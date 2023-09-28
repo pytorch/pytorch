@@ -277,7 +277,8 @@ PyObject* THPEngine_run_backward(
           i);
       THPUtils_assert(
           !variable.requires_grad(),
-          "element %d of gradients tuple is None, but the corresponding Tensor requires grad");
+          "element %d of gradients tuple is None, but the corresponding Tensor requires grad",
+          i);
     }
   }
 

@@ -1,20 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
-from collections import deque
+from collections import deque, OrderedDict
 from contextlib import ContextDecorator
 from copy import deepcopy
+from typing import Tuple
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MemoryDelta(ContextDecorator):
@@ -66,6 +62,32 @@ class RandomModel(nn.Module):
         return torch.matmul(x, y)
 
 
+class MultiOutputModel(nn.Module):
+    def __init__(self, device: torch.device):
+        super().__init__()
+        self.w1 = nn.Parameter(torch.randn((100, 100), device=device))
+        self.w2 = nn.Parameter(torch.randn((100, 100), device=device))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = x @ self.w1
+        z = nn.functional.relu(z)
+        z = z @ self.w2
+        return z.sin(), z.cos()
+
+
+class MultiInputModel(nn.Module):
+    def __init__(self, device: torch.device):
+        super().__init__()
+        self.w = nn.Parameter(torch.randn((100, 100), device=device))
+
+    def forward(self, xs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+        assert len(xs) == 2, f"Expects 2 args but got {len(xs)}"
+        x, y = xs
+        z = x + y
+        z = z @ self.w
+        return nn.functional.relu(z)
+
+
 class TestCheckpoint(TestCase):
     def _get_graph_size(self, out: torch.Tensor) -> int:
         q = deque([out.grad_fn])
@@ -83,7 +105,6 @@ class TestCheckpoint(TestCase):
         self,
         net: nn.Module,
         x: torch.Tensor,
-        use_reentrant: bool,
     ) -> None:
         x1 = x.clone()
         x2 = x.clone()
@@ -100,14 +121,10 @@ class TestCheckpoint(TestCase):
         loss1.backward()
 
         # with checkpoint
-        checkpoint(net2.seq, use_reentrant=use_reentrant)
+        checkpoint(net2.seq)
         with MemoryDelta(x.device) as mem2:
             loss2 = net2(x2).sum()
-        graph_size2 = self._get_graph_size(loss2)
         loss2.backward()
-
-        if use_reentrant:
-            self.assertTrue(graph_size2 < graph_size1)
 
         if x.is_cuda:
             self.assertTrue(mem2.delta() < mem1.delta())
@@ -115,18 +132,16 @@ class TestCheckpoint(TestCase):
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
-    @parametrize("use_reentrant", [True, False])
-    def test_tensor_only_cpu(self, use_reentrant: bool):
+    def test_tensor_only_cpu(self):
         x = torch.randn(20, 100)
         net = ToyModel()
-        self._test_tensor_only(net, x, use_reentrant)
+        self._test_tensor_only(net, x)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @parametrize("use_reentrant", [True, False])
-    def test_tensor_only_gpu(self, use_reentrant: bool):
+    def test_tensor_only_gpu(self):
         x = torch.randn(20, 100, device="cuda:0")
         net = ToyModel().to("cuda:0")
-        self._test_tensor_only(net, x, use_reentrant)
+        self._test_tensor_only(net, x)
 
     def test_random_cpu(self):
         x1 = torch.randn(20, 100, requires_grad=True)
@@ -143,8 +158,66 @@ class TestCheckpoint(TestCase):
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
+    def test_multi_args(self):
+        """
+        Tests checkpoint for modules with multiple output args and hence
+        multiple backward function input args.
+        """
+        device = torch.device("cpu")
+        net1 = nn.Sequential(
+            MultiOutputModel(device),
+            MultiInputModel(device),
+            MultiOutputModel(device),
+            MultiInputModel(device),
+        )
+        net2 = deepcopy(net1)
+        checkpoint(net2[0])
+        checkpoint(net2[2])
+        x1 = torch.randn(20, 100, requires_grad=True)
+        x2 = x1.clone()
+        net1(x1).sum().backward()
+        net2(x2).sum().backward()
+        for p1, p2 in zip(net1.parameters(), net2.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
 
-instantiate_parametrized_tests(TestCheckpoint)
+    def test_clears_state_on_error_in_forward(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self, raise_in_recomp):
+                super().__init__()
+                self.fwd_count = 0
+                self.raise_in_recomp = raise_in_recomp
+                self.a = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                if self.raise_in_recomp and self.fwd_count == 1:
+                    raise RuntimeError("foo")
+                else:
+                    if not self.raise_in_recomp:
+                        # raise in the first forward
+                        raise RuntimeError("foo")
+                    self.fwd_count += 1
+                    return self.a(x)
+
+        m = MyModel(raise_in_recomp=True)
+        m_seq = torch.nn.Sequential(OrderedDict({"m": m}))
+        checkpoint(m_seq.m)
+        inp = torch.randn(1, 2)
+        out = m_seq(inp).sum()
+        # Should raise in forward recomputation
+        with self.assertRaisesRegex(RuntimeError, "foo"):
+            out.backward()
+
+        # Check that _ac_generator is cleared out
+        self.assertEqual(None, checkpoint.state(m)._ac_generator)
+
+        m = MyModel(raise_in_recomp=False)
+        checkpoint(m)
+        inp = torch.randn(1, 2)
+        # Should raise in first forward
+        with self.assertRaises(RuntimeError):
+            m(inp)
+
+        self.assertEqual(None, checkpoint.state(m)._ac_generator)
 
 
 if __name__ == "__main__":

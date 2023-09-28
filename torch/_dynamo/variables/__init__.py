@@ -6,6 +6,7 @@ from .ctx_manager import (
     CUDAStreamContextVariable,
     CUDAStreamVariable,
     DeterministicAlgorithmsVariable,
+    DisabledSavedTensorsHooksVariable,
     GradModeVariable,
     WithExitFunctionVariable,
 )
@@ -15,12 +16,14 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -42,6 +45,7 @@ from .misc import (
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     FakeItemVariable,
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -70,11 +74,12 @@ __all__ = [
     "LambdaVariable",
     "ListIteratorVariable",
     "ListVariable",
+    "NNModuleVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
     "NewGlobalVariable",
-    "NNModuleVariable",
+    "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",

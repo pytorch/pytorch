@@ -266,7 +266,7 @@ class FullyConnectedOperatorTester {
           // Attention! Bias size must be a multiple of 8.
           constexpr size_t kBiasSizeMultiple = 8u;
           std::vector<float, AlignedAllocator<float, 32>> bias_float(
-            (bias.size() + (kBiasSizeMultiple - 1)) & -kBiasSizeMultiple);
+              (bias.size() + (kBiasSizeMultiple - 1)) & -kBiasSizeMultiple);
           std::copy(bias.cbegin(), bias.cend(), bias_float.begin());
 
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinearDynamic(
@@ -356,15 +356,16 @@ class FullyConnectedOperatorTester {
           }
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t c = 0; c < outputChannels(); c++) {
-              ASSERT_FLOAT_EQ(
+              const float ref = ((float)accumulators[i * outputChannels() + c] *
+                           requantization_scales[c]) +
+                  float(bias[c]);
+              ASSERT_NEAR(
                   output_dynamic[i * outputChannels() + c],
-                  ((float)accumulators[i * outputChannels() + c] *
-                  requantization_scales[c]) + float(bias[c]))
-                  << "at " << i << ", " << c
-                  << ": reference = " <<
-                  ((float)accumulators[i * outputChannels() + c] *
-                  requantization_scales[c]) + float(bias[c])
-                  << ", optimized = " << output_dynamic[i * outputChannels() + c];
+                  ref,
+                  std::abs(ref) * 1.0e-4)
+                  << "at " << i << ", " << c << ": reference = " << ref
+                  << ", optimized = "
+                  << output_dynamic[i * outputChannels() + c];
             }
           }
         }

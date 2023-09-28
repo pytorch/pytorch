@@ -14,7 +14,7 @@ DriverAPI create_driver_api() {
 
   C10_FORALL_DRIVER_LIBRARIES(OPEN_LIBRARIES)
 #undef OPEN_LIBRARIES
-  DriverAPI r;
+  DriverAPI r{};
 
 #define LOOKUP_ENTRY(name, n)                              \
   r.name##_ = ((decltype(&name))dlsym(handle_##n, #name)); \

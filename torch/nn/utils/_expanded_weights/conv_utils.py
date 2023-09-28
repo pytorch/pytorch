@@ -197,7 +197,7 @@ def unfold3d(
         stride: the stride of the sliding blocks in the input spatial dimensions
         dilation: the spacing between the kernel points.
     Returns:
-        A tensor of shape ``(B, C * np.product(kernel_size), L)``, where L - output spatial dimensions.
+        A tensor of shape ``(B, C * np.prod(kernel_size), L)``, where L - output spatial dimensions.
         See :class:`torch.nn.Unfold` for more details
     Example:
         >>> # xdoctest: +SKIP

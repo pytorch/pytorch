@@ -38,7 +38,9 @@ namespace {
     }
     return "(unknown)";
   }
-}
+
+  constexpr auto CatchAll = c10::DispatchKey::CatchAll;
+} // anonymous namespace
 
 CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
@@ -54,7 +56,7 @@ CppFunction::~CppFunction() = default;
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_((!k.has_value() || *k == c10::DispatchKey::CatchAll) ? c10::nullopt : k)
+  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? c10::nullopt : k)
   , file_(file)
   , line_(line)
   {
@@ -67,7 +69,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
             *ns_, debugString(file_, line_)
           )
         );
-        // fallthrough
+        [[fallthrough]];
       case FRAGMENT:
         TORCH_CHECK(
           ns_.has_value(),

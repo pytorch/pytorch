@@ -617,19 +617,31 @@ def register_prop_rule_map(
 
         if shard_out is not None:
             # no reshard needed
-            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=shard_out)
-            local_out_shape = compute_local_shape(
-                list(global_out_shape), mesh, shard_out
-            )
+            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
 
             # We only need the local shape to lower the call into the local op
             args = op_schema.args_schema
             shape_argnum = spec.shape_argnum
             if shape_argnum is not None:
-                op_schema.args_schema = (
-                    args[:shape_argnum]
+                # compute the local shape from the global shape, then return
+                # a resharding even if we don't really reshard, the only reason
+                # for this type of resharding is to lower the global shape to
+                # local shape
+                local_out_shape = compute_local_shape(
+                    list(global_out_shape), mesh, shard_out
+                )
+
+                suggested_schema = OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=args[:shape_argnum]
                     + (tuple(local_out_shape),)
-                    + args[shape_argnum + 1 :]
+                    + args[shape_argnum + 1 :],
+                    kwargs_schema=op_schema.kwargs_schema,
+                )
+                return OutputSharding(
+                    output_spec=output_dtensor_spec,
+                    schema_suggestions=[suggested_schema],
+                    needs_redistribute=True,
                 )
 
             return OutputSharding(output_spec=output_dtensor_spec)
@@ -652,7 +664,7 @@ def register_prop_rule_map(
                         func_schema=op_schema.func_schema,
                         args_schema=(
                             DTensorSpec(
-                                placements=suggested_placements,
+                                placements=tuple(suggested_placements),
                                 mesh=input_dtensor_spec.mesh,
                                 tensor_meta=input_dtensor_spec.tensor_meta,
                             ),

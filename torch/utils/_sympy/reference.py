@@ -76,7 +76,21 @@ class ReferenceAnalysis:
 
     @staticmethod
     def div(a, b):
+        return ReferenceAnalysis.truediv(a, b)
+
+    @staticmethod
+    def floordiv(a, b):
+        if b == 0:
+            return sympy.nan if a == 0 else sympy.zoo
         return a // b
+
+    @staticmethod
+    def truncdiv(a, b):
+        result = a / b
+        if result.is_finite:
+            result = sympy.Integer(result)
+
+        return result
 
     @staticmethod
     def add(a, b):
@@ -108,11 +122,27 @@ class ReferenceAnalysis:
 
     @staticmethod
     def minimum(a, b):
-        return sympy.Min(a, b)
+        # Poorman's version of upcasting in Sympy
+        # This won't do for sympy.Expr as the casting does nothing for those
+        if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
+            result_type = sympy.Float
+        else:
+            assert a.is_Integer
+            assert b.is_Integer
+            result_type = sympy.Integer
+        return sympy.Min(result_type(a), result_type(b))
 
     @staticmethod
     def maximum(a, b):
-        return sympy.Max(a, b)
+        # Poorman's version of upcasting in Sympy
+        # This won't do for sympy.Expr as the casting does nothing for those
+        if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
+            result_type = sympy.Float
+        else:
+            assert a.is_Integer
+            assert b.is_Integer
+            result_type = sympy.Integer
+        return sympy.Max(result_type(a), result_type(b))
 
     @staticmethod
     def floor(x):

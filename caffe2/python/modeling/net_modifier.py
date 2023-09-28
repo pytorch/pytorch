@@ -17,9 +17,6 @@ class NetModifier(metaclass=abc.ABCMeta):
         modifier(net)
     """
 
-    def __init__(self):
-        pass
-
     @abc.abstractmethod
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
         pass

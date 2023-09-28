@@ -1312,8 +1312,8 @@ def forward(self, arg0_1):
         # Make sure that functionalization ran the "+" kernel
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
-$2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
+$2: f32[4] = torch._ops.aten.add.Tensor($0, $1)
+$3: f32[4] = torch._ops.aten.add.Tensor($2, 1)""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
@@ -1515,6 +1515,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     "test_view_clone_view_inplace",
     "test_view_inplace",
 ])
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "dynamo-ing code with proxy + fake doesnt work well")
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
 

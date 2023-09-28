@@ -4,11 +4,8 @@
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Linear.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
-namespace internal {
-namespace linear {
+namespace at::native::xnnpack {
+namespace internal::linear {
 
 namespace {
 
@@ -64,7 +61,7 @@ Tensor create_and_run(
       input);
 }
 
-} // namespace
+} // anonymous namespace
 
 ContextLinear create(
     const Tensor& weight,
@@ -191,8 +188,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue) {
       (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt));
 }
 
-} // namespace linear
-} // namespace internal
+} // namespace internal::linear
 
 bool use_linear(
     const Tensor& input,
@@ -219,9 +215,6 @@ Tensor linear(
       ContextLinear::kMax);
 }
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

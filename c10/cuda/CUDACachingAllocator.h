@@ -10,6 +10,7 @@
 #include <array>
 #include <mutex>
 #include <set>
+#include <unordered_set>
 
 namespace c10 {
 
@@ -100,12 +101,6 @@ struct DeviceStats {
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
 
-struct History {
-  void* addr;
-  size_t real_size; // unrounded, actually requested size
-  std::shared_ptr<GatheredContext> context; // per-watcher context
-};
-
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
 struct BlockInfo {
@@ -114,7 +109,8 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
-  std::vector<History> history;
+  std::shared_ptr<GatheredContext>
+      context_when_allocated; // per-watcher context
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
@@ -122,7 +118,7 @@ struct SegmentInfo {
   int64_t device = 0;
   int64_t address = 0;
   int64_t total_size = 0;
-  int64_t requested_size = 0;
+  int64_t requested_size = 0; // unrounded, actually requested size
   int64_t allocated_size = 0;
   int64_t active_size = 0;
   cudaStream_t stream = 0;
@@ -130,6 +126,7 @@ struct SegmentInfo {
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
 struct AllocatorState {
@@ -184,6 +181,13 @@ struct CheckpointDelta {
   std::vector<at::DataPtr> dataptrs_allocd;
 };
 
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 // Size pretty-printer
@@ -217,12 +221,30 @@ class CUDAAllocator : public Allocator {
       MempoolId_t mempool_id) = 0;
   virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
+  // returns true if the allocated blocks are equal to expected live allocations
+  virtual bool checkPoolLiveAllocations(
+      int device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support checkPoolLiveAllocations. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
+  virtual bool isHistoryEnabled() {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support recordHistory. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) = 0;
+      RecordContext when) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
@@ -347,12 +369,21 @@ inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    bool alloc_trace_record_context) {
+    RecordContext when) {
   return get()->recordHistory(
-      enabled,
-      context_recorder,
-      alloc_trace_max_entries,
-      alloc_trace_record_context);
+      enabled, context_recorder, alloc_trace_max_entries, when);
+}
+
+inline bool isHistoryEnabled() {
+  return get()->isHistoryEnabled();
+}
+
+inline bool checkPoolLiveAllocations(
+    int device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations) {
+  return get()->checkPoolLiveAllocations(
+      device, mempool_id, expected_live_allocations);
 }
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {

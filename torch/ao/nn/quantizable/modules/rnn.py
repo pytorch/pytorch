@@ -318,8 +318,8 @@ class LSTM(torch.nn.Module):
             if num_layers == 1:
                 warnings.warn("dropout option adds dropout after all but last "
                               "recurrent layer, so non-zero dropout expects "
-                              "num_layers greater than 1, but got dropout={} "
-                              "and num_layers={}".format(dropout, num_layers))
+                              f"num_layers greater than 1, but got dropout={dropout} "
+                              f"and num_layers={num_layers}")
 
         layers = [_LSTMLayer(self.input_size, self.hidden_size,
                              self.bias, batch_first=False,
@@ -392,6 +392,7 @@ class LSTM(torch.nn.Module):
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
                                                          batch_first=False)
+        # TODO: Remove setting observed to eval to enable QAT.
         observed.eval()
         observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed

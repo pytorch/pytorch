@@ -1,3 +1,5 @@
+#include <test/cpp/jit/test_utils.h>
+
 #include <gtest/gtest.h>
 
 #include <c10/core/TensorOptions.h>
@@ -236,6 +238,17 @@ TEST(MobileTest, LoadParametersEmptyDataShouldThrow) {
   // Loading parameters from an empty data stream should throw an exception.
   std::stringstream empty;
   EXPECT_ANY_THROW(_load_parameters(empty));
+}
+
+TEST(MobileTest, LoadParametersMalformedFlatbuffer) {
+  // Manually create some data with Flatbuffer header.
+  std::stringstream bad_data;
+  bad_data << "PK\x03\x04PTMF\x00\x00"
+           << "*}NV\xb3\xfa\xdf\x00pa";
+
+  // Loading parameters from it should throw an exception.
+  ASSERT_THROWS_WITH_MESSAGE(
+      _load_parameters(bad_data), "Malformed Flatbuffer module");
 }
 
 TEST(LiteTrainerTest, SGD) {

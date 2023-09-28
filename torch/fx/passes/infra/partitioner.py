@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 class Partition:
-    def __init__(self, id: int = None, nodes: Iterable[Node] = None):
+    def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
         self.id = id
         self.nodes: Set[Node] = set(nodes) if nodes is not None else set()
 
@@ -152,9 +152,9 @@ class CapabilityBasedPartitioner:
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
-            for user_node in node.users:
-                if user_node in assignment:
-                    merge_candidates[assignment[user_node]] = None
+            # merge all possible partitions
+            for node in assignment:
+                merge_candidates[assignment[node]] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
@@ -194,12 +194,12 @@ class CapabilityBasedPartitioner:
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
-                    if node.op == "call_function" and \
-                       _get_qualified_name(node.target) not in non_compute_ops:  # type: ignore[arg-type]
-                        compute_node_count += 1
-                    if node.op == "call_function" and \
-                       _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
-                        compute_node_count += 1
+                    if node.op == "call_function":
+                        assert callable(node.target)
+                        if _get_qualified_name(node.target) not in non_compute_ops:
+                            compute_node_count += 1
+                        if _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
+                            compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
             for id in partitions_to_remove:

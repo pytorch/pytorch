@@ -54,7 +54,7 @@ class PixelShuffle(Module):
         return F.pixel_shuffle(input, self.upscale_factor)
 
     def extra_repr(self) -> str:
-        return 'upscale_factor={}'.format(self.upscale_factor)
+        return f'upscale_factor={self.upscale_factor}'
 
 
 class PixelUnshuffle(Module):
@@ -104,4 +104,4 @@ class PixelUnshuffle(Module):
         return F.pixel_unshuffle(input, self.downscale_factor)
 
     def extra_repr(self) -> str:
-        return 'downscale_factor={}'.format(self.downscale_factor)
+        return f'downscale_factor={self.downscale_factor}'

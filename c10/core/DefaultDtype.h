@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 
 namespace caffe2 {
 class TypeMeta;

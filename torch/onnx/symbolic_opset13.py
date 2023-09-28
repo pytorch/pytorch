@@ -437,26 +437,40 @@ def _reduce_with_dtype(onnx_op, name):
         @symbolic_helper.parse_args("v", "none")
         @_beartype.beartype
         def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         @symbolic_helper.parse_args("v", "v", "i", "none")
         @_beartype.beartype
         def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self, dim, keepdim)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         return reduce_nodim, reduce_dim
 
@@ -608,7 +622,7 @@ def repeat_interleave(
         input = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
-        dim = 0
+        dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
 
@@ -639,21 +653,22 @@ def repeat_interleave(
         if input_size is None:
             output_sizes[idx], input_sizes[idx] = 0, -1
 
+    # Check if all indices should be repeated the same number of times.
+    if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
+            g, self, repeats, dim
+        )
+
     cond_dynamic_repeats = repeats_dim == 1 and repeats_sizes[0] is None
     # If input size is dynamic or repeats vector is dynamic
     if output_sizes[dim] == 0 or cond_dynamic_repeats:
         reps = symbolic_helper._size_helper(g, input, dim)
         reps = opset11.unsqueeze(g, reps, 0)
-        # Check if repeats vector is a single integer value
-        # or a single dimension tensor with non-dynamic values
-        if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-            if not symbolic_helper._is_tensor(repeats):
-                repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-            repeats = g.op("Expand", repeats, reps)
+
         # Check if repeats is dynamic
         # As repeats is dynamic, we use a where node as a substitute for the if statement
         # If repests_dim = 1, expand repeats otherwise use original tensor
-        elif cond_dynamic_repeats:
+        if cond_dynamic_repeats:
             repeat_dim = symbolic_helper._size_helper(
                 g, repeats, g.op("Constant", value_t=torch.LongTensor([0]))
             )
@@ -873,9 +888,9 @@ def quantized_linear(
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
 
-@_onnx_symbolic("quantized::conv2d")
+@_onnx_symbolic("quantized::conv1d_relu")
 @_beartype.beartype
-def quantized_conv2d(
+def quantized_conv1d_relu(
     g: jit_utils.GraphContext,
     q_input,
     q_weight,
@@ -894,7 +909,8 @@ def quantized_conv2d(
     )
     bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.conv1d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
@@ -922,5 +938,197 @@ def quantized_conv2d_relu(
 
     output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
     output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv3d_relu")
+@_beartype.beartype
+def quantized_conv3d_relu(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv3d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv1d")
+@_beartype.beartype
+def quantized_conv1d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv1d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv2d")
+@_beartype.beartype
+def quantized_conv2d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv3d")
+@_beartype.beartype
+def quantized_conv3d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv3d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv_transpose1d")
+@_beartype.beartype
+def quantized_conv_transpose1d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv_transpose2d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv_transpose2d")
+@_beartype.beartype
+def quantized_conv_transpose2d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv_transpose2d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv_transpose3d")
+@_beartype.beartype
+def quantized_conv_transpose3d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv_transpose3d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)

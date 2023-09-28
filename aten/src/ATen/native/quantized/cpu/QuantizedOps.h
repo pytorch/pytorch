@@ -62,6 +62,28 @@ using qmaxpool_2d_fn = void (*)(
     int64_t dH,
     int64_t dW, // dilation
     Tensor& qy);
+using qmaxpool_3d_fn = void (*)(
+    const Tensor& qx,
+    int64_t iC, // input/output channels
+    int64_t iT,
+    int64_t iH,
+    int64_t iW, // input sizes
+    int64_t oT,
+    int64_t oH,
+    int64_t oW, // output sizes
+    int64_t kT,
+    int64_t kH,
+    int64_t kW, // kernel size
+    int64_t sT,
+    int64_t sH,
+    int64_t sW, // strides
+    int64_t pT,
+    int64_t pH,
+    int64_t pW, // padding
+    int64_t dT,
+    int64_t dH,
+    int64_t dW, // dilation
+    Tensor& qy);
 using qadaptive_avg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
@@ -217,6 +239,7 @@ DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qdropout_fn, qdropout_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
+DECLARE_DISPATCH(qmaxpool_3d_fn, qmaxpool_3d_nthwc_stub);
 DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
 DECLARE_DISPATCH(qnormalize_nhwc_fn, quantized_groupnorm_nhwc_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);

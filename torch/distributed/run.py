@@ -384,7 +384,7 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
-
+from torch.utils.backend_registration import _get_custom_mod_func
 
 log = get_logger(__name__)
 
@@ -454,8 +454,8 @@ def get_args_parser() -> ArgumentParser:
         "--standalone",
         action=check_env,
         help="Start a local standalone rendezvous backend that is represented by a C10d TCP store "
-        "on port 29400. Useful when launching single-node, multi-worker job. If specified "
-        "--rdzv-backend, --rdzv-endpoint, --rdzv-id are auto-assigned; any explicitly set values "
+        "on a free port. Useful when launching single-node, multi-worker job. If specified "
+        "--rdzv-backend, --rdzv-endpoint, --rdzv-id are auto-assigned and any explicitly set values "
         "are ignored.",
     )
 
@@ -639,10 +639,19 @@ def determine_local_world_size(nproc_per_node: str):
                 raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
+        elif nproc_per_node == torch._C._get_privateuse1_backend_name():
+            if not _get_custom_mod_func("is_available")():
+                raise ValueError(f"{nproc_per_node} is not available.") from e
+            device_type = nproc_per_node
+            num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
             if torch.cuda.is_available():
                 num_proc = torch.cuda.device_count()
                 device_type = "gpu"
+            elif hasattr(torch, torch._C._get_privateuse1_backend_name()) and \
+                    _get_custom_mod_func("is_available")():
+                num_proc = _get_custom_mod_func("device_count")()
+                device_type = torch._C._get_privateuse1_backend_name()
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
@@ -772,7 +781,7 @@ def run_script_path(training_script: str, *training_script_args: str):
 def run(args):
     if args.standalone:
         args.rdzv_backend = "c10d"
-        args.rdzv_endpoint = "localhost:29400"
+        args.rdzv_endpoint = "localhost:0"
         args.rdzv_id = str(uuid.uuid4())
         log.info(
             "\n**************************************\n"

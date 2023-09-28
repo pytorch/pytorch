@@ -205,7 +205,7 @@ def gen_diagnostics(
     out_cpp_dir: str,
     out_docs_dir: str,
 ) -> None:
-    with open(rules_path, "r") as f:
+    with open(rules_path) as f:
         rules = yaml.load(f, Loader=YamlLoader)
 
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")

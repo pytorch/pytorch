@@ -38,7 +38,7 @@ class TORCH_API DeprecatedTypeProperties {
     return layout_from_backend(backend()) == kSparseCsr;
   }
 
-  DeviceType device_type() const {
+  c10::DeviceType device_type() const {
     return backendToDeviceType(backend_);
   }
 

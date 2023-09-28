@@ -53,6 +53,7 @@ const Tensor& resize_cuda_(
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
+  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =
@@ -62,6 +63,10 @@ const Tensor& resize_cuda_(
         "Unsupported memory format",
         memory_format);
     self_->empty_tensor_restride(memory_format);
+  }
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
   }
   return self;
 }

@@ -7,7 +7,6 @@
 using c10::intrusive_ptr;
 using c10::intrusive_ptr_target;
 using c10::make_intrusive;
-using c10::weak_intrusive_ptr;
 
 namespace {
 

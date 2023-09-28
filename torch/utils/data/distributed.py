@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Iterator
+from typing import TypeVar, Optional, Iterator
 
 import torch
 from . import Sampler, Dataset
@@ -7,8 +7,10 @@ import torch.distributed as dist
 
 __all__ = ["DistributedSampler", ]
 
+T_co = TypeVar('T_co', covariant=True)
 
-class DistributedSampler(Sampler[int]):
+
+class DistributedSampler(Sampler[T_co]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -70,8 +72,7 @@ class DistributedSampler(Sampler[int]):
             rank = dist.get_rank()
         if rank >= num_replicas or rank < 0:
             raise ValueError(
-                "Invalid rank {}, rank should be in the interval"
-                " [0, {}]".format(rank, num_replicas - 1))
+                f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]")
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank
@@ -92,7 +93,7 @@ class DistributedSampler(Sampler[int]):
         self.shuffle = shuffle
         self.seed = seed
 
-    def __iter__(self) -> Iterator[int]:
+    def __iter__(self) -> Iterator[T_co]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()

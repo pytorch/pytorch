@@ -12,7 +12,7 @@ import numpy as np
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_TORCHDYNAMO)
+    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
@@ -738,10 +738,7 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
-    )
+    @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -839,6 +836,7 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_index_put_accumulate_with_optional_tensors(self, device):
         # TODO: replace with a better solution.
         # Currently, here using torchscript to put None into indices.
@@ -935,6 +933,7 @@ class TestIndexing(TestCase):
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_jit_indexing(self, device):
         def fn1(x):
             x[x < 50] = 1.0
@@ -1328,6 +1327,48 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t.cpu(), indices, dim=0)
+
+    @onlyCUDA
+    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+        with DeterministicGuard(True):
+            idx1 = torch.tensor([0])
+            idx2 = torch.tensor([2, 6])
+            idx3 = torch.tensor([1, 5, 7])
+
+            tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx1] = 1.0
+            tensor_a[idx1, :, idx2, idx2, :] = 2.0
+            tensor_a[:, idx1, idx3, :, idx3] = 3.0
+            tensor_b[idx1] = 1.0
+            tensor_b[idx1, :, idx2, idx2, :] = 2.0
+            tensor_b[:, idx1, idx3, :, idx3] = 3.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 11).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx3] = 1.0
+            tensor_a[idx2, :] = 2.0
+            tensor_a[:, idx2] = 3.0
+            tensor_a[:, idx1] = 4.0
+            tensor_b[idx3] = 1.0
+            tensor_b[idx2, :] = 2.0
+            tensor_b[:, idx2] = 3.0
+            tensor_b[:, idx1] = 4.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[[8]] = 1.0
+            tensor_b[[8]] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[6] = 1.0
+            tensor_b[6] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:

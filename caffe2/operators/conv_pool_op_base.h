@@ -651,7 +651,7 @@ class ConvPoolOpBase : public Operator<Context> {
     return TensorInferenceForSchema(def, in, in[1].dims(img_ndim));
   }
 
-  virtual ~ConvPoolOpBase() {}
+  ~ConvPoolOpBase() override {}
 
  protected:
   LegacyPadding legacy_pad_;

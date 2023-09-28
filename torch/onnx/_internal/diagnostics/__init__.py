@@ -3,13 +3,15 @@ from ._diagnostic import (
     diagnose,
     engine,
     export_context,
-    ExportDiagnostic,
+    ExportDiagnosticEngine,
+    TorchScriptOnnxExportDiagnostic,
 )
 from ._rules import rules
 from .infra import levels
 
 __all__ = [
-    "ExportDiagnostic",
+    "TorchScriptOnnxExportDiagnostic",
+    "ExportDiagnosticEngine",
     "rules",
     "levels",
     "engine",

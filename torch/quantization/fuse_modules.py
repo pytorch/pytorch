@@ -7,18 +7,16 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
-from torch.ao.quantization.fuse_modules import fuse_modules
-from torch.ao.quantization.fuse_modules import fuse_known_modules
-from torch.ao.quantization.fuse_modules import get_fuser_method
-
-# for backward compatiblity
-from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn
-from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu
-
 # TODO: These functions are not used outside the `fuse_modules.py`
 #       Keeping here for now, need to remove them later.
 from torch.ao.quantization.fuse_modules import (
     _fuse_modules,
     _get_module,
     _set_module,
+    fuse_known_modules,
+    fuse_modules,
+    get_fuser_method,
 )
+
+# for backward compatiblity
+from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn, fuse_conv_bn_relu

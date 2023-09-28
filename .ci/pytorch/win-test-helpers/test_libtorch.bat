@@ -5,14 +5,16 @@ if "%USE_CUDA%" == "0" IF NOT "%CUDA_VERSION%" == "cpu" exit /b 0
 call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
 if errorlevel 1 exit /b 1
 
-cd %TMP_DIR_WIN%\build\torch\bin
-set TEST_OUT_DIR=%~dp0\..\..\..\test\test-reports\cpp-unittest
-md %TEST_OUT_DIR%
+:: Save the current working directory so that we can go back there
+set CWD=%cd%
+
+set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\bin
 set PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt\bin\x64;%TMP_DIR_WIN%\build\torch\lib;%PATH%
 
-set TEST_API_OUT_DIR=%TEST_OUT_DIR%\test_api
-md %TEST_API_OUT_DIR%
-test_api.exe --gtest_filter="-IntegrationTest.MNIST*" --gtest_output=xml:%TEST_API_OUT_DIR%\test_api.xml
+set TORCH_CPP_TEST_MNIST_PATH=%CWD%\test\cpp\api\mnist
+python tools\download_mnist.py --quiet -d %TORCH_CPP_TEST_MNIST_PATH%
+
+python test\run_test.py --cpp --verbose -i cpp/test_api
 if errorlevel 1 exit /b 1
 if not errorlevel 0 exit /b 1
 
@@ -25,6 +27,10 @@ for /r "." %%a in (*.exe) do (
 goto :eof
 
 :libtorch_check
+
+cd %CWD%
+set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\test
+
 :: Skip verify_api_visibility as it a compile level test
 if "%~1" == "verify_api_visibility" goto :eof
 
@@ -42,12 +48,12 @@ if "%~1" == "utility_ops_gpu_test" goto :eof
 
 echo Running "%~2"
 if "%~1" == "c10_intrusive_ptr_benchmark" (
+  :: NB: This is not a gtest executable file, thus couldn't be handled by pytest-cpp
   call "%~2"
   goto :eof
 )
-:: Differentiating the test report directories is crucial for test time reporting.
-md %TEST_OUT_DIR%\%~n2
-call "%~2" --gtest_output=xml:%TEST_OUT_DIR%\%~n2\%~1.xml
+
+python test\run_test.py --cpp --verbose -i "cpp/%~1"
 if errorlevel 1 (
   echo %1 failed with exit code %errorlevel%
   exit /b 1

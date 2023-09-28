@@ -87,6 +87,16 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
 
+if(USE_ASAN AND TARGET Sanitizer::address)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
+endif()
+if(USE_ASAN AND TARGET Sanitizer::undefined)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
+endif()
+if(USE_TSAN AND TARGET Sanitizer::thread)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::thread)
+endif()
+
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
@@ -375,10 +385,9 @@ endif()
 
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
   COMMAND
-    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
-  COMMAND
-    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
+    "${PYTHON_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
       --is-debug=${TORCH_VERSION_DEBUG}
       --cuda-version=${CUDA_VERSION}
       --hip-version=${HIP_VERSION}

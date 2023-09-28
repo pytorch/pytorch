@@ -625,13 +625,28 @@ class ScatterWeightedSumOp : public Operator<Context> {
  * @brief Update slices of the tensor in-place by overriding.
  *
  * Input:
- *   DATA - tensor to be updated
+ *   DATA - tensor to be updated (also referred to here as X_0)
  *   INDICES - 1-D list of indices on the first dimension of X_0 that need to be
  *             updated
  *   SLICES - update slices, has to have shape of len(INDICES) + shape(X_0)[1:]
  *
  * Output:
  *   DATA - has to be exactly the same tensor as the input 0
+ *
+ * Example: For the inputs
+ *
+ *    DATA = [[1, 2], [3, 4], [5, 6]]
+ *    INDICES = [2, 0]
+ *    SLICES = [[0, 9], [7, 8]]
+ *
+ * ScatterAssignOp will modify DATA in place to insert the entries at
+ * INDICES with the values in SLICES, so DATA[INDICES[i]] = SLICES[INDICES[i]].
+ * So the final output will then be
+ *
+ *    DATA = [[7, 8], [3, 4], [0, 9]]
+ *
+ * Note: If DATA is empty, INDICES and SLICES must be empty as well, and this is
+ * a no-op.
  *
  * Note: The op pretty much ignores the exact shapes of the input arguments and
  * cares only about sizes. It's done for performance consideration to avoid
@@ -648,7 +663,7 @@ template <class Context>
 class ScatterAssignOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  virtual ~ScatterAssignOp() {}
+  ~ScatterAssignOp() override {}
 
   template <class... Args>
   explicit ScatterAssignOp(Args&&... args)
@@ -724,10 +739,17 @@ class ScatterAssignOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
-    CAFFE_ENFORCE_GT(input.dim(), 0, "X0 has to be at least the vector");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "Input has to be at least a vector");
     int64_t M = input.numel();
     int64_t N = input.size(0);
     int64_t K = indices.numel();
+
+    if (M == 0) {
+      CAFFE_ENFORCE_EQ(K, 0, "Indices must be empty when input is empty");
+      CAFFE_ENFORCE_EQ(slices.numel(), 0, "Slices must be empty when input is empty");
+      return;
+    }
+
     int64_t block_size = M / N;
     CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
     // TODO(dzhulgakov): it can be made to work with arbitrary data type by

@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 import argparse
-from torchgen.gen import parse_native_yaml, FileManager
+
 import torchgen.model as model
+from torchgen.gen import FileManager, parse_native_yaml
+
 
 def num_leading_spaces(line: str) -> int:
     return len(line) - len(line.lstrip())
+
+
 def deindent(code: str) -> str:
-    lines = code.split('\n')
+    lines = code.split("\n")
     min_leading_spaces = min(map(num_leading_spaces, lines))
     lines = [line[min_leading_spaces:] for line in lines]
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def gen_external(native_functions_path, tags_path, external_path):
@@ -29,11 +33,21 @@ def gen_external(native_functions_path, tags_path, external_path):
             continue
 
         # Doesn't currently support kwarg arguments
-        if len(args.pre_tensor_options_kwarg_only) > 0 or len(args.post_tensor_options_kwarg_only) > 0:
+        if (
+            len(args.pre_tensor_options_kwarg_only) > 0
+            or len(args.post_tensor_options_kwarg_only) > 0
+        ):
             continue
         self_arg = [args.self_arg.argument] if args.self_arg is not None else []
-        args = list(args.pre_self_positional) + self_arg + list(args.post_self_positional)
-        tensor_args = [arg for arg in args if isinstance(arg.type, model.BaseType) and arg.type.name == model.BaseTy.Tensor]
+        args = (
+            list(args.pre_self_positional) + self_arg + list(args.post_self_positional)
+        )
+        tensor_args = [
+            arg
+            for arg in args
+            if isinstance(arg.type, model.BaseType)
+            and arg.type.name == model.BaseTy.Tensor
+        ]
         if len(tensor_args) != len(args):
             continue
 
@@ -44,7 +58,7 @@ def gen_external(native_functions_path, tags_path, external_path):
             s = f"const at::Tensor& {arg.name} = tensors[{idx + 1}];"
             tensor_decls.append(s)
             arg_names[idx] = arg.name
-        nl = '\n'
+        nl = "\n"
 
         # print(tensor_decls, name, arg_names)
         func_decl = f"""\
@@ -72,27 +86,39 @@ const static RegisterNNCExternalFunction nnc_{name}(
     nnc_aten_{name});"""
         func_decls.append(func_decl)
         func_registrations.append(func_registration)
-    fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
-    fm.write_with_template('external_functions_codegen.cpp', external_path,
-                           lambda: {'external_registrations': func_registrations, 'external_functions': func_decls})
+    fm = FileManager(install_dir=".", template_dir=".", dry_run=False)
+    fm.write_with_template(
+        "external_functions_codegen.cpp",
+        external_path,
+        lambda: {
+            "external_registrations": func_registrations,
+            "external_functions": func_decls,
+        },
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description='Generate annotated_fn_args script')
-    parser.add_argument('--native-functions',
-                        '--native_functions',
-                        help='path to native_functions.yaml',
-                        default='../../../../aten/src/ATen/native/native_functions.yaml')
-    parser.add_argument('--tags',
-                        help='path to tags.yaml',
-                        default='../../../../aten/src/ATen/native/tags.yaml')
-    parser.add_argument('--template-path',
-                        '--template_path',
-                        help='path to external_functions_codegen_template.cpp',
-                        default='../../../../tools/jit/templates/external_functions_codegen_template.cpp')
+    parser = argparse.ArgumentParser(description="Generate annotated_fn_args script")
+    parser.add_argument(
+        "--native-functions",
+        "--native_functions",
+        help="path to native_functions.yaml",
+        default="../../../../aten/src/ATen/native/native_functions.yaml",
+    )
+    parser.add_argument(
+        "--tags",
+        help="path to tags.yaml",
+        default="../../../../aten/src/ATen/native/tags.yaml",
+    )
+    parser.add_argument(
+        "--template-path",
+        "--template_path",
+        help="path to external_functions_codegen_template.cpp",
+        default="../../../../tools/jit/templates/external_functions_codegen_template.cpp",
+    )
     args = parser.parse_args()
     gen_external(args.native_functions, args.tags, args.template_path)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

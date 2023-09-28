@@ -40,7 +40,7 @@ class Location:
     line: int
 
     def __str__(self) -> str:
-        return "{}:{}".format(self.file, self.line)
+        return f"{self.file}:{self.line}"
 
 
 # Valid values of the 'variants' field in native_functions.yaml
@@ -53,7 +53,7 @@ class Variant(Enum):
 DEFAULT_KERNEL_NAMESPACE = "at::native"
 
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
-BACKEND_COMPONENTS = "CPU CUDA HIP XLA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
+BACKEND_COMPONENTS = "CPU CUDA HIP XLA MTIA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
 FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
 
 # This list guards dispatches that can be used in derivatives.yaml
@@ -99,6 +99,7 @@ class DispatchKey(Enum):
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
     FuncTorchBatched = auto()
+    BatchedNestedTensor = auto()
     FuncTorchVmapMode = auto()
     FuncTorchDynamicLayerFrontMode = auto()
     Functionalize = auto()
@@ -118,6 +119,7 @@ class DispatchKey(Enum):
     CUDA = auto()
     HIP = auto()
     XLA = auto()
+    MTIA = auto()
     MPS = auto()
     IPU = auto()
     XPU = auto()
@@ -132,6 +134,7 @@ class DispatchKey(Enum):
     QuantizedCUDA = auto()
     QuantizedHIP = auto()
     QuantizedXLA = auto()
+    QuantizedMTIA = auto()
     QuantizedMPS = auto()
     QuantizedIPU = auto()
     QuantizedXPU = auto()
@@ -146,6 +149,7 @@ class DispatchKey(Enum):
     SparseCUDA = auto()
     SparseHIP = auto()
     SparseXLA = auto()
+    SparseMTIA = auto()
     SparseMPS = auto()
     SparseIPU = auto()
     SparseXPU = auto()
@@ -160,6 +164,7 @@ class DispatchKey(Enum):
     NestedTensorCUDA = auto()
     NestedTensorHIP = auto()
     NestedTensorXLA = auto()
+    NestedTensorMTIA = auto()
     NestedTensorMPS = auto()
     NestedTensorIPU = auto()
     NestedTensorXPU = auto()
@@ -174,6 +179,7 @@ class DispatchKey(Enum):
     AutogradCUDA = auto()
     AutogradHIP = auto()
     AutogradXLA = auto()
+    AutogradMTIA = auto()
     AutogradMPS = auto()
     AutogradIPU = auto()
     AutogradXPU = auto()
@@ -198,6 +204,11 @@ class DispatchKey(Enum):
             if k == value:
                 return v
         raise AssertionError(f"unknown dispatch key {value}")
+
+
+class _TorchDispatchModeKey(Enum):
+    FAKE = auto()
+    PROXY = auto()
 
 
 def codegen_per_backend_entries() -> str:
@@ -249,31 +260,6 @@ dispatch_keys = [
 ]
 
 
-def rename_dispatch_key_privateuse1(custom_device: str) -> None:
-    """
-    User can rename DispatchKey.PrivateUse1 to custom device rather than 'PrivateUse1'.
-    For example:
-    >>>from torchgen.model import DispatchKey, rename_dispatch_key_privateuse1
-    >>>rename_dispatch_key_privateuse1("FOO")
-    >>>str(DispatchKey.PrivateUse1) # "FOO"
-    >>>DispatchKey.parse("FOO") # DispatchKey.PrivateUse1
-    """
-
-    def rename_privateuse1(self: DispatchKey) -> str:
-        return self.name.replace("PrivateUse1", custom_device)
-
-    @staticmethod  # type: ignore[misc]
-    def parse_custom_device(value: str) -> "DispatchKey":
-        for k, v in DispatchKey.__members__.items():
-            if k == value.replace(custom_device, "PrivateUse1"):
-                return v
-        raise AssertionError(f"unknown dispatch key {value}")
-
-    DispatchKey.__str__ = rename_privateuse1  # type: ignore[assignment]
-    DispatchKey.parse = parse_custom_device  # type: ignore[assignment]
-    dispatch_keys.append(DispatchKey.PrivateUse1)
-
-
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
@@ -323,6 +309,8 @@ class ScalarType(Enum):
     ComplexDouble = auto()
     Bool = auto()
     BFloat16 = auto()
+    Float8_e5m2 = auto()
+    Float8_e4m3fn = auto()
 
     def __str__(self) -> str:
         return self.name
@@ -968,7 +956,12 @@ class NativeFunction:
         if (
             "rand" in str(self.func.name)
             or (
-                "dropout" in str(self.func.name)
+                (
+                    "dropout" in str(self.func.name)
+                    or any(
+                        "dropout" in arg.name for arg in self.func.arguments.flat_all
+                    )
+                )
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
                 and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
@@ -996,7 +989,9 @@ class NativeFunction:
         )
         # See Note [resize_ in Functionalization] for more dtails
         is_inplace_view = (
-            "inplace_view" in self.tags and str(self.func.name) != "resize_"
+            "inplace_view" in self.tags
+            and str(self.func.name) != "resize_"
+            and str(self.func.name) != "resize_as_"
         )
         is_wildcard_view = any(
             inp.annotation is not None and "*" in inp.annotation.alias_set_after
@@ -1447,7 +1442,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
+                "Found an operator that is not functional or out variant, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
@@ -1669,9 +1664,7 @@ class FunctionSchema:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
     def has_symint(self) -> bool:
-        return self.arguments.has_symint_arg() or any(
-            r.type.is_symint_like() for r in self.returns
-        )
+        return self.arguments.has_symint_arg()
 
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)
@@ -1816,6 +1809,7 @@ class BaseTy(Enum):
     bool = auto()
     Layout = auto()
     Device = auto()
+    DeviceIndex = auto()
     Scalar = auto()
     MemoryFormat = auto()
     QScheme = auto()

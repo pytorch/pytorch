@@ -21,7 +21,7 @@ class Int8ReluOp final : public Operator<CPUContext> {
 #endif
       }
 
-  ~Int8ReluOp() {
+  ~Int8ReluOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

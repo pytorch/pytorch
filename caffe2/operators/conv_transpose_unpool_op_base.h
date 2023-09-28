@@ -208,7 +208,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     CAFFE_THROW("Not implemented");
   }
 
-  virtual ~ConvTransposeUnpoolBase() {}
+  ~ConvTransposeUnpoolBase() override {}
 
  protected:
   // Accessors for 2D conv params.

@@ -18,14 +18,14 @@ class SHM_API THManagedMapAllocator : public at::RefcountedMapAllocator {
       const char* manager_handle,
       const char* filename,
       int flags,
-      ptrdiff_t size)
+      size_t size)
       : at::RefcountedMapAllocator(filename, flags, size) {}
 
   static at::DataPtr makeDataPtr(
       const char* manager_handle,
       const char* filename,
       int flags,
-      ptrdiff_t size);
+      size_t size);
   static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
 
   const char* manager_handle() const {

@@ -23,7 +23,7 @@ class Int8MaxPoolOp final : public ConvPoolOpBase<CPUContext> {
         this->order_ == StorageOrder::NHWC, "Int8 only supports NHWC order.");
   }
 
-  ~Int8MaxPoolOp() {
+  ~Int8MaxPoolOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

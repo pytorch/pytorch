@@ -7,8 +7,4 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
-from torch.ao.quantization.stubs import (
-    QuantStub,
-    DeQuantStub,
-    QuantWrapper
-)
+from torch.ao.quantization.stubs import DeQuantStub, QuantStub, QuantWrapper

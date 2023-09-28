@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -25,7 +25,7 @@ graph {
       t {
         dims: 1
         data_type: 7
-        raw_data: "\002\000\000\000\000\000\000\000"
+        raw_data: "\000\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
@@ -39,21 +39,21 @@ graph {
       t {
         dims: 1
         data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
+        raw_data: "\002\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
   }
   node {
     input: "onnx::Slice_0"
-    input: "onnx::Slice_13"
     input: "onnx::Slice_14"
     input: "onnx::Slice_15"
+    input: "onnx::Slice_13"
     output: "11"
     name: "Slice_3"
     op_type: "Slice"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Slice_0"
     type {
@@ -88,5 +88,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

@@ -369,7 +369,7 @@ class Fuzzer:
                 ops will create reproducible Tensors.
         """
         if seed is None:
-            seed = np.random.RandomState().randint(0, 2**63)
+            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)
         self._seed = seed
         self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
@@ -392,7 +392,7 @@ class Fuzzer:
 
     def take(self, n):
         state = np.random.RandomState(self._seed)
-        torch.manual_seed(state.randint(low=0, high=2 ** 63))
+        torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=np.int64))
         for _ in range(n):
             params = self._generate(state)
             tensors = {}

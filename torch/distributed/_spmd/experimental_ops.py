@@ -203,9 +203,9 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
             output_spec=(
                 # by default, nll_loss_forward conducts a reduction and returns
                 # a scalar tensor, and hence the _Partial placements.
-                DTensorSpec(mesh=self.mesh, placements=[_Partial()]),
+                DTensorSpec(mesh=self.mesh, placements=(_Partial(),)),
                 # the 2nd output total_weight is always a scalar tensor
-                DTensorSpec(mesh=self.mesh, placements=[Replicate()]),
+                DTensorSpec(mesh=self.mesh, placements=(Replicate(),)),
             )
         )
 
@@ -266,7 +266,7 @@ def _prop_select(op_schema: OpSchema) -> OutputSharding:
             new_placements.append(p)
 
     return OutputSharding(
-        output_spec=DTensorSpec(mesh=tensor.mesh, placements=new_placements)
+        output_spec=DTensorSpec(mesh=tensor.mesh, placements=tuple(new_placements))
     )
 
 
@@ -322,7 +322,7 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     weight_grad = (
         DTensorSpec(
             mesh=weight.mesh,
-            placements=[_Partial()] * weight.mesh.ndim,
+            placements=tuple([_Partial()] * weight.mesh.ndim),
         )
         if weight
         else None
@@ -330,7 +330,7 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     bias_grad = (
         DTensorSpec(
             mesh=bias.mesh,
-            placements=[_Partial()] * bias.mesh.ndim,
+            placements=tuple([_Partial()] * bias.mesh.ndim),
         )
         if bias
         else None

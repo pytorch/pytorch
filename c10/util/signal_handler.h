@@ -5,7 +5,6 @@
 #include <mutex>
 
 #include <c10/macros/Export.h>
-#include <c10/util/Logging.h>
 
 #if defined(__APPLE__)
 #define C10_SUPPORTS_SIGNAL_HANDLER

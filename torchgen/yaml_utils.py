@@ -2,12 +2,12 @@
 try:
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
 
 try:
     from yaml import CSafeDumper as Dumper
 except ImportError:
-    from yaml import SafeDumper as Dumper  # type: ignore[misc]
+    from yaml import SafeDumper as Dumper  # type: ignore[assignment, misc]
 YamlDumper = Dumper
 
 

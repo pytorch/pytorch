@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """End-to-end example to test a PR for regressions:
 
 $ python -m examples.end_to_end --pr 39850
@@ -111,7 +110,7 @@ _SUBPROCESS_CMD_TEMPLATE = (
 
 def construct_stmt_and_label(pr, params):
     if pr == "39850":
-        k0, k1, k2, dim = [params[i] for i in ["k0", "k1", "k2", "dim"]]
+        k0, k1, k2, dim = (params[i] for i in ["k0", "k1", "k2", "dim"])
         state = np.random.RandomState(params["random_value"])
         topk_dim = state.randint(low=0, high=dim)
         dim_size = [k0, k1, k2][topk_dim]
@@ -291,7 +290,7 @@ def construct_table(results, device_str, test_variance):
     )
 
     _, result_log_file = tempfile.mkstemp(suffix=".log")
-    with open(result_log_file, "wt") as f:
+    with open(result_log_file, "w") as f:
         f.write(f"{device_str}\n\n{column_labels}\n")
         print(f"\n{column_labels}\n[First twenty omitted (these tend to be noisy) ]")
         for key, (r_ref, r_pr), rel_diff in results:

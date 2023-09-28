@@ -32,7 +32,7 @@ class TestTile(serial.SerializedTestCase):
         )
 
         def tile_ref(X, tiles, axis):
-            dims = np.asarray([1, 1, 1], dtype=np.int)
+            dims = np.asarray([1, 1, 1], dtype=int)
             dims[axis] = tiles
             tiled_data = np.tile(X, dims)
             return (tiled_data,)
@@ -61,7 +61,7 @@ class TestTile(serial.SerializedTestCase):
         )
 
         def tile_ref(X, tiles, axis):
-            dims = np.asarray([1, 1], dtype=np.int)
+            dims = np.asarray([1, 1], dtype=int)
             dims[axis] = tiles
             tiled_data = np.tile(X, dims)
             return (tiled_data,)
@@ -99,7 +99,7 @@ class TestTile(serial.SerializedTestCase):
         )
 
         def tile_ref(X, tiles, axis):
-            dims = np.asarray([1, 1, 1], dtype=np.int)
+            dims = np.asarray([1, 1, 1], dtype=int)
             dims[axis] = tiles
             tiled_data = np.tile(X, dims)
             return (tiled_data,)

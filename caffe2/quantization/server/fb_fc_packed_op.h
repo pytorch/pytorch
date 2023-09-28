@@ -70,7 +70,7 @@ class FbFCPackedOperator final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)) {}
-  ~FbFCPackedOperator() {}
+  ~FbFCPackedOperator() override {}
 
   // template on X, B, and Y.
   template <typename T_X, typename T_B, typename T_Y>

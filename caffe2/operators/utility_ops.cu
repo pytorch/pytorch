@@ -10,6 +10,7 @@
 #include "caffe2/operators/flatten_op.h"
 #include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 namespace caffe2 {
 

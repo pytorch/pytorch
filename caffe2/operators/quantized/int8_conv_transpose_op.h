@@ -26,7 +26,7 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     createSharedBuffer<CPUContext>(ws_);
   }
 
-  ~Int8ConvTransposeOp() {
+  ~Int8ConvTransposeOp() override {
     if (this->qnnpackObject_ != nullptr) {
       qnnp_delete_operator(this->qnnpackObject_);
       this->qnnpackObject_ = nullptr;

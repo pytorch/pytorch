@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -173,7 +172,7 @@ class Skippable(nn.Module):
                     op = generator.send(tensor)
                     continue
 
-                raise TypeError("%r is not a command from @skippable" % op)
+                raise TypeError(f"{op!r} is not a command from @skippable")
 
         except StopIteration as stop:
             output = stop.args[0]
@@ -218,12 +217,12 @@ class Skippable(nn.Module):
         # All declared skips must be stashed or popped.
         not_stashed = self.stashable_names - stashed_tensors.keys()
         if not_stashed:
-            comma_names = ", ".join("'%s'" % n for n in not_stashed)
+            comma_names = ", ".join(f"'{n}'" for n in not_stashed)
             raise RuntimeError(f"{comma_names} must be stashed but have not")
 
         not_popped = poppable_tensors.keys()
         if not_popped:
-            comma_names = ", ".join("'%s'" % n for n in not_popped)
+            comma_names = ", ".join(f"'{n}'" for n in not_popped)
             raise RuntimeError(f"{comma_names} must be popped but have not")
 
         # Save stashed skip tensors.
@@ -397,7 +396,7 @@ def verify_skippables(module: nn.Sequential) -> None:
                 continue
 
             if (ns, name) in stashed:
-                msg = f"'{layer_name}' redeclared '{name}' as stashable " "but not isolated by namespace"
+                msg = f"'{layer_name}' redeclared '{name}' as stashable but not isolated by namespace"
                 msgs.append(msg)
                 continue
 
@@ -408,7 +407,7 @@ def verify_skippables(module: nn.Sequential) -> None:
                 continue
 
             if (ns, name) in popped:
-                msg = f"'{layer_name}' redeclared '{name}' as poppable " "but not isolated by namespace"
+                msg = f"'{layer_name}' redeclared '{name}' as poppable but not isolated by namespace"
                 msgs.append(msg)
                 continue
 

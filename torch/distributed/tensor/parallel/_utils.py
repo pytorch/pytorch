@@ -151,6 +151,5 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
         if cur_rank in mesh_1d:
             res_sub_mesh = sub_mesh
 
-    sub_pg = device_mesh.get_dim_groups()[tp_mesh_dim]
-    res_sub_mesh._dim_groups = [sub_pg]
+    res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[tp_mesh_dim]]
     return res_sub_mesh

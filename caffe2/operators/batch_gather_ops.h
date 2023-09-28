@@ -50,7 +50,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1),
         OP_SINGLE_ARG(bool, "match_outer", match_outer_, false) {}
-  virtual ~BatchGatherGradientOp() noexcept {}
+  ~BatchGatherGradientOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(

@@ -15,7 +15,7 @@
 // On CUDA, the cast is currently pushed down into the kernel (for performance reasons).
 // On CPU, there is currently an internal assert that a dynamic_cast is not needed.
 
-namespace at { namespace native {
+namespace at::native {
 
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
@@ -42,14 +42,12 @@ struct needs_dynamic_casting<func_t, 0> {
 
     // we could assert output numbers are correct here, but checks
     // (including arity) are currently pushed outside of this struct.
-    return c10::guts::if_constexpr<std::is_void<cpp_type>::value>([]() {
+    if constexpr (std::is_void_v<cpp_type>) {
       return false;
-    }, /* else */ [&](auto _) {
-      // decltype(_) is used to delay computation
-      using delayed_type = typename decltype(_)::template type_identity<cpp_type>;
-      return iter.dtype(0) != c10::CppTypeToScalarType<delayed_type>::value;
-    });
+    } else {
+      return iter.dtype(0) != c10::CppTypeToScalarType<cpp_type>::value;
+    }
   }
 };
 
-}} //namespace at::native
+} //namespace at::native

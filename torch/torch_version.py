@@ -68,7 +68,7 @@ class TorchVersion(str):
             #   * (1)         -> Version("1")
             #   * (1, 20)     -> Version("1.20")
             #   * (1, 20, 1)  -> Version("1.20.1")
-            return Version('.'.join((str(item) for item in inp)))
+            return Version('.'.join(str(item) for item in inp))
         else:
             raise InvalidVersion(inp)
 

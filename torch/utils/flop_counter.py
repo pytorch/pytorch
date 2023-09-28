@@ -1,8 +1,10 @@
 import torch
+import torch.nn as nn
 from torch.utils._pytree import tree_map
-from typing import List, Any, Dict, Optional, Union
+from typing import List, Any, Dict, Optional, Union, NamedTuple
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.hooks import RemovableHandle
 from math import prod
 
 __all__ = ["FlopCounterMode"]
@@ -208,7 +210,7 @@ def get_suffix_str(number):
 def convert_num_with_suffix(number, suffix):
     index = suffixes.index(suffix)
     # Divide the number by 1000^index and format it to two decimal places
-    value = "{:.3f}".format(number / (1000 ** index))
+    value = f"{number / 1000 ** index:.3f}"
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
@@ -234,7 +236,7 @@ class FlopCounterMode(TorchDispatchMode):
             mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Dict[Any, Any] = None):
+            custom_mapping: Optional[Dict[Any, Any]] = None):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
@@ -244,17 +246,31 @@ class FlopCounterMode(TorchDispatchMode):
         if isinstance(mods, torch.nn.Module):
             mods = [mods]
         self.mods = mods
-        if mods is not None:
-            for mod in mods:
-                prefix = type(mod).__name__
-                for name, module in dict(mod.named_modules()).items():
-                    if name == "":
-                        name = prefix
-                    else:
-                        name = ".".join([prefix, name])
-                    module.register_forward_pre_hook(self._enter_module(name))
-                    module.register_forward_hook(self._exit_module(name))
+        # Keys will include the modules in `mods` and their submodules
+        self._module_to_forward_hook_handles: Dict[nn.Module, _ForwardHookHandles] = {}
         self.flop_mapping = {**flop_mapping, **custom_mapping}
+
+    def _register_forward_hooks(self):
+        if self.mods is None:
+            return
+        for mod in self.mods:
+            prefix = type(mod).__name__
+            for name, module in dict(mod.named_modules()).items():
+                if name == "":
+                    name = prefix
+                else:
+                    name = ".".join([prefix, name])
+                forward_pre_hook_handle = module.register_forward_pre_hook(self._enter_module(name))
+                forward_hook_handle = module.register_forward_hook(self._exit_module(name))
+                self._module_to_forward_hook_handles[module] = _ForwardHookHandles(
+                    forward_pre_hook_handle, forward_hook_handle
+                )
+
+    def _deregister_forward_hooks(self):
+        for forward_hook_handles in self._module_to_forward_hook_handles.values():
+            forward_hook_handles[0].remove()
+            forward_hook_handles[1].remove()
+        self._module_to_forward_hook_handles.clear()
 
     def _enter_module(self, name):
         def f(module, inputs):
@@ -345,13 +361,13 @@ class FlopCounterMode(TorchDispatchMode):
             values.append([
                 padding + mod_name,
                 convert_num_with_suffix(total_flops, global_suffix),
-                "{:.2f}%".format(total_flops / global_flops * 100)
+                f"{total_flops / global_flops * 100:.2f}%"
             ])
             for k, v in self.flop_counts[mod_name].items():
                 values.append([
                     padding + " - " + str(k),
                     convert_num_with_suffix(v, global_suffix),
-                    "{:.2f}%".format(v / global_flops * 100)
+                    f"{v / global_flops * 100:.2f}%"
                 ])
             return values
 
@@ -382,12 +398,14 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __enter__(self):
         self.flop_counts.clear()
+        self._register_forward_hooks()
         super().__enter__()
         return self
 
     def __exit__(self, *args):
         if self.display:
             print(self.get_table(self.depth))
+        self._deregister_forward_hooks()
         super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -402,3 +420,7 @@ class FlopCounterMode(TorchDispatchMode):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+class _ForwardHookHandles(NamedTuple):
+    forward_pre_hook_handle: RemovableHandle
+    forward_hook_handle: RemovableHandle

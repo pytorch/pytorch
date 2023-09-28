@@ -696,7 +696,7 @@ TEST(
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
-    // Do not manage intput value.
+    // Do not manage input value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
@@ -712,7 +712,7 @@ TEST(
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
-    // Do not manage intput value.
+    // Do not manage input value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));

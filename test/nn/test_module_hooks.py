@@ -121,6 +121,16 @@ class KwargModel(nn.Module):
         return out + kwargs["bias"]
 
 
+class FailsInForwardModel(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.net1 = Net()
+
+    def forward(self, x: torch.Tensor, fail: bool = True) -> torch.Tensor:
+        if fail:
+            raise RuntimeError("failing in forward")
+        return self.net1(x)
+
 def kwarg_forward_pre_hook(
     self: TestCase,
     fired_hooks: List[int],
@@ -153,6 +163,17 @@ def kwarg_forward_hook(
 
     out = out + kwargs["bias"]
     return out
+
+
+class DummyContextManager:
+    def __init__(self, inp):
+        self.input = inp
+
+    def __enter__(self, *args, **kwargs):
+        self.input.append(2)
+
+    def __exit__(self, *args, **kwargs):
+        self.input.append(-1)
 
 
 class TestModuleHooks(TestCase):
@@ -389,6 +410,94 @@ class TestModuleHooks(TestCase):
         self.assertFalse(
             forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
         )
+
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
+    def test_always_called_forward_hooks(self):
+        x: torch.Tensor = torch.ones(10, 10)
+        model = FailsInForwardModel()
+        stack = []
+        ctx = None
+
+        def setup_context():
+            nonlocal ctx
+            ctx = DummyContextManager(stack)
+
+        def ctx_setup_hook(m, i):
+            setup_context()
+            ctx.__enter__()
+
+        def ctx_setup_failure_hook(m, i):
+            setup_context()
+            ctx.__enter__()
+            raise RuntimeError("failing in ctx setup")
+
+        def ctx_shutdown_hook(m, i, o):
+            ctx.__exit__()
+
+        def ctx_shutdown_failure_hook(m, i, o):
+            ctx.__exit__()
+            raise RuntimeError("failing in ctx shutdown")
+
+        def throw_hook(m, i, o):
+            raise RuntimeError("failing in throw")
+
+        forward_pre_hook_handle = model.register_forward_pre_hook(ctx_setup_hook)
+        forward_hook_handle = model.register_forward_hook(ctx_shutdown_hook, always_call=True)
+        self.assertTrue(len(model._forward_hooks_always_called) == 1)
+
+        # make sure always_called forward hook runs when model.forward raises RuntimeError
+        with self.assertRaisesRegex(RuntimeError, "failing in forward"):
+            model(x)
+        self.assertEqual(stack, [2, -1])
+
+        # make sure that always_called forward hook does not run twice if there is no error
+        model(x, fail=False)
+        self.assertEqual(stack, [2, -1, 2, -1])
+
+        # make sure always_called forward hook runs when forward pre hook raises RuntimeError
+        forward_pre_hook_handle.remove()
+        model.register_forward_pre_hook(ctx_setup_failure_hook)
+
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
+            model(x, fail=False)
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1])
+
+        # make sure always_called hook runs when another always_called forward hook raises an error
+        forward_hook_handle2 = model.register_forward_hook(throw_hook,
+                                                           prepend=True,
+                                                           always_call=True)
+
+        # error raised should not be error of the forced hook
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
+            model(x, fail=False)
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1])
+
+        # make sure that always called forward hooks are properly removed
+        forward_hook_handle.remove()
+        forward_hook_handle2.remove()
+        self.assertTrue(len(model._forward_hooks_always_called) == 0)
+
+        # make sure that always called forward hook is not run twice if it fails while running
+        forward_hook_handle3 = model.register_forward_hook(ctx_shutdown_failure_hook, always_call=True)
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
+            model(x, fail=False)
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1])
+
+        forward_hook_handle3.remove()
+
+        global_forward_hook_handle = nn.modules.module.register_module_forward_hook(ctx_shutdown_hook, always_call=True)
+        self.assertTrue(len(nn.modules.module._global_forward_hooks_always_called) == 1)
+        # make sure global forward hook runs when forward pre hook raises RuntimeError
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
+            model(x, fail=False)
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2, -1])
+
+        # make sure forced global forward hook is properly removed
+        global_forward_hook_handle.remove()
+        self.assertTrue(len(nn.modules.module._global_forward_hooks_always_called) == 0)
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
+            model(x)
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2])
 
     @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_bw_hook_warning_for_non_tensor_or_tuple(self):

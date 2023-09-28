@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/bitwise_and_native.h>
@@ -91,7 +92,7 @@ kernel void bitwise_not(constant uint& length [[buffer(0)]],
 }}
 )METAL";
 
-const std::string& getMetalType(const c10::ScalarType& t) {
+static const std::string& getMetalType(const c10::ScalarType& t) {
   // Mapping from c10::ScalarType to integral type that can be used for bitwise ops
   // As bitwise ops sign-agnostic map signed/unsigned char and boolean to the same type
   static std::unordered_map<c10::ScalarType, std::string> scalar_to_metal_type = {
@@ -108,11 +109,11 @@ const std::string& getMetalType(const c10::ScalarType& t) {
   return it->second;
 }
 
-const std::string& getMetalType(const Tensor& t) {
+static const std::string& getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
-const std::string& getMetalType(const c10::Scalar& s) {
+static const std::string& getMetalType(const c10::Scalar& s) {
   return getMetalType(s.type());
 }
 
@@ -160,17 +161,19 @@ static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
   return rc;
 }
 
-void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePipelineState> cplState, uint32_t length) {
+static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
+                          id<MTLComputePipelineState> cplState,
+                          uint32_t length) {
   uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
   [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-void handle_tensor_tensor_binary_op(const Tensor& self,
-                                    const Tensor& other,
-                                    Tensor& output,
-                                    const std::string& kernel_name) {
+static void handle_tensor_tensor_binary_op(const Tensor& self,
+                                           const Tensor& other,
+                                           Tensor& output,
+                                           const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   id<MTLComputePipelineState> cplState = getCPLState(
@@ -179,7 +182,11 @@ void handle_tensor_tensor_binary_op(const Tensor& self,
   if (length == 0) {
     return;
   }
+
   dispatch_sync(stream->queue(), ^() {
+    // this function call is a no-op if MPS Profiler is not enabled
+    getMPSProfiler().beginProfileKernel(cplState, kernel_name, {self, other});
+
     id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
     id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
@@ -193,13 +200,15 @@ void handle_tensor_tensor_binary_op(const Tensor& self,
     [commandEncoder setBuffer:selfBuf offset:self.storage_offset() * self.itemsize() atIndex:2];
     [commandEncoder setBuffer:otherBuf offset:other.storage_offset() * other.itemsize() atIndex:3];
     dispatch1DJob(commandEncoder, cplState, length);
+
+    getMPSProfiler().endProfileKernel(cplState);
   });
 }
 
-void handle_tensor_scalar_binary_op(const Tensor& self,
-                                    const Scalar& other,
-                                    Tensor& output,
-                                    const std::string& kernel_name) {
+static void handle_tensor_scalar_binary_op(const Tensor& self,
+                                           const Scalar& other,
+                                           Tensor& output,
+                                           const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   id<MTLComputePipelineState> cplState = getCPLState(
@@ -209,7 +218,10 @@ void handle_tensor_scalar_binary_op(const Tensor& self,
   if (length == 0) {
     return;
   }
+
   dispatch_sync(stream->queue(), ^() {
+    getMPSProfiler().beginProfileKernel(cplState, kernel_name, {self});
+
     id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
     id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
@@ -222,10 +234,15 @@ void handle_tensor_scalar_binary_op(const Tensor& self,
     [commandEncoder setBuffer:selfBuf offset:self.storage_offset() * self.itemsize() atIndex:2];
     [commandEncoder setBytes:&sval length:sizeof(sval) atIndex:3];
     dispatch1DJob(commandEncoder, cplState, length);
+
+    getMPSProfiler().endProfileKernel(cplState);
   });
 }
 
-void _bitwise_op_out_mps(const Tensor& self, const Tensor& other, const Tensor& output_, const std::string& op_name) {
+static void _bitwise_op_out_mps(const Tensor& self,
+                                const Tensor& other,
+                                const Tensor& output_,
+                                const std::string& op_name) {
   using namespace at::mps;
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
@@ -265,7 +282,7 @@ void _bitwise_op_out_mps(const Tensor& self, const Tensor& other, const Tensor& 
   return;
 }
 
-void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
+static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   // Handle boolean tensor using logical not
   if (self.scalar_type() == c10::ScalarType::Bool) {
     logical_not_out_mps(self, const_cast<Tensor&>(output_));
@@ -298,6 +315,8 @@ void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   id<MTLComputePipelineState> cplState = getCPLState(
       MPSDevice::getInstance()->device(), getMetalType(output), getMetalType(self), getMetalType(self), "bitwise_not");
   dispatch_sync(stream->queue(), ^() {
+    getMPSProfiler().beginProfileKernel(cplState, "bitwise_not", {self});
+
     id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
     id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
@@ -309,6 +328,8 @@ void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
     [commandEncoder setBuffer:outBuf offset:output.storage_offset() * output.itemsize() atIndex:1];
     [commandEncoder setBuffer:selfBuf offset:self.storage_offset() * self.itemsize() atIndex:2];
     dispatch1DJob(commandEncoder, cplState, length);
+
+    getMPSProfiler().endProfileKernel(cplState);
   });
   if (needs_output_copy) {
     output_.copy_(output);

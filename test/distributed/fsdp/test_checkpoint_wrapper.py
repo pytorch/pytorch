@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import unittest
 from copy import deepcopy
 from functools import partial
@@ -14,6 +15,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     offload_wrapper,
     OffloadWrapper,
 )
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import checkpoint
 
@@ -98,6 +100,34 @@ class CheckpointWrapperTest(TestCase):
         inp = torch.ones(4, 10, requires_grad=True)
         out = model(a=inp, b=inp)
         self.assertEqual(2, len(out))
+
+    def test_checkpoint_wrapper_args_kwargs(self):
+        """
+        Tests that checkpoint_wrapper can pass down args / kwargs to configure
+        torch.utils.checkpoint.
+        """
+
+        count = 0
+
+        @contextlib.contextmanager
+        def ctx_manager():
+            nonlocal count
+            count += 1
+            yield
+
+        def get_ctx_mgrs():
+            return (ctx_manager(), ctx_manager())
+
+        # kwargs test
+        torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+        m = checkpoint_wrapper(
+            torch.nn.Linear(1, 1),
+            checkpoint_fn=torch_utils_checkpoint,
+            use_reentrant=False,
+            context_fn=get_ctx_mgrs,
+        )
+        m(torch.randn(2, 1)).sum().backward()
+        self.assertEqual(2, count)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_wrapper_parity(self):
@@ -218,11 +248,15 @@ class CheckpointWrapperTest(TestCase):
 
         n_linear = None
 
-        for wrapper in [
-            partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
-            partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT),
-            offload_wrapper,
-        ]:
+        for i, wrapper in enumerate(
+            [
+                partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
+                partial(
+                    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+                ),
+                offload_wrapper,
+            ]
+        ):
             model = MyModel()
             if n_linear is None:
                 n_linear = sum(
@@ -230,9 +264,16 @@ class CheckpointWrapperTest(TestCase):
                 )
 
             with self.subTest(wrapper=wrapper):
-                apply_activation_checkpointing(
-                    model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
-                )
+                if i != 0:
+                    apply_activation_checkpointing(
+                        model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
+                    )
+                else:
+                    apply_activation_checkpointing(
+                        model,
+                        checkpoint_wrapper_fn=wrapper,
+                        auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+                    )
                 n_linear_wrapped = sum(
                     1 if isinstance(x, nn.Linear) else 0 for x in model.modules()
                 )

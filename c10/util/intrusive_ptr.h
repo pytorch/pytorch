@@ -1,13 +1,10 @@
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <climits>
 #include <memory>
-#include <stdexcept>
 
 namespace pybind11 {
 template <typename, typename...>
@@ -53,6 +50,7 @@ struct DontIncreaseRefcount {};
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
+// NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class C10_API intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

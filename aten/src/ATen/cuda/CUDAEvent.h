@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 /*
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
@@ -98,7 +98,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       C10_CUDA_CHECK(err);
     } else {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
 
     return false;
@@ -205,5 +205,4 @@ private:
   }
 };
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

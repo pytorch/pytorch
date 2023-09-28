@@ -126,7 +126,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(
-            "{} instance doesn't have valid length".format(type(self).__name__)
+            f"{type(self).__name__} instance doesn't have valid length"
         )
 
 

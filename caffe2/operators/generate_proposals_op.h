@@ -103,7 +103,7 @@ class GenerateProposalsOp final : public Operator<Context> {
         legacy_plus_one_(
             this->template GetSingleArgument<bool>("legacy_plus_one", true)) {}
 
-  ~GenerateProposalsOp() {}
+  ~GenerateProposalsOp() override {}
 
   bool RunOnDevice() override;
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
 import contextlib
@@ -20,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
-    FloorDiv,
+    expect_true,
     guard_bool,
     guard_float,
     guard_int,
@@ -40,6 +39,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 aten = torch.ops.aten
 
@@ -195,13 +195,17 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(x.size()[0], 5)
         self.assertTrue(x.size()[1], 4)
+        # Should be simplifiable to an integer.
+        # Ref: https://github.com/pytorch/pytorch/pull/107492
         self.assertTrue(isinstance(x.size()[1], SymInt))
+        self.assertTrue(isinstance(x.size()[1].node.maybe_as_int(), int))  # due to guard above
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), SymInt))
+        self.assertTrue(isinstance(x.size(2).node.maybe_as_int(), int))
 
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
@@ -418,6 +422,56 @@ class TestPySymInt(TestCase):
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
 
+    def test_expect_true_basic(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        # This doesn't error
+        self.assertTrue(expect_true(i0 == 0))
+        # This generates a deferred runtime assert
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
+            """[Eq(i0, 0)]"""
+        )
+        self.assertIn("test_dynamic_shapes.py", shape_env.deferred_runtime_asserts[i0.node.expr][0].msg)
+        # After expecting true, guards now resolve given the runtime assert
+        bool(i0 == 0)
+
+    def test_expect_true_with_s0(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5)
+        i0 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 <= s0))
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
+            """[i0 <= s0]"""
+        )
+        self.assertTrue(i0 <= s0)
+        self.assertFalse(i0 > s0)
+
+    def test_expect_true_prefer_later(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        i1 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 + i1 == 10))
+        # Importantly, this is put in i1, not i0!
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1.node.expr]]),
+            """[Eq(i0 + i1, 10)]"""
+        )
+        self.assertTrue(i0 + i1 == 10)
+        # NB: We currently don't support deriving that we can substitute
+        # i0 + i1 with 10; maybe we should, but this means our rewriting
+        # system is no longer confluent (it's probably OK though, because
+        # you're unlikely to get other equalities like this on the
+        # unbacked SymInts.)
+
+    def test_expect_true_double_digits(self):
+        shape_env = ShapeEnv()
+        ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
+        self.assertEqual(str(ia[-1]), "i10")
+        self.assertTrue(expect_true(sum(ia) == 20))
+        self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
+
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -546,6 +600,15 @@ class TestSymNumberMagicMethods(TestCase):
                 # Complex result, which we do not support:
                 # TypeError: Cannot convert complex to float
                 return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and not (
+                isinstance(inp1, (SymInt, int)) and
+                isinstance(inp2, (SymInt, int))
+            ):
+                # TypeError: unsupported operand type(s)
+                return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and inp2 < 0:
+                # ValueError: math domain error
+                return self.assertRaises((ValueError,))
             else:
                 return contextlib.nullcontext()
 
@@ -559,15 +622,12 @@ class TestSymNumberMagicMethods(TestCase):
             lambda_apply = getattr(operator, fn)
 
         def guard_fn(v):
-            try:
-                if type(v) in (SymBool, bool):
-                    return guard_bool(v)
-                elif type(v) in (SymFloat, float):
-                    return guard_float(v)
-                else:  # SymInt, int
-                    return guard_int(v)
-            except Exception as e:
-                raise e
+            if type(v) in (SymBool, bool):
+                return guard_bool(v)
+            elif type(v) in (SymFloat, float):
+                return guard_float(v)
+            else:  # SymInt, int
+                return guard_int(v)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
@@ -790,6 +850,20 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
+    def test_floordiv_simplify_rational(self):
+        result = 21
+
+        a = sympy.Symbol("a", integer=True)
+        b = sympy.Symbol("b")
+
+        cases = [
+            (FloorDiv(a, sympy.Rational(1, 8)), 8 * a),
+            (FloorDiv(b, sympy.Rational(1, 8)), sympy.floor(8 * b)),
+        ]
+
+        for expr, expected in cases:
+            self.assertEqual(expr, expected)
+
     def test_floordiv_assumptions(self):
         # We define two Symbols (with different names) for each type to make
         # sure the behavior is consistent regardless of whether both arguments
@@ -842,7 +916,7 @@ class TestDimConstraints(TestCase):
         from torch.fx.experimental.symbolic_shapes import DimConstraints
 
         s = Symbol("s", positive=True, integer=True)
-        dim_constraints = DimConstraints({}, {})
+        dim_constraints = DimConstraints({}, {}, set())
         dim_constraints._congruences[s] = {
             (s / 2) % 2,
             (s / 2) % 8,
@@ -878,51 +952,51 @@ class TestDimConstraints(TestCase):
         self.assertEqual(solution, {8})
 
     def test_dim_constraints_solve_full(self):
-        from sympy import Eq, Integer, Mod, Ne, Symbol
+        from sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
 
         src0 = TensorPropertySource(
-            base=LocalSource(local_name="x0"), prop=TensorProperty.SIZE, idx=0
+            base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=0
         )
         src2 = TensorPropertySource(
-            base=LocalSource(local_name="x2"), prop=TensorProperty.SIZE, idx=0
+            base=LocalSource(local_name="b"), prop=TensorProperty.SIZE, idx=0
         )
         src3 = TensorPropertySource(
-            base=LocalSource(local_name="x3"), prop=TensorProperty.SIZE, idx=0
+            base=LocalSource(local_name="c"), prop=TensorProperty.SIZE, idx=0
         )
         src4 = TensorPropertySource(
-            base=LocalSource(local_name="x4"), prop=TensorProperty.SIZE, idx=0
+            base=LocalSource(local_name="d"), prop=TensorProperty.SIZE, idx=0
         )
 
         src1 = TensorPropertySource(
-            base=LocalSource(local_name="x1"), prop=TensorProperty.SIZE, idx=2
+            base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=2
         )
         src7 = TensorPropertySource(
-            base=LocalSource(local_name="x7"), prop=TensorProperty.SIZE, idx=3
+            base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=3
         )
 
         src5 = TensorPropertySource(
-            base=LocalSource(local_name="x5"), prop=TensorProperty.SIZE, idx=1
+            base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=1
         )
         src8 = TensorPropertySource(
-            base=LocalSource(local_name="x8"), prop=TensorProperty.SIZE, idx=1
+            base=LocalSource(local_name="b"), prop=TensorProperty.SIZE, idx=1
         )
 
         src6 = TensorPropertySource(
-            base=LocalSource(local_name="x6"), prop=TensorProperty.SIZE, idx=1
+            base=LocalSource(local_name="c"), prop=TensorProperty.SIZE, idx=1
         )
         src9 = TensorPropertySource(
-            base=LocalSource(local_name="x9"), prop=TensorProperty.SIZE, idx=1
+            base=LocalSource(local_name="d"), prop=TensorProperty.SIZE, idx=1
         )
         src10 = TensorPropertySource(
-            base=LocalSource(local_name="x10"), prop=TensorProperty.SIZE, idx=1
+            base=LocalSource(local_name="e"), prop=TensorProperty.SIZE, idx=1
         )
 
         src11 = TensorPropertySource(
-            base=LocalSource(local_name="x11"), prop=TensorProperty.SIZE, idx=1
+            base=LocalSource(local_name="f"), prop=TensorProperty.SIZE, idx=1
         )
         src12 = TensorPropertySource(
-            base=LocalSource(local_name="x12"), prop=TensorProperty.SIZE, idx=2
+            base=LocalSource(local_name="b"), prop=TensorProperty.SIZE, idx=2
         )
 
         s0 = Symbol("s0", positive=True, integer=True)
@@ -936,7 +1010,8 @@ class TestDimConstraints(TestCase):
             s6: [src6, src9, src10],
         }
         var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
-        dim_constraints = DimConstraints(symbol_to_source, var_to_val)
+        marked_dynamic = {s0, s1, s5, s6}
+        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic)
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
         dim_constraints.add_equality(src4, s0)
@@ -1754,49 +1829,59 @@ class TestDimConstraints(TestCase):
         dim_constraints.add(s5 >= 2)
 
         dim_constraints.solve()
+        dim_constraints.remove_redundant_dynamic_results()
         self.assertEqual(dim_constraints._static_results, {
-            "L['x3'].size()[0] == 8",
-            "L['x4'].size()[0] == 8",
-            "L['x1'].size()[2] == 96",
-            "L['x11'].size()[1] == 1",
-            "L['x7'].size()[3] == 96",
-            "L['x12'].size()[2] == 3",
-            "L['x8'].size()[1] == 22",
-            "L['x2'].size()[0] == 8",
-            "L['x5'].size()[1] == 22",
-            "L['x0'].size()[0] == 8",
+            "L['c'].size()[0] == 8",
+            "L['d'].size()[0] == 8",
+            "L['a'].size()[2] == 96",
+            "L['f'].size()[1] == 1",
+            "L['a'].size()[3] == 96",
+            "L['b'].size()[2] == 3",
+            "L['b'].size()[1] == 22",
+            "L['b'].size()[0] == 8",
+            "L['a'].size()[1] == 22",
+            "L['a'].size()[0] == 8",
         })
         self.assertEqual(dim_constraints._dynamic_results, {
-            "dynamic_dim(L['x10'], 1) == dynamic_dim(L['x6'], 1)",
-            "2 <= dynamic_dim(L['x6'], 1)",
-            "dynamic_dim(L['x9'], 1) == dynamic_dim(L['x6'], 1)",
+            "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
+            "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
         })
 
-        def dummy_f(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+        def dummy_fn(a, b, c, d, e, f):
             pass
 
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_f))
+        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn))
         static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
-        print(static_code)
         expected_static = '''
-def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
-    return (x0.size()[0] == 8 and
-    x1.size()[2] == 96 and
-    x11.size()[1] == 1 and
-    x12.size()[2] == 3 and
-    x2.size()[0] == 8 and
-    x3.size()[0] == 8 and
-    x4.size()[0] == 8 and
-    x5.size()[1] == 22 and
-    x7.size()[3] == 96 and
-    x8.size()[1] == 22)
+def specializations(a, b, c, d, e, f):
+    # a:
+    assert a.size()[0] == 8
+    assert a.size()[1] == 22
+    assert a.size()[2] == 96
+    assert a.size()[3] == 96
+
+    # b:
+    assert b.size()[0] == 8
+    assert b.size()[1] == 22
+    assert b.size()[2] == 3
+
+    # c:
+    assert c.size()[0] == 8
+
+    # d:
+    assert d.size()[0] == 8
+
+    # f:
+    assert f.size()[1] == 1
 '''
         expected_dynamic = '''
-def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+def specify_constraints(a, b, c, d, e, f):
     return [
-        2 <= dynamic_dim(x6, 1),
-        dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
-        dynamic_dim(x9, 1) == dynamic_dim(x6, 1),
+        # d:
+        dynamic_dim(d, 1) == dynamic_dim(c, 1),
+
+        # e:
+        dynamic_dim(e, 1) == dynamic_dim(c, 1),
     ]
 '''
 

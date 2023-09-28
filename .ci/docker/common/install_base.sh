@@ -31,10 +31,13 @@ install_ubuntu() {
     maybe_libomp_dev=""
   fi
 
-  # TODO: Remove this once nvidia package repos are back online
-  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
-  # shellcheck disable=SC2046
-  sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+  # HACK: UCC testing relies on libnccl library from NVIDIA repo, and version 2.16 crashes
+  # See https://github.com/pytorch/pytorch/pull/105260#issuecomment-1673399729
+  if [[ "$UBUNTU_VERSION" == "20.04"* && "$CUDA_VERSION" == "11.8"* ]]; then
+    maybe_libnccl_dev="libnccl2=2.15.5-1+cuda11.8 libnccl-dev=2.15.5-1+cuda11.8 --allow-downgrades --allow-change-held-packages"
+  else
+    maybe_libnccl_dev=""
+  fi
 
   # Install common dependencies
   apt-get update
@@ -63,6 +66,7 @@ install_ubuntu() {
     libasound2-dev \
     libsndfile-dev \
     ${maybe_libomp_dev} \
+    ${maybe_libnccl_dev} \
     software-properties-common \
     wget \
     sudo \
@@ -76,20 +80,6 @@ install_ubuntu() {
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
-
-  # cuda-toolkit does not work with gcc-11.2.0 which is default in Ubunutu 22.04
-  # see: https://github.com/NVlabs/instant-ngp/issues/119
-  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
-    apt-get install -y g++-10
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 30
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 30
-    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-10 30
-
-    # https://www.spinics.net/lists/libreoffice/msg07549.html
-    sudo rm -rf /usr/lib/gcc/x86_64-linux-gnu/11
-    wget https://github.com/gcc-mirror/gcc/commit/2b2d97fc545635a0f6aa9c9ee3b017394bc494bf.patch -O noexecpt.patch
-    sudo patch  /usr/include/c++/10/bits/range_access.h noexecpt.patch
-  fi
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean

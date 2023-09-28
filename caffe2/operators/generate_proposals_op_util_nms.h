@@ -371,6 +371,11 @@ int convex_hull_graham(
       q + 1,
       q + num_in,
       [](const Eigen::Vector2f& A, const Eigen::Vector2f& B) -> bool {
+        if (A == B) {
+          // explicit irreflexivity handling to sate
+          // https://fburl.com/strict-weak-ordering
+          return false;
+        }
         float temp = cross_2d(A, B);
         if (fabs(temp) < 1e-6) {
           return A.squaredNorm() < B.squaredNorm();
@@ -412,7 +417,8 @@ int convex_hull_graham(
   // But if we're only interested in getting the area/perimeter of the shape
   // We can simply return.
   if (!shift_to_zero) {
-    for (const auto i : c10::irange(m))q[i] += s;
+    for (const auto i : c10::irange(m))
+      q[i] += s;
   }
 
   return m;

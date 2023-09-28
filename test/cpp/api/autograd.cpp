@@ -31,6 +31,22 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
+TEST(AutogradAPITests, RegisterHookVoidReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::TensorBase x) { return; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
+TEST(AutogradAPITests, RegisterHookTensorReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::Tensor x) -> at::Tensor { return x; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
 TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -1339,12 +1355,6 @@ void assertBasicChecks(F op) {
 
 } // namespace
 
-// These tests trigger an MSVC bug in the internal arvr build
-// Reproduce with: buck build @arvr/mode/win/opt
-// //xplat/caffe2:autograd_libtorch_test_ovrsource It is probably caused by the
-// lambda, see https://github.com/pytorch/pytorch/issues/48763
-#if !defined(_MSC_VER)
-
 TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   REGISTER_TEST_OP(
       "ret_single_non_tensor",
@@ -1660,8 +1670,6 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
 }
-
-#endif
 
 // TODO add these tests if needed
 // test_once_differentiable

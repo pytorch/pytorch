@@ -1,11 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
+from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -40,20 +42,21 @@ class Shard(Placement):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> Tuple[List[torch.Tensor], List[int]]:
-        # NOTE: For with_padding option, we pad the tensor on each rank before calling
-        # the collectives (i.e. scatter/all_gather, etc.). This is because for gloo
-        # backend, it does not support uneven collectives, nccl supports some, but
-        # it might be slow compared to even size collective, we need to pad tensor
-        # before really calling the collective, and unpad/narrow it afterwards
-        # TODO: consider if we should remove this logic once ProcessGroupGloo
-        # support uneven list, and collective performance on par
+        """
+        This function uses torch.chunk to split a tensor into num_chunks shards along
+        the Shard placement dimension, and return a list of shards with their pad sizes.
+
+        Keyword args:
+            with_padding (bool, optional): when True, we pad the tensor on the last
+            few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
+            This is because collectives usually require equal size tensor inputs
+        """
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         assert (
-            tensor.size(self.dim) >= num_chunks
-        ), f"Tensors to be sharded on dim {self.dim} must be at least as large as "
-        f"the number of devices in that dimension {num_chunks}"
+            tensor.size(self.dim) > 0
+        ), f"Tensor size along dim{self.dim} is 0. There is nothing to be sharded."
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
@@ -164,7 +167,7 @@ class Shard(Placement):
         )
 
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
-        mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
+        mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
 
         # Only unpad if the local_tensor was padded on the dimension.
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
@@ -176,7 +179,7 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp,
+        reduce_op: c10d.ReduceOp.RedOpType,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -184,11 +187,11 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return tensor
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
@@ -197,8 +200,8 @@ class Shard(Placement):
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
 
-        output = mesh.reduce_scatter(
-            tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
+        output = funcol.reduce_scatter_tensor(
+            tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
         if is_padded:
@@ -219,11 +222,11 @@ class Shard(Placement):
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
 
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return local_tensor
+
         # check if it needs to pad input tensor before all_gather
         full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
         chunk_sizes = [
@@ -242,23 +245,16 @@ class Shard(Placement):
             local_tensor = self._pad_tensor(local_tensor, pad_size)
         local_tensor = local_tensor.contiguous()
 
-        result = mesh.all_gather(
-            tensor=local_tensor,
-            mesh_dim=mesh_dim,
+        result = funcol.all_gather_tensor(
+            local_tensor,
             gather_dim=self.dim,
+            group=(mesh, mesh_dim),
         )
 
         # Unpad the tensor if the input tensor was padded
         if is_padded:
-            gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
-            gathered_list = [
-                self._unpad_tensor(gathered_tensor, pad_size)  # type: ignore[misc]
-                if pad_size > 0
-                else gathered_tensor
-                for gathered_tensor, pad_size in zip(gathered_list, pad_sizes)
-            ]
-
-            result = torch.cat(gathered_list, dim=self.dim)
+            full_pad_size = sum(pad_sizes)
+            result = self._unpad_tensor(result, full_pad_size)
         return result
 
     def __eq__(self, other: object) -> bool:
@@ -316,7 +312,7 @@ class Replicate(Placement):
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
         tensor = tensor.contiguous()
-        mesh.broadcast(tensor, mesh_dim=mesh_dim)
+        mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim)
         return tensor
 
 
@@ -329,14 +325,14 @@ class _Partial(Placement):
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
 
-    def __init__(self, reduce_op: c10d.ReduceOp = c10d.ReduceOp.SUM):  # type: ignore[assignment]
-        self.reduce_op: c10d.ReduceOp = reduce_op
+    def __init__(self, reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM):
+        self.reduce_op: c10d.ReduceOp.RedOpType = reduce_op
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        return mesh.all_reduce(
-            tensor, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
+        return funcol.all_reduce(
+            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
         )
 
     def _to_shard(
@@ -348,9 +344,7 @@ class _Partial(Placement):
     ) -> torch.Tensor:
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
-        return shard_spec._reduce_shard_tensor(
-            tensor, mesh, self.reduce_op, mesh_dim  # type: ignore[call-arg]
-        )
+        return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _Partial):
@@ -358,7 +352,7 @@ class _Partial(Placement):
         return self.reduce_op == other.reduce_op
 
     def __hash__(self) -> int:
-        return hash(self.reduce_op)
+        return 1 + hash(self.reduce_op)
 
     def __repr__(self) -> str:
         """
@@ -377,27 +371,46 @@ class _Partial(Placement):
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Sequence[Placement]
+    placements: Tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMetadata] = None
 
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
-        # propagation results. We only need to consider the mesh, placements and shape
+        # propagation results. We only need to consider the mesh, placements, shape
+        # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
-        # fields to them,
+        # fields to them.
         if self.tensor_meta is not None:
-            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
+            return hash(
+                (
+                    self.mesh,
+                    self.placements,
+                    self.tensor_meta.shape,
+                    self.tensor_meta.dtype,
+                    self.tensor_meta.stride,
+                )
+            )
         else:
-            return hash((self.mesh, tuple(self.placements)))
+            return hash((self.mesh, self.placements))
 
     def __eq__(self, __o: object) -> bool:
-        return (
+        if not (
             isinstance(__o, DTensorSpec)
             and self.mesh == __o.mesh
             and self.placements == __o.placements
-            and self.tensor_meta == __o.tensor_meta
+        ):
+            return False
+        if self.tensor_meta is None or __o.tensor_meta is None:
+            return self.tensor_meta == __o.tensor_meta
+
+        # perf hack to avoid redistribute due to memory_format to be None.
+        # and we only care about shape, dtype and stride for now.
+        return (
+            self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
+            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
+            and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
         )
 
     @property
@@ -411,6 +424,14 @@ class DTensorSpec:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return len(self.tensor_meta.shape)
+
+    @property
+    def num_shards(self) -> int:
+        num_shards = 1
+        for i, placement in enumerate(self.placements):
+            if placement.is_shard():
+                num_shards *= self.mesh.size(i)
+        return num_shards
 
     @property
     def dim_map(self) -> List[int]:
@@ -505,4 +526,4 @@ class DTensorSpec:
                     )
                 placements[m] = Shard(i)
 
-        return cls(mesh, placements, tensor_meta=tensor_meta)
+        return cls(mesh, tuple(placements), tensor_meta=tensor_meta)

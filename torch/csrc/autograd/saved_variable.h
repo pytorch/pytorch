@@ -48,6 +48,10 @@ class TORCH_API SavedVariable {
 
   void reset_data();
 
+  bool has_hooks() const {
+    return (bool)hooks_;
+  }
+
  private:
   // This field contains either:
   // 1. the variable to save
@@ -102,7 +106,11 @@ class TORCH_API SavedVariable {
   // hooks are defined. They are set before pack_hook is called and used after
   // unpack_hook is called.
   std::shared_ptr<Node> grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
+  // For the usual case where leaf tensors are the input, we expect its
+  // grad_acc to be kept alive by the graph. The reason SavedVariable holds
+  // a owning reference is to support the case where a custom autograd Function
+  // saves an intermediate.
+  std::shared_ptr<Node> grad_accumulator_;
   bool requires_grad_ = false;
 
   void save_metadata(const Variable& data);

@@ -28,6 +28,7 @@
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/copysign.h>
@@ -71,7 +72,9 @@ struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
       std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value> {
+      std::is_same<T, at::BFloat16>::value ||
+      std::is_same<T, at::Float8_e5m2>::value ||
+      std::is_same<T, at::Float8_e4m3fn>::value> {
 };
 
 template<typename T>

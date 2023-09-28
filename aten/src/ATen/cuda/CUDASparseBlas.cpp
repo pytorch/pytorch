@@ -4,9 +4,7 @@
 
 #include <ATen/cuda/CUDASparseBlas.h>
 
-namespace at {
-namespace cuda {
-namespace sparse {
+namespace at::cuda::sparse {
 
 template <>
 void csrgeam2_bufferSizeExt<float>(
@@ -888,6 +886,4 @@ void bsrsm2_solve<c10::complex<double>>(
 
 #endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
-} // namespace sparse
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::sparse

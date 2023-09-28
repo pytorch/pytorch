@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import itertools
 import sys
 
 from typing import Union
@@ -43,11 +44,15 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-def _reset_params_if_meta(is_meta, model):
+def _reset_params_if_meta(is_meta: bool, model: nn.Module):
     # For torchdistX init, we don't need to call reset_params, as
     # deferred_init(model).materialize() is equivalent to model().
     if is_meta:
-        model.reset_parameters()
+        for module in model.modules():
+            # Assume that a module has `reset_parameters()` iff it has directly
+            # managed parameters or buffers
+            if hasattr(module, "reset_parameters"):
+                module.reset_parameters()
 
 
 class MyLinear(nn.Linear):
@@ -59,23 +64,32 @@ class MyLinear(nn.Linear):
         super().__init__(*args, **kwargs)
 
     def reset_parameters(self, *args, **kwargs):
+        torch.manual_seed(42)
         with torch.no_grad():
-            self.weight.fill_(1)
+            # Use an initialization method that depends on shape
+            torch.nn.init.xavier_uniform_(self.weight, 1.0)
+
+
+class MyBuffer(nn.Module):
+    def __init__(self, device: torch.device):
+        super().__init__()
+        self.register_buffer("buf", torch.empty((3, 3), device=device))
+
+    def reset_parameters(self, *args, **kwargs):
+        torch.manual_seed(42)
+        # Use an initialization method that depends on shape
+        torch.nn.init.xavier_uniform_(self.buf, 0.5)
 
 
 class MyModel(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device: torch.device):
         super().__init__()
         self.lin1 = MyLinear(2, 2, bias=False, device=device)
         self.lin2 = MyLinear(2, 2, bias=False, device=device)
+        self.buf_mod = MyBuffer(device)
 
     def forward(self, x):
         return self.lin2(self.lin1(x))
-
-    def reset_parameters(self, *args, **kwargs):
-        for m in [self.lin1, self.lin2]:
-            if not isinstance(m, FSDP):
-                m.reset_parameters()
 
 
 class NestedModel(nn.Module):
@@ -90,25 +104,25 @@ class NestedModel(nn.Module):
     def forward(self, x):
         return self.l3(self.lin2(self.lin1(x)))
 
-    def reset_parameters(self):
-        for m in [self.lin1, self.lin2, self.l3]:
-            if not isinstance(m, FSDP):
-                m.reset_parameters()
 
-
-def _init_with_reset_params(module):
+def _init_with_reset_params(module: nn.Module):
     """
     to_empty + reset_parameters() init function example for modules
     initailized with device="meta"
     """
-    is_meta = any(t.is_meta for t in module.parameters())
-    if is_meta:
-        module.to_empty(device=torch.cuda.current_device())
-    with torch.no_grad():
+    has_meta_states = any(
+        t.is_meta
+        for t in itertools.chain(
+            module.parameters(recurse=False), module.buffers(recurse=False)
+        )
+    )
+    if has_meta_states:
+        device = torch.device("cuda", torch.cuda.current_device())
+        module.to_empty(device=device, recurse=False)
         module.reset_parameters()
 
 
-def _init_with_torchdistX(module):
+def _init_with_torchdistX(module: nn.Module):
     """
     torchdistX-based deferred module initialization function example
     using ``materialize_module``.
@@ -225,7 +239,9 @@ class TestFSDPWithMetaDevice(FSDPTest):
     ):
         if auto_wrap:
             module = meta_module_fn()
-            is_meta = next(module.parameters()).is_meta
+            is_meta = (
+                next(module.parameters()).is_meta or next(module.buffers()).is_meta
+            )
             fsdp_meta = FSDP(
                 module,
                 auto_wrap_policy=always_wrap,

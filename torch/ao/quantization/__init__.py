@@ -12,6 +12,13 @@ from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
+from .pt2e.eval_utils import _move_exported_model_to_eval as move_exported_model_to_eval
+from typing import Union, List, Callable, Tuple, Optional
+from torch import Tensor
+import torch
+
+ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
 
 __all__ = [
     "DeQuantStub",
@@ -27,6 +34,7 @@ __all__ = [
     "MovingAveragePerChannelMinMaxObserver",
     "NoopObserver",
     "ObserverBase",
+    "ObserverOrFakeQuantize",
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
@@ -112,6 +120,7 @@ __all__ = [
     "get_quantized_operator",
     "get_static_quant_module_class",
     "load_observer_state_dict",
+    "move_exported_model_to_eval",
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
@@ -138,3 +147,35 @@ def default_eval_fn(model, calib_data):
     """
     for data, target in calib_data:
         model(data)
+
+class _DerivedObserverOrFakeQuantize(ObserverBase):
+    r""" This observer is used to describe an observer whose quantization parameters
+    are derived from other observers
+    """
+    def __init__(
+        self,
+        dtype: torch.dtype,
+        obs_or_fqs: List[ObserverOrFakeQuantize],
+        derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]],
+        quant_min: Optional[int]=None,
+        quant_max: Optional[int]=None,
+        qscheme: Optional[torch.qscheme]=None,
+        ch_axis: Optional[int] = None
+    ):
+        super().__init__(dtype)
+        self.obs_or_fqs = obs_or_fqs
+        self.derive_qparams_fn = derive_qparams_fn
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.qscheme = qscheme
+        self.ch_axis = ch_axis
+
+        from .utils import is_per_channel
+        if is_per_channel(self.qscheme):
+            assert self.ch_axis is not None, "Must provide a valid ch_axis if qscheme is per channel"
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x
+
+    def calculate_qparams(self):
+        return self.derive_qparams_fn(self.obs_or_fqs)

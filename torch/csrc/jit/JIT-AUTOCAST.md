@@ -79,6 +79,9 @@ Using `@autocast` is not currently supported in script mode (a diagnostic
 will be emitted)
 
 ```python
+import torch
+from torch.cpu.amp import autocast
+
 @autocast(enabled=True)
 def helper(x):
     ...
@@ -91,6 +94,9 @@ def foo(x):
 Another example
 
 ```python
+import torch
+from torch.cpu.amp import autocast
+
 @torch.jit.script
 @autocast() # not supported
 def foo(a, b, c, d):
@@ -100,6 +106,9 @@ def foo(a, b, c, d):
 #### Autocast argument must be a compile-time constant
 
 ```python
+import torch
+from torch.cpu.amp import autocast
+
 @torch.jit.script
 def fn(a, b, use_amp: bool):
     # runtime values for autocast enable argument are not supported
@@ -111,6 +120,9 @@ def fn(a, b, use_amp: bool):
 #### Uncommon autocast usage patterns may not be supported
 
 ```python
+import torch
+from torch.cpu.amp import autocast
+
 @torch.jit.script
 def fn(a, b, c, d):
     with autocast(enabled=True) as autocast_instance: # not supported
@@ -140,6 +152,9 @@ stripped from the TorchScript IR so it's effectively ignored:
 > This is one known limitation where we don't have a way to emit a diagnostic!
 
 ```python
+import torch
+from torch.cpu.amp import autocast
+
 def helper(a, b):
     with autocast(enabled=False):
         return torch.mm(a, b) * 2.0
@@ -158,6 +173,9 @@ Calling a scripted function from a trace is similar to calling the scripted
 function from eager mode:
 
 ```python
+import torch
+from torch.cpu.amp import autocast
+
 @torch.jit.script
 def fn(a, b):
     return torch.mm(a, b)
@@ -176,6 +194,9 @@ If eager-mode autocast is enabled and we try to disable autocasting from
 within a scripted function, autocasting will still occur.
 
 ```python
+import torch
+from torch.cuda.amp import autocast
+
 @torch.jit.script
 def fn(a, b):
     with autocast(enabled=False):

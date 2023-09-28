@@ -1,3 +1,6 @@
+// To regenerate header, use:
+// flatc --cpp --gen-mutable --no-prefix --scoped-enums mobile_bytecode.fbs
+
 file_identifier "PTMF";
 
 namespace torch.jit.mobile.serialization;

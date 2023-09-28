@@ -1,3 +1,4 @@
+import copy
 import itertools
 import math
 from typing import Any, Dict, Optional
@@ -13,6 +14,8 @@ from torch.distributed._shard.sharded_tensor import (
     TensorProperties,
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 
 
 def _all_gather_sharded_tensor(
@@ -25,27 +28,24 @@ def _all_gather_sharded_tensor(
     dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
     tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
-    cuda_device = torch.device("cuda", torch.cuda.current_device())
+    pg_device = distributed_c10d._get_pg_default_device(pg)
     if shards:
         local_tensor = shards[0].tensor.flatten()
-        if not local_tensor.is_cuda:
-            move_to_cpu = torch.ones(1, device=cuda_device)
-            local_tensor = local_tensor.cuda()
-        else:
-            move_to_cpu = torch.zeros(1, device=cuda_device)
+        with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+            if local_tensor.device.type != pg_device.type:
+                local_tensor = local_tensor.to(pg_device)
         num_padding = chunk_size - local_tensor.numel()
         if num_padding > 0:
             local_tensor = F.pad(local_tensor, [0, num_padding])
     else:
         local_tensor = torch.zeros(
-            chunk_size, dtype=sharded_tensor.dtype, device=cuda_device
+            chunk_size, dtype=sharded_tensor.dtype, device=pg_device
         )
-        move_to_cpu = torch.zeros(1, device=cuda_device)
 
     tensor = torch.empty(
         chunk_size * world_size,
         dtype=local_tensor.dtype,
-        device=cuda_device,
+        device=pg_device,
     )
     dist._all_gather_base(tensor, local_tensor, group=pg)
 
@@ -53,23 +53,50 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
+# TODO: Make this API work for both FSDP, and 2D. Move it outside of FSDP.
+# External users are interesting in using this API.
 def _gather_state_dict(
     state_dict: Dict[str, Any],
     pg: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Given a state_dict, this API gathers all the ShardedTensors in the state_dict.
+    Given a state_dict, this API gathers all the ShardedTensors or DTensors in the state_dict.
     """
     new_state_dict = {}
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             output_tensor = _all_gather_sharded_tensor(tensor, pg)
-            if tensor.local_shards() and tensor.local_shards()[0].tensor.is_cuda:
-                tensor = output_tensor
-            else:
-                tensor = output_tensor.cpu()
+            local_shard_device = (
+                tensor.local_shards()[0].tensor.device
+                if tensor.local_shards()
+                else torch.device("cpu")
+            )
+            with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                if output_tensor.device != local_shard_device:
+                    tensor = output_tensor.to(local_shard_device)
+                else:
+                    tensor = output_tensor
+        elif isinstance(tensor, DTensor):
+            if tensor.device != tensor.device_mesh.device_type:
+                tensor = tensor.to(tensor.device_mesh.device_type)
+            # FSDP all_gather: [Shard(0)] -> [Replicate()]
+            # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+            placements = list(copy.deepcopy(tensor.placements))
+            placements[-1] = Replicate()
+            tensor = tensor.redistribute(
+                device_mesh=tensor.device_mesh,
+                placements=placements,
+            )
+            tensor = tensor.to_local()
         new_state_dict[key] = tensor
     return new_state_dict
+
+
+def _get_remove_device_str(rank, device_type, num_devices_per_node):
+    if device_type.lower() == "cpu":
+        return f"rank:{rank}/{device_type}"
+    else:
+        return f"rank:{rank}/{device_type}:{rank % num_devices_per_node}"
 
 
 def _create_chunk_sharded_tensor(
@@ -99,8 +126,10 @@ def _create_chunk_sharded_tensor(
     )[:-1]
     offsets = [0] * (len(chunk_sizes[0]) - 1)
     chunk_offsets = [[d0] + offsets for d0 in dim0_offsets]
+    device_type = distributed_c10d._get_pg_default_device(pg).type
     placements = [
-        f"rank:{r}/cuda:{r % num_devices_per_node}" for r in range(len(chunk_sizes))
+        _get_remove_device_str(r, device_type, num_devices_per_node)
+        for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
     shard_metadata = [
@@ -121,3 +150,32 @@ def _create_chunk_sharded_tensor(
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards, sharded_tensor_metadata=sharded_tensor_metadata, process_group=pg
     )
+
+
+def _create_chunk_dtensor(
+    tensor: torch.Tensor,
+    rank: int,
+    device_mesh: DeviceMesh,
+) -> DTensor:
+    """
+    Shard a tensor to chunks along the first dimension. The local rank will gets its
+    corresponding chunk as the local tensor to create a DTensor.
+    """
+    inner_dim = device_mesh.ndim - 1
+    shard_placement = DShard(0)
+    tensor_list, _ = shard_placement._split_tensor(
+        tensor,
+        device_mesh.size(dim=inner_dim),
+        with_padding=False,
+        contiguous=True,
+    )
+    # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
+    # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
+    # We need to explicitly call .detach() to return a new tensor detached from the current graph.
+    local_tensor = tensor_list[rank].clone().detach()
+
+    # FSDP placements: [Shard(0)]
+    # HSDP placements: [Replicate(), Shard(0)]
+    placements = [Replicate() for _ in range(device_mesh.ndim)]
+    placements[-1] = shard_placement  # type: ignore[call-overload]
+    return DTensor.from_local(local_tensor, device_mesh, placements)

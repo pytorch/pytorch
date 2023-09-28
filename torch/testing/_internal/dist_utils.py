@@ -101,7 +101,7 @@ def wait_until_node_failure(rank: int, expected_error_regex: str = ".*") -> str:
     """
     while True:
         try:
-            rpc.rpc_sync("worker{}".format(rank), noop, args=())
+            rpc.rpc_sync(f"worker{rank}", noop, args=())
             time.sleep(0.1)
         except Exception as e:
             if re.search(pattern=expected_error_regex, string=str(e)):
@@ -187,7 +187,7 @@ def initialize_pg(init_method, rank: int, world_size: int) -> None:
 
 
 def worker_name(rank: int) -> str:
-    return "worker{}".format(rank)
+    return f"worker{rank}"
 
 
 def get_function_event(function_events, partial_event_name):

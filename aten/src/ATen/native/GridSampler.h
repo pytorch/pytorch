@@ -7,7 +7,7 @@
 
 #include <ATen/native/GridSamplerUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
@@ -295,4 +295,4 @@ static inline void get_cubic_coefficients_grad(
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

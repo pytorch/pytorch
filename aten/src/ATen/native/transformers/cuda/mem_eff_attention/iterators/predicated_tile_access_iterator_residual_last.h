@@ -1,5 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2017 - 2022 NVIDIA CORPORATION & AFFILIATES. All rights
+ * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights
  *reserved. SPDX-License-Identifier: BSD-3-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -55,7 +55,6 @@
 #include <cutlass/tensor_ref.h>
 #include <cutlass/tensor_view.h>
 #include <cutlass/transform/threadblock/predicated_tile_access_iterator_params.h>
-#include <cutlass/transform/threadblock/predicated_tile_access_iterator.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -176,7 +175,7 @@ class PredicatedTileAccessIteratorResidualLast<
   Mask residual_tile_mask;
 
   /// Parameters object with precomputed internal state
-  Params const& params_;
+  Params params_;
 
   /// Internal pointer to first access of tile
   BytePointer pointer_;
@@ -1019,7 +1018,7 @@ class PredicatedTileAccessIteratorResidualLast<
   //
 
   /// Parameters object with precomputed internal state
-  Params const& params_;
+  Params params_;
 
   /// Internal pointer to first access of tile
   BytePointer pointer_;
