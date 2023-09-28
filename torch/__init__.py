@@ -24,6 +24,7 @@ def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
 from ._utils import _import_dotted_name, classproperty
+from ._utils import _functionalize_sync as _sync
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 
@@ -55,7 +56,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export',
+    'export', 'autocast',
 ]
 
 ################################################################################
@@ -174,13 +175,13 @@ def _load_global_deps() -> None:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        # As PyTorch is not purelib, but nvidia-*-cu12 is
         cuda_libs: Dict[str, str] = {
             'cublas': 'libcublas.so.*[0-9]',
             'cudnn': 'libcudnn.so.*[0-9]',
-            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
-            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
-            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9]',
             'cufft': 'libcufft.so.*[0-9]',
             'curand': 'libcurand.so.*[0-9]',
             'cusolver': 'libcusolver.so.*[0-9]',
@@ -289,6 +290,14 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def __hash__(self) -> builtins.int:
+        ret = self.node.singleton_int()
+        if ret is not None:
+            return hash(ret)
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-singleton SymInt")
+
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -381,8 +390,17 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __eq__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.bool_())
+        else:
+            raise TypeError("unhashable type: SymBool")
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.
@@ -471,6 +489,9 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
+    elif name == 'TensorBase':
+        # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
+        delattr(sys.modules[__name__], name)
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -789,7 +810,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(0)
+        >>> torch.randn(10, device='cuda').kthvalue(1)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
 
@@ -1005,6 +1026,20 @@ def _check(cond, message=None):
             message. Default: ``None``
     """
     _check_with(RuntimeError, cond, message)
+
+def _check_is_size(i, message=None):
+    """Checks that a given integer is a valid size (i.e., is non-negative).
+    You should use this over _check(i >= 0) because we can use the semantic
+    information (that i is a size) to make some further inferences in case
+    i is an unbacked SymInt.
+
+    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
+    to infer the size from context, or if you should wrap-around or truncate).
+    Only use this if the only valid value is an honest to goodness size.
+    """
+    # This is responsible for the expect_true
+    _check(i >= 0, message)
+    torch.fx.experimental.symbolic_shapes._advise_is_size(i)
 
 def _check_index(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
@@ -1468,6 +1503,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+import torch._library
 
 # quantization depends on torch.fx
 # Import quantization
@@ -1596,9 +1632,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
-        if dynamic is not None:
-            self.kwargs.setdefault("options", {})
-            self.kwargs["options"]["dynamic"] = dynamic
+            if dynamic is not None:
+                self.kwargs["options"]["dynamic"] = dynamic
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileWrapper) and
@@ -1812,28 +1847,29 @@ if TYPE_CHECKING:
     from torch import _inductor as _inductor
     from torch import onnx as onnx
 
-_lazy_modules = {
-    "_dynamo",
-    "_inductor",
-    "_export",
-    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-    "onnx",
-}
+else:
+    _lazy_modules = {
+        "_dynamo",
+        "_inductor",
+        "_export",
+        # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+        "onnx",
+    }
 
-def __getattr__(name):
-    # Deprecated attrs
-    replacement = _deprecated_attrs.get(name)
-    if replacement is not None:
-        import warnings
-        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
-        return replacement()
+    def __getattr__(name):
+        # Deprecated attrs
+        replacement = _deprecated_attrs.get(name)
+        if replacement is not None:
+            import warnings
+            warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+            return replacement()
 
-    # Lazy modules
-    if name in _lazy_modules:
-        import importlib
-        return importlib.import_module(f".{name}", __name__)
+        # Lazy modules
+        if name in _lazy_modules:
+            import importlib
+            return importlib.import_module(f".{name}", __name__)
 
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 from . import _logging
 _logging._init_logs()

@@ -1,6 +1,5 @@
 #include <ATen/autocast_mode.h>
 
-#include <iostream>
 #include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
@@ -161,9 +160,6 @@ at::ScalarType get_autocast_privateuseone_dtype() {
 }
 
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
-  TORCH_CHECK(
-      dtype == at::kBFloat16,
-      "Currently, AutocastCPU only support Bfloat16 as the autocast_cpu_dtype");
   autocast_cpu_dtype = dtype;
 }
 

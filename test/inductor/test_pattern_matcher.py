@@ -3,11 +3,20 @@ import copy
 import unittest
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.serialized_patterns.central_index import (
+    get_serialized_pattern,
+)
+from torch._inductor.pattern_matcher import (
+    _TargetExpr,
+    gen_pattern,
+    PatternExpr,
+    PatternPrettyPrinter,
+)
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -386,7 +395,6 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
-    @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
@@ -409,7 +417,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         counters.clear()
         args = [
@@ -419,8 +427,10 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        # We don't recompile for dynamic-shape cases.
+        if dynamo_config.assume_static_by_default:
+            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
+            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -438,7 +448,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -462,6 +472,10 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_cumsum(self):
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -474,7 +488,24 @@ class TestPaternMatcher(TestCase):
             ).to(torch.int64)
             return torch.cumsum(ones, 1)
 
-        for fn in (fn1, fn2):
+        def fn3():
+            twos = torch.full([5, 4, 3], 2, dtype=torch.int64)
+            return torch.cumsum(twos, 0)
+
+        def fn4():
+            x = torch.full([100], 0.1, dtype=torch.float32)
+            return torch.cumsum(x, 0)
+
+        def fn5():
+            t1 = torch.full([2, 4], 1)
+            t2 = t1.to(dtype=torch.bool)
+            return torch.cumsum(t2, 1)
+
+        def fn6():
+            x = torch.full([10, 10], True, dtype=torch.int32)
+            return torch.cumsum(x, 1)
+
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
@@ -762,6 +793,66 @@ class TestPaternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_fuse_attention_roundtrip_pattern(self):
+        # are we losing anything in serialization
+        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+
+        global_vals = {
+            "aten": torch.ops.aten,
+            "prims": torch.ops.prims,
+            "torch": torch,
+        }
+
+        for name in dir(torch._inductor.pattern_matcher):
+            attr = getattr(torch._inductor.pattern_matcher, name)
+            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
+                global_vals[name] = attr
+
+        with torch._subclasses.FakeTensorMode():
+            for _, kwargs in _get_sfdp_patterns():
+                gen_kwargs = {
+                    key: kwargs[key]
+                    for key in (
+                        "search_fn",
+                        "example_inputs",
+                        "trace_fn",
+                        "scalar_workaround",
+                    )
+                }
+                pattern = gen_pattern(**gen_kwargs)
+                pattern_pp = PatternPrettyPrinter.run(pattern)
+                env = global_vals.copy()
+                exec(pattern_pp, env)
+                pattern_2 = env["output"]
+                self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
+
+    def test_fuse_attention_all_patterns_serialized(self):
+        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+
+        with torch._subclasses.FakeTensorMode():
+            for key, kwargs in _get_sfdp_patterns():
+                gen_kwargs = {
+                    key: kwargs[key]
+                    for key in (
+                        "search_fn",
+                        "example_inputs",
+                        "trace_fn",
+                        "scalar_workaround",
+                    )
+                }
+                pattern = gen_pattern(**gen_kwargs)
+                pattern_pp = PatternPrettyPrinter.run(pattern)
+
+                search_fn_pattern = get_serialized_pattern(key)
+                if search_fn_pattern is None:
+                    continue
+
+                self.assertEqual(
+                    pattern_pp,
+                    PatternPrettyPrinter.run(search_fn_pattern),
+                    msg=f"Found mismatched pattern {key}. Run gen_attention_patterns.py",
+                )
 
 
 if __name__ == "__main__":

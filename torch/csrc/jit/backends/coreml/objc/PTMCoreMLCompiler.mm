@@ -55,11 +55,10 @@ static NSString *gVersionExtension = @"version";
   return [PTMCoreMLCompiler _compileModel:modelName atPath:modelPath];
 }
 
-+ (nullable MLModel*)loadModel:(const std::string)modelID backend:(const std::string)backend allowLowPrecision:(BOOL)allowLowPrecision {
++ (nullable MLModel*)loadModel:(const std::string)modelID backend:(const std::string)backend allowLowPrecision:(BOOL)allowLowPrecision error:(NSError**)error {
   NSString *modelName = [NSString stringWithCString:modelID.c_str() encoding:NSUTF8StringEncoding];
   NSURL *modelURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gCompiledModelExtension];
 
-  NSError *error;
   MLModel *model;
   if (@available(iOS 12.0, macOS 10.14, *)) {
     MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
@@ -71,12 +70,12 @@ static NSString *gVersionExtension = @"version";
     }
     config.computeUnits = computeUnits;
     config.allowLowPrecisionAccumulationOnGPU = allowLowPrecision;
-    model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
+    model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:error];
   } else {
-    model = [MLModel modelWithContentsOfURL:modelURL error:&error];
+    model = [MLModel modelWithContentsOfURL:modelURL error:error];
   }
 
-  if (error) {
+  if (error && *error) {
     [PTMCoreMLCompiler _cleanupCachedModel:modelName];
     return nil;
   }

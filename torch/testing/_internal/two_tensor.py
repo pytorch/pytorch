@@ -46,8 +46,12 @@ class TwoTensor(torch.Tensor):
             kwargs = {}
         args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
         args_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, args)
-        out_a = func(*args_a, **kwargs)
-        out_b = func(*args_b, **kwargs)
+
+        kwargs_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, kwargs)
+        kwargs_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, kwargs)
+
+        out_a = func(*args_a, **kwargs_a)
+        out_b = func(*args_b, **kwargs_b)
         assert type(out_a) == type(out_b)
         out_a_flat, spec = pytree.tree_flatten(out_a)
         out_b_flat, _ = pytree.tree_flatten(out_b)
