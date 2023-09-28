@@ -4176,7 +4176,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         constant_args = constant_args + [
             attr,
             may_convert_to_optional(scalars),
-            may_convert_to_optional(algorithm),
+            algorithm,
         ]
         return ConvolutionUnary(
             layout=kernel_layout,
@@ -4261,10 +4261,10 @@ class ConvolutionBinary(ExternKernelAlloc):
         inputs.insert(1, other)
         constant_args = constant_args + [
             binary_attr,
-            may_convert_to_optional(binary_alpha),
-            may_convert_to_optional(unary_attr),
+            binary_alpha,
+            unary_attr,
             may_convert_to_optional(unary_scalars),
-            may_convert_to_optional(unary_algorithm),
+            unary_algorithm,
         ]
         return ConvolutionBinary(
             layout=kernel_layout,
@@ -4353,10 +4353,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs.insert(1, other)
         constant_args = constant_args + [
             binary_attr,
-            may_convert_to_optional(binary_alpha),
-            may_convert_to_optional(unary_attr),
+            binary_alpha,
+            unary_attr,
             may_convert_to_optional(unary_scalars),
-            may_convert_to_optional(unary_algorithm),
+            unary_algorithm,
         ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
@@ -4625,7 +4625,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         constant_args = constant_args + [
             attr,
             may_convert_to_optional(scalars),
-            may_convert_to_optional(algorithm),
+            algorithm,
         ]
         return ConvolutionTransposeUnary(
             layout=kernel_layout,
