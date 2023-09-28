@@ -2470,23 +2470,33 @@ class Buffer(IRNode):
         Returns the unbacked symbols which are defined by this IR node,
         because this is a data-dependent IR node, or item()
         """
-        # Uses the 'outputs' convention for MultiOutputLayout, since we
-        # can't read off sizes directly from the layout itself
+        # So this is a little unusual.  In principle, you could imagine
+        # defining a MultiOutputLayout buffer so that it DOES define
+        # unbacked symints.  However, we can't easily tell what symints
+        # such a buffer defines, because MultiOutputLayout doesn't actually
+        # define any useful information about what it returns.
+        #
+        # An easier and better approach is to delay the symint allocation
+        # to the MultiOutput IR nodes, which are when we actually extract
+        # out the buffers and know what their sizes are.
+        #
+        # There are two subleties here:
+        #
+        # 1. Suppose you have a kernel that produces out1: (i0,), out2: (i0,)
+        #    Both of these actually count as defs!  The scheduler will just
+        #    arbitrarily pick one of these as the canonical definer and
+        #    ensure it stays live.  It's not a big deal if we pick the
+        #    wrong one because tuple accesses are cheap, and all this means
+        #    is we accidentally keep a MultiOutput node live when it wasn't
+        #    strictly necessary.
+        #
+        # 2. Suppose you have a MultiOutput buffer whose size is (i0,), but
+        #    the MultiOutputLayout buffer it is projecting from isn't actually
+        #    dynamic; it has i0 as one of the arguments.  We cannot tell this
+        #    directly from MultiOutput, we have to look at the input buffer's
+        #    uses to work this out.  No big deal.
         if isinstance(self.layout, MultiOutputLayout):
-            assert hasattr(self, "outputs")
-
-            def get_defs(x):
-                if x is None:
-                    return set()
-                elif isinstance(x, (list, tuple)):
-                    r = set()
-                    for o in x:
-                        r |= get_defs(o)
-                    return r
-                else:
-                    return x.get_unbacked_symbol_defs()
-
-            return get_defs(self.outputs)
+            return set()
 
         # This kernel defines all unbacked symbols... that it didn't get in as
         # arguments!
@@ -2513,6 +2523,23 @@ class Buffer(IRNode):
         necessary.
         """
         return set()
+
+    def codegen_unbacked_symbol_defs(self, wrapper):
+        symbols_to_define = self.get_unbacked_symbol_defs()
+        for i, s in enumerate(self.get_size()):
+            if s in symbols_to_define:
+                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
+                symbols_to_define.remove(s)
+        for i, s in enumerate(self.get_stride()):
+            if s in symbols_to_define:
+                wrapper.writeline(f"{s} = {self.get_name()}.stride({i})")
+                symbols_to_define.remove(s)
+        if (s := self.get_offset()) in symbols_to_define:
+            wrapper.writeline(f"{s} = {self.get_name()}.storage_offset()")
+            symbols_to_define.remove(s)
+        assert (
+            not symbols_to_define
+        ), f"unbacked symint {s} not written out, check comment above"
 
     def realize(self):
         pass
@@ -3909,6 +3936,7 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):
+        assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
@@ -3917,12 +3945,20 @@ class FallbackKernel(ExternKernelAlloc):
         serializer = GraphModuleSerializer(None, None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
-        # TODO: only single output is supported
-        output_arguments = [
-            export_schema.Argument.create(
-                as_tensor=export_schema.TensorArgument(name=self.get_name())
-            )
-        ]
+        # serialize_outputs
+        if isinstance(self.outputs, (list, tuple)):
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=output.get_name())
+                )
+                for output in self.outputs
+            ]
+        else:
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=self.outputs.get_name())
+                )
+            ]
 
         node = ExternKernelNode(
             name=self.get_name(),
@@ -4023,6 +4059,9 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
+    # Given an input MultiOutputLayout buffer, indexes out an actual buffer
+    # from that result.  This doesn't actually produce multiple outputs,
+    # that's MultiOutputLayout!
     def codegen_list_tuple_access(self, basename, indices):
         if len(indices) > 0:
             itype, i = indices[0]
@@ -4044,29 +4083,15 @@ class MultiOutput(ExternKernel):
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
-        # NB: If it is possible for other ir node types to return unbacked
-        # symints, we also have to add this logic there too.  Don't forget to
-        # update get_unbacked_symbol_defs too.
-        symbols_to_define = self.get_unbacked_symbol_defs()
-        for i, s in enumerate(self.get_size()):
-            if s in symbols_to_define:
-                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
-                symbols_to_define.remove(s)
-        for i, s in enumerate(self.get_stride()):
-            if s in symbols_to_define:
-                wrapper.writeline(f"{s} = {self.get_name()}.stride({i})")
-                symbols_to_define.remove(s)
-        if (s := self.get_offset()) in symbols_to_define:
-            wrapper.writeline(f"{s} = {self.get_name()}.storage_offset()")
-            symbols_to_define.remove(s)
-        assert (
-            not symbols_to_define
-        ), f"unbacked symint {s} not written out, check comment above"
+        self.codegen_unbacked_symbol_defs(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         self.indices = indices
+
+    def get_unbacked_symbol_uses(self):
+        return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self):
         return False
@@ -5476,6 +5501,10 @@ class StorageBox(MutableBox):
         return (
             (sum(read.index != 0 for read in self.data.get_reads()) > 1)
             if isinstance(self.data, Pointwise)
+            and all(
+                not isinstance(read, dependencies.StarDep)
+                for read in self.data.get_reads()
+            )
             else True
         )
 

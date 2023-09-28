@@ -1755,6 +1755,40 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         with self.assertRaises(NotImplementedError):
             m.train()
 
+    def test_reentrant(self):
+        """Test we can safely call quantization apis multiple times"""
+        m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
+        example_inputs = (torch.randn(3, 3, 10, 10),)
+
+        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
+        m.conv_bn_relu = capture_pre_autograd_graph(m.conv_bn_relu, example_inputs)
+        m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
+        m(*example_inputs)
+        m.conv_bn_relu = convert_pt2e(m.conv_bn_relu, fold_quantize=True)
+
+        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=False))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        m = convert_pt2e(m, fold_quantize=True)
+
+        node_occurrence = {
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 4,
+            # one for weight
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 5,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 1,
+        }
+        node_list = [
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+            ns.call_function(torch.ops.aten.conv2d.default),
+            ns.call_function(torch.ops.aten.relu.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+            ns.call_function(torch.ops.aten.linear.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
+        )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):
