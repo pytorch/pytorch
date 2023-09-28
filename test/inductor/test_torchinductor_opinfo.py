@@ -266,13 +266,7 @@ if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 if not TEST_MKL:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "fft.hfftn": {b8, i32, i64, f32, f64},
-            "fft.ihfft2": {b8, i32, i64, f32, f64},
-            "fft.ihfftn": {b8, i32, i64, f32, f64},
-        }
-    )
+    inductor_expected_failures_single_sample["cpu"].update({})
 
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
