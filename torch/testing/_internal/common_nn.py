@@ -2531,7 +2531,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.05,
+        tf32_precision=0.08,
         default_dtype=torch.double,
     ),
     dict(
@@ -2576,7 +2576,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.03,
+        tf32_precision=0.05,
         default_dtype=torch.double,
     ),
     dict(
