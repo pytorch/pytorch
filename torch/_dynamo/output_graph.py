@@ -41,9 +41,8 @@ from torch._guards import (
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
-from . import config, logging as torchdynamo_logging, variables
 
-from .allowed_functions import is_allowed
+from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -686,10 +685,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            # Dynamo does not trace inside the inbuilt torch nn modules. Skip
-            # guarding on those. More rationale at https://github.com/pytorch/pytorch/issues/110048
-            if not is_allowed(target.__class__):
-                options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
+            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(target), module_key, **options)
