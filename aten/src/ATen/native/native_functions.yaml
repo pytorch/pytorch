@@ -2734,6 +2734,11 @@
     CompositeExplicitAutograd: full
   tags: core
 
+- func: full_permuted(SymInt[] size, int[] physical_layout, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: full_permuted_symint
+  tags: core
+
 - func: full.out(SymInt[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: full_out

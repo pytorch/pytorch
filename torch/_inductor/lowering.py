@@ -2456,6 +2456,12 @@ def full(size, fill_value, **kwargs):
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
+@register_lowering([aten.full_permuted])
+def full(size, permutation, fill_value, **kwargs):
+    assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
+    return tensor_constructor(fill_value)(size, **kwargs)
+
+
 @register_lowering(aten.gather, type_promotion_kind=None)
 def gather(x, dim, index, sparse_grad=False):
     # sparse_grad doesn't affect forward computation,

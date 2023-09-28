@@ -5,6 +5,7 @@ import typing
 
 import torch
 import torch._decomp as decomp
+import torch._prims_common as utils
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -111,6 +112,18 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+@register_decomposition([aten.full_permuted])
+def full(size, permutation, fill_value, **kwargs):
+    if permutation == list(range(len(size))):
+        return aten.full(size, fill_value, **kwargs)
+
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, permutation, fill_value, **kwargs)
+    return NotImplemented
 
 
 @register_decomposition([aten.full])
@@ -303,24 +316,46 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
+def get_like_permutation(tensor, memory_format):
+    if memory_format in (
+        torch.preserve_format,
+        None,
+    ) and utils.is_non_overlapping_and_dense(tensor):
+        return utils.compute_elementwise_output_logical_to_physical_perm(tensor)
+    elif memory_format == torch.channels_last:
+        return [0, 2, 3, 1]
+    elif memory_format == torch.channels_last_3d:
+        return [0, 2, 3, 4, 1]
+    else:
+        return list(range(tensor.ndim))
+
+
+def get_like_layout(tensor: torch.Tensor, memory_format: Optional[torch.memory_format]) -> torch.memory_format:
+    # TODO: _to_copy tensor to stride permutation
+    if memory_format in (torch.preserve_format, None):
+        return utils.suggest_memory_format(tensor)
+    else:
+        return memory_format
+
+
 @register_decomposition(aten.rand_like)
-def rand_like(self, *, dtype=None, device=None, **kwargs):
+def rand_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
     return torch.rand(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randn_like)
-def randn_like(self, *, dtype=None, device=None, **kwargs):
+def randn_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
     return torch.randn(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.full_like)
@@ -335,8 +370,10 @@ def full_like(
     requires_grad=False,
     memory_format=torch.preserve_format,
 ):
-    return torch.full(
+    permutation = get_like_permutation(self, memory_format)
+    return torch.full_permuted(
         [*self.size()],
+        permutation,
         fill_value,
         dtype=dtype or self.dtype,
         layout=layout or self.layout,
@@ -346,7 +383,7 @@ def full_like(
 
 
 @register_decomposition(aten.randint_like.default)
-def randint_like(self, high, *, dtype=None, device=None, **kwargs):
+def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **kwargs):
     return aten.randint.low(
         0,
         high,
@@ -354,11 +391,11 @@ def randint_like(self, high, *, dtype=None, device=None, **kwargs):
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint_like.low_dtype)
-def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
+def randint_like_low(self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs):
     return aten.randint.low(
         low,
         high,
@@ -366,7 +403,7 @@ def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint.default)

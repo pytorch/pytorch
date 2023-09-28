@@ -323,6 +323,22 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c
   return phys_tensor.as_strided_symint(size, strides);
 }
 
+Tensor full_permuted_symint(
+    SymIntArrayRef size,
+    IntArrayRef physical_layout,
+    const Scalar& fill_value,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+
+  TORCH_CHECK(!layout.has_value() or (*layout) != kSparse,
+    "full(...) is not implemented for sparse layout");
+
+  return empty_permuted_symint(size, physical_layout, dtype, layout, device, pin_memory).fill_(fill_value);
+}
+
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
