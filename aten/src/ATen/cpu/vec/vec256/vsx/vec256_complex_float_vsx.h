@@ -562,10 +562,6 @@ class Vectorized<ComplexFlt> {
       TORCH_CHECK(false, "not supported for complex numbers");
   }
 
-  Vectorized<ComplexFlt> digamma(const Vectorized<ComplexFlt>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexFlt> igamma(const Vectorized<ComplexFlt>& x) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
