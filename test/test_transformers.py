@@ -1500,6 +1500,58 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_fused_kernels_seq_len_0_inputs(self, device, fused_kernel):
+        rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
+        batch, num_heads, head_dim = 32, 16, 64
+        seq_lens = torch.randint(low=1, high=32, size=(batch,))
+        # make sure some seq_lens are 0
+        num_zeros = 10
+        indices = torch.randint(low=0, high=batch, size=(num_zeros,))
+        seq_lens.scatter_(0, indices, 0)
+
+        shape = (batch, seq_lens.tolist(), num_heads, head_dim)
+        query = rand_nested_tensor(shape)
+        key = rand_nested_tensor(shape)
+        value = rand_nested_tensor(shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(**backend_map[fused_kernel]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    def test_fused_kernels_nested_broadcasting_requires_grad_failure(self, device):
+        rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16, requires_grad=True)
+        batch, num_heads, head_dim, head_dim_v = 32, 16, 64, 64
+        seq_lens = torch.randint(low=1, high=32, size=(batch,)).tolist()
+        q_shape = (1, 1, num_heads, head_dim)
+        k_shape = (batch, seq_lens, num_heads, head_dim)
+        v_shape = (batch, seq_lens, 1, head_dim_v)
+
+        # create a dense query
+        query = torch.randn(q_shape, device=device, dtype=torch.float16, requires_grad=True)
+        key = rand_nested_tensor(k_shape)
+        value = rand_nested_tensor(v_shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(**backend_map[SDPBackend.FLASH_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, "Both fused kernels do not support training with broadcasted NT inputs"):
+                with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                    out = torch.nn.functional.scaled_dot_product_attention(
+                        query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
 def _get_block_size(device, head_dim, is_causal):
     # This should match the block sizes in the CUDA kernel
     # Mask is only interesting when we are setting dropout
@@ -2696,31 +2748,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
-    def test_fused_kernels_seq_len_0_inputs(self, device, fused_kernel):
-        rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
-        batch, num_heads, head_dim = 32, 16, 64
-        seq_lens = torch.randint(low=1, high=32, size=(batch,))
-        # make sure some seq_lens are 0
-        num_zeros = 10
-        indices = torch.randint(low=0, high=batch, size=(num_zeros,))
-        seq_lens.scatter_(0, indices, 0)
-
-        shape = (batch, seq_lens.tolist(), num_heads, head_dim)
-        query = rand_nested_tensor(shape)
-        key = rand_nested_tensor(shape)
-        value = rand_nested_tensor(shape)
-
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
-
-        with sdp_kernel(**backend_map[fused_kernel]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
@@ -2853,10 +2880,14 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.1])
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
+    @parametrize("is_causal", [True, False])
     def test_flash_attention_vs_math_ref_grads_nestedtensor(self, device, batch_size: int, max_seq_len_q: int, max_seq_len_kv: int,
                                                             head_dim: int, dropout_p: float, dtype: torch.dtype,
-                                                            scale: str):
-
+                                                            scale: str, is_causal: bool):
+        if is_causal:
+            # TODO we should support this
+            self.assertRaisesRegex(RuntimeError, "Nested tensors for query / key are not supported when is_causal=True")
+            return
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         seq_lens_q = torch.randint(low=1, high=max_seq_len_q, size=(batch_size,))
@@ -2886,18 +2917,18 @@ class TestSDPACudaOnly(NNTestCase):
 
         if not is_dropout:
             with sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=False, scale=scale)
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
-                    query_ref, key_ref, value_ref, is_causal=False, scale=scale)
+                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=False, scale=scale)
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
             # Create real output
             output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-                query, key, value, dropout_p=dropout_p, is_causal=False,
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, return_debug_mask=is_dropout)
             out = output_tuple[0]
             dbug_mask = output_tuple[-1]
@@ -2913,7 +2944,7 @@ class TestSDPACudaOnly(NNTestCase):
             key_padding_mask = key_padding_mask.to("cuda")
 
             softmax_mask = self.convert_flash_attn_S_to_softmax(
-                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=False)
+                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
             dropout_mask = softmax_mask >= 0
             nt_stack = []
             for tensor_component in range(batch_size):
@@ -2927,10 +2958,10 @@ class TestSDPACudaOnly(NNTestCase):
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p,
-                is_causal=False, scale=scale, dropout_mask=nested_dropout_mask)[0]
+                is_causal=is_causal, scale=scale, dropout_mask=nested_dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=False, scale=scale,
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                 dropout_mask=nested_dropout_mask)[0]
 
         upstream_grad = out.detach().clone().contiguous()

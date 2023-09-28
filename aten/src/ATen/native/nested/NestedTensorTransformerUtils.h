@@ -18,6 +18,15 @@ sdpa_nested_preprocessing(
     const Tensor& key,
     const Tensor& value);
 
+/**
+ * This function will take nested query, key, and value, grad_out, and out
+ * and will preprocess it in order to run with either
+ * the flash-attention or efficient-attention kernels backwards.
+ * We use both functions to avoid having to do the same preprocessing
+ * for cumulative_sequence_length_q and cumulative_sequence_length_kv
+ * @return A tuple containing all the necessary data for running the fused
+ * kernels
+ */
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
 sdpa_nested_preprocessing_backward(
     const at::Tensor& grad_out_,
