@@ -480,9 +480,14 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        # debug_msg is only for debugging help and goes to kwargs of guard call,
-        # which is ignored.
-        self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
+        if guards_log.isEnabledFor(logging.DEBUG):
+            # Avoid debug_msg related python bytecode overhead in the runtime.
+
+            # debug_msg is only for debugging help and goes to kwargs of guard call,
+            # which is ignored.
+            self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
+        else:
+            self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""

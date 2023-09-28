@@ -84,7 +84,7 @@ class BaseSchedulerNode:
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
-        self.recursive_predecessors: Optional[Set[str]] = None
+        self.ancestors: Optional[Set[str]] = None
         self.min_order: Optional[int] = None
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
@@ -724,9 +724,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.users = None
         self.inverse_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
-        self.recursive_predecessors = set.union(
-            *[x.recursive_predecessors for x in snodes]
-        )
+        self.ancestors = set.union(*[x.ancestors for x in snodes])
 
         self.set_read_writes(
             dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
@@ -967,8 +965,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             foreach_node = prev_node_1 if prev_node_1.is_foreach() else prev_node_2
             other_node = prev_node_2 if prev_node_1.is_foreach() else prev_node_1
 
-            self.recursive_predecessors = foreach_node.recursive_predecessors
-            self.recursive_predecessors.update(other_node.recursive_predecessors)
+            self.ancestors = foreach_node.ancestors
+            self.ancestors.update(other_node.ancestors)
 
             self.name_to_node = foreach_node.name_to_node
             for name in other_node.get_names():
@@ -1098,7 +1096,7 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
-        self.compute_predecessors()
+        self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1335,19 +1333,19 @@ class Scheduler:
             visit(node)
         self.nodes = result
 
-    def compute_predecessors(self):
+    def compute_ancestors(self):
         """
-        Populate each node.recursive_predecessors
+        Populate each node.ancestors
         """
         # note self.nodes is topologically sorted
-        name_to_predecessors = {}
+        name_to_ancestors = {}
         for node in self.nodes:
-            recursive_predecessors = set()
+            ancestors = set()
             for dep in node.unmet_dependencies:
-                recursive_predecessors.add(dep.name)
-                recursive_predecessors |= name_to_predecessors[dep.name]
-            name_to_predecessors[node.get_name()] = recursive_predecessors
-            node.recursive_predecessors = recursive_predecessors
+                ancestors.add(dep.name)
+                ancestors |= name_to_ancestors[dep.name]
+            name_to_ancestors[node.get_name()] = ancestors
+            node.ancestors = ancestors
 
         for order, node in enumerate(self.nodes):
             node.min_order = order
@@ -1435,34 +1433,38 @@ class Scheduler:
         return sorted(possible_fusions, key=self.score_fusion_key, reverse=True)
 
     def will_fusion_create_cycle(self, node1, node2):
-        """Finds whether there's a path from src to dst caused indirectly by fusion"""
+        """
+        Finds whether there's a path from node1 to node2 (or vice-versa)
+        caused indirectly by other fusions.
+        """
 
-        def check(node):
+        def found_path(node):
+            # only fused nodes can introduce new ancestors.
             if isinstance(node, FusedSchedulerNode) and node not in visited:
                 visited.add(node)
-                cond0 = bool(combined_names & node.recursive_predecessors)
-
-                if cond0:
-                    return cond0
-
-                names = node.get_names()
-                shortcut = names.issubset(combined_predecessors)
-
-                if shortcut:
-                    return cond0
+                if node.get_names().issubset(combined_ancestors):
+                    # All fusion outputs are in ancestors of node1 and node2, thus
+                    # cannot introduce new path:
+                    #
+                    # 1. if output is neither descendent of node1 or node2, the
+                    #        output cannot introduce a path
+                    # 2. due to [can_fuse]: if WLOG output is descendent of node1, it cannot be
+                    #        on path(node1->node2), hence it cannot be ancestor of node2
+                    # 3. due to [acyclic]: if WLOG output is descendent of node1, it cannot be
+                    #        ancestor of node1
+                    return False
                 else:
-                    return any(
-                        check(self.name_to_fused_node[n])
-                        for n in node.recursive_predecessors - combined_predecessors
+                    # continue DFS of new ancestors introduced by the fusion
+                    return bool(combined_names & node.ancestors) or any(
+                        found_path(self.name_to_fused_node[n])
+                        for n in node.ancestors - combined_ancestors
                     )
             return False
 
         visited = set()
         combined_names = node1.get_names() | node2.get_names()
-        combined_predecessors = (
-            node1.recursive_predecessors | node2.recursive_predecessors
-        ) - combined_names
-        return any(check(self.name_to_fused_node[n]) for n in combined_predecessors)
+        combined_ancestors = (node1.ancestors | node2.ancestors) - combined_names
+        return any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
 
     def can_fusion_increase_peak_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -1513,8 +1515,8 @@ class Scheduler:
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
-        if node2.get_names() & node1.recursive_predecessors:
-            return False  # node2 must go before node1
+        if node2.get_names() & node1.ancestors:
+            return False  # node1 must go before node2
 
         if (
             isinstance(node1, (FusedSchedulerNode, SchedulerNode))
@@ -1561,7 +1563,7 @@ class Scheduler:
         ):
             return False  # heuristic not needed for correctness
 
-        if node1.get_names() & node2.recursive_predecessors:
+        if node1.get_names() & node2.ancestors:
             # node2 depends on node1 outputs
             if not self.can_fuse_vertical(node1, node2):
                 return False
@@ -1607,7 +1609,7 @@ class Scheduler:
             #   - MemoryDep("foo", x) != StarDep("foo")
             return False
         for name in remaining_deps:
-            if node1_names & self.name_to_fused_node[name].recursive_predecessors:
+            if node1_names & self.name_to_fused_node[name].ancestors:
                 return False
         return True
 

@@ -249,14 +249,14 @@ Expressing Dynamism
 By default ``torch.export`` will trace the program assuming all input shapes are
 **static**, and specializing the exported program to those dimensions. However,
 some dimensions, such as a batch dimension, can be dynamic and vary from run to
-run. Such dimensions must be marked dynamic using the
-:func:`torch.export.dynamic_dim` API, and passed into
-:func:`torch.export.export` through the ``constraints`` argument. An example:
+run. Such dimensions must be specified by using the
+:func:`torch.export.Dim` API to create them and by passing them into
+:func:`torch.export.export` through the ``dynamic_shapes`` argument. An example:
 
 ::
 
     import torch
-    from torch.export import export, dynamic_dim
+    from torch.export import Dim, export
 
     class M(torch.nn.Module):
         def __init__(self):
@@ -276,16 +276,14 @@ run. Such dimensions must be marked dynamic using the
             return (out1 + self.buffer, out2)
 
     example_args = (torch.randn(32, 64), torch.randn(32, 128))
-    constraints = [
-        # First dimension of each input is a dynamic batch size
-        dynamic_dim(example_args[0], 0),
-        dynamic_dim(example_args[1], 0),
-        # The dynamic batch size between the inputs are equal
-        dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0),
-    ]
+
+    # Create a dynamic batch size
+    batch = Dim("batch")
+    # Specify that the first dimension of each input is that batch size
+    dynamic_shapes = {"x1": {0: batch}, "x2": {0: batch}}
 
     exported_program: torch.export.ExportedProgram = export(
-      M(), args=example_args, constraints=constraints
+        M(), args=example_args, dynamic_shapes=dynamic_shapes
     )
     print(exported_program)
 
@@ -335,7 +333,7 @@ run. Such dimensions must be marked dynamic using the
 
 Some additional things to note:
 
-* Through the :func:`torch.export.dynamic_dim` API, we specified the first
+* Through the :func:`torch.export.Dim` API and the ``dynamic_shapes`` argument, we specified the first
   dimension of each input to be dynamic. Looking at the inputs ``arg5_1`` and
   ``arg6_1``, they have a symbolic shape of (s0, 64) and (s0, 128), instead of
   the (32, 64) and (32, 128) shaped tensors that we passed in as example inputs.
@@ -357,11 +355,11 @@ Some additional things to note:
   we see in the equality constraints the tuple specifying that ``arg5_1``
   dimension 0 and ``arg6_1`` dimension 0 are equal.
 
-(An experimental mechanism that is designed to eventually subsume the use of
-:func:`torch.export.dynamic_dim` and ``constraints`` involves constructing
-dynamic shape specifications with the :func:`torch.export.Dim` and
-:func:`torch.export.dims` APIs and passing them into :func:`torch.export.export`
-through the ``dynamic_shapes`` argument.)
+(A legacy mechanism for specifying dynamic shapes
+involves marking and constraining dynamic dimensions with the
+:func:`torch.export.dynamic_dim` API and passing them into :func:`torch.export.export`
+through the ``constraints`` argument. That mechanism is now **deprecated** and will
+not be supported in the future.)
 
 
 Serialization

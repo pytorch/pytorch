@@ -531,6 +531,7 @@ class GraphModuleSerializer:
             inductor_ir.ComputedBuffer,
             inductor_ir.ConcatKernel,
             inductor_ir.ExternKernelOut,
+            inductor_ir.MultiOutput,
         )
 
         if isinstance(arg, torch.fx.Node):
