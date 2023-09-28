@@ -332,7 +332,7 @@ class OpInfo:
     mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
-    local_args: Tuple[object, ...]
+    local_args: Sequence[object]
     local_kwargs: Dict[str, object]
     args_tree_spec: Optional[TreeSpec] = None
 

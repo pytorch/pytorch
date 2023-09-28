@@ -128,7 +128,7 @@ def _operator_dispatch(
     if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
         # flatten args/kwargs when necessary
         tree_args, args_spec = tree_flatten(args)
-        args_list = tuple(tree_args)
+        args_list: Sequence[object] = tree_args
     else:
         args_list, args_spec = args, None
 
@@ -251,7 +251,9 @@ def _operator_dispatch(
             redistribute_local_args(op_info, suggested_input_schema)
 
         local_tensor_args = (
-            tree_unflatten(local_args, args_spec) if args_spec else op_info.local_args
+            tree_unflatten(cast(List[object], op_info.local_args), args_spec)
+            if args_spec
+            else op_info.local_args
         )
 
         # run local op computation with potentially modified args/kwargs
@@ -295,9 +297,9 @@ def _operator_dispatch(
         )
         out_dts = []
         spec_idx = 0
-        for arg in op_call._schema.arguments:
-            if arg.is_out:
-                out_dt = cast(dtensor.DTensor, kwargs[arg.name])
+        for argument in op_call._schema.arguments:
+            if argument.is_out:
+                out_dt = cast(dtensor.DTensor, kwargs[argument.name])
                 out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])
                 out_dts.append(out_dt)
                 spec_idx += 1
