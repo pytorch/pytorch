@@ -159,10 +159,10 @@ class AbstractImplCtx:
         Example::
 
             >>> # An operator with data-dependent output shape
-            >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-            >>> lib.define("mylibrary::custom_nonzero(Tensor x) -> Tensor")
+            >>> lib = torch.library.Library("mymodule", "FRAGMENT")
+            >>> lib.define("mymodule::custom_nonzero(Tensor x) -> Tensor")
             >>>
-            >>> @torch.library.impl_abstract("mylibrary::custom_nonzero")
+            >>> @torch.library.impl_abstract("mymodule::custom_nonzero")
             >>> def custom_nonzero_abstract(x):
             >>>     # Number of nonzero-elements is data-dependent.
             >>>     # Since we cannot peek at the data in an abstract impl,
