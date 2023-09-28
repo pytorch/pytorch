@@ -2467,7 +2467,14 @@ class Buffer(IRNode):
         Returns the unbacked symbols which are defined by this IR node,
         because this is a data-dependent IR node, or item()
         """
-        return set()
+        # This kernel defines all unbacked symbols... that it didn't get in as
+        # arguments!
+        defs = (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
+        return defs - self.get_unbacked_symbol_uses()
 
     def get_unbacked_symbol_uses(self):
         """
@@ -3680,6 +3687,7 @@ class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
     """
+
     def get_reads(self):
         return ()
 
@@ -4009,16 +4017,6 @@ class MultiOutput(ExternKernel):
                 raise AssertionError("non supported index type")
         else:
             return basename
-
-    def get_unbacked_symbol_defs(self):
-        # This kernel defines all unbacked symbols... that it didn't get in as
-        # arguments!
-        defs = (
-            free_unbacked_symbols(self.get_size())
-            | free_unbacked_symbols(self.get_stride())
-            | free_unbacked_symbols(self.get_offset())
-        )
-        return defs - self.get_unbacked_symbol_uses()
 
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(
@@ -6220,6 +6218,7 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
     3. `c10d._find_or_create_pg_by_ranks_and_tag` is not emitted, because the underlying
     `fun_col_impl._all_to_all_single` kernel already calls it.
     """
+
     def __init__(
         self,
         layout,
@@ -6231,6 +6230,11 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         super().__init__(layout, inputs, [], constant_args)
         self.output_split_sizes = output_split_sizes
         self.input_split_sizes = input_split_sizes
+
+    def get_unbacked_symbol_uses(self):
+        return free_unbacked_symbols(self.output_split_sizes) | free_unbacked_symbols(
+            self.input_split_sizes
+        )
 
     def should_emit_register_tensor_work(self):
         return False
@@ -6257,10 +6261,14 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         new_size = x_realized.get_size()
         output_shape_first_dim_s = None
         if output_split_sizes is not None:
-            output_shape_first_dim_s = V.graph.current_node.meta['val'].size()[0].node.expr
+            output_shape_first_dim_s = (
+                V.graph.current_node.meta["val"].size()[0].node.expr
+            )
             new_size[0] = output_shape_first_dim_s
         # In the average case, `output.shape[0]` equals to `input.shape[0]`, so we use that as size hint
-        V.graph.sizevars.shape_env.var_to_size_hint[output_shape_first_dim_s] = x_realized.get_size()[0]
+        V.graph.sizevars.shape_env.var_to_size_hint[
+            output_shape_first_dim_s
+        ] = x_realized.get_size()[0]
 
         layout = FlexibleLayout(
             device=x_realized.get_device(),

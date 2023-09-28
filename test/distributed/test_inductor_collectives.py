@@ -308,6 +308,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            # TODO: this and others need updating
             FileCheck() \
                 .check("buf0 = arg4_1[0].item()") \
                 .check("buf1 = arg4_1[1].item()") \
