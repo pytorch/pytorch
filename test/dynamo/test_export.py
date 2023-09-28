@@ -4080,6 +4080,53 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
 
+    def test_torch_inference_mode_ctx(self):
+        @torch.inference_mode()
+        def fn(x):
+            return x + 1
+
+        gm, _ = torch._dynamo.export(fn, torch.rand(2, 2))
+
+        inp = torch.randn(2, 2)
+        out = gm(inp)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = arg0 + 1;  arg0 = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+        self.assertEqual(out.requires_grad, False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.",
+        ):
+            out.requires_grad = True
+
+        @torch.inference_mode(False)
+        def fn_no_inference(x):
+            return x + 1
+
+        gm_no_inference, _ = torch._dynamo.export(fn_no_inference, torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm_no_inference.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
+    add = arg0 + 1;  arg0 = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+
+        inp = torch.randn(2, 2)
+        out = gm_no_inference(inp)
+        self.assertEqual(out.requires_grad, False)
+        out.requires_grad = True
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

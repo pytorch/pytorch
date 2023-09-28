@@ -625,7 +625,7 @@ def save(
             def forward(self, x):
                 return x + 10
 
-        ep = torch.export.export(MyModule(), torch.randn(5))
+        ep = torch.export.export(MyModule(), (torch.randn(5),))
 
         # Save to file
         torch.export.save(ep, 'exported_program.pt2')
@@ -635,7 +635,7 @@ def save(
         torch.export.save(ep, buffer)
 
         # Save with extra files
-        extra_files = {'foo.txt': b'bar'}
+        extra_files = {'foo.txt': b'bar'.decode('utf-8')}
         torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
 
     """
@@ -693,7 +693,7 @@ def load(
         extra_files = {'foo.txt': ''}  # values will be replaced with data
         ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
         print(extra_files['foo.txt'])
-
+        print(ep(torch.randn(5)))
     """
     from torch._export import load
 

@@ -7,6 +7,7 @@
 # GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
 # And re-run the test locally with ones PAT
 
+import gzip
 import json
 import os
 import warnings
@@ -40,6 +41,10 @@ from trymerge import (
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
 
+GQL_MOCKS = "gql_mocks.json.gz"
+ROCKSET_MOCKS = "rockset_mocks.json.gz"
+DRCI_MOCKS = "drci_mocks.json.gz"
+
 
 def mock_query(
     fallback_function: Any,
@@ -52,11 +57,11 @@ def mock_query(
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
             return {}
-        with open(gql_db_fname, encoding="utf-8") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="rt") as f:
             return json.load(f)
 
     def save_mocked_queries(obj: Any) -> None:
-        with open(gql_db_fname, encoding="utf-8", mode="w") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="wt") as f:
             json.dump(obj, f, indent=2)
             f.write("\n")
 
@@ -102,13 +107,13 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
         return gh_graphql(query, **kwargs)
 
-    return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
+    return mock_query(gh_graphql_wrapper, GQL_MOCKS, key_function, query, kwargs)
 
 
 def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_rockset_results,
-        "rockset_mocks.json",
+        ROCKSET_MOCKS,
         lambda x, y: f"{x} {y}",
         head_sha,
         merge_base,
@@ -118,7 +123,7 @@ def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3)
 def mocked_drci_classifications(pr_num: int, project: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_drci_classifications,
-        "drci_mocks.json",
+        DRCI_MOCKS,
         lambda x, y: f"{x} {y}",
         pr_num,
         project,
@@ -917,7 +922,6 @@ class TestBypassFailures(TestCase):
         # Check that failure is classified as flaky but still raises exception
         with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
             rule = find_matching_merge_rule(pr, repo)
-        print(w)
         self.assertEqual(len(w), 1)
         self.assertIn(
             "1 checks failed but were likely due flakiness or broken trunk",
@@ -935,10 +939,11 @@ class TestGitHubPRGhstackDependencies2(TestCase):
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)
-        assert msg == (
+        self.assertEqual(
+            msg,
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
             "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
+            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n",
         )
 
     def test_pr_dependencies_ghstack(self, *args: Any) -> None:
@@ -948,11 +953,12 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 106068)
 
         msg = pr.gen_commit_message(filter_ghstack=True, ghstack_deps=[pr0, pr1, pr2])
-        assert msg == (
+        self.assertEqual(
+            msg,
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
             "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
             "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
-            "ghstack dependencies: #106032, #106033, #106034\n"
+            "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
     @skip(
@@ -1001,7 +1007,7 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         mock_repo.cherry_pick.assert_any_call("rev2")
         mock_repo.cherry_pick.assert_any_call("rev123")
 
-        assert mock.call("rev1") not in mock_repo.cherry_pick.call_args_list
+        self.assertTrue(mock.call("rev1") not in mock_repo.cherry_pick.call_args_list)
 
         # Verify the first call
         message = mock_repo.amend_commit_message.call_args_list[0].args[0]
@@ -1014,8 +1020,8 @@ class TestGitHubPRGhstackDependencies2(TestCase):
             "dependencies: #106032, #106033\n"
         )
 
-        assert message.startswith(prefix)
-        assert message.endswith(suffix)
+        self.assertTrue(message.startswith(prefix))
+        self.assertTrue(message.endswith(suffix))
 
         # Verify the second call
         mock_repo.amend_commit_message.assert_any_call(

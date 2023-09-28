@@ -195,6 +195,22 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    def test_output_path(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device="cuda")
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        )
+        with config.patch("aot_inductor.output_path", "tmp_output_"):
+            self.check_model(Repro(), example_inputs)
+
     @requires_cuda()
     def test_multi_device(self):
         class Repro(torch.nn.Module):
@@ -242,6 +258,25 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device="cuda"),
         )
         self.check_model(Repro(), example_inputs)
+
+    def test_freezing(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(9, 10, device="cuda")
+                self.padding = torch.randn(1, 10, device="cuda")
+
+            def forward(self, x, y):
+                padded_weight = torch.cat((self.weight, self.padding), dim=0)
+                return x + torch.nn.functional.linear(y, padded_weight)
+
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        )
+
+        with torch.no_grad(), config.patch({"freezing": True}):
+            self.check_model(Repro(), example_inputs)
 
     def test_missing_output(self):
         class Repro(torch.nn.Module):

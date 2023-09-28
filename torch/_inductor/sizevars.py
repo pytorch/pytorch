@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -45,14 +45,14 @@ class SizeVarAllocator:
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
 
-    def make_simplify_with_ranges_cache(self):
+    def make_simplify_with_ranges_cache(self) -> Callable[[Expr, VarRanges], Expr]:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict = dict()
+        cache: Dict[Tuple[Any, ...], Expr] = dict()
         replacement_count = len(self.replacements)
 
-        def simplify_with_ranges(expr: Expr, var_ranges: VarRanges):
+        def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
             nonlocal replacement_count
             if replacement_count != len(self.replacements):
                 # new replacements invalidates cached results
@@ -71,7 +71,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict = dict()
+        cache: Dict[Tuple[Any, ...], Any] = dict()
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -89,7 +89,7 @@ class SizeVarAllocator:
 
         return simplify_loops
 
-    def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
+    def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges) -> Expr:
         """
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
@@ -163,7 +163,9 @@ class SizeVarAllocator:
             return self._simplify_with_ranges(expr, var_ranges)
         return expr
 
-    def _simplify_loops_impl(self, index_vars, sizes, index_formulas):
+    def _simplify_loops_impl(
+        self, index_vars: List[sympy.Symbol], sizes, index_formulas
+    ):
         """
         Try to remove as many axis from loop iterations as possible, by:
             1) removing size==1 dimensions
@@ -475,20 +477,20 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[misc]
-        )  # lambda to placate mypy
+            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
+        )
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
-    def lookup_precomputed_size(self, expr: Expr):
+    def lookup_precomputed_size(self, expr: Expr) -> sympy.Symbol:
         if expr not in self.precomputed_replacements:
             sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
             self.precomputed_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
 
-    def free_symbols(self):
+    def free_symbols(self) -> Set[sympy.Symbol]:
         return set(self.var_to_val.keys()) - set(self.replacements.keys())
 
 

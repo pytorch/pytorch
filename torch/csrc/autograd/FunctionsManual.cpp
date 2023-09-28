@@ -994,6 +994,21 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   return at::stack(grads_tensors, dim);
 }
 
+Tensor unbind_backward_nested(
+    const variable_list& grads,
+    const variable_list& result,
+    int64_t dim) {
+  std::vector<Tensor> grads_tensors;
+  for (auto i : c10::irange(grads.size())) {
+    const auto& v = grads[i];
+    const auto& r = result[i];
+    grads_tensors.push_back(
+        v.defined() ? static_cast<Tensor>(v) : at::zeros_like(r));
+  }
+
+  return at::_nested_tensor_from_tensor_list(grads_tensors);
+}
+
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
