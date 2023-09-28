@@ -305,7 +305,9 @@ def _rebuild_sparse_tensor(layout, data):
 
 
 def _rebuild_nested_tensor(buffer, nested_sizes, nested_strides, storage_offsets):
-    return torch._nested_view_from_buffer(buffer, nested_sizes, nested_strides, storage_offsets)
+    return torch._nested_view_from_buffer(
+        buffer, nested_sizes, nested_strides, storage_offsets
+    )
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
