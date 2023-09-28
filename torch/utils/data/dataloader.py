@@ -1443,6 +1443,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 for q in self._index_queues:
                     q.cancel_join_thread()
                     q.close()
+            except AttributeError as e:
+                logger.warning(e)
             finally:
                 # Even though all this function does is putting into queues that
                 # we have called `cancel_join_thread` on, weird things can
