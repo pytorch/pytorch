@@ -49,14 +49,14 @@ mm_template = TritonTemplate(
     num_pid_n = tl.cdiv(N, BLOCK_N)
     num_pid_m = tl.cdiv(M, BLOCK_M)
 
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    num_pid_in_group = GROUP_M * num_pid_n
     group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    first_pid_m = group_id * GROUP_M
+    GROUP_M = min(num_pid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + (pid % GROUP_M)
+    pid_n = (pid % num_pid_in_group) // GROUP_M
     block_offset_m = pid_m * BLOCK_M
-    block_offset_n = pid_N * BLOCK_N
+    block_offset_n = pid_n * BLOCK_N
     
     A_block_ptr = tl.make_block_ptr(
         base=A,
@@ -70,8 +70,8 @@ mm_template = TritonTemplate(
         base=B,
         shape=(K, N),
         strides=(stride_bk, stride_bn),
-        offsets=(0, pid_n * BLOCK_SIZE_N),
-        block_shape=(BLOCK_SIZE_K, BLOCK_SIZE_N),
+        offsets=(0, pid_n * BLOCK_N),
+        block_shape=(BLOCK_K, BLOCK_N),
         order=(1, 0)
     )
 
@@ -86,8 +86,8 @@ mm_template = TritonTemplate(
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A_block_ptr = tl.advance(A_block_ptr, (0, BLOCK_SIZE_K))
-        B_block_ptr = tl.advance(B_block_ptr, (BLOCK_SIZE_K, 0))
+        A_block_ptr = tl.advance(A_block_ptr, (0, BLOCK_K))
+        B_block_ptr = tl.advance(B_block_ptr, (BLOCK_K, 0))
 
     # TODO (jon-chuang): support `boundary_check` in `store_output` to 
     # support `make_block_ptr` (cannot use mask for block_ptr)
