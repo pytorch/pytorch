@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -82,12 +82,6 @@ def only_consist_of(var, types):
     return False
 
 
-def tree_flatten(tx, input) -> Tuple[VariableTracker, VariableTracker]:
-    return tuple(
-        UserFunctionVariable(pytree.tree_flatten).call_function(tx, [input], {}).unpack_var_sequence(tx)
-    )
-
-
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
@@ -101,9 +95,8 @@ def validate_args_and_maybe_create_graph_inputs(
 
     assert tracer.parent is not None
 
-    varlist, treespec = tree_flatten(tx, ListVariable(list(sub_args)))
     args = []
-    for a in varlist.unpack_var_sequence(tx):
+    for a in sub_args:
         assert isinstance(a, VariableTracker)
 
         if isinstance(a, ConstantVariable):
@@ -1062,7 +1055,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         # TODO: Support kwargs
         (
-            (body_r, treespec),
+            (body_r, _),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
@@ -1078,7 +1071,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
-            should_flatten_outputs=True,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
@@ -1096,17 +1088,14 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        # non_single_tensor_return_unsupported("autograd.Function forward", body_r)
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
+        non_single_tensor_return_unsupported("autograd.Function forward", body_r)
+        r = body_r.as_proxy().node.meta["example_value"]
+        example_value = r
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
         # Store the invocation as a call
-        variable = wrap_fx_proxy(
+        return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
@@ -1116,16 +1105,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             ),
             example_value=example_value,
         )
-
-        if treespec is None:
-            return variable
-
-        # Transform variable back into a list (previously made into a tuple by
-        # speculate_subgraph function) so as to respect the pytree API typing.
-        variable = BuiltinVariable(list).call_function(tx, [variable], {})
-
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
-        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
