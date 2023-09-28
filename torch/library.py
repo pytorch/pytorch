@@ -212,7 +212,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>
         >>> # Example 1: an operator without data-dependent output shape
         >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-        >>> lib.define("mylibrary::custom_linear(Tensor x, Tensor weight, Tensor bias)"
+        >>> lib.define("mylibrary::custom_linear(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylibrary::custom_linear")
         >>> def custom_linear_abstract(x, weight):
@@ -227,7 +227,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>
         >>> # Example 2: an operator with data-dependent output shape
         >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-        >>> lib.define("mylibrary::custom_nonzero(Tensor x) -> Tensor"
+        >>> lib.define("mylibrary::custom_nonzero(Tensor x) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylibrary::custom_nonzero")
         >>> def custom_nonzero_abstract(x):
