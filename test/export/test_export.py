@@ -53,31 +53,30 @@ class TestDynamismExpression(TestCase):
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
     def test_export_constraints_error(self):
-
         def invalid_input_conflict_with_input_constraints(x):
             return x + 1
 
         inp = torch.zeros([3])
-        inp_constraints = [
-            dynamic_dim(inp, 0) > 5,
-        ]
-        with self.assertRaisesRegex(torchdynamo.exc.UserError, "not in range"):
-            export(
+        dim_x = torch.export.Dim("dim_x", min=6)
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "not in range"):
+            torch.export.export(
                 invalid_input_conflict_with_input_constraints,
                 (inp,),
-                constraints=inp_constraints,
+                dynamic_shapes={"x": {0: dim_x}},
             )
 
         def conflicting_constraints(x):
             b = x.item()
-            constrain_as_size(b)
-            constrain_as_value(b, min=4, max=5)
+            torch.export.constrain_as_size(b)
+            torch.export.constrain_as_value(b, min=4, max=5)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
-        ep = export(conflicting_constraints, inp)
+        ep = torch.export.export(conflicting_constraints, inp)
 
-        with self.assertRaisesRegex(RuntimeError, r"is outside of inline constraint \[4, 5\]"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"is outside of inline constraint \[4, 5\]"
+        ):
             ep(torch.tensor([3]))
 
     def test_export_assume_static_by_default(self):
@@ -172,7 +171,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError,
             "trying to get a value out of symbolic int"
         ):
-            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
+            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
     def test_if_functional(self):
         def foo(x):
@@ -181,7 +180,7 @@ class TestExport(TestCase):
             y = z.view(x.shape)
             return x.cos() + y.cos()
 
-        gm = export(foo, (torch.tensor([2, 3, 5]),), constraints=None)
+        gm = export(foo, (torch.tensor([2, 3, 5]),))
 
         view_count = 0
         for node in gm.graph.nodes:
@@ -205,18 +204,19 @@ class TestExport(TestCase):
 
         m = BasicDynamiShapeModel()
         a = torch.randn(3, 4)
-        constraints = [3 <= dynamic_dim(a, 0), dynamic_dim(a, 1)]
+        dim0_x = torch.export.Dim("dim0_x", min=3)
+        dim1_x = torch.export.Dim("dim1_x")
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Some dynamic dimensions need to be specialized because "
-                "the constraints inferred for them are too complex to specify"
-                ".*\n.*\\[0\\], which was marked dynamic, must be specialized to 3"
-                ".*\n.*\\[1\\], which was marked dynamic, must be specialized to 4"
+                "Specializations unexpectedly required"
+                ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex"
+                ".*\n.*\\[1\\] must be specialized to 4.*guards.*too complex"
             ),
         ):
-            torch._export.export(m, (a,), constraints=constraints)
-        em = torch._export.export(m, (a,))
+            torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
+        em = torch.export.export(m, (a,))
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
@@ -629,7 +629,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError,
             r"^(?!.*fall back to eager).*"
         ):
-            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
+            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
     def test_pytree_regster_data_class(self):
 
@@ -1128,18 +1128,25 @@ class TestExport(TestCase):
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
     def test_runtime_assert_for_prim(self):
-
         def f(x, y):
             return x + y
 
         tensor_inp = torch.ones(7, 5)
-        exported = torch._export.export(f, (tensor_inp, 5), constraints=[dynamic_dim(tensor_inp, 0) > 5])
-        self.assertTrue(torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5)))
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"):
+        dim0_x = torch.export.Dim("dim0_x", min=6)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": None}
+        exported = torch.export.export(f, (tensor_inp, 5), dynamic_shapes=dynamic_shapes)
+        self.assertTrue(
+            torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5))
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"
+        ):
             _ = exported(torch.ones(8, 5), 6)
 
-        exported = torch._export.export(f, (tensor_inp, 5.0), constraints=[dynamic_dim(tensor_inp, 0) > 5])
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"):
+        exported = torch.export.export(f, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes)
+        with self.assertRaisesRegex(
+            RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"
+        ):
             _ = exported(torch.ones(7, 5), 6.0)
 
     def test_runtime_assert_for_prm_str(self):
@@ -1200,7 +1207,6 @@ class TestExport(TestCase):
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
     def test_retracable_ep(self):
-
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1223,31 +1229,40 @@ class TestExport(TestCase):
                 return bar.sum() + self.buf.sum()
 
         inp = torch.ones(5, 5)
-        exported = torch._export.export(Foo(), (inp,))
-        reexported = torch._export.export(exported, (inp,))
+        exported = torch.export.export(Foo(), (inp,))
+        reexported = torch.export.export(exported, (inp,))
 
         self.assertTrue(torch.allclose(exported(inp), reexported(inp)))
 
         inp = torch.ones(5, 5)
-        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
-        reexported = torch._export.export(exported, (inp,))
+        dim0_x = torch.export.Dim("dim0_x")
+        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
+        reexported = torch.export.export(exported, (inp,))
 
-        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
+        self.assertTrue(
+            torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5)))
+        )
 
-        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
+        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
         # This seems fine because the exported program is generalized to work for dynamic shapes.
-        reexported = torch._export.export(exported, (inp,))
-        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
+        reexported = torch.export.export(exported, (inp,))
+        self.assertTrue(
+            torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5)))
+        )
 
-        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, 'Cannot provide constraints for already exported program.'):
-            _ = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
+        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Cannot provide constraints for already exported program.",
+        ):
+            _ = torch.export.export(
+                exported, (inp,), dynamic_shapes={"args": [{0: dim0_x}]}
+            )
         # Reexported program should still work for dynamic shapes.
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch.export.export(exported, (inp,))
         self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
 
     def test_retrace_graph_level_meta_preservation(self):
-
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1258,17 +1273,22 @@ class TestExport(TestCase):
                 return x.sin()
 
         inp = torch.ones(7, 5)
-        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        dim0_x = torch.export.Dim("dim0_x", min=6)
+        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
         re_exported = torch._export.export(stateful_module, (inp,))
         self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
-        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5))))
+        self.assertTrue(
+            torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5)))
+        )
 
         re_exported_v2 = torch._export.export(exported, (inp,))
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
-        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
+        self.assertTrue(
+            torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5)))
+        )
 
     def test_constrain_as_size_error(self):
 
@@ -1396,18 +1416,18 @@ class TestExport(TestCase):
 
         mod = Module()
         example_inputs = (Input(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
-        ep_static = export(mod, example_inputs)
+        ep_static = torch.export.export(mod, example_inputs)
         for node in ep_static.graph.nodes:
-            if node.op == 'placeholder':
-                for s in node.meta['val'].shape:
+            if node.op == "placeholder":
+                for s in node.meta["val"].shape:
                     self.assertIsInstance(s, int)
 
-        x = example_inputs[0]
-        constraints = [dynamic_dim(x.f, 0), dynamic_dim(x.p, 0)]
-        ep_dynamic = export(mod, example_inputs, constraints=constraints)
+        dim0_x_f, dim0_x_p = torch.export.dims("dim0_x_f", "dim0_x_p")
+        dynamic_shapes = {"x": Input(f={0: dim0_x_f}, p={0: dim0_x_p})}
+        ep_dynamic = torch.export.export(mod, example_inputs, dynamic_shapes=dynamic_shapes)
         for node in ep_dynamic.graph.nodes:
-            if node.op == 'placeholder':
-                for i, s in enumerate(node.meta['val'].shape):
+            if node.op == "placeholder":
+                for i, s in enumerate(node.meta["val"].shape):
                     if i == 0:
                         self.assertIsInstance(s, torch.SymInt)
                     else:
