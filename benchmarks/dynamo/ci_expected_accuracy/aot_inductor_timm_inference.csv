@@ -51,10 +51,10 @@ selecsls42b,pass,0
 spnasnet_100,pass,0
 swin_base_patch4_window7_224,pass,0
 swsl_resnext101_32x16d,pass,0
-tf_efficientnet_b0,fail_to_run,0
+tf_efficientnet_b0,pass,0
 tf_mixnet_l,pass,0
 tinynet_a,pass,0
-tnt_s_patch16_224,fail_to_run,0
+tnt_s_patch16_224,pass,0
 twins_pcpvt_base,pass,0
 visformer_small,pass,0
 vit_base_patch16_224,pass,0
