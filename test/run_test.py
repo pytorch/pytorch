@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import pkg_resources
 
@@ -40,7 +40,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.export_test_times import TEST_TIMES_FILE
-from tools.stats.upload_metrics import emit_metric
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
@@ -601,8 +601,13 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and not options.continue_through_error
     )
+    is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
+        "BUILD_ENVRIONMENT", ""
+    )
     timeout = (
-        THRESHOLD * 3
+        THRESHOLD * 6
+        if is_slow
+        else THRESHOLD * 3
         if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
@@ -1433,12 +1438,7 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
         return test_times_file["default"]["default"]
 
 
-def do_sharding(
-    options,
-    selected_tests: List[str],
-    test_file_times: Dict[str, float],
-    sort_by_time: bool = True,
-) -> List[ShardedTest]:
+def get_sharding_opts(options) -> Tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
@@ -1447,6 +1447,17 @@ def do_sharding(
         assert (
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
+
+    return (which_shard, num_shards)
+
+
+def do_sharding(
+    options,
+    selected_tests: List[str],
+    test_file_times: Dict[str, float],
+    sort_by_time: bool = True,
+) -> List[ShardedTest]:
+    which_shard, num_shards = get_sharding_opts(options)
 
     # Do sharding
     shards = calculate_shards(
@@ -1610,6 +1621,11 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+
+    # Include sharding info in all metrics
+    which_shard, num_shards = get_sharding_opts(options)
+    add_global_metric("shard", which_shard)
+    add_global_metric("num_shards", num_shards)
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
