@@ -943,7 +943,7 @@ def handle_log_file(
             f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
         for line in full_text.splitlines():
-            if re.search(b"Running .* items in this shard:", line):
+            if re.search("Running .* items in this shard:", line):
                 print_to_stderr(line.strip())
         print_to_stderr()
         return
