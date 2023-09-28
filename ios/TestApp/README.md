@@ -70,10 +70,8 @@ pip install --pre torch torchvision torchaudio --index-url https://download.pyto
 pushd ios/TestApp/benchmark
 mkdir -p ../models
 
-# NB: Both of the following scripts only export models with lite interpreter
-python coreml_backend.py
-
 echo "Setting up the TestApp for LiteInterpreter"
+python coreml_backend.py
 ruby setup.rb --lite 1
 popd
 
@@ -101,11 +99,9 @@ popd
 ```
 export PYTORCH_ARN="arn:aws:devicefarm:us-west-2:308535385114:project:b531574a-fb82-40ae-b687-8f0b81341ae0"
 
-# AWS Device Farm is only available on us-west-2
-export AWS_DEFAULT_REGION: us-west-2
-
 pushd ios/TestApp
-python run_on_aws_devicefarm.py \
+# AWS Device Farm is only available on us-west-2
+AWS_DEFAULT_REGION=us-west-2 python run_on_aws_devicefarm.py \
   --project-arn "${PYTORCH_ARN}" \
   --app-file build/Release-iphoneos/TestApp.ipa \
   --xctest-file build/Release-iphoneos/TestAppTests.xctest.zip \
