@@ -806,6 +806,13 @@ class DummyXPUModule:
 
 
 class TestExtensionUtils(TestCase):
+    def tearDown(self):
+        # Clean up from test_external_module_register
+        if hasattr(torch, "xpu"):
+            delattr(torch, "xpu")
+        if "torch.xpu" in sys.modules:
+            del sys.modules["torch.xpu"]
+
     def test_external_module_register(self):
         # Built-in module
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
@@ -825,10 +832,6 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
-
-        # Clean up
-        delattr(torch, "xpu")
-        del sys.modules["torch.xpu"]
 
     def test_external_module_and_backend_register(self):
         torch.utils.rename_privateuse1_backend('foo')
