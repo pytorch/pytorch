@@ -237,18 +237,14 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
         >>>     nnz = ctx.new_dynamic_size()
-        >>>     shape = [x.dim(), nnz]
-        >>>     result = x.new_empty(shape, dtype=torch.long)
+        >>>     shape = [nnz, x.dim()]
+        >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
         >>> @torch.library.impl(lib, "custom_nonzero", "CPU")
         >>> def custom_nonzero_cpu(x):
-        >>>     x_np = to_numpy(x)
+        >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
-        >>>     # unbacked symbolic ints in PyTorch must be >= 2, so we
-        >>>     # constrain the range to at least 2
-        >>>     if res.shape[0] <= 1:
-        >>>         raise RuntimeError("not supported")
         >>>     return torch.tensor(res, device=x.device)
 
     """
