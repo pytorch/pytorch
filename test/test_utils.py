@@ -806,7 +806,7 @@ class DummyXPUModule:
 
 
 class TestExtensionUtils(TestCase):
-    @unittest.skip("TODO: somehow unregister xpu")
+    @unittest.skip("See https://github.com/pytorch/pytorch/pull/110254")
     def test_external_module_register(self):
         # Built-in module
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
