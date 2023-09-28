@@ -5340,6 +5340,10 @@ class StorageBox(MutableBox):
         return (
             (sum(read.index != 0 for read in self.data.get_reads()) > 1)
             if isinstance(self.data, Pointwise)
+            and all(
+                not isinstance(read, dependencies.StarDep)
+                for read in self.data.get_reads()
+            )
             else True
         )
 

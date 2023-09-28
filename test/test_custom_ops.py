@@ -1776,6 +1776,15 @@ class MiniOpTest(CustomOpTestCaseBase):
         y = op(x)
 
 
+class MiniOpTestOther(CustomOpTestCaseBase):
+    test_ns = "mini_op_test"
+
+    def test_nonzero_again(self):
+        x = torch.tensor([0, 1, 2, 0, 0])
+        y = torch.ops.aten.nonzero.default(x)
+        self.assertEqual(y, torch.tensor([[1], [2]]))
+
+
 mini_op_test_checks = [
     "test_schema",
     "test_autograd_registration",
@@ -1786,6 +1795,17 @@ mini_op_test_checks = [
 
 optests.generate_opcheck_tests(
     MiniOpTest,
+    ["aten", "mini_op_test"],
+    get_file_path_2(
+        os.path.dirname(__file__),
+        "minioptest_failures_dict.json",
+    ),
+    [],
+    mini_op_test_checks,
+)
+
+optests.generate_opcheck_tests(
+    MiniOpTestOther,
     ["aten", "mini_op_test"],
     get_file_path_2(
         os.path.dirname(__file__),

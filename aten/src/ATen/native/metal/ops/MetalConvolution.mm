@@ -97,7 +97,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   return output;
 }
 
-static Tensor conv2d_prepack_run(
+Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
   return conv2d(input, *op_context);
