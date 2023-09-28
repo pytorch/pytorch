@@ -45,6 +45,7 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
+from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -7610,6 +7611,23 @@ ShapeEnv not equal: field values don't match:
         foo()
         torch.set_default_dtype(torch.double)
         foo()
+
+    def test_torch_dynamo_codegen_pow(self):
+        def pow(x):
+            return x**2
+
+        x = np.arange(8)
+        pow_opt = torch.compile(pow)
+
+        actual, source_code = run_and_get_code(pow_opt, x)
+        expect = pow(x)
+
+        self.assertEqual(expect, actual)
+
+        self.assertTrue(
+            all("aten.pow" not in code for code in source_code),
+            msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
+        )
 
 
 class TestTracer(JitTestCase):
