@@ -44,6 +44,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
@@ -2266,6 +2267,25 @@ class AliasedLayout(Layout):
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
 
+class NoneLayout(IRNode):
+    # This is janky, I figured out what fields to populate by just running
+    # the model I was interested in and adding properties/methods as needed.
+    # This doesn't inherit from Layout because Layout assumes you have stuff
+    # like sizes, but I don't really have anything here.
+    #
+    # If you have an ir.Node with NoneLayout, you probably need to setup
+    # dependencies manually in scheduler
+
+    def __init__(self):
+        self.device = torch.device("cpu")
+
+    def storage_size(self):
+        return 0
+
+    def as_fixed(self):
+        return self
+
+
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
         super().__init__(
@@ -2371,6 +2391,9 @@ class Buffer(IRNode):
     def get_stride(self):
         return list(self.layout.stride)
 
+    def get_offset(self):
+        return self.layout.offset
+
     def get_layout(self):
         return self.layout
 
@@ -2438,6 +2461,30 @@ class Buffer(IRNode):
 
     def get_reads(self):
         return self.get_read_writes().reads
+
+    def get_unbacked_symbol_defs(self):
+        """
+        Returns the unbacked symbols which are defined by this IR node,
+        because this is a data-dependent IR node, or item()
+        """
+        return set()
+
+    def get_unbacked_symbol_uses(self):
+        """
+        Returns the unbacked symbols which are required to be in scope in
+        order to successfully perform codegen for this buffer.  For example,
+        a buffer that corresponds to an extern kernel call that takes i0 as
+        an argument would return {i0} here.  This is used to generate necessary
+        dependencies that ensure we actually bind i0 in codegen before you
+        try to use it.
+
+        Note that this is NOT transitive; in particular, if this buffer takes
+        in as input another buffer with dynamic shape (e.g., (i0,)), we will
+        not report it here, because you will already have a dependency
+        on that buffer, which will eventually have a dependency on i0 if
+        necessary.
+        """
+        return set()
 
     def realize(self):
         pass
@@ -2510,6 +2557,30 @@ class ComputedBuffer(Buffer):
                     self.get_store_function(),
                     self.data.get_size(),
                 )
+
+    def get_unbacked_symbol_uses(self):
+        # Ordinarily, we'd like to just peek at the arguments list,
+        # but ComputedBuffers have no argument list.
+        #
+        # Morally, this logic needs to be synchronized with the
+        # KernelArgs.size calls, which are responsible for making symbols make
+        # there way as kernel arguments (and it is precisely passing in one of
+        # those symbols that establishes a dependency).  However, we haven't
+        # started codegen yet so we can't directly reuse that logic.
+        #
+        # For now, I'm just yoloing with the size of the buffer.  Not sure if
+        # it is enough.
+        #
+        # One thing you might wonder is if this is enough for a ComputedBuffer
+        # denoting a reduction over i0.  Empirically, it is enough, but for an
+        # unusual reason: we only need accurate dependencies for item() call,
+        # but it's impossible to end up with a reduction over i0 from an
+        # item() call without a regular non-reduction buffer first.
+        return (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
 
     def make_loader(self):
         # Inline constants and index_expressions
@@ -3060,6 +3131,11 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
+        # TODO: Unconditionally do this, not just when example_output has
+        # unbacked symbols
+        if maybe_free_unbacked_symbols(example_output):
+            example_output = V.graph.current_node.meta["val"]
+
         return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
     @classmethod
@@ -3304,6 +3380,16 @@ class ExternKernel(InputsKernel):
 
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
+
+    def get_unbacked_symbol_uses(self):
+        # NB: It's not necessary to check regular inputs as we automatically
+        # have dependencies on them
+        r = set()
+        for arg in self.constant_args:
+            r |= maybe_free_unbacked_symbols(arg)
+        for arg in self.kwargs.values():
+            r |= maybe_free_unbacked_symbols(arg)
+        return r
 
     def __str__(self):
         kernel_name = getattr(self, "kernel", None)
@@ -3590,17 +3676,30 @@ class DeviceCopy(ExternKernelOut):
             wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
-class DynamicScalar(IRNode):
+class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
-
-    This is not yet implemented.  The one model (so far) that calls this
-    (fastNLP_Bert) does not actually use the result.  So we expect this
-    node to get dead code eliminated.
     """
 
     def get_reads(self):
         return ()
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, sym, data):
+        super().__init__(None, NoneLayout(), [data])
+        self.sym = sym
+
+    def get_unbacked_symbol_defs(self):
+        return {self.sym}
+
+    def codegen(self, wrapper):
+        (data,) = (t.codegen_reference() for t in self.inputs)
+        wrapper.writeline(f"{self.sym} = {data}.item()")
+        # No one should ever use this buffer, but for uniformity
+        # define the variable and assign it None
+        wrapper.writeline(f"{self.get_name()} = None")
 
 
 @dataclasses.dataclass
@@ -3921,12 +4020,39 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
+    def get_unbacked_symbol_defs(self):
+        # This kernel defines all unbacked symbols... that it didn't get in as
+        # arguments!
+        defs = (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
+        return defs - self.get_unbacked_symbol_uses()
+
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
-        self.codegen_size_asserts(wrapper)
+        # NB: If it is possible for other ir node types to return unbacked
+        # symints, we also have to add this logic there too.  Don't forget to
+        # update get_unbacked_symbol_defs too.
+        symbols_to_define = self.get_unbacked_symbol_defs()
+        for i, s in enumerate(self.get_size()):
+            if s in symbols_to_define:
+                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
+                symbols_to_define.remove(s)
+        for i, s in enumerate(self.get_stride()):
+            if s in symbols_to_define:
+                wrapper.writeline(f"{s} = {self.get_name()}.stride({i})")
+                symbols_to_define.remove(s)
+        if (s := self.get_offset()) in symbols_to_define:
+            wrapper.writeline(f"{s} = {self.get_name()}.storage_offset()")
+            symbols_to_define.remove(s)
+        assert (
+            not symbols_to_define
+        ), f"unbacked symint {s} not written out, check comment above"
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
@@ -6068,3 +6194,22 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
+
+
+# NB: recursive structure here reflects val_to_arg_str, avoid
+# calling free_unbacked_symbols on "exotic" types that don't get pexpr
+# treatment
+def maybe_free_unbacked_symbols(s):
+    if isinstance(s, (SymTypes, sympy.Expr)):
+        # This branch should be impossible in return position
+        return free_unbacked_symbols(s)
+    elif isinstance(s, (tuple, list)):
+        r = set()
+        for t in s:
+            r |= maybe_free_unbacked_symbols(t)
+        return r
+    elif isinstance(s, torch.Tensor):
+        # This branch is impossible in constant-args position
+        return free_unbacked_symbols(s)
+    else:
+        return set()
