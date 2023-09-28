@@ -551,14 +551,49 @@ class AOTInductorTestsTemplate:
             constraints=constraints,
         )
 
+    # scaled_dot_product_flash_attention
+    def test_sdpa(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-class AOTInductorTestABICompatibile(TestCase):
+            def forward(self, q, k, v):
+                return torch.nn.functional.scaled_dot_product_attention(q, k, v)[0]
+
+        example_inputs = (
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+        )
+        self.check_model(Repro(), example_inputs)
+
+    def test_sdpa_2(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v, x):
+                t = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, is_causal=True
+                )[0]
+                return x + t
+
+        example_inputs = (
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+        )
+        self.check_model(Repro(), example_inputs)
+
+
+class AOTInductorTestABICompatible(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
-copy_tests(AOTInductorTestsTemplate, AOTInductorTestABICompatibile, "abi_compatible")
+copy_tests(AOTInductorTestsTemplate, AOTInductorTestABICompatible, "abi_compatible")
 
 
 class AOTInductorTestNonABICompatible(TestCase):
