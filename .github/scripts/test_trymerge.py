@@ -33,10 +33,10 @@ from trymerge import (
     MandatoryChecksMissingError,
     MergeRule,
     PostCommentError,
+    RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
     validate_revert,
-    RE_GHSTACK_DESC
 )
 
 if "GIT_REMOTE_URL" not in os.environ:
@@ -335,7 +335,9 @@ class TestTryMerge(TestCase):
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
-    @skip("Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218")
+    @skip(
+        "Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218"
+    )
     def test_internal_changes(self, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
         pr = GitHubPR("pytorch", "pytorch", 110140)
@@ -402,7 +404,9 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 105260)
         conclusions = pr.get_checkrun_conclusions()
         self.assertEqual(len(conclusions), 221)
-        self.assertTrue("pull / linux-docs / build-docs-cpp-false" in conclusions.keys())
+        self.assertTrue(
+            "pull / linux-docs / build-docs-cpp-false" in conclusions.keys()
+        )
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successfull status"""
