@@ -553,10 +553,6 @@ sdpa_nested_preprocessing_backward(
   if (head_dim_v != head_dim_qk) {
     output_shape.select(1, -1).fill_(head_dim_v);
   }
-  // MONDAY DRISS LISTEN TO ME:
-  // We need to do the following:
-  // 1. Get the grad_out_ tensor and reshape it
-  // 2. Get the output tensor and reshape
 
   return std::make_tuple(
       grad_out_buffer_reshaped,

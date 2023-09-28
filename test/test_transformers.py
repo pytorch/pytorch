@@ -141,7 +141,7 @@ def calculate_nt_tolerances(nt_ref_hp, nt_ref_lp, default_dtype, fudge_factor=1)
     # TODO use NT ops when we have implemented Max for NestedTensor instead of unrolling
     ref_atol = default_atol[default_dtype]
     ref_rtol = default_rtol[default_dtype]
-    for tensor_component_ref, tensor_component_ref_lp in zip(nt_ref_hp.unbind(), nt_ref_lp):
+    for tensor_component_ref, tensor_component_ref_lp in zip(nt_ref_hp.unbind(), nt_ref_lp.unbind()):
         ref_atol = max((fudge_factor * torch.abs(tensor_component_ref - tensor_component_ref_lp)).max().item(), ref_atol)
         ref_rtol = max(get_rtol(tensor_component_ref, tensor_component_ref_lp), ref_rtol)
     return ref_atol, ref_rtol
