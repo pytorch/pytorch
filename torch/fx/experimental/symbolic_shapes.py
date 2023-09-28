@@ -2106,7 +2106,7 @@ class DimConstraints:
             if forced_specializations:
                 debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
                 buf += (
-                    f"Specializations unexpectedly required ({'n'.join(debug_names)})! "
+                    f"Specializations unexpectedly required ({', '.join(debug_names)})! "
                     "For more information, run with TORCH_LOGS=dynamic.\n"
                 )
                 for s, val in forced_specializations.items():
@@ -2441,6 +2441,7 @@ class ShapeEnv:
             "is_recording",
             "tracked_fakes",
             "events",
+            "source_name_to_debug_name",
         )
 
         # Mapping of the value of each to-be-compared field into the values that

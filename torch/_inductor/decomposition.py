@@ -69,7 +69,10 @@ decomps_to_exclude = [
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
-    aten.glu,  # has lowering in inductor
+    aten.glu,  # inductor lowers this directly
+    aten.lift_fresh,  # inductor lowers this directly (to no-op)
+    aten.split.Tensor,  # inductor lowers this directly
+    aten.unbind,  # inductor lowers this directly
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -182,6 +185,18 @@ def bmm(self, batch2):
             return torch.sum(
                 self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
             ).unsqueeze(1)
+    return NotImplemented
+
+
+@register_decomposition([aten.addmm])
+@pw_cast_for_opmath
+def addmm(self, mat1, mat2, beta=1, alpha=1):
+    if self.device.type == "cpu":
+        if mat1.size(0) == 1 and mat2.size(-1) == 1:
+            out = torch.sum(
+                mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
+            ).unsqueeze(0)
+            return alpha * out + beta * self
     return NotImplemented
 
 
