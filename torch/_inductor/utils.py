@@ -1175,7 +1175,7 @@ class Placeholder(enum.Enum):
 # A utility function for easier AOTInductor testing
 aot_inductor_launcher = """
     #include <c10/cuda/CUDAStream.h>
-    #include <torch/csrc/inductor/aot_runtime/interface.h>
+    #include <torch/csrc/inductor/aoti_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
     class RAIIModelContainer {
