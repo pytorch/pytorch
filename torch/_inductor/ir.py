@@ -3680,10 +3680,8 @@ class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
     """
-    def __str__(self):
-        return self.get_name()
-
-    __repr__ = __str__
+    def get_reads(self):
+        return ()
 
     def should_allocate(self):
         return False
@@ -5964,9 +5962,6 @@ class MultiOutputNoSizeAssert(MultiOutput):
         wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
-        for i, s in enumerate(self.get_size()):
-            if V.graph.sizevars.shape_env.is_unbacked_symint(s):
-                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
 
 
 class AllReduceCoalesced(InPlaceCollectiveKernel):

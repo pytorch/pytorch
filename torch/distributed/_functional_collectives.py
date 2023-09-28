@@ -326,9 +326,9 @@ def all_to_all_single(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if output_split_sizes is not None:
-        assert all([isinstance(size, int) for size in output_split_sizes])
+        assert all([isinstance(size, (int, torch.SymInt)) for size in output_split_sizes]), output_split_sizes
     if input_split_sizes is not None:
-        assert all([isinstance(size, int) for size in input_split_sizes])
+        assert all([isinstance(size, (int, torch.SymInt)) for size in input_split_sizes]), input_split_sizes
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_to_all_single(self, output_split_sizes, input_split_sizes, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)
