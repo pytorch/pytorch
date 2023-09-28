@@ -120,7 +120,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-    def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=1):
+    def _test_wrap_simple(
+        self,
+        func,
+        args,
+        expected_num_wrap_args,
+        expected_opcount=1,
+        return_graph=False,
+    ):
         # Given a `func` that has a single call to `wrap`,
         # we check that:
         # - there are no graph breaks
@@ -138,8 +145,11 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, expected_opcount)
 
         self.assertEqual(len(backend.graphs), 1)
-        wrap_node = find_first_node(backend.graphs[0], wrap)
+        graph = backend.graphs[0]
+        wrap_node = find_first_node(graph, wrap)
         self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
+        if return_graph:
+            return normalize_gm(graph.print_readable(print_output=False))
 
     def test_error_message_sane(self):
         foo = []
@@ -226,6 +236,126 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self._test_wrap_simple(
             f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
         )
+
+    def test_wrap_pytree_args_nested(self):
+        def f(x, y, z):
+            def fn(d):
+                return d["x"].sin() + d["y"][0].cos() - d["y"][1][2].sin()
+
+            return wrap(fn, d)
+
+        x = torch.tensor(1.5)
+        y = torch.tensor(2.0)
+        z = torch.tensor(3.0)
+        d = {"x": x, "y": (y, [x, y, z])}
+        actual_graph = self._test_wrap_simple(
+            f,
+            (x, y, z),
+            4,
+            return_graph=True,
+        )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor, L_z_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+        l_z_ = L_z_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, l_y_, l_z_);  wrap_body_0 = l_x_ = l_y_ = l_z_ = None
+        return (wrap,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_, l_z_):
+            sin = l_x_.sin();  l_x_ = None
+            cos = l_y_.cos();  l_y_ = None
+            add = sin + cos;  sin = cos = None
+            sin_1 = l_z_.sin();  l_z_ = None
+            sub = add - sin_1;  add = sin_1 = None
+            return sub
+""",
+        )
+
+    def test_wrap_pytree_args_with_symint_constant(self):
+        def f(x, y):
+            i = x.size(0)
+            return wrap(lambda t: t[0].view(t[2]) + t[1], (x, y, i))
+
+        x = torch.randn(3, 1)
+        y = 0.5
+        actual_graph = self._test_wrap_simple(
+            f,
+            (x, y),
+            ifdynstaticdefault(2, 3),
+            expected_opcount=ifdynstaticdefault(1, 2),
+            return_graph=True,
+        )
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                actual_graph,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        return (wrap,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            view = l_x_.view(3);  l_x_ = None
+            add = view + 0.5;  view = None
+            return add
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                actual_graph,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        size = l_x_.size(0)
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        return (wrap,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, size):
+            view = l_x_.view(size);  l_x_ = size = None
+            add = view + 0.5;  view = None
+            return add
+""",
+            )
+
+    def test_wrap_pytree_kwargs(self):
+        def f(x, y, z):
+            def fn(*, x, y, z):
+                z1, z2 = z
+                return (x * 2) + y + z1
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(f, (x, y, (x, y)), 3)
+
+    def test_wrap_pytree_args_not_const_symint_tensor(self):
+        class MyClass:
+            def __init__(self, x):
+                self.val = x
+
+        def f(x, y):
+            return wrap(lambda z: z[0].sin() * z[1].val.cos(), (x, y))
+
+        x = torch.tensor(1.2)
+        y = MyClass(torch.tensor(3.4))
+        self._assert_wrap_fallback(f, (x, y))
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -892,19 +1022,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self._test_wrap_simple(f, (x, y, 8), 2)
 
-    def test_wrap_unsupported_kwarg(self):
-        def f(x, y, z):
-            def fn(*, x, y, z):
-                z1, z2 = z
-                return (x * 2) + y + z1
-
-            return wrap(fn, x=x, y=y, z=z)
-
-        x = torch.randn(3)
-        y = torch.randn(3, 3)
-
-        self._assert_wrap_fallback(f, (x, y, (x, y)))
-
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1529,7 +1646,7 @@ def forward(self):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*torch.* op returned non-Tensor dict call_function": 1},
         )
 
     def test_access_module_attr(self):

@@ -1095,7 +1095,7 @@ class AotCodeCache:
                     log.debug("aot constant bin removal command: %s", cmd)
                     run_command_and_check(cmd)
 
-                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    body = re.sub(r"[\W]", "_", consts_path)
                     symbol_list = []
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"

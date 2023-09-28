@@ -328,6 +328,25 @@ void gemm(
 }
 
 void gemm(
+   TransposeType transa, TransposeType transb,
+   int64_t m, int64_t n, int64_t k,
+   const float alpha,
+   const at::Half *a, int64_t lda,
+   const at::Half *b, int64_t ldb,
+   const float beta,
+   at::Half *c, int64_t ldc) {
+   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
+   gemm_stub(
+      at::kCPU, at::kHalf,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     const float alpha,
