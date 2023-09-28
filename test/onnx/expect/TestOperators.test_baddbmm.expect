@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -56,7 +56,7 @@ graph {
     name: "Add_5"
     op_type: "Add"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Mul_0"
     type {
@@ -135,5 +135,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

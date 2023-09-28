@@ -4,7 +4,6 @@ import math
 from typing import (
     Generic,
     Iterable,
-    Iterator,
     List,
     Optional,
     Sequence,
@@ -52,7 +51,7 @@ class Dataset(Generic[T_co]):
     list of samples.
 
     .. note::
-      :class:`~torch.utils.data.DataLoader` by default constructs a index
+      :class:`~torch.utils.data.DataLoader` by default constructs an index
       sampler that yields integral indices.  To make it work with a map-style
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
@@ -72,7 +71,7 @@ class Dataset(Generic[T_co]):
     # in pytorch/torch/utils/data/sampler.py
 
 
-class IterableDataset(Dataset[T_co]):
+class IterableDataset(Dataset[T_co], Iterable[T_co]):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -180,8 +179,6 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-    def __iter__(self) -> Iterator[T_co]:
-        raise NotImplementedError("Subclasses of IterableDataset should implement __iter__.")
 
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])

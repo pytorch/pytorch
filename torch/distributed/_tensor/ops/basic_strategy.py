@@ -173,9 +173,9 @@ def gen_einsum_strategies(
     # strategies base on the actual tensor shape
     # (i.e. for Shard, tensor dim size must > mesh size)
     all_strategies = []
-    for startegy_comb in strategy_combs:
+    for strategy_comb in strategy_combs:
         spec_list = []
-        for specs in zip(*startegy_comb):
+        for specs in zip(*strategy_comb):
             spec_list.append(DTensorSpec(mesh, tuple(specs)))
         strat = PlacementStrategy(output_spec=spec_list[0], input_specs=spec_list[1:])
         all_strategies.append(strat)

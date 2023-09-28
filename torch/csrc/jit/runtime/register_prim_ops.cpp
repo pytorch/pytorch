@@ -292,7 +292,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
+          int64_t val = static_cast<int64_t>(std::stoll(s->string(), &sz));
           if (sz == s->string().size()) {
             push(stack, val);
           } else {
@@ -349,7 +349,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          double b = c10::stod(s->string(), &sz);
+          double b = std::stod(s->string(), &sz);
           if (sz == s->string().size()) {
             push(stack, b);
           } else {
@@ -1188,6 +1188,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_xla());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_mtia(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_mtia());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

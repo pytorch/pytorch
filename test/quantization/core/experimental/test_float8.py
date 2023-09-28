@@ -1,8 +1,15 @@
 # Owner(s): ["oncall: quantization"]
 
+import unittest
+
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 # Masks for float8 simulation
 
@@ -156,6 +163,18 @@ class TestFloat8DtypeCPUOnly(TestCase):
         mul8 = a8 * b8
         mul8_simulated = (a8_simulated * b8_simulated).to(dtype)
         self.assertEqual(mul8, mul8_simulated)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    def test_pt2_traceable_aot_eager(self, dtype):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            x = x.to(dtype)
+            x = x.float()
+            return x
+
+        x = torch.randn(1).requires_grad_()
+        f(x).sum().backward()
 
 
 instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")

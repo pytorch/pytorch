@@ -5,7 +5,7 @@ import operator
 import traceback
 from collections import OrderedDict
 from functools import partial
-from typing import Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 
 import sympy
 
@@ -59,6 +59,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self.counter = 0
 
     def _assert_range_constraint(self, proxy, lower, upper, assert_msg):
         if lower > -math.inf:
@@ -72,6 +73,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         Inserts assert_async call_function nodes in the graph. This function is
         called **during** the interpreter-based pass.
         """
+        self.counter += 1
         cmp = super().call_operator(operator, (lower, upper), {}, self._create_dummy_node_metadata())
         cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, self._create_dummy_node_metadata())
         super().call_operator(
@@ -139,10 +141,15 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         # Add runtime asserts for inline constraints
         val = super().call(graph_module)
 
+        # Sometimes this pass would return a wrong graph where we have mismatched
+        # node names in signature. Before we fix it, let's just skip it.
+        if self.counter == 0 and type(self) is _AddRuntimeAssertionsForInlineConstraintsPass:
+            return PassResult(graph_module, False)
+
         # Populate the stack trace with dummy vals to respect IR
         for node in val.graph_module.graph.nodes:
-            if not hasattr(node.meta, "stack_trace"):
-                node.meta["stack_trace"] = traceback.format_exc(-1)
+            if not node.meta.get("stack_trace", None):
+                node.meta["stack_trace"] = "".join(traceback.format_stack(limit=1))
 
         return PassResult(val.graph_module, val.modified)
 
@@ -176,35 +183,38 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
                 continue
 
             if (
-                "val" not in node.meta or
-                not isinstance(node.meta["val"], FakeTensor)
+                "val" not in node.meta or node.meta["val"] is None
             ):
                 continue
 
-            fake_tensor_shape = node.meta["val"].shape
-            for dim, shape in enumerate(fake_tensor_shape):
-                with graph.inserting_after(insert_loc):
-                    dim_node = graph.call_function(
-                        torch.ops.aten.sym_size.int, (node, dim)
-                    )
-                input_dim = InputDim(node.name, dim)
-                inputdim_to_node[input_dim] = dim_node
-                insert_loc = dim_node
-
-                if isinstance(shape, SymInt):
-                    # If the shape is dynamic, add range assertions
-                    symbol = shape.node._expr
-                    if symbol in self.range_constraints:
-                        self._insert_range_assert_inplace(
-                            graph, input_dim, dim_node, self.range_constraints[symbol]
+            if not isinstance(node.meta["val"], FakeTensor):
+                # it has to be a prim value
+                self._insert_prim_assert_inplace(graph, node, node.meta["val"])
+            else:
+                fake_tensor_shape = node.meta["val"].shape
+                for dim, shape in enumerate(fake_tensor_shape):
+                    with graph.inserting_after(insert_loc):
+                        dim_node = graph.call_function(
+                            torch.ops.aten.sym_size.int, (node, dim)
                         )
-                else:
-                    # If no dynamism is specified, we assume all dimensions #
-                    # are specialized
-                    assert isinstance(shape, int)
-                    self._insert_specialized_shape_assert_inplace(
-                        graph, input_dim, dim_node, shape,
-                    )
+                    input_dim = InputDim(node.name, dim)
+                    inputdim_to_node[input_dim] = dim_node
+                    insert_loc = dim_node
+
+                    if isinstance(shape, SymInt):
+                        # If the shape is dynamic, add range assertions
+                        symbol = shape.node._expr
+                        if symbol in self.range_constraints:
+                            self._insert_range_assert_inplace(
+                                graph, input_dim, dim_node, self.range_constraints[symbol]
+                            )
+                    else:
+                        # If no dynamism is specified, we assume all dimensions #
+                        # are specialized
+                        assert isinstance(shape, int)
+                        self._insert_specialized_shape_assert_inplace(
+                            graph, input_dim, dim_node, shape,
+                        )
 
         # Add runtime assertions on equality constraints on the inputs
         if len(inputdim_to_node) > 0:
@@ -221,6 +231,18 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
         assert_msg = f"Input {input_dim.input_name}.shape[{input_dim.dim}] is specialized at {shape}"
         with graph.inserting_after(dim_node):
             eq_node = graph.call_function(operator.eq, (dim_node, shape))
+        with graph.inserting_after(eq_node):
+            tensor_eq_node = graph.call_function(torch.ops.aten.scalar_tensor.default, (eq_node,))
+        with graph.inserting_after(tensor_eq_node):
+            _ = graph.call_function(torch.ops.aten._assert_async.msg, (tensor_eq_node, assert_msg))
+
+    def _insert_prim_assert_inplace(self, graph, node: torch.fx.Node, value: Any):
+        assert_msg = (
+            f"Input {node.name} is specialized to be {value} at tracing time,"
+            f"it is not supported to pass in a different value at run time."
+        )
+        with graph.inserting_after(node):
+            eq_node = graph.call_function(operator.eq, (node, value))
         with graph.inserting_after(eq_node):
             tensor_eq_node = graph.call_function(torch.ops.aten.scalar_tensor.default, (eq_node,))
         with graph.inserting_after(tensor_eq_node):
