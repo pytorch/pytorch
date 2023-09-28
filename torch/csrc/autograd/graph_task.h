@@ -15,10 +15,6 @@ struct ReadyQueue;
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
-namespace {
-std::atomic<uint64_t> graph_task_id{0};
-}
-
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::atomic<uint64_t> outstanding_tasks_{0};
@@ -192,6 +188,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   utils::DelayWarningHandler warning_handler_;
 
+  static std::atomic<uint64_t> graph_task_id;
   uint64_t id_;
 
   GraphTask(

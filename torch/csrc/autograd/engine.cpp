@@ -99,6 +99,8 @@ struct CompiledAutogradThreadingDebugCheck {
 
 } // namespace
 
+std::atomic<uint64_t> GraphTask::graph_task_id{0};
+
 // Threads spawned by the engine are assigned a 'worker_device' specifying
 // what device they process work for. This variable is initialized at:
 // 1. thread creation time for CUDA, XLA device threads, as they are
@@ -642,7 +644,7 @@ void Engine::thread_on_exception(
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
-    std::exception& e) {
+    std::exception&) {
   graph_task->set_exception(std::current_exception(), fn);
 }
 
