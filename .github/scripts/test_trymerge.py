@@ -7,6 +7,7 @@
 # GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
 # And re-run the test locally with ones PAT
 
+import gzip
 import json
 import os
 import warnings
@@ -39,6 +40,9 @@ from trymerge import (
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
 
+GQL_MOCKS = "gql_mocks.json.gz"
+ROCKSET_MOCKS = "rockset_mocks.json.gz"
+
 
 def mock_query(
     fallback_function: Any,
@@ -51,11 +55,11 @@ def mock_query(
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
             return {}
-        with open(gql_db_fname, encoding="utf-8") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="rt") as f:
             return json.load(f)
 
     def save_mocked_queries(obj: Any) -> None:
-        with open(gql_db_fname, encoding="utf-8", mode="w") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="wt") as f:
             json.dump(obj, f, indent=2)
             f.write("\n")
 
@@ -100,13 +104,13 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
         return gh_graphql(query, **kwargs)
 
-    return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
+    return mock_query(gh_graphql_wrapper, GQL_MOCKS, key_function, query, kwargs)
 
 
 def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_rockset_results,
-        "rockset_mocks.json",
+        ROCKSET_MOCKS,
         lambda x, y: f"{x} {y}",
         head_sha,
         merge_base,
