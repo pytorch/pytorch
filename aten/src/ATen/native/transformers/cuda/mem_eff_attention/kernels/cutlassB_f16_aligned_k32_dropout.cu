@@ -6,6 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 // This file is auto-generated. See "generate_kernels.py"
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 using namespace PyTorchMemEffAttention;
 __global__ void __launch_bounds__(

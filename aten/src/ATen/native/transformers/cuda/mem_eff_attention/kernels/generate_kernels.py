@@ -368,6 +368,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
 
     for f, f_kernels in implfile_to_kernels.items():
         impl_cu = cpp_file_header
+        impl_cu += "#define TORCH_ASSERT_NO_OPERATORS\n"
         # impl_cu += f"#ifndef {disable_def}\n"
         impl_cu += f"""#include {impl_file}\n"""
         impl_cu += """using namespace PyTorchMemEffAttention;\n"""
