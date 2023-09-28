@@ -18,6 +18,11 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+#Set Default values for these variables in case they are not set
+SHARD_NUMBER="${SHARD_NUMBER:=1}"
+NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
+
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
