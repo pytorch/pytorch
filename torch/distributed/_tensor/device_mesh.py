@@ -289,7 +289,10 @@ class DeviceMesh:
             return False
         if id(self.mesh) == id(other.mesh):
             return True
-        return self._flatten_mesh_list == other._flatten_mesh_list and self.mesh.shape == other.mesh.shape
+        return (
+            self.mesh.shape == other.mesh.shape
+            and self._flatten_mesh_list == other._flatten_mesh_list
+        )
 
     def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
         """
