@@ -115,7 +115,7 @@ def clamp(x, min=None, max=None):
 
 
 @register_decomposition([aten.full_permuted])
-def full(size, permutation, fill_value, **kwargs):
+def full_permuted(size, permutation, fill_value, **kwargs):
     if permutation == list(range(len(size))):
         return aten.full(size, fill_value, **kwargs)
 
@@ -330,7 +330,9 @@ def get_like_permutation(tensor, memory_format):
         return list(range(tensor.ndim))
 
 
-def get_like_layout(tensor: torch.Tensor, memory_format: Optional[torch.memory_format]) -> torch.memory_format:
+def get_like_layout(
+    tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
+) -> torch.memory_format:
     # TODO: _to_copy tensor to stride permutation
     if memory_format in (torch.preserve_format, None):
         return utils.suggest_memory_format(tensor)
@@ -395,7 +397,9 @@ def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **k
 
 
 @register_decomposition(aten.randint_like.low_dtype)
-def randint_like_low(self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs):
+def randint_like_low(
+    self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs
+):
     return aten.randint.low(
         low,
         high,
