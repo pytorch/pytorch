@@ -201,7 +201,8 @@ def _get_module_name_filter(module_name: str):
         #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
         #    'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
         # }
-        nn_module_stack = n.meta["nn_module_stack"]
+        # get_attr nodes doesn't have nn_module_stack?
+        nn_module_stack = n.meta.get("nn_module_stack", {})
         names = [
             n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
         ]
@@ -228,7 +229,7 @@ def _get_module_type_filter(tp: Callable):
         #     'L__self___sub': ("L['self'].sub", <class '....Sub'>),
         #     'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
         # }
-        nn_module_stack = n.meta["nn_module_stack"]
+        nn_module_stack = n.meta.get("nn_module_stack", {})
         types = [t for _, t in nn_module_stack.values()]
         return tp in types
 
