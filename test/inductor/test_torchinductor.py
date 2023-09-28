@@ -4809,7 +4809,7 @@ class CommonTemplate:
 
     def test_like_channels_last(self):
         def foo():
-            randn = torch.randn((4, 3, 8, 8), device="cuda:0", dtype=torch.float32)
+            randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
             xc = randn.contiguous(memory_format=torch.channels_last)
             clone = torch.zeros_like(xc, memory_format=torch.preserve_format)
             rand_like = torch.rand_like(randn)
