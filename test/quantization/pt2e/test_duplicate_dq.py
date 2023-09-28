@@ -133,7 +133,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     is_per_channel=True
                 )
                 OP_TO_ANNOTATOR["linear"](gm, quantization_config)
-                OP_TO_ANNOTATOR["conv2d"](gm, quantization_config)
+                OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 OP_TO_ANNOTATOR["adaptive_avg_pool2d"](gm, quantization_config)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -169,7 +169,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     is_per_channel=True
                 )
                 OP_TO_ANNOTATOR["linear"](gm, quantization_config)
-                OP_TO_ANNOTATOR["conv2d"](gm, quantization_config)
+                OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 OP_TO_ANNOTATOR["add"](gm, quantization_config)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -206,7 +206,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     is_per_channel=True
                 )
                 OP_TO_ANNOTATOR["linear"](gm, quantization_config)
-                OP_TO_ANNOTATOR["conv2d"](gm, quantization_config)
+                OP_TO_ANNOTATOR["conv"](gm, quantization_config)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -288,7 +288,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     is_per_channel=True
                 )
                 avgpool_qconfig = _get_uint8_quantization_config()
-                OP_TO_ANNOTATOR["conv2d"](gm, quantization_config)
+                OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 OP_TO_ANNOTATOR["add"](gm, quantization_config)
                 for n in gm.graph.nodes:
                     if n.op == "call_function" and n.target == torch.ops.aten.mean.dim:
