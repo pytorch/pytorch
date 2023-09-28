@@ -1138,6 +1138,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_erfinv);
   }
 
+  Vectorized<T> digamma(const Vectorized<T>& x) const {
+    return mapOrdinary(calc_digamma, x);
+  }
+
   Vectorized<T> igamma(const Vectorized<T>& x) const {
     return mapOrdinary(calc_igamma, x);
   }

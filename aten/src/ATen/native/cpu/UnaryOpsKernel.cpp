@@ -407,9 +407,10 @@ static void atanh_kernel(TensorIteratorBase& iter) {
 
 static void digamma_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "digamma", [&]() {
-    cpu_kernel(
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
+        [=](scalar_t a) -> scalar_t { return calc_digamma(a); },
+        [=](Vectorized<scalar_t> x) { return x.digamma(); });
   });
 }
 
@@ -846,12 +847,12 @@ ALSO_REGISTER_AVX512_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
 
 // Might enable AVX512 dispatch after enabling explicit vectorization for them
 REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
 REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
-REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);

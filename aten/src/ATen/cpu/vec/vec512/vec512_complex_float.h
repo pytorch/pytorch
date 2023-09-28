@@ -828,6 +828,9 @@ public:
   Vectorized<c10::complex<float>> hypot(const Vectorized<c10::complex<float>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vectorized<c10::complex<float>> digamma(const Vectorized<c10::complex<float>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vectorized<c10::complex<float>> igamma(const Vectorized<c10::complex<float>> &x) const {
     AT_ERROR("not supported for complex numbers");
   }

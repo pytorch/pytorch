@@ -483,6 +483,10 @@ class Vectorized<ComplexDbl> {
       TORCH_CHECK(false, "not supported for complex numbers");
   }
 
+  Vectorized<ComplexDbl> digamma(const Vectorized<ComplexDbl>& x) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+
   Vectorized<ComplexDbl> igamma(const Vectorized<ComplexDbl>& x) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
