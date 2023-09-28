@@ -340,9 +340,14 @@ class TestPaternMatcher(TestCase):
                 torch.randn(1, 16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
-                False
+                False,
             ),
-            (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda"), False),
+            (
+                4,
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                False,
+            ),
         ]
         for a, b, c, should_fuse in args_list:
             torch._dynamo.reset()

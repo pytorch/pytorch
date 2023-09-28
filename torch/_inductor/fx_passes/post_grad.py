@@ -757,6 +757,7 @@ def is_pointwise_use(use):
 
     return torch.Tag.pointwise in use.target.tags
 
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not inp.meta["val"].is_cuda:
@@ -771,8 +772,7 @@ def should_prefer_unfused_addmm(match):
     pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
-
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
@@ -785,7 +785,7 @@ def is_valid_addmm_fusion(match):
     inp = match.kwargs["inp"]
 
     if not isinstance(inp, torch.fx.Node):
-        return False # Input is a number
+        return False  # Input is a number
 
     in_shape = inp.meta["val"].shape
     matched = len(in_shape) <= 2
@@ -793,7 +793,7 @@ def is_valid_addmm_fusion(match):
     for i, m in zip(in_shape, mm_shape):
         matched &= i == 1 or i == m
     if not matched:
-        return False # Shape mismatch
+        return False  # Shape mismatch
 
     return not should_prefer_unfused_addmm(match)
 
@@ -816,8 +816,7 @@ def is_valid_addmm_fusion(match):
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
-def addmm(match, mat1, mat2, inp):
-
+def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
