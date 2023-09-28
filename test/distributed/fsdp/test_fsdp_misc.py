@@ -144,6 +144,58 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_zero2_eval_with_prefetch(self):
+        # Test FSDP validation with SHARD_GRAD_OP and forward_prefetch
+
+        class Mnist(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 32, 3, 1)
+                self.conv2 = nn.Conv2d(32, 64, 3, 1)
+                self.dropout1 = nn.Dropout(0.25)
+                self.dropout2 = nn.Dropout(0.5)
+                self.fc1 = nn.Linear(9216, 128)
+                self.fc2 = nn.Linear(128, 10)
+                self.ln = nn.LayerNorm(9216)
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                x = torch.nn.functional.relu(x)
+                x = self.conv2(x)
+                x = torch.nn.functional.relu(x)
+                x = torch.nn.functional.max_pool2d(x, 2)
+                x = self.dropout1(x)
+                x = torch.flatten(x, 1)
+                x = self.ln(x)
+                x = self.fc1(x)
+                x = torch.nn.functional.relu(x)
+                x = self.dropout2(x)
+                x = self.fc2(x)
+                output = torch.nn.functional.log_softmax(x, dim=1)
+                loss = torch.nn.functional.cross_entropy(output, y)
+                return loss
+
+        model = FSDP(
+            Mnist().cuda(),
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            forward_prefetch=True,
+            use_orig_params=True,
+            auto_wrap_policy=ModuleWrapPolicy([nn.Linear, nn.Conv2d]),
+        )
+        x = torch.randn(8, 1, 28, 28, device='cuda')
+        y = torch.randint(low=0,high=9,size=(8,), device='cuda')
+
+        for _ in range(5):
+            loss = model(x, y)
+            loss = loss.sum()
+            loss.backward()
+
+        with torch.no_grad():
+            model.eval()
+            for _ in range(5):
+                loss = model(x, y)
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
     @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
     def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
