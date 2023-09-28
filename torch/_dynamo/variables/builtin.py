@@ -1109,12 +1109,8 @@ class BuiltinVariable(VariableTracker):
                             VariableBuilder(tx, GetItemSource(source, i))(b)
                             for i, b in enumerate(bases)
                         ]
-                    elif len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C.TensorBase
-                    ):
-                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
-                        unimplemented(f"unexpected sourceless type bases: {bases}")
+                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
 
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
