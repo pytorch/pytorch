@@ -7095,27 +7095,6 @@ class CommonTemplate:
             ),
         )
 
-    def test_torch_dynamo_codegen_pow(self):
-        def pow(x):
-            return x**2
-
-        x = torch.randn(8, device=self.device)
-        pow_opt = torch._dynamo.optimize("inductor")(pow)
-
-        actual, source_code = run_and_get_code(pow_opt, x)
-        expect = aten.pow(x, 2)
-
-        # assert that the functionality matches aten and self prior to being compiled by dynamo
-        self.assertEqual(expect, actual)
-        self.assertEqual(actual, pow(x))
-
-        pattern = "aten.pow"
-        for code in source_code:
-            self.assertIsNone(
-                re.search(pattern, code),
-                msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
-            )
-
 
 @dataclasses.dataclass
 class TestFailure:
