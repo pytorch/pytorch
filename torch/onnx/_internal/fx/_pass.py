@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 
 import contextlib
+import dataclasses
 import difflib
 
 import io
@@ -17,6 +18,32 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
+
+
+@dataclasses.dataclass
+class PackageInfo:
+    package_name: str
+    version: Optional[str]
+    commit_hash: Optional[str]
+
+    def to_onnx_domain_string(self) -> str:
+        return ".".join(
+            filter(None, ("pkg", self.package_name, self.version, self.commit_hash))
+        )
+
+    @classmethod
+    def from_python_class(cls, python_class: type) -> PackageInfo:
+        package_name = python_class.__module__.split(".")[0]
+        package = __import__(package_name)
+        version = getattr(package, "__version__", None)
+        # TODO: Figure out how to retrieve commit hash.
+        commit_hash = None
+        return cls(package_name, version, commit_hash)
+
+
+@dataclasses.dataclass
+class GraphModuleOnnxMeta:
+    package_info: PackageInfo
 
 
 @contextlib.contextmanager
@@ -219,6 +246,12 @@ class Transform(abc.ABC):
         diagnostic = self.diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_pass
         )
+        diagnostic.info(
+            "For detailed logging of graph modifications by this pass, either set "
+            "`DiagnosticOptions.verbosity_level` to `logging.DEBUG` or use the environment variable "
+            "`TORCH_LOGS='onnx_diagnostics'`."
+        )
+
         # Gather graph information before transform.
         graph_diff_log_level = logging.DEBUG
         if diagnostic.logger.isEnabledFor(graph_diff_log_level):

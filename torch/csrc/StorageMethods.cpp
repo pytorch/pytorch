@@ -41,6 +41,7 @@
 
 static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   return py::cast(THPStorage_Unpack(self).sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
@@ -49,7 +50,15 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // PyLong_FromVoidPtr should not need to mutate the pointer in order
   // to extract a new long object from it.
-  return PyLong_FromVoidPtr(const_cast<void*>(THPStorage_Unpack(self).data()));
+
+  auto self_ = THPStorage_Unpack(self);
+  // See Note [Invalid Python Storages]
+  auto invalid = self_.data() == nullptr &&
+      self_.device_type() != c10::DeviceType::Meta && self_.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid,
+      "Attempted to access the data pointer on an invalid python storage.")
+  return PyLong_FromVoidPtr(self_.mutable_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -58,6 +67,7 @@ static PyObject* THPStorage_copy_(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
 
   at::Storage self_ = torch::createStorage(self);
 
@@ -69,6 +79,12 @@ static PyObject* THPStorage_copy_(
 
   at::Storage src = r.storage(0);
   bool non_blocking = r.toBoolOptional(1).value_or(false);
+
+  // See Note [Invalid Python Storages]
+  auto invalid = src.data() == nullptr &&
+      src.device_type() != c10::DeviceType::Meta && src.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid, "Attempted to call copy_() on an invalid python storage.")
 
   TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
 
@@ -82,12 +98,14 @@ static PyObject* THPStorage_copy_(
 
 static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(_self);
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -95,14 +113,20 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
       allocator,
       /*resizable=*/true);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  return THPStorage_New(std::move(new_storage));
+  return THPStorage_Wrap(std::move(new_storage));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
+  // See Note [Invalid Python Storages]
+  auto invalid = storage.data() == nullptr &&
+      storage.device_type() != c10::DeviceType::Meta &&
+      storage.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid, "Attempted to call resize_() on an invalid python storage.")
   THPUtils_assert(
       THPUtils_checkLong(number_arg),
       "resize_ expects an int, "
@@ -148,7 +172,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
       new_tensor.copy_(src_tensor);
       storage.set_data_ptr_noswap(
-          std::move(const_cast<at::DataPtr&>(new_tensor.storage().data_ptr())));
+          std::move(new_tensor.storage().mutable_data_ptr()));
       storage.unsafeGetStorageImpl()->set_allocator(
           new_tensor.storage().unsafeGetStorageImpl()->allocator());
       storage.set_nbytes(new_tensor.storage().nbytes());
@@ -166,7 +190,14 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 
 static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
+  // See Note [Invalid Python Storages]
+  auto invalid = storage.data() == nullptr &&
+      storage.device_type() != c10::DeviceType::Meta &&
+      storage.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid, "Attempted to call fill_() on an invalid python storage.")
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
       "fill_ expects int, "
@@ -198,6 +229,7 @@ static PyObject* THPStorage_fromBuffer(
           args,
           keywds,
           argtypes,
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &obj,
           &byte_order_str,
@@ -222,8 +254,7 @@ static PyObject* THPStorage_fromBuffer(
       "function missing required argument 'byte_order' (pos 2)");
   size_t element_size = c10::elementSize(scalar_type);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool do_byte_swap;
+  bool do_byte_swap = false;
   if (!is_endian_independent) {
     if (strcmp(byte_order_str, "native") == 0) {
       do_byte_swap = false;
@@ -257,8 +288,7 @@ static PyObject* THPStorage_fromBuffer(
     return nullptr;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t size_bytes;
+  size_t size_bytes = 0;
   if (count < 0) {
     if ((buffer.len - offset) % element_size != 0) {
       PyErr_SetString(
@@ -271,7 +301,7 @@ static PyObject* THPStorage_fromBuffer(
       return nullptr;
     }
     size_bytes = buffer.len - offset;
-    count = size_bytes / element_size;
+    count = static_cast<Py_ssize_t>(size_bytes / element_size);
   } else {
     size_bytes = count * element_size;
   }
@@ -365,7 +395,7 @@ static PyObject* THPStorage_fromBuffer(
   }
 
   PyBuffer_Release(&buffer);
-  return (PyObject*)THPStorage_New(storage);
+  return THPStorage_Wrap(storage);
   END_HANDLE_TH_ERRORS
 }
 
@@ -374,8 +404,7 @@ static PyObject* THPStorage_fromFile(
     PyObject* args,
     PyObject* keywds) {
   HANDLE_TH_ERRORS
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const char* filename;
+  const char* filename = nullptr;
   Py_ssize_t nbytes = 0;
   int shared = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -384,6 +413,7 @@ static PyObject* THPStorage_fromFile(
           args,
           keywds,
           "s|in",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &filename,
           &shared,
@@ -405,13 +435,23 @@ static PyObject* THPStorage_fromFile(
     storage->set_nbytes(actual_nbytes);
   }
 
-  return (PyObject*)THPStorage_New(std::move(storage));
+  return THPStorage_NewWithStorage(
+      THPStorageClass,
+      std::move(storage),
+      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
+  // See Note [Invalid Python Storages]
+  auto invalid = storage.data() == nullptr &&
+      storage.device_type() != c10::DeviceType::Meta &&
+      storage.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid, "Attempted to call _write_file() on an invalid python storage.")
   PyObject* file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
   bool save_size = PyTuple_GetItem(args, 2) == Py_True;
@@ -456,12 +496,13 @@ PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   auto storage = THPStorage_readFileRaw<int>(fd, {}, element_size);
   if (!storage.defined())
     return nullptr;
-  return THPStorage_New(std::move(storage));
+  return THPStorage_Wrap(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GET_ITEM(args, 0);
   PyObject* offset = PyTuple_GET_ITEM(args, 1);
@@ -587,6 +628,12 @@ PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* noargs) {
+  const auto& storage = THPStorage_Unpack(self);
+  Py_DECREF(THPStorage_Wrap(storage));
+  Py_RETURN_NONE;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
@@ -615,6 +662,7 @@ static PyMethodDef THPStorage_methods[] = {
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
     {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
+    {"_fix_weakref", THPStorage_fix_weakref, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getMethods() {

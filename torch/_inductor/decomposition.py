@@ -1,17 +1,25 @@
 import functools
 import logging
 import math
-import numbers
 import typing
 
 import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
-from torch._decomp import core_aten_decompositions, get_decompositions
-from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp import (
+    core_aten_decompositions,
+    get_decompositions,
+    remove_decompositions,
+)
+from torch._decomp.decompositions import (
+    _grid_sampler_2d as decomp_grid_sampler_2d,
+    pw_cast_for_opmath,
+)
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._higher_order_ops.out_dtype import out_dtype
+from torch._prims_common import type_to_dtype
 
-from . import config
+from . import config, inductor_prims
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -45,16 +53,26 @@ inductor_decompositions = get_decompositions(
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
-        aten.std,
-        aten.std_mean,
+        out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
-        aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
+
+# Remove unwanted decompositions included via the core ATen decompositions from
+# the Inductor decomp table.
+decomps_to_exclude = [
+    aten._unsafe_index,
+    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten.clamp_max,
+    aten.clamp_min,
+    aten.glu,  # has lowering in inductor
+]
+
+remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(ops):
@@ -62,12 +80,6 @@ def register_decomposition(ops):
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
-
-
-@register_decomposition(aten._unsafe_view.default)
-def _unsafe_view(self, size):
-    # this makes pattern matching easier
-    return self.view(size)
 
 
 # TODO: for now, inductor doesn't handle asserts
@@ -98,11 +110,13 @@ def clamp(x, min=None, max=None):
     return x
 
 
-# TorchInductor-only decomposition. It should not be taken to core.
-# See https://github.com/pytorch/torchdynamo/pull/1120
-@register_decomposition([aten.floor_divide.default])
-def floordiv(a, b):
-    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+@register_decomposition([aten.full])
+def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, fill_value, **kwargs)
+    return NotImplemented
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -161,28 +175,6 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.all.default])
-def all(input):
-    return torch.logical_not(torch.any(torch.logical_not(input)))
-
-
-@register_decomposition([aten.all.dim])
-def all_dim(input, dim, keepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
-
-
-@register_decomposition([aten.baddbmm])
-def baddbmm(self, batch1, batch2, beta=1, alpha=1):
-    result = torch.bmm(batch1, batch2)
-    if not isinstance(alpha, numbers.Number) or alpha != 1:
-        result = result * alpha
-    if beta == 0:
-        return result
-    if not isinstance(beta, numbers.Number) or beta != 1:
-        self = self * beta
-    return self + result
-
-
 @register_decomposition([aten.bmm])
 def bmm(self, batch2):
     if self.device == "cpu":
@@ -195,6 +187,11 @@ def bmm(self, batch2):
 
 @register_decomposition([aten.mm])
 def mm(self, input2):
+    # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
+    # todo: Look into why and fix it (hopefully)
+    if config.coordinate_descent_tuning:
+        if self.shape[0] == 1 or input2.shape[1] == 1:
+            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device == "cpu":
         if (
             self.size(-1) == 1
@@ -329,7 +326,7 @@ def full_like(
         dtype=dtype or self.dtype,
         layout=layout or self.layout,
         device=device or self.device,
-        requires_grad=requires_grad or self.requires_grad,
+        requires_grad=requires_grad,
     )
 
 
@@ -420,6 +417,48 @@ def dequantize_per_tensor_tensor_decomp_impl(
     return (input.to(torch.float32) - zero_point) * scale
 
 
+@register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
+def q_embedding_bag_byte_unpack_decomp(packed):
+    def bitcast_u8_to_f32(u8):
+        x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
+        return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+
+    scales = bitcast_u8_to_f32(packed[..., -8:-4])
+    offsets = bitcast_u8_to_f32(packed[..., -4:])
+    return packed[..., :-8].to(torch.float32) * scales + offsets
+
+
+@register_decomposition([aten.grid_sampler_2d])
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: torch.Tensor,
+    grid: torch.Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> torch.Tensor:
+    # We do not expand the grid (_expand_grid=False) on cpu for performance reasons
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
+    _expand_grid = not (
+        a.device == torch.device("cpu")
+        and interpolation_mode == 0
+        and a.is_contiguous(memory_format=torch.contiguous_format)
+    )
+
+    output = decomp_grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+        _expand_grid=_expand_grid,
+    )
+    return output
+
+
 @register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
     return aten._foreach_add.List(
@@ -486,3 +525,14 @@ def select_decomp_table():
     if config.fallback_random:
         return decompositions
     return fast_random_decomps()
+
+
+@register_decomposition(aten.masked_scatter)
+def masked_scatter(self, mask, source):
+    if self.device.type == "cuda":
+        # This two-step algorithm is the same as eager CUDA, for eager CPU we
+        # use a 1-shot serial iteration.
+        self, mask = aten.broadcast_tensors([self, mask])
+        source_idx = mask.reshape(-1).cumsum(0) - 1
+        return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
+    return NotImplemented

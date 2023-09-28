@@ -50,6 +50,15 @@ struct TORCH_API AccumulateGrad : public Node {
     //     to all other Nodes). So we must lazily read the Tensor hooks here.
     return impl::hooks(variable);
   }
+
+  std::unique_ptr<PostAccumulateGradHook>& tensor_post_acc_grad_hooks() noexcept
+      override {
+    // NB: Since the AccumulateGrad Node is only a weak ref from the Tensor,
+    //     it can be destroyed even though the Tensor is still alive (contrary
+    //     to all other Nodes). So we must lazily read the Tensor hooks here.
+    return impl::post_acc_grad_hooks(variable);
+  }
+
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.

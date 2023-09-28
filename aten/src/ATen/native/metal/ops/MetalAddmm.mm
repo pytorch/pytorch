@@ -17,7 +17,7 @@ namespace native {
 namespace metal {
 
 API_AVAILABLE(ios(11.0), macos(10.13))
-Tensor addmm(
+static Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
@@ -63,7 +63,7 @@ Tensor addmm(
 
 namespace prepack {
 
-Tensor linear(const Tensor& input, LinearOpContext& context) {
+static Tensor linear(const Tensor& input, LinearOpContext& context) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(context.get_weight().device() == kCPU);
   TORCH_CHECK(context.get_weight().dim() == 4);
@@ -126,7 +126,7 @@ Tensor linear(const Tensor& input, LinearOpContext& context) {
   return output;
 }
 
-Tensor linear_run(
+static Tensor linear_run(
     const Tensor& input,
     const c10::intrusive_ptr<LinearOpContext>& op_context) {
   return linear(input, *op_context);

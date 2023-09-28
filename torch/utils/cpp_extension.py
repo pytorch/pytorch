@@ -1593,6 +1593,8 @@ def load_inline(name,
     if use_pch is True:
         # Using PreCompile Header('torch/extension.h') to reduce compile time.
         _check_and_build_extension_h_precompiler_headers(extra_cflags, extra_include_paths)
+    else:
+        remove_extension_h_precompiler_headers()
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -2348,8 +2350,7 @@ def _write_ninja_file(path,
             # Note: non-system deps with nvcc are only supported
             # on Linux so use --generate-dependencies-with-compile
             # to make this work on Windows too.
-            if IS_WINDOWS:
-                nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
+            nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
         cuda_compile_rule.append(
             f'  command = $nvcc {nvcc_gendeps} $cuda_cflags -c $in -o $out $cuda_post_cflags')
 

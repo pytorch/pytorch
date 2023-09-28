@@ -80,7 +80,7 @@ class BenchmarkHelper {
   // would race with Python
   void runOnce(Input&&) const;
   // This method is to be used when calling from Python directly
-  Output runOnce(py::args&&, py::kwargs&&) const;
+  Output runOnce(py::args&&, const py::kwargs&) const;
   // Aggregate input in the format Model expects in order to avoid further
   // conversions at the benchmark time
   void addInput(py::args&&, py::kwargs&&);
@@ -136,13 +136,13 @@ void ScriptModuleBenchmark::runOnce(ScriptModuleInput&& input) const;
 template <>
 ScriptModuleOutput ScriptModuleBenchmark::runOnce(
     py::args&& args,
-    py::kwargs&& kwargs) const;
+    const py::kwargs& kwargs) const;
 
 template <>
 void ModuleBenchmark::runOnce(ModuleInput&& input) const;
 
 template <>
-ModuleOutput ModuleBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)
+ModuleOutput ModuleBenchmark::runOnce(py::args&& args, const py::kwargs& kwargs)
     const;
 
 template <>
@@ -181,7 +181,7 @@ class C10_HIDDEN ThroughputBenchmark {
   void addInput(py::args args, py::kwargs kwargs);
 
   // Equivalent to just running the model directly on the given input
-  py::object runOnce(py::args&& args, py::kwargs&& kwargs);
+  py::object runOnce(py::args&& args, const py::kwargs& kwargs);
 
   // The main method of the class allows to perform a multi-threaded benchmark
   // It returns BenchmarkExecutionStats object with a lot of useful statistics
