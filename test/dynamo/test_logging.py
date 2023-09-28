@@ -396,6 +396,27 @@ LoweringException: AssertionError:
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)
 
+    @make_logging_test(trace_source=True)
+    def test_trace_source_funcname(self, records):
+        def fn1():
+            def fn2():
+                if True:
+                    return [torch.ones(3, 3) for _ in range(5)]
+                return None
+
+            return fn2()
+
+        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt()
+
+        found_funcname = False
+        for record in records:
+            msg = record.getMessage()
+            if "<listcomp>" in msg and "fn1.fn2" in msg:
+                found_funcname = True
+
+        self.assertTrue(found_funcname)
+
     @make_logging_test(graph_sizes=True)
     def test_graph_sizes_dynamic(self, records):
         def fn(a, b):
