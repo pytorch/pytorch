@@ -1,7 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
+import io
 import itertools
-import pickle
 import unittest
 from functools import partial
 
@@ -2920,12 +2920,27 @@ class TestNestedTensorSubclass(TestCase):
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_pickle(self, device, dtype, requires_grad):
-        a = random_nt_from_dims([3, None, 5], device=device, dtype=dtype,
-                                requires_grad=requires_grad)
-        serialized = pickle.dumps(a)
-        b = pickle.loads(serialized)
-        self.assertEqual(a, b)
+    def test_serialization(self, device, dtype, requires_grad):
+
+        def compare_metadata(nt1, nt2):
+            self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
+            self.assertEqual(nt1._nested_tensor_strides(), nt2._nested_tensor_strides())
+            self.assertEqual(nt1._nested_tensor_storage_offsets(),
+                             nt2._nested_tensor_storage_offsets())
+
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
+        for a in [nt_contiguous, nt_noncontiguous]:
+            buffer = io.BytesIO()
+            serialized = torch.save(a, buffer)
+            buffer.seek(0)
+            b = torch.load(buffer)
+            # should be both conceptually equal and metadata equivalent
+            self.assertEqual(a, b)
+            compare_metadata(a, b)
+            # should be conceptually equal but not necessarily metadata equivalent
+            self.assertEqual(b, nt_contiguous)
+            self.assertEqual(b, nt_noncontiguous)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
