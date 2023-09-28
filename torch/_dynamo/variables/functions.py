@@ -651,19 +651,22 @@ class TritonKernelVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .dicts import ConstDictVariable
-        from .lists import BaseListVariable, TupleVariable
+        from .lists import BaseListVariable
 
         grid = self.grid
 
         if grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")
 
+        # Both for grid's meta as well as for the kernel, we need combined
+        # args and kwargs normalized
+        normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        meta = ConstDictVariable(normalized_args, dict)
+
         # If the grid is a function, then lets execute it and convert it to
         # a list
         if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
             # Populate the special "meta" argument to call the grid function
-            d = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
-            meta = ConstDictVariable(d, dict)
             grid = grid.call_function(tx, [meta], {})
 
         # Now, the grid must be a list either originally or through above
@@ -684,7 +687,7 @@ class TritonKernelVariable(VariableTracker):
             # Super hacky but on AMD __module__ is not set
             fn.__module__ = "itertools"
 
-        # Pass args and kwargs as tuple and dict so that if user defined triton
+        # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
         tx.output.create_proxy(
@@ -693,14 +696,13 @@ class TritonKernelVariable(VariableTracker):
             (),
             {
                 "grid": grid,
-                "args": TupleVariable(args).as_proxy(),
-                "kwargs": ConstDictVariable(kwargs, dict).as_proxy(),
+                "kwargs": meta.as_proxy(),
             },
         )
 
         return variables.ConstantVariable(
             None,
-            **VariableTracker.propagate(self, args),
+            **VariableTracker.propagate(self, args, kwargs.values()),
         )
 
     def call_method(

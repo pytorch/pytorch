@@ -1503,8 +1503,13 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         triton_kernel_wrapper_mutation(
             kernel=add_kernel,
             grid=grid,
-            args=(t1, t2, output, n_elements),
-            kwargs={"BLOCK_SIZE": 16},
+            kwargs={
+                "in_ptr0": t1,
+                "in_ptr1": t2,
+                "out_ptr": output,
+                "n_elements": n_elements,
+                "BLOCK_SIZE": 16,
+            },
         )
         self.assertEqual(output, torch_add)
         # Make sure it is modified
@@ -1512,13 +1517,18 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         # Test higher order function without mutation
         output = torch.zeros_like(t1)
-        ((_, _, o, _), _) = triton_kernel_wrapper_functional(
+        out_dict = triton_kernel_wrapper_functional(
             kernel=add_kernel,
             grid=grid,
-            args=(t1, t2, output, n_elements),
-            kwargs={"BLOCK_SIZE": 16},
+            kwargs={
+                "in_ptr0": t1,
+                "in_ptr1": t2,
+                "out_ptr": output,
+                "n_elements": n_elements,
+                "BLOCK_SIZE": 16,
+            },
         )
-        self.assertEqual(o, torch_add)
+        self.assertEqual(out_dict["out_ptr"], torch_add)
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
