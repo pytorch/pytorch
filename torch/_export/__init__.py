@@ -268,6 +268,10 @@ def capture_pre_autograd_graph(
 
         m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
         m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
+
+        # print(m.graph)
+        # for node in m.graph.nodes:
+        #     print(node.name, node.meta)
         return m
 
 
