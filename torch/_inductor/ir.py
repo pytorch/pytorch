@@ -3737,21 +3737,42 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
-        op_overload_packet = (
-            kernel._overloadpacket
-            if isinstance(kernel, torch._ops.OpOverload)
-            else kernel
-        )
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
+        assert isinstance(
+            kernel,
+            (
+                torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
+                torch._ops.HigherOrderOperator,
+            ),
+        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if (
-            getattr(torch.ops.aten, op_overload_packet.__name__, None)
-            is op_overload_packet
-        ):
-            self.kernel = (
-                f"at::{op_overload_packet.__name__}"
-                if V.graph.cpp_wrapper
-                else f"aten.{kernel.__name__}"
+        if kernel.__module__ == "torch._ops.aten":
+            op_base_name = (
+                kernel.__name__.split(".")[0]
+                if isinstance(kernel, torch._ops.OpOverload)
+                else kernel.__name__
             )
+            if V.graph.cpp_wrapper:
+                if (
+                    isinstance(kernel, torch._ops.OpOverload)
+                    and kernel._overloadname != "default"
+                ):
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    #
+                    # In theory, we should be able to do the following codegen for all aten fallback ops, but more
+                    # plumbing needs to be done in order to make that happen.
+                    # TODO: follow up on this
+                    self.kernel = f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    schema = kernel._schema
+                else:
+                    self.kernel = f"at::{op_base_name}"
+            else:
+                self.kernel = f"aten.{op_base_name}"
+
             if schema is not None:
                 self.args_default_value = [
                     {"type": x.real_type, "value": x.default_value}

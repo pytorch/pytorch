@@ -2830,6 +2830,16 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave_2(self):
+        def fn(x):
+            return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
+
+        self.common(
+            fn,
+            (torch.tensor([2, 4, 6]),),
+        )
+
     @config.patch(fallback_random=True)
     def test_randn_with_dtype_and_device(self):
         if self.device == "cuda":
