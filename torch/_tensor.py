@@ -366,6 +366,14 @@ class Tensor(torch._C.TensorBase):
                 ),
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
+        elif self.is_nested:
+            args_nested = (
+                self.values(),
+                self._nested_tensor_size(),
+                self._nested_tensor_strides(),
+                self._nested_tensor_storage_offsets()
+            )
+            return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor

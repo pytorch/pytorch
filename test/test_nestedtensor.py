@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import itertools
+import pickle
 import unittest
 from functools import partial
 
@@ -103,14 +104,14 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
 # Alternate approach to generating a random NT.
 # dims should be something like [5, None, 10], with None indicating that a
 # random ragged structure should be used
-def random_nt_from_dims(dims, device=None, dtype=None):
+def random_nt_from_dims(dims, device=None, dtype=None, requires_grad=False):
     sizes = [
         [d if d is not None else torch.randint(2, 10, size=(1,)).item() for d in dims[1:]]
         for d in range(dims[0])
     ]
     return torch.nested.nested_tensor([
         torch.randn(*size) for size in sizes
-    ], device=device, dtype=dtype)
+    ], device=device, dtype=dtype, requires_grad=requires_grad)
 
 
 # Creates an NT matching another NT's number of components and
@@ -2916,6 +2917,15 @@ class TestNestedTensorSubclass(TestCase):
             return buffer_from_jagged(out)
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    def test_pickle(self, device, dtype, requires_grad):
+        a = random_nt_from_dims([3, None, 5], device=device, dtype=dtype,
+                                requires_grad=requires_grad)
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertEqual(a, b)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
