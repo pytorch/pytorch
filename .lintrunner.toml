@@ -391,6 +391,7 @@ exclude_patterns=[
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '**/*.png',
+    '**/*.gz',
 ]
 command = [
     'python3',
