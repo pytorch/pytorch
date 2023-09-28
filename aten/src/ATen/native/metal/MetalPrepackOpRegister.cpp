@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-static c10::intrusive_ptr<Conv2dOpContext> unpack(
+c10::intrusive_ptr<Conv2dOpContext> unpack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
@@ -28,7 +28,7 @@ static c10::intrusive_ptr<Conv2dOpContext> unpack(
       output_max);
 }
 
-static c10::intrusive_ptr<LinearOpContext> unpack(
+c10::intrusive_ptr<LinearOpContext> unpack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     const c10::optional<Scalar>& output_min,
@@ -94,7 +94,7 @@ TORCH_LIBRARY(metal_prepack, m) {
       TORCH_SELECTIVE_SCHEMA("metal_prepack::linear_run(Tensor X, __torch__.torch.classes.metal.LinearOpContext W_prepack) -> Tensor Y"));
 }
 
-static c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
+c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
@@ -115,7 +115,7 @@ static c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
       output_max);
 }
 
-static c10::intrusive_ptr<LinearOpContext> linear_prepack(
+c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     const c10::optional<Scalar>& output_min,
