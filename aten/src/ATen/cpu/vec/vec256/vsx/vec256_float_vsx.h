@@ -264,6 +264,9 @@ class Vectorized<float> {
   Vectorized<float> atan() const {
     return {Sleef_atanf4_u10(_vec0), Sleef_atanf4_u10(_vec1)};
   }
+  Vectorized<float> atanh() const {
+    return {Sleef_atanhf4_u10(_vec0), Sleef_atanhf4_u10(_vec1)};
+  }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
     return {Sleef_atan2f4_u10(_vec0, b._vec0), Sleef_atan2f4_u10(_vec1, b._vec1)};
   }

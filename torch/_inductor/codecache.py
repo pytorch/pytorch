@@ -1009,8 +1009,7 @@ class AotCodeCache:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> Callable[..., Any]:
-        # TODO: update cpp_compile_command for different platforms
-        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
@@ -1096,7 +1095,7 @@ class AotCodeCache:
                     log.debug("aot constant bin removal command: %s", cmd)
                     run_command_and_check(cmd)
 
-                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    body = re.sub(r"[\W]", "_", consts_path)
                     symbol_list = []
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"

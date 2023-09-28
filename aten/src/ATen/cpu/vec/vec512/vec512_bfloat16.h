@@ -408,6 +408,9 @@ public:
   Vectorized<T> atan() const {
     return map(Sleef_atanf16_u10);
   }
+  Vectorized<T> atanh() const {
+    return map(Sleef_atanhf16_u10);
+  }
   Vectorized<T> atan2(const Vectorized<T> &b) const {
     __m512 lo, hi;
     __m512 b1, b2;

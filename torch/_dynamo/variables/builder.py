@@ -100,7 +100,6 @@ from .functions import (
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
-    DequeVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -260,20 +259,6 @@ class VariableBuilder:
             # dynamic_shapes
         }
 
-    @staticmethod
-    def list_type(value):
-        if is_namedtuple(value):
-            return functools.partial(NamedTupleVariable, tuple_cls=type(value))
-        # TODO(voz): Why do we have both this and `BaseListVariable`'s `cls_for`?
-        return {
-            tuple: TupleVariable,
-            list: ListVariable,
-            odict_values: ListVariable,
-            torch.nn.ParameterList: ListVariable,
-            torch.nn.ModuleList: ListVariable,
-            collections.deque: DequeVariable,
-        }[type(value)]
-
     def get_source(self):
         return self.source
 
@@ -338,7 +323,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     InspectSignatureVariable.create,
                     source=self.source,
-                    guards=self.make_guards(GuardBuilder.CLOSURE_MATCH),
+                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
             ),
             (comptime, lambda self, value: ComptimeVariable()),
@@ -538,11 +523,13 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(getfile(value), allow_torch=True)
+            and skipfiles.check_verbose(getfile(value), allow_torch=True).skipped
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
             return SkipFilesVariable(
                 value,
+                skipfiles.check_verbose(getfile(value), allow_torch=True).reason,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
@@ -562,7 +549,7 @@ class VariableBuilder:
             return UserFunctionVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.CLOSURE_MATCH),
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             return PythonModuleVariable(
@@ -835,7 +822,7 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
-        result = self.list_type(value)(
+        result = BaseListVariable.cls_for_instance(value)(
             output, mutable_local=MutableLocal(), guards=guards
         )
         if istype(value, list):
