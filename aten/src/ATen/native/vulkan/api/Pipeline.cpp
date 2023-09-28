@@ -233,7 +233,7 @@ void swap(ComputePipeline& lhs, ComputePipeline& rhs) noexcept {
   rhs.handle_ = tmp_handle;
 }
 
-bool operator==(
+static bool operator==(
     const ComputePipeline::Descriptor& _1,
     const ComputePipeline::Descriptor& _2) {
   return (

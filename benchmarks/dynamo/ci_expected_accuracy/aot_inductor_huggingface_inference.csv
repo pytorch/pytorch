@@ -25,7 +25,7 @@ LayoutLMForMaskedLM,pass,0
 LayoutLMForSequenceClassification,fail_to_run,0
 M2M100ForConditionalGeneration,pass,0
 MBartForCausalLM,pass,0
-MBartForConditionalGeneration,fail_to_run,0
+MBartForConditionalGeneration,pass,0
 MT5ForConditionalGeneration,pass,0
 MegatronBertForCausalLM,pass,0
 MegatronBertForQuestionAnswering,pass,0
@@ -40,8 +40,8 @@ RobertaForCausalLM,pass,0
 RobertaForQuestionAnswering,pass,0
 Speech2Text2ForCausalLM,pass,0
 T5ForConditionalGeneration,pass,0
-T5Small,fail_to_run,0
+T5Small,pass,0
 TrOCRForCausalLM,pass,0
 XGLMForCausalLM,pass,0
-XLNetLMHeadModel,fail_to_run,0
+XLNetLMHeadModel,pass,0
 YituTechConvBert,pass,0
