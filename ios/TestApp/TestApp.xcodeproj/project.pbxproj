@@ -363,7 +363,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CODE_SIGN_STYLE = Manual;
+                CODE_SIGN_STYLE = Automatic;
                 DEVELOPMENT_TEAM = "";
                 ENABLE_BITCODE = NO;
                 INFOPLIST_FILE = TestApp/Info.plist;
@@ -382,7 +382,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CODE_SIGN_STYLE = Manual;
+                CODE_SIGN_STYLE = Automatic;
                 DEVELOPMENT_TEAM = "";
                 ENABLE_BITCODE = NO;
                 INFOPLIST_FILE = TestApp/Info.plist;
@@ -401,7 +401,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 CODE_SIGN_IDENTITY = "iPhone Developer";
-                CODE_SIGN_STYLE = Manual;
+                CODE_SIGN_STYLE = Automatic;
                 DEVELOPMENT_TEAM = "";
                 INFOPLIST_FILE = TestAppTests/Info.plist;
                 IPHONEOS_DEPLOYMENT_TARGET = 12.4;
