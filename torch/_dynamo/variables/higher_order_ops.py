@@ -28,6 +28,7 @@ from ..exc import (
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
+from .dicts import ConstDictVariable
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable
 
@@ -71,13 +72,13 @@ def dynamo_enable_grad(tx):
         GradModeVariable.create(tx, org_value)
 
 
-def are_tensors(var):
-    from . import TensorVariable
-
-    if isinstance(var, TensorVariable):
+def only_consist_of(var, types):
+    if isinstance(var, types):
         return True
     if isinstance(var, (TupleVariable, ListVariable)):
-        return all(are_tensors(item) for item in var.items)
+        return all(only_consist_of(item, types) for item in var.items)
+    if isinstance(var, ConstDictVariable):
+        return all(only_consist_of(item, types) for item in var.items.values())
     return False
 
 
@@ -134,10 +135,21 @@ def validate_args_and_maybe_create_graph_inputs(
                 tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
         else:
-            raise unimplemented(
-                f"HigherOrderOperator with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
+            if manually_set_subgraph_inputs:
+                raise unimplemented(
+                    f"HigherOrderOperator with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            else:
+                # leverage tracer's lifting mechanism to lift these args.
+                if only_consist_of(
+                    a, (ConstantVariable, SymNodeVariable, TensorVariable)
+                ):
+                    new_arg = a
+                else:
+                    unimplemented(
+                        "HigherOrderOperator with body that accepts non-Tensors as input that can't be lifted by tracer."
+                    )
 
         args.append(new_arg)
     return args
@@ -211,7 +223,9 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
             else:
-                if not are_tensors(output):
+                from . import TensorVariable
+
+                if not only_consist_of(output, TensorVariable):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )

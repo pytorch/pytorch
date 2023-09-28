@@ -482,7 +482,7 @@ vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
 // vTensorStorage
 //
 
-api::VulkanImage allocate_image(
+static api::VulkanImage allocate_image(
     api::Context* const context_ptr,
     api::utils::uvec3& extents,
     const api::StorageType storage_type,
@@ -525,7 +525,7 @@ api::VulkanImage allocate_image(
       true);
 }
 
-api::VulkanBuffer allocate_buffer(
+static api::VulkanBuffer allocate_buffer(
     api::Context* const context_ptr,
     const int64_t numel,
     const api::StorageType storage_type,
