@@ -2,14 +2,21 @@ import tokenize
 
 cache = {}
 
+
 def clearcache():
     cache.clear()
 
+
 def _add_file(filename):
+    try:
+        with open(filename) as f:
+            tokens = list(tokenize.generate_tokens(f.readline))
+    except Exception:
+        cache[filename] = {}
+        return
+
     # NOTE: undefined behavior if file is not valid Python source,
     # since tokenize will have undefined behavior.
-    with open(filename, "r") as f:
-        tokens = list(tokenize.generate_tokens(f.readline))
     result = {}
     cur_name = ""
     cur_indent = 0
@@ -25,10 +32,10 @@ def _add_file(filename):
                 significant_indents.pop()
                 cur_name = cur_name.rpartition(".")[0]
         elif (
-            token.type == tokenize.NAME and
-            i + 1 < len(tokens) and
-            tokens[i + 1].type == tokenize.NAME and
-            (token.string == "class" or token.string == "def")
+            token.type == tokenize.NAME
+            and i + 1 < len(tokens)
+            and tokens[i + 1].type == tokenize.NAME
+            and (token.string == "class" or token.string == "def")
         ):
             # name of class/function always follows class/def token
             significant_indents.append(cur_indent)
@@ -38,6 +45,7 @@ def _add_file(filename):
         result[token.start[0]] = cur_name
 
     cache[filename] = result
+
 
 def get_funcname(filename, lineno):
     if filename not in cache:
