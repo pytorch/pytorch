@@ -4792,18 +4792,18 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
 
 class MkldnnRnnLayer(ExternKernelAlloc):
     def __init__(
-        self, layout, inputs, constant_args=(), kernel="aten.mkldnn_rnn_layer"
+        self,
+        layout,
+        inputs,
+        constant_args=(),
     ):
         super().__init__(
             layout,
             inputs,
             constant_args,
-        )
-        self.kernel = kernel
-
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+            None,
+            kernel="aten.mkldnn_rnn_layer",
+            cpp_kernel="at::mkldnn_rnn_layer",
         )
 
     @classmethod
@@ -4890,7 +4890,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                     output_stride,
                 ),
                 packed,
-                indices + [(list, i)],
+                indices + [(tuple, i)],
             )
             for i, (output_size, output_stride) in enumerate(
                 zip(output_sizes, output_strides)
