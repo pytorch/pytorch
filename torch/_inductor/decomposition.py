@@ -16,6 +16,7 @@ from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     pw_cast_for_opmath,
 )
+from typing import Optional
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import type_to_dtype
@@ -544,9 +545,9 @@ def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
 def miopen_batch_norm(
     input: torch.Tensor,
     weight: torch.Tensor,
-    bias: typing.Optional[torch.Tensor],
-    running_mean: typing.Optional[torch.Tensor],
-    running_var: typing.Optional[torch.Tensor],
+    bias: Optional[torch.Tensor],
+    running_mean: Optional[torch.Tensor],
+    running_var: Optional[torch.Tensor],
     training: bool,
     exponential_average_factor: float,
     epsilon: float,

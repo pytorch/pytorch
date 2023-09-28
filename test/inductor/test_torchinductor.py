@@ -4821,6 +4821,19 @@ class CommonTemplate:
         for t, t_comp in zip(out, out_comp):
             self.assertEqual(t.stride(), t_comp.stride())
 
+    def test_full_striding(self):
+        @torch.compile()
+        def foo(x):
+            return torch.full_like(x, .5)
+
+        x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=self.device)
+        for i in range(5):
+            permutation = list(range(len(x.shape)))
+            random.shuffle(permutation)
+            x = x.permute(permutation)
+
+            self.assertEqual(foo(x).stride(), x.stride())
+
     def test_as_strided_scatter(self):
         def fn(a, b):
             return aten.as_strided_scatter(
