@@ -235,7 +235,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "cauchy": {f16},
     "cholesky": {f32, f64},
     "exponential": {f16},
-    "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
     "geometric": {f16},
     "log_normal": {f16},
