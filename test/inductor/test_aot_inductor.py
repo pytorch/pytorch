@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import copy
 import sys
 import unittest
 
@@ -94,7 +93,6 @@ class AOTInductorModelRunner:
     ):
         if constraints is None:
             constraints = []
-        example_outputs = copy.deepcopy(example_outputs)
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs, options, constraints=constraints
         )
@@ -336,6 +334,18 @@ class AOTInductorTestsTemplate:
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
+
+    def test_seq(self):
+        layernorm = torch.nn.LayerNorm(10)
+        net = torch.nn.Sequential(
+            layernorm,
+            torch.nn.ReLU(),
+            layernorm,
+            torch.nn.ReLU(),
+        )
+
+        example_inputs = (torch.randn(10),)
+        self.check_model(net.eval(), example_inputs)
 
     def test_addmm(self):
         class Model(torch.nn.Module):

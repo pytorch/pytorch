@@ -3881,6 +3881,7 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):
+        assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
@@ -3889,12 +3890,20 @@ class FallbackKernel(ExternKernelAlloc):
         serializer = GraphModuleSerializer(None, None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
-        # TODO: only single output is supported
-        output_arguments = [
-            export_schema.Argument.create(
-                as_tensor=export_schema.TensorArgument(name=self.get_name())
-            )
-        ]
+        # serialize_outputs
+        if isinstance(self.outputs, (list, tuple)):
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=output.get_name())
+                )
+                for output in self.outputs
+            ]
+        else:
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=self.outputs.get_name())
+                )
+            ]
 
         node = ExternKernelNode(
             name=self.get_name(),
@@ -5457,6 +5466,10 @@ class StorageBox(MutableBox):
         return (
             (sum(read.index != 0 for read in self.data.get_reads()) > 1)
             if isinstance(self.data, Pointwise)
+            and all(
+                not isinstance(read, dependencies.StarDep)
+                for read in self.data.get_reads()
+            )
             else True
         )
 
