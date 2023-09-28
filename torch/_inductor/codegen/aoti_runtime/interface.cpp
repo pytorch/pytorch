@@ -183,4 +183,43 @@ AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
   })
 }
 
+AOTIRuntimeError AOTInductorModelCreate(
+    AOTInductorModelHandle* model_handle,
+    AOTInductorConstantMapHandle constant_map_handle) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+
+      for (auto const& kv : *input_map) {
+        constant_map->emplace(kv.first, kv.second);
+      }
+
+      auto model = new torch::aot_inductor::AOTInductorModel(
+          constant_map,
+          ""
+      );
+      *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
+  })
+}
+
+AOTIRuntimeError AOTInductorModelRun(
+    AOTInductorModelHandle model_handle,
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles) {
+  auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      model->run_impl(input_handles, output_handles, (cudaStream_t)nullptr, nullptr);
+  })
+}
+
+
+AOTIRuntimeError AOTInductorModelDelete(
+    AOTInductorModelHandle model_handle
+) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+      delete model;
+  })
+}
+
 } // extern "C"
