@@ -411,9 +411,7 @@ def cast_dtype_args_to_fp64(model):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
-        if (
-            node.op == "call_function"
-        ):
+        if node.op == "call_function":
             dtype = node.kwargs.get("dtype")
             if dtype is not None and is_float_dtype(dtype):
                 new_kwargs = dict(node.kwargs)
