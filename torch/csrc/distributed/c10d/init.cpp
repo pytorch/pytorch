@@ -1758,6 +1758,11 @@ Arguments:
               &::c10d::ProcessGroup::hasHooks,
               py::call_guard<py::gil_scoped_acquire>())
           .def(
+              "_enable_collectives_timing",
+              &::c10d::ProcessGroup::enableCollectivesTiming,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Enable timing of collectives by all backends. This might incur in additional overhead.")
+          .def(
               "_set_group_name",
               &::c10d::ProcessGroup::setGroupName,
               py::call_guard<py::gil_scoped_acquire>(),
