@@ -328,13 +328,14 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, size):
             view = l_x_.view(size);  l_x_ = size = None
             add = view + 0.5;  view = None
-            return add
+            return (add,)
 """,
             )
 
