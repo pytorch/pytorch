@@ -2365,6 +2365,9 @@ class Buffer(IRNode):
     name: Optional[str]
     layout: Layout
 
+    # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
+    # MultiOutput does NOT define this!
+
     def __post_init__(self):
         super().__post_init__()
         self.origin_node = None
@@ -2467,6 +2470,16 @@ class Buffer(IRNode):
         Returns the unbacked symbols which are defined by this IR node,
         because this is a data-dependent IR node, or item()
         """
+        # Uses the 'outputs' convention for MultiOutputLayout, since we
+        # can't read off sizes directly from the layout itself
+        if isinstance(self.layout, MultiOutputLayout):
+            assert hasattr(self, 'outputs')
+            assert self.outputs
+            r = set()
+            for o in self.outputs:
+                r |= o.get_unbacked_symbol_defs()
+            return r
+
         # This kernel defines all unbacked symbols... that it didn't get in as
         # arguments!
         defs = (
@@ -4884,6 +4897,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                 zip(output_sizes, output_strides)
             )
         ]
+        packed.outputs = output_ir
 
         return output_ir
 
