@@ -10,7 +10,7 @@ from ._functional_collectives_impl import _register_tensor_wrapper
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
-from torch._custom_ops import impl_abstract, get_ctx
+from torch._custom_ops import impl_abstract
 
 if torch._running_with_deploy():
     def is_torchdynamo_compiling():
@@ -326,9 +326,9 @@ def all_to_all_single(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if output_split_sizes is not None:
-        assert all([isinstance(size, (int, torch.SymInt)) for size in output_split_sizes]), output_split_sizes
+        assert all(isinstance(size, (int, torch.SymInt)) for size in output_split_sizes), output_split_sizes
     if input_split_sizes is not None:
-        assert all([isinstance(size, (int, torch.SymInt)) for size in input_split_sizes]), input_split_sizes
+        assert all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes), input_split_sizes
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_to_all_single(self, output_split_sizes, input_split_sizes, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)

@@ -24,11 +24,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    constrain_range,
-    magic_methods,
-    method_to_operator,
-)
+from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
@@ -754,7 +750,7 @@ def expand(x, sizes):
 
     x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
     if x_size_product > 0 and not any(
-        [V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes]
+        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
     ):
         # maybe realize input before broadcasting it
         x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)

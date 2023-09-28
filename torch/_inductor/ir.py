@@ -2473,12 +2473,14 @@ class Buffer(IRNode):
         # Uses the 'outputs' convention for MultiOutputLayout, since we
         # can't read off sizes directly from the layout itself
         if isinstance(self.layout, MultiOutputLayout):
-            assert hasattr(self, 'outputs')
-            assert self.outputs
-            r = set()
-            for o in self.outputs:
-                r |= o.get_unbacked_symbol_defs()
-            return r
+            assert hasattr(self, "outputs")
+            if isinstance(self.outputs, list):
+                r = set()
+                for o in self.outputs:
+                    r |= o.get_unbacked_symbol_defs()
+                return r
+            else:
+                return self.outputs.get_unbacked_symbol_defs()
 
         # This kernel defines all unbacked symbols... that it didn't get in as
         # arguments!
@@ -6246,9 +6248,12 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         self.input_split_sizes = input_split_sizes
 
     def get_unbacked_symbol_uses(self):
-        return free_unbacked_symbols(self.output_split_sizes) | free_unbacked_symbols(
-            self.input_split_sizes
-        )
+        r = set()
+        if self.output_split_sizes is not None:
+            r |= free_unbacked_symbols(self.output_split_sizes)
+        if self.input_split_sizes is not None:
+            r |= free_unbacked_symbols(self.input_split_sizes)
+        return r
 
     def should_emit_register_tensor_work(self):
         return False
@@ -6301,7 +6306,7 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         return MultiOutputNoSizeAssert(
             layout,
             coll,
-            f"",
+            "",
         )
 
     def codegen_input(self, wrapper, output_name, input_names):

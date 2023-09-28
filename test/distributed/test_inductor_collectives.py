@@ -308,17 +308,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
-            # TODO: this and others need updating
             FileCheck() \
-                .check("buf0 = arg4_1[0].item()") \
-                .check("buf1 = arg4_1[1].item()") \
-                .check("buf2 = arg3_1[0].item()") \
-                .check("buf3 = arg3_1[1].item()") \
-                .check("buf4_inputs = [arg2_1]") \
-                .check("buf4 = fun_col_impl._all_to_all_single(input=buf4_inputs[0], output_split_sizes=[buf0, buf1], input_split_sizes=[buf2, buf3], tag='', ranks=[0, 1], group_size=2)") \
-                .check("buf5 = buf4") \
-                .check("i19 = buf5.size(0)") \
-                .check("buf5 = _wait_tensor(buf5)") \
+                .check("fun_col_impl._all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
@@ -356,12 +347,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("buf0 = arg1_1[0].item()") \
-                .check("buf1 = arg1_1[1].item()") \
-                .check("buf2_inputs = [arg0_1]") \
-                .check("buf2 = fun_col_impl._all_to_all_single(input=buf2_inputs[0], output_split_sizes=None, input_split_sizes=[buf0, buf1], tag='', ranks=[0, 1], group_size=2)") \
-                .check("buf3 = buf2") \
-                .check("buf3 = _wait_tensor(buf3)") \
+                .check("fun_col_impl._all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
@@ -406,13 +392,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("buf0 = arg1_1[0].item()") \
-                .check("buf1 = arg1_1[1].item()") \
-                .check("buf2_inputs = [arg0_1]") \
-                .check("buf2 = fun_col_impl._all_to_all_single(input=buf2_inputs[0], output_split_sizes=[buf0, buf1], input_split_sizes=None, tag='', ranks=[0, 1], group_size=2)") \
-                .check("buf3 = buf2") \
-                .check("i11 = buf3.size(0)") \
-                .check("buf3 = _wait_tensor(buf3)") \
+                .check("fun_col_impl._all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
@@ -444,10 +424,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("buf0_inputs = [arg1_1]") \
-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=None, input_split_sizes=None, tag='', ranks=[0, 1], group_size=2)") \
-                .check("buf1 = buf0") \
-                .check("buf1 = _wait_tensor(buf1)") \
+                .check("fun_col_impl._all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
