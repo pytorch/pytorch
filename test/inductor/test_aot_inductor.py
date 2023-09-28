@@ -42,18 +42,7 @@ except (unittest.SkipTest, ImportError) as e:
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(
-        cls, model, example_inputs, example_outputs, options=None, constraints=None
-    ):
-        # AOTInductorModel relies on the caller to pass in output_tensors,
-        # so we need to explicitly allocate output tensors here.
-        if constraints is None:
-            constraints = []
-        output_tensors = []
-        example_outputs, output_spec = pytree.tree_flatten(example_outputs)
-        for output in example_outputs:
-            output_tensors.append(torch.empty_like(output))
-
+    def load(cls, model, example_inputs, options=None, constraints=None):
         # The exact API is subject to change
         so_path, exported = torch._export.aot_compile(
             model,
@@ -75,56 +64,41 @@ class AOTInductorModelRunner:
             with_cuda=True,
         ).run
 
-        return optimized, exported, output_tensors, output_spec
+        return optimized, exported
 
     @classmethod
-    def run_compiled(
-        cls, optimized, exported, example_inputs, output_tensors, output_spec
-    ):
+    def run_compiled(cls, optimized, exported, example_inputs):
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             (example_inputs, {}), exported.call_spec.in_spec
         )
         output_tensors = optimized(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, output_spec)
+        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
 
     @classmethod
-    def run(
-        cls, model, example_inputs, example_outputs, options=None, constraints=None
-    ):
-        if constraints is None:
-            constraints = []
-        optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
-            model, example_inputs, example_outputs, options, constraints=constraints
+    def run(cls, model, example_inputs, options=None, constraints=None):
+        optimized, exported = AOTInductorModelRunner.load(
+            model, example_inputs, options=options, constraints=constraints
         )
-        return AOTInductorModelRunner.run_compiled(
-            optimized, exported, example_inputs, output_tensors, output_spec
-        )
+        return AOTInductorModelRunner.run_compiled(optimized, exported, example_inputs)
 
     @classmethod
     def run_multiple(
         cls,
         model,
         list_example_inputs,
-        list_example_outputs,
         options=None,
         constraints=None,
     ):
-        optimized, exported, _, output_spec = AOTInductorModelRunner.load(
+        optimized, exported = AOTInductorModelRunner.load(
             model,
             list_example_inputs[0],
-            list_example_outputs[0],
             options=options,
             constraints=constraints,
         )
         list_output_tensors = []
-        for example_inputs, example_outputs in zip(
-            list_example_inputs, list_example_outputs
-        ):
-            output_tensors = [torch.empty_like(output) for output in example_outputs]
+        for example_inputs in list_example_inputs:
             list_output_tensors.append(
-                AOTInductorModelRunner.run_compiled(
-                    optimized, exported, example_inputs, output_tensors, output_spec
-                )
+                AOTInductorModelRunner.run_compiled(optimized, exported, example_inputs)
             )
         return list_output_tensors
 
@@ -138,9 +112,7 @@ def check_model(
 ):
     expected = model(*example_inputs)
     with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
-        actual = AOTInductorModelRunner.run(
-            model, example_inputs, expected, options, constraints
-        )
+        actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
     self.assertTrue(same(actual, expected))
 
 
@@ -151,12 +123,10 @@ def check_model_with_multiple_inputs(
     options=None,
     constraints=None,
 ):
-    list_expected = [
-        (model(*example_inputs),) for example_inputs in list_example_inputs
-    ]
+    list_expected = [model(*example_inputs) for example_inputs in list_example_inputs]
     with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
         list_actual = AOTInductorModelRunner.run_multiple(
-            model, list_example_inputs, list_expected, options, constraints
+            model, list_example_inputs, options, constraints
         )
     self.assertTrue(same(list_actual, list_expected))
 
