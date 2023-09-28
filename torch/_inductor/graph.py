@@ -526,6 +526,8 @@ class GraphLowering(torch.fx.Interpreter):
 
             if name is None:
                 name = f"constant{len(self.constants)}"
+            if name[0].isdigit():
+                name = f"constant_{name}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
