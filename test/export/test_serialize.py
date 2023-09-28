@@ -7,7 +7,7 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import dynamic_dim, export, save, load
+from torch._export import export, save, load
 from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
@@ -184,11 +184,10 @@ class TestSerialize(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
-    def check_graph(self, fn, inputs, constraints=None, _check_meta=True) -> None:
+    def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
-        constraints = [] if constraints is None else constraints
-        ep = export(fn, inputs, {}, constraints)
+        ep = torch.export.export(fn, inputs, {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
@@ -333,14 +332,10 @@ class TestDeserialize(TestCase):
                 e = d.view(d_s3)
                 return torch.cat([e, e])
 
-
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
-        constraints = [
-            dynamic_dim(inputs[0], 0),
-            dynamic_dim(inputs[2], 0),
-            dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
-        ]
-        self.check_graph(DynamicShapeSimpleModel(), inputs, constraints)
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
+        self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
     def test_sym_bool(self):
         def f(x, y):
@@ -354,11 +349,9 @@ class TestDeserialize(TestCase):
             return z + y + x[0], z
 
         inputs = (torch.ones(2, 3),)
-        constraints = [
-            dynamic_dim(inputs[0], 0),
-            dynamic_dim(inputs[0], 1),
-        ]
-        self.check_graph(f, inputs, constraints)
+        dim0_x, dim1_x = torch.export.dims("dim0_x", "dim1_x")
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
+        self.check_graph(f, inputs, dynamic_shapes)
 
     def test_module(self):
         class M(torch.nn.Module):
