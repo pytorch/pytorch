@@ -74,6 +74,7 @@ mkdir -p ../models
 python coreml_backend.py
 
 echo "Setting up the TestApp for LiteInterpreter"
+# NB: Need to also set the team ID with -t if you are running this locally
 ruby setup.rb --lite 1
 popd
 
@@ -82,6 +83,8 @@ ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodepro
 ```
 
 4. Prepare the artifacts
+https://docs.aws.amazon.com/devicefarm/latest/developerguide/test-types-ios-xctest.html
+
 ```
 export DEST_DIR="Payload"
 
@@ -92,8 +95,12 @@ cp -r TestApp.app "${DEST_DIR}"
 # TestApp.ipa is just a zip file with a payload subdirectory
 zip -vr TestApp.ipa "${DEST_DIR}"
 
+pushd TestApp.app/PlugIns
 # Also zip the TestAppTests.xctest test suite
 zip -vr TestAppTests.xctest.zip TestAppTests.xctest
+popd
+
+cp TestApp.app/PlugIns/TestAppTests.xctest.zip .
 popd
 ```
 

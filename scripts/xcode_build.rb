@@ -26,9 +26,7 @@ if not File.exist? (xcodeproj_path)
 end
 
 project = Xcodeproj::Project.open(xcodeproj_path)
-# There are 2 targets TestApp and TestAppTests, we need to build both
-target = project.targets.first
-test_suite = project.targets.last
+target = project.targets.first #TestApp
 header_search_path      = ['$(inherited)', "#{install_path}/include"]
 libraries_search_path   = ['$(inherited)', "#{install_path}/lib"]
 other_linker_flags      = ['$(inherited)', "-all_load"]
@@ -76,4 +74,4 @@ else
 end
 
 # run xcodebuild
-exec "xcodebuild clean build -project #{xcodeproj_path} -target #{target.name} -target #{test_suite.name} -sdk #{sdk} -configuration Release -arch #{arch}"
+exec "xcodebuild clean build -project #{xcodeproj_path} -alltargets -sdk #{sdk} -configuration Release -arch #{arch}"
