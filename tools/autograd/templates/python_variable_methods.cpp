@@ -34,7 +34,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 #include <ATen/FuncTorchTLS.h>
@@ -1067,13 +1067,13 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   Device device = self_.device();
   if (is_dtype) {
     scalar_type = r.scalartype(0);
-  } else {
-    at::TensorOptions options = torch::utils::options_from_string(type_name);
-    scalar_type = at::typeMetaToScalarType(options.dtype());
-    auto device_type = options.device().type();
-    if (device_type != device.type()) {
-      device = at::Device(device_type);
-    }
+    return THPVariable_Wrap(dispatch_to(self_, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
+  }
+  at::TensorOptions options = torch::utils::options_from_string(type_name);
+  scalar_type = at::typeMetaToScalarType(options.dtype());
+  auto device_type = options.device().type();
+  if (device_type != device.type()) {
+    device = at::Device(device_type);
   }
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();

@@ -108,6 +108,7 @@ def _disallowed_function_ids():
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
+        torch.jit.isinstance,
         torch.set_anomaly_enabled,
         torch.set_autocast_cache_enabled,
         torch.set_autocast_cpu_dtype,
@@ -118,10 +119,6 @@ def _disallowed_function_ids():
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
     ]
-    if torch.distributed.is_available():
-        from torch.distributed import _functional_collectives
-
-        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
 
     # extract all dtypes from torch
     dtypes = [
@@ -162,6 +159,7 @@ def _allowed_function_ids():
         disallowed_modules = (
             "torch.optim.",
             "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
+            "torch.utils._pytree",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
@@ -170,6 +168,13 @@ def _allowed_function_ids():
             "torch.fx.",
             "torch.distributed.fsdp.",
             "torch.distributed._tensor.",
+            # Inline through the ActivationWrapper in
+            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
+            # nn module calls torch.utils.checkpoint internally. If Dynamo does
+            # not trace this, AOT Autograd will try to trace this and can cause
+            # issues observed in
+            # https://github.com/pytorch/pytorch/issues/108269
+            "torch.distributed.algorithms.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
