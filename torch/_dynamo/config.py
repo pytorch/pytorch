@@ -93,6 +93,20 @@ allow_ignore_mark_dynamic = False
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
+# Uses CPython internal dictionary tags to detect mutation. There is some
+# overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.
+# guard_nn_modules unspecializes the nn module instance and adds guard for each
+# relevant member of the nn modules. On the other hand,
+# guard_nn_modules_using_dict_tags specializes on each nn module instance but
+# uses low overhead dict version matching to detect mutations, obviating the
+# need to guard on members of the nn modules. With
+# guard_nn_modules_using_dict_tags, the guard_nn_modules is not really required
+# but kept around for debugging and discussing unspecializing nn module
+# variables.
+# TODO(janimesh, voz): Remove both of these flags (or atleast guard_nn_modules)
+# once we have reached stability for the guard_nn_modules_using_dict_tags.
+guard_nn_modules_using_dict_tags = True
+
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
@@ -130,21 +144,8 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# If a PyTorch module is in this allowlist, torchdynamo will be allowed
-# to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-    torch.testing,
-    torch.ao.nn,
-    torch._refs,
-    torch._prims,
-    torch._decomp,
-    torch.utils._contextlib,
-    torch.utils._pytree,
-    torch.fx._pytree,
-    torch.sparse,
-}
+# legacy config, does nothing now!
+skipfiles_inline_module_allowlist = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it

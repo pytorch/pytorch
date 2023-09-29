@@ -1,4 +1,8 @@
+#if !defined(__s390x__)
 #include <cpuinfo.h>
+#else
+#include <unistd.h>
+#endif
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -14,6 +18,7 @@ uint32_t wipe_cache() {
   static size_t wipe_size = 0;
 
   if (wipe_buffer == nullptr) {
+#if !defined(__s390x__)
     CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
     const cpuinfo_processor* processor = cpuinfo_get_processor(0);
     if (processor->cache.l4 != nullptr) {
@@ -73,6 +78,16 @@ uint32_t wipe_cache() {
       default:
         wipe_size = 60 * 1024 * 1024;
         break;
+    }
+#endif
+#else
+    wipe_size = sysconf(_SC_LEVEL4_CACHE_SIZE);
+    if (wipe_size <= 0)
+    {
+      /*
+      * Take current max L4 cache size for s390x
+      */
+      wipe_size = 1024 * 1024 * 1024;
     }
 #endif
     LOG(INFO) << "Allocating cache wipe buffer of size " << wipe_size;
