@@ -1068,5 +1068,18 @@ def torch_compile_backend(
     args,
     *,
     options: Optional[Union[OrtBackendOptions, Mapping[str, Any]]] = None,
+    dynamic: Optional[bool] = None,
+    **kwargs,
 ):
+    if isinstance(options, OrtBackendOptions):
+        if options.dynamic != dynamic:
+            logger.warning(
+                "`options.dynamic` (%s) and `dynamic` (%s) are inconsistent. `options.dynamic` will be used.",
+                options.dynamic,
+                dynamic,
+            )
+    elif isinstance(options, dict):
+        options["dynamic"] = dynamic
+    else:
+        options = OrtBackendOptions(dynamic=dynamic)
     return OrtBackend.get_cached_instance_for_options(options)(graph_module, args)
