@@ -1241,7 +1241,9 @@ class GraphModule(torch.nn.Module):
         graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
         if graphs is not None:
             graph, true_graph, false_graph = graphs
-            self.assertExpectedInline(graph, """\
+            self.assertExpectedInline(
+                graph,
+                """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     sum_1 = l_x_.sum()
@@ -1249,15 +1251,22 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
-    return (cond,)""")
-            self.assertExpectedInline(true_graph, """\
+    return (cond,)""",
+            )
+            self.assertExpectedInline(
+                true_graph,
+                """\
 def forward(self, l_x_, l_x__false_branch):
     sin = torch.sin(l_x_);  l_x_ = None
-    return sin""")
-            self.assertExpectedInline(false_graph, """\
+    return sin""",
+            )
+            self.assertExpectedInline(
+                false_graph,
+                """\
 def forward(self, l_x__true_branch, l_x_):
     cos = torch.cos(l_x_);  l_x_ = None
-    return cos""")
+    return cos""",
+            )
 
     def test_cond_branches_no_arguments_no_closure(self):
         def fn(x):
@@ -1273,7 +1282,9 @@ def forward(self, l_x__true_branch, l_x_):
         graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
         if graphs is not None:
             graph, true_graph, false_graph = graphs
-            self.assertExpectedInline(graph, """\
+            self.assertExpectedInline(
+                graph,
+                """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     sum_1 = l_x_.sum();  l_x_ = None
@@ -1281,16 +1292,23 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
-    return (cond,)""")
-            self.assertExpectedInline(true_graph, """\
+    return (cond,)""",
+            )
+            self.assertExpectedInline(
+                true_graph,
+                """\
 def forward(self):
     ones = torch.ones(3, 4)
-    return ones""")
-            self.assertExpectedInline(false_graph, """\
+    return ones""",
+            )
+            self.assertExpectedInline(
+                false_graph,
+                """\
 def forward(self):
     ones = torch.ones(3, 4)
     sin = ones.sin();  ones = None
-    return sin""")
+    return sin""",
+            )
 
     def test_cond_side_effect_in_one_branches(self):
         backend = EagerAndRecordGraphs()
@@ -1835,7 +1853,9 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -1855,7 +1875,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-""")
+""",
+        )
 
     def test_grad_freevar_tensor(self):
         counters.clear()
@@ -1890,7 +1911,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -1911,7 +1934,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-""")
+""",
+        )
 
     def test_grad_capture_tensor(self):
         counters.clear()
@@ -1987,7 +2011,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2008,7 +2034,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-""")
+""",
+        )
 
     def test_grad_has_aux(self):
         counters.clear()
@@ -2029,7 +2056,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2053,7 +2082,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-""")
+""",
+        )
 
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
@@ -2073,7 +2103,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2098,7 +2130,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-""")
+""",
+        )
 
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
@@ -2129,7 +2162,9 @@ class GraphModule(torch.nn.Module):
         actual_tuple_var = normalize_gm(
             wrapped_gm_tuple_var.print_readable(print_output=False)
         )
-        self.assertExpectedInline(actual_const_var, """\
+        self.assertExpectedInline(
+            actual_const_var,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2157,8 +2192,11 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-""")
-        self.assertExpectedInline(actual_tuple_var, """\
+""",
+        )
+        self.assertExpectedInline(
+            actual_tuple_var,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2186,7 +2224,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-""")
+""",
+        )
 
     def test_grad_over_grad(self):
         counters.clear()
@@ -2204,7 +2243,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2236,7 +2277,8 @@ class GraphModule(torch.nn.Module):
 
                 _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
                 return sum_1
-""")
+""",
+        )
 
     def test_grad_with_graph_break(self):
         counters.clear()
@@ -2321,7 +2363,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2342,7 +2386,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return add
-""")
+""",
+        )
 
     def test_grad_disable_capture(self):
         counters.clear()
@@ -2401,7 +2446,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2420,7 +2467,8 @@ class GraphModule(torch.nn.Module):
             sum_2 = select.sum(1);  select = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             return add
-""")
+""",
+        )
 
     def test_vmap_free_const(self):
         y = 3
@@ -2436,7 +2484,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2456,7 +2506,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + 3;  add = None
             return add_1
-""")
+""",
+        )
 
     def test_vmap_free_tensor(self):
         y = torch.randn(3, 3)
@@ -2472,7 +2523,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2493,7 +2546,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + l_y_;  add = l_y_ = None
             return add_1
-""")
+""",
+        )
 
     def test_vmap_two_inputs(self):
         def fn(x, y):
@@ -2510,7 +2564,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2532,7 +2588,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + select_1;  add = select_1 = None
             return add_1
-""")
+""",
+        )
 
     def test_vmap_two_inputs_tuple_in_dims(self):
         in_dims = (0, 1)
@@ -2551,7 +2608,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2573,7 +2632,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + select_1;  add = select_1 = None
             return add_1
-""")
+""",
+        )
 
     def test_vmap_over_vmap_two_inputs(self):
         def fn(x, y):
@@ -2588,7 +2648,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2620,7 +2682,8 @@ class GraphModule(torch.nn.Module):
             def forward(self, select_2, select_3):
                 add = select_2 + select_3;  select_2 = select_3 = None
                 return add
-""")
+""",
+        )
 
     def test_vmap_over_vmap_captured(self):
         x = torch.ones(2, 3)
@@ -2636,7 +2699,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2665,7 +2730,8 @@ class GraphModule(torch.nn.Module):
             def forward(self, select_1, l_x_):
                 mul = l_x_ * select_1;  l_x_ = select_1 = None
                 return mul
-""")
+""",
+        )
 
     def test_vmap_multiple_outputs(self):
         x = torch.ones(2, 4, 3)
@@ -2680,7 +2746,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2700,7 +2768,8 @@ class GraphModule(torch.nn.Module):
             sum_1 = select.sum(0)
             sum_2 = select.sum(1);  select = None
             return (sum_1, sum_2)
-""")
+""",
+        )
 
     def test_vmap_multiple_outputs_diff_dims(self):
         x = torch.ones(2, 4, 3)
@@ -2715,7 +2784,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2735,7 +2806,8 @@ class GraphModule(torch.nn.Module):
             sum_1 = select.sum(0)
             sum_2 = select.sum(1);  select = None
             return (sum_1, sum_2)
-""")
+""",
+        )
 
     def test_vmap_multiple_outputs_out_dims_tuple(self):
         x = torch.ones(2, 4, 3)
@@ -2751,7 +2823,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2771,7 +2845,8 @@ class GraphModule(torch.nn.Module):
             sum_1 = select.sum(0)
             sum_2 = select.sum(1);  select = None
             return (sum_1, sum_2)
-""")
+""",
+        )
 
     def test_vmap_kwargs(self):
         counters.clear()
