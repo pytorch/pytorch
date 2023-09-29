@@ -34,6 +34,7 @@ import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._prims_common import (
@@ -48,7 +49,6 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
@@ -640,7 +640,10 @@ class Reduction(Loops):
         if not should_split:
             return ReductionHint.DEFAULT, 1
 
-        num_sm = get_device_properties(device).multi_processor_count
+        device_interface = get_interface_for_device(get_device_type(device))
+        num_sm = device_interface.Worker.get_device_properties(
+            device
+        ).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -3582,13 +3585,9 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
         else:
-            wrapper.writeline(
-                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
 class DynamicScalar(IRNode):
@@ -3627,6 +3626,10 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
@@ -3779,6 +3782,7 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):
+        assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
@@ -3787,12 +3791,20 @@ class FallbackKernel(ExternKernelAlloc):
         serializer = GraphModuleSerializer(None, None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
-        # TODO: only single output is supported
-        output_arguments = [
-            export_schema.Argument.create(
-                as_tensor=export_schema.TensorArgument(name=self.get_name())
-            )
-        ]
+        # serialize_outputs
+        if isinstance(self.outputs, (list, tuple)):
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=output.get_name())
+                )
+                for output in self.outputs
+            ]
+        else:
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=self.outputs.get_name())
+                )
+            ]
 
         node = ExternKernelNode(
             name=self.get_name(),
@@ -3826,6 +3838,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overlad_name,
                 self.op_overload,
                 exported_args,
+                self.outputs,
             )
         else:
             super().codegen(wrapper)
@@ -3879,7 +3892,8 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output, [])
+        packed.outputs = generate_output(example_output, [])
+        return packed.outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3899,7 +3913,7 @@ class MultiOutput(ExternKernel):
             elif itype == tuple:
                 # cpp wrapper code needs to use std::get<> to access a tuple
                 tuple_access = V.graph.wrapper_code.codegen_tuple_access(
-                    basename, str(i)
+                    basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
             else:
@@ -3908,11 +3922,11 @@ class MultiOutput(ExternKernel):
             return basename
 
     def codegen(self, wrapper):
-        line = V.graph.wrapper_code.declare
-        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
-        line += V.graph.wrapper_code.ending
-        V.graph.wrapper_code.writeline(line)
-        self.codegen_size_asserts(V.graph.wrapper_code)
+        wrapper.codegen_multi_output(
+            self.get_name(),
+            self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
+        )
+        self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
@@ -5326,6 +5340,10 @@ class StorageBox(MutableBox):
         return (
             (sum(read.index != 0 for read in self.data.get_reads()) > 1)
             if isinstance(self.data, Pointwise)
+            and all(
+                not isinstance(read, dependencies.StarDep)
+                for read in self.data.get_reads()
+            )
             else True
         )
 
