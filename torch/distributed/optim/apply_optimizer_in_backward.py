@@ -47,6 +47,9 @@ def _apply_optimizer_in_backward(
         # have their registered optimizer applied.
 
     """
+    torch._C._log_api_usage_once(
+        "torch.distributed.optim.apply_optimizer_in_backward"
+    )
 
     @no_type_check
     def _apply_optimizer_in_backward_to_param(param: torch.nn.Parameter) -> None:

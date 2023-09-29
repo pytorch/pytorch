@@ -7,6 +7,10 @@
       "MiniOpTest.test_aot_dispatch_static__test_nonzero": {
         "comment": "",
         "status": "xfail"
+      },
+      "MiniOpTestOther.test_aot_dispatch_static__test_nonzero_again": {
+        "comment": "",
+        "status": "xfail"
       }
     },
     "aten::sin_": {},

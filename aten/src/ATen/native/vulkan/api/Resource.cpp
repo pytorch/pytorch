@@ -242,7 +242,7 @@ BufferMemoryBarrier::BufferMemoryBarrier(
 // ImageSampler
 //
 
-static bool operator==(
+bool operator==(
     const ImageSampler::Properties& _1,
     const ImageSampler::Properties& _2) {
   return (
