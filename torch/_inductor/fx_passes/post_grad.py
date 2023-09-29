@@ -646,6 +646,9 @@ def reinplace_scatters(graph):
     for node in reversed(graph.nodes):
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
+            if node.args[0].op == "get_attr":
+                # skip mutation to attributes
+                continue
             copy_args_to_copy_nodes[(node.args[0], node.args[1])] = node
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])

@@ -8,6 +8,7 @@ import torch._export
 import torch._inductor
 
 import torch.fx._pytree as fx_pytree
+import torch.nn as nn
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.utils import aot_inductor_launcher
@@ -596,6 +597,34 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    # from torchbench/pytorch_stargan
+    def test_copy_attribute(self):
+        class Model(torch.nn.Module):
+            def __init__(self, conv_dim=64, c_dim=5, repeat_num=6):
+                super().__init__()
+                layers = []
+                layers.append(
+                    nn.Conv2d(
+                        3 + c_dim,
+                        conv_dim,
+                        kernel_size=7,
+                        stride=1,
+                        padding=3,
+                        bias=False,
+                    )
+                )
+                layers.append(
+                    nn.InstanceNorm2d(conv_dim, affine=True, track_running_stats=True)
+                )
+                layers.append(nn.ReLU(inplace=True))
+                self.main = torch.nn.Sequential(*layers)
+
+            def forward(self, x):
+                return self.main(x)
+
+        example_inputs = (torch.randn(8, 224, 224, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -612,6 +641,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_copy_attribute": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
@@ -633,7 +663,13 @@ class AOTInductorTestABICompatibleCuda(TestCase):
 
 
 copy_tests(
-    AOTInductorTestsTemplate, AOTInductorTestABICompatibleCuda, "abi_compatible_cuda"
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCuda,
+    "abi_compatible_cuda",
+    # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_copy_attribute": TestFailure(("abi_compatible_cuda",)),
+    },
 )
 
 
