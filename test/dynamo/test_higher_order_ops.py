@@ -1623,41 +1623,65 @@ def forward(self):
         )
 
     def test_nested_tuple_output(self):
-        counters.clear()
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        @torch.compile(backend=cnt)
         def f(x):
             ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
             return a + b
 
         x = torch.randn(2, 3)
-        result = f(x)
 
-        self.assertEqual(result, x.sin() + x.cos())
-        self.assertEqual(cnt.frame_count, 1)
+        counters.clear()
+        graph = self._test_wrap_simple(f, (x,), 2, 4, return_graph=True)
         self.assertEqual(len(counters["graph_break"]), 0)
-        self.assertEqual(len(backend.graphs), 1)
-        wrap_node = find_first_node(backend.graphs[0], wrap)
-        self.assertTrue(len(wrap_node.args), 1)
-        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 2)
+        self.assertExpectedInline(
+            graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        a = wrap[0]
+        b = wrap[1];  wrap = None
+
+        add = a + b;  a = b = None
+        return (add,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            child = l_x_.sin()
+            child_1 = l_x_.cos();  l_x_ = None
+            return (child, child_1)
+""",
+        )
 
     def test_output_with_dict(self):
-        counters.clear()
-        cnt = CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return wrap(lambda x: [{"a": -x}], x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result[0]["a"], -x)
-        self.assertEqual(cnt.frame_count, 1)
+
+        counters.clear()
+        graph = self._test_wrap_simple(f, (x,), 2, 2, return_graph=True)
         self.assertEqual(len(counters["graph_break"]), 0)
+        self.assertExpectedInline(
+            graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            child = -l_x_;  l_x_ = None
+            return (child,)
+""",
+        )
 
     def test_access_module_attr(self):
         counters.clear()
