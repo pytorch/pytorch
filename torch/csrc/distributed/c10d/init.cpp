@@ -308,7 +308,7 @@ py::object c10d_dequeue_python_event() {
   data["timestamp"] = evt.timestamp;
   data["duration"] = evt.duration_ms.value_or(-1);
 
-  return data;
+  return std::move(data);
 }
 
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
