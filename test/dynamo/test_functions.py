@@ -1287,6 +1287,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             cnts.frame_count, 4
         )  # Recompile! input is no longer a functools partial
 
+    def test_manual_seed(self):
+        @torch.compile
+        def foo():
+            torch.manual_seed(3)
+            return torch.randint(0, 5, (5,))
+
+        self.assertEqual(foo(), foo())
+        self.assertEqual(foo(), foo())
+
 
 def udf_mul(x, y):
     return x * y

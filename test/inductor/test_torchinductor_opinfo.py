@@ -239,8 +239,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
 }
 
 
@@ -255,14 +253,7 @@ if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 if not TEST_MKL:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "fft.hfft2": {b8, i32, i64, f32, f64},
-            "fft.hfftn": {b8, i32, i64, f32, f64},
-            "fft.ihfft2": {b8, i32, i64, f32, f64},
-            "fft.ihfftn": {b8, i32, i64, f32, f64},
-        }
-    )
+    inductor_expected_failures_single_sample["cpu"].update({})
 
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
@@ -297,6 +288,13 @@ def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
+<<<<<<< HEAD
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
+    wrapper_noop_set_seed
+)
+
+=======
+>>>>>>> a62192f7ba4... TorchInductor Opinfo fixes for rng ops
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
     torch.testing._internal.common_utils.disable_functorch
