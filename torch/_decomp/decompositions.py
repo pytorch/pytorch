@@ -4192,9 +4192,9 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
+@register_decomposition([aten.baddbmm])
 @out_wrapper()
 @pw_cast_for_opmath
-@register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
@@ -4207,6 +4207,12 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition(aten.floor_divide)
+@out_wrapper()
+def floor_divide(self, other):
+    return torch.div(self, other, rounding_mode="floor")
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

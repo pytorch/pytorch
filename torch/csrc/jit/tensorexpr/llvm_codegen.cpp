@@ -491,9 +491,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),
       bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
-#if LLVM_VERSION_MAJOR >= 15
-  context_->setOpaquePointers(true);
-#endif
   if (!triple) {
     triple = LLVMTargetTriple();
   }
@@ -2589,7 +2586,7 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
       size,
       nullptr,
       nullptr);
-
+#endif
   // Insert the bitcast into the block.
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Value* malloc = irb_.Insert(I);

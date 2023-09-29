@@ -20,6 +20,8 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
+from .allowed_functions import is_allowed
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -49,7 +51,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import LocalSource, TypeSource
+from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -182,7 +184,7 @@ class GuardCodeList:
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Any], str],
+        id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
@@ -468,6 +470,11 @@ class GuardBuilder(GuardBuilderBase):
             # leading to recompilations.
             log.warning("Skipping nn module guard on LSTMs")
             return
+
+        # Dynamo does not trace inside the inbuilt torch nn modules. Skip
+        # guarding on those. More rationale at https://github.com/pytorch/pytorch/issues/110048
+        if is_allowed(val.__class__):
+            return
         try:
             g = torch._C._dynamo.guards.nn_module_guard(val)
         except AttributeError:
@@ -480,26 +487,19 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        self._produce_guard_code(guard, [f"{name}({ref})"])
+        if guards_log.isEnabledFor(logging.DEBUG):
+            # Avoid debug_msg related python bytecode overhead in the runtime.
+
+            # debug_msg is only for debugging help and goes to kwargs of guard call,
+            # which is ignored.
+            self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
+        else:
+            self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
         if guard.is_local():
             return self.ID_MATCH(guard)
-
-    def CLOSURE_MATCH(self, guard: Guard):
-        """matches a closure by __code__ id."""
-        if guard.is_local():
-            val = self.get(guard.name)
-            # Strictly only want user-defined functions
-            if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                ref = self.arg_ref(guard)
-                code = [
-                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
-                ]
-                self._produce_guard_code(guard, code)
-            else:
-                self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
@@ -923,6 +923,20 @@ class PyExprCSEPass:
         return replacer.preface, _ast_unparse(new_node)
 
 
+def must_add_nn_module_guards(guard):
+    # For config.guard_nn_modules=False, we can skip all the guards that
+    # originate from inside of nn module except for a few categories.
+    return (
+        # Guard for defaults
+        isinstance(guard.originating_source, DefaultsSource)
+        # Guard using dict tags if the config flag is set
+        or (
+            config.guard_nn_modules_using_dict_tags
+            and guard.create_fn is GuardBuilder.NN_MODULE
+        )
+    )
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -994,14 +1008,10 @@ class CheckFunctionManager:
             if (
                 not config.guard_nn_modules
                 and guard.is_nn_module()
-                # Default func args must be guarded on.
-                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
-                and "__defaults__" not in guard.name
-                and "__kwdefaults__" not in guard.name
-                # Force-enable NN_MODULE checks
-                and guard.create_fn is not GuardBuilder.NN_MODULE
+                and not must_add_nn_module_guards(guard)
             ):
                 continue
+
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
@@ -1066,15 +1076,19 @@ class CheckFunctionManager:
             if not log_only:
                 code_parts.append(code)
 
-        # TODO: Maybe better not to repeatedly spam the same guard information
-        # for each individual piece?  Not sure.
+        seen = set()
         for gcl in local_builder.code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
+        seen = set()
         for gcl in global_builder.code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
