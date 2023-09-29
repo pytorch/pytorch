@@ -1352,7 +1352,7 @@ class GlobalsGuardAccessor : public GuardAccessor {
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     // Ignore the obj arg. Just pass on the globals dict to the child managers.
-    return _guard_manager->check_verbose_nopybind(obj);
+    return _guard_manager->check_verbose_nopybind(_globals_dict);
   }
 
  private:
