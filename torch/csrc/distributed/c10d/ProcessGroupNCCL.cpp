@@ -647,7 +647,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_);
+  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING));
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
