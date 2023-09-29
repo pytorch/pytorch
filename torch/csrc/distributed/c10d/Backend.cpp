@@ -18,7 +18,7 @@ void commonEventinit(
   evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
 }
-}
+} // namespace
 
 Backend::Backend(int rank, int size)
     : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
