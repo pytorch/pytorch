@@ -2157,6 +2157,70 @@ TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
   ASSERT_TRUE(std::includes(all_ops.begin(), all_ops.end(), cpu_ops.begin(), cpu_ops.end(), cmp_lambda));
 }
 
+Tensor symint_op(const Tensor& self, int64_t length) {
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymNonSymCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op));
+
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_op", "");
+
+  opHandle.typed<Tensor(const Tensor&, int64_t)>().call(dummyTensor(c10::DispatchKey::CPU), 4);
+  opHandle.typed<Tensor(const Tensor&, c10::SymInt)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+
+  expectThrows<c10::Error>([&] {
+    opHandle.typed<Tensor(const Tensor&, const c10::SymInt&)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+  }, "Tried to access or call an operator with a wrong signature");
+}
+
+Tensor symint_op2(const Tensor& self, c10::SymInt length) {
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymSymCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op2));
+
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_op", "");
+
+  opHandle.typed<Tensor(const Tensor&, int64_t)>().call(dummyTensor(c10::DispatchKey::CPU), 4);
+  opHandle.typed<Tensor(const Tensor&, c10::SymInt)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+  // TODO: We should reject this on principle, but today it accidentally works
+  // due to going through the boxed calling convention.
+  //
+  // First, we attempt to test if const SymInt& has SymInt. It does not,
+  // because we only accept something as SymInt if it has exactly SymInt in
+  // its signature. So we check if there is a non-symint kernel. But there is
+  // no non-SymInt kernel, because we only registered a real SymInt kernel.
+  // When this occurs, we fall back to the boxed calling convention.  And the
+  // boxed calling convention can deal with const SymInt& fine, as during
+  // boxing it will just create a SymInt to push onto the argument stack and
+  // everything is fine.
+  opHandle.typed<Tensor(const Tensor&, const c10::SymInt&)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+}
+
+Tensor symint_op3(const Tensor& self, const c10::SymInt& length) {
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op3));
+  }, "doesn't match the expected function schema");
+}
+
 }
 
 #pragma GCC diagnostic pop
