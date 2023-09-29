@@ -9,10 +9,7 @@ import torch.onnx.operators
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_SDPA,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 
 
 class CutomizedCtxManager:
@@ -288,7 +285,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
@@ -747,11 +744,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        ones = torch.ones(1)
+        x = torch.ones(1)
 
-        zeros = torch.zeros(1)
+        y = torch.zeros(1)
 
-        add = ones + zeros;  ones = zeros = None
+        add = x + y;  x = y = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
         return (add,)
@@ -785,11 +782,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        ones = torch.ones(1)
+        x = torch.ones(1)
 
-        zeros = torch.zeros(1)
+        y = torch.zeros(1)
 
-        add = ones + zeros;  ones = zeros = None
+        add = x + y;  x = y = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
         return (add,)
@@ -829,17 +826,17 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        ones = torch.ones(1)
+        x = torch.ones(1)
 
-        zeros = torch.zeros(1)
+        y = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
 
-        add = ones + zeros;  zeros = None
+        add = x + y;  y = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        add_1 = add + ones;  add = ones = None
+        add_1 = add + x;  add = x = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
         return (add_1,)
@@ -868,10 +865,10 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        add = l_x_ + 1;  l_x_ = None
+        y = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
-        return (add,)
+        return (y,)
 """
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))

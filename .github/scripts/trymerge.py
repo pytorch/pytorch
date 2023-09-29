@@ -1313,6 +1313,8 @@ def find_matching_merge_rule(
             f"{type(e)}\n{e}"
         )
     checks = get_classifications(
+        pr.pr_num,
+        pr.project,
         checks,
         pr.last_commit()["oid"],
         base_rev,
@@ -1575,6 +1577,27 @@ where
         return []
 
 
+@retries_decorator()
+def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
+    """
+    Query HUD API to find similar failures to decide if they are flaky
+    """
+    # NB: This doesn't work internally atm because this requires making an
+    # external API call to HUD
+    failures = gh_fetch_url(
+        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+        data=f"repo={project}",
+        headers={
+            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+            "Accept": "application/vnd.github.v3+json",
+        },
+        method="POST",
+        reader=json.load,
+    )
+
+    return failures.get(str(pr_num), {}) if failures else {}
+
+
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
 
 
@@ -1595,7 +1618,24 @@ def is_broken_trunk(
     )
 
 
+def is_flaky(
+    head_job: Optional[Dict[str, Any]],
+    flaky_rules: List[FlakyRule],
+    drci_classifications: Any,
+) -> bool:
+    if not head_job or not drci_classifications:
+        return False
+
+    # Consult the list of flaky failures from Dr.CI
+    return any(
+        head_job["name"] == flaky["name"]
+        for flaky in drci_classifications.get("FLAKY", [])
+    ) or any(rule.matches(head_job) for rule in flaky_rules)
+
+
 def get_classifications(
+    pr_num: int,
+    project: str,
     checks: Dict[str, JobCheckState],
     head_sha: str,
     merge_base: Optional[str],
@@ -1652,6 +1692,11 @@ def get_classifications(
                     overwrite_failed_run_attempt=False,
                 )
 
+    # Get the failure classification from Dr.CI, which is the source of truth
+    # going forward
+    drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
+    print(f"From Dr.CI: {json.dumps(drci_classifications)}")
+
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
         if check.status == "SUCCESS":
@@ -1682,7 +1727,7 @@ def get_classifications(
             )
             continue
 
-        elif any(rule.matches(head_sha_job) for rule in flaky_rules):
+        elif is_flaky(head_sha_job, flaky_rules, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id, check.title
             )
@@ -2007,6 +2052,8 @@ def merge(
 
             checks = pr.get_checkrun_conclusions()
             checks = get_classifications(
+                pr.pr_num,
+                pr.project,
                 checks,
                 pr.last_commit()["oid"],
                 pr.get_merge_base(),

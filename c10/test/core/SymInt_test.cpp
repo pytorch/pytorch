@@ -39,15 +39,57 @@ TEST(SymIntTest, SingletonSymNode) {
   ASSERT_FALSE(a == c);
   ASSERT_TRUE(a != c);
 
-  // Tentaively throw an error when comparing with a non-singleton, this is not
-  // necessarily the right behavior.
-  ASSERT_THROW((void)(a == d), c10::Error);
-  ASSERT_THROW((void)(a != d), c10::Error);
-  ASSERT_THROW((void)(d == a), c10::Error);
-  ASSERT_THROW((void)(d != a), c10::Error);
+  ASSERT_FALSE(a == d);
+  ASSERT_TRUE(a != d);
+  ASSERT_FALSE(d == a);
+  ASSERT_TRUE(d != a);
 
-  ASSERT_THROW((void)(a >= b), c10::Error); // "not supported by..."
-  ASSERT_THROW((void)(a >= d), c10::Error); // "not supported by..."
-  ASSERT_THROW((void)(d >= a), c10::Error); // "NYI"
+  // ge
+  ASSERT_TRUE(a >= a);
+  ASSERT_TRUE(a >= b);
+  ASSERT_TRUE(b >= a);
+  ASSERT_FALSE(a >= c);
+  ASSERT_FALSE(c >= a);
+  ASSERT_FALSE(c >= 3);
+  ASSERT_TRUE(c >= 2);
+  ASSERT_TRUE(c >= 1);
+  ASSERT_TRUE(std::numeric_limits<int64_t>::max() >= c);
+  ASSERT_FALSE(std::numeric_limits<int64_t>::max() - 1 >= c);
+  ASSERT_FALSE(1 >= c);
+
+  // lt
+  ASSERT_FALSE(a < a);
+  ASSERT_FALSE(a < b);
+  ASSERT_FALSE(b < a);
+  ASSERT_FALSE(a < c);
+  ASSERT_FALSE(c < a);
+  ASSERT_FALSE(a < std::numeric_limits<int64_t>::max());
+  ASSERT_FALSE(3 < a);
+  ASSERT_FALSE(2 < a);
+  ASSERT_TRUE(1 < a);
+
+  // le
+  ASSERT_TRUE(a <= a);
+  ASSERT_TRUE(b <= a);
+  ASSERT_TRUE(a <= b);
+  ASSERT_FALSE(c <= a);
+  ASSERT_FALSE(a <= c);
+  ASSERT_FALSE(3 <= c);
+  ASSERT_TRUE(2 <= c);
+  ASSERT_TRUE(1 <= c);
+  ASSERT_TRUE(c <= std::numeric_limits<int64_t>::max());
+  ASSERT_FALSE(c <= std::numeric_limits<int64_t>::max() - 1);
+  ASSERT_FALSE(c <= 1);
+
+  // gt
+  ASSERT_FALSE(a > a);
+  ASSERT_FALSE(b > a);
+  ASSERT_FALSE(a > b);
+  ASSERT_FALSE(c > a);
+  ASSERT_FALSE(a > c);
+  ASSERT_FALSE(std::numeric_limits<int64_t>::max() > a);
+  ASSERT_FALSE(a > 3);
+  ASSERT_FALSE(a > 2);
+  ASSERT_TRUE(a > 1);
 }
 #endif
