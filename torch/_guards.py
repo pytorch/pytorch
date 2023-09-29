@@ -611,6 +611,8 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
+        # TODO(voz): Is this too silent? Should this be an assert that says "You must turn on compiled autograd"
+        self.requires_compiled_autograd = False
 
     @staticmethod
     @contextmanager

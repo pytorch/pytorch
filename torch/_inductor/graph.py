@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
+from torch._logging import LazyString
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     magic_methods,
@@ -525,6 +526,8 @@ class GraphLowering(torch.fx.Interpreter):
 
             if name is None:
                 name = f"constant{len(self.constants)}"
+            if name[0].isdigit():
+                name = f"constant_{name}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
@@ -670,7 +673,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
-            assert isinstance(value, (TensorBox, sympy.Expr))
+            assert isinstance(
+                value, (TensorBox, sympy.Expr)
+            ), "Unsupported inductor graph input type: " + type(value)
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -701,6 +706,7 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
+        log.debug("lowering %s", LazyString(lambda: n.format_node()))
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)

@@ -10,9 +10,6 @@ except ModuleNotFoundError:
     np = None
 
 
-import itertools
-import weakref
-
 import sympy
 
 import torch._numpy as tnp
@@ -27,7 +24,7 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource
 from ..utils import (
     fqn,
     get_custom_getattr,
@@ -223,7 +220,7 @@ class TensorVariable(VariableTracker):
         result = None
         options = VariableTracker.propagate(self)
         if name == "ndim" and self.ndim is not None:
-            result = ConstantVariable(self.ndim, **options)
+            result = ConstantVariable.create(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
             result = TorchVariable(self.dtype, **options)
         elif name == "device" and self.device is not None:
@@ -231,16 +228,16 @@ class TensorVariable(VariableTracker):
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
-            result = ConstantVariable(self.device.type == "cuda", **options)
+            result = ConstantVariable.create(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
-            sizes = [variables.ConstantVariable(x) for x in self.size]
+            sizes = [variables.ConstantVariable.create(x) for x in self.size]
             result = SizeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
-            result = ConstantVariable(self.requires_grad, **options)
+            result = ConstantVariable.create(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
-            result = ConstantVariable(self.is_quantized, **options)
+            result = ConstantVariable.create(self.is_quantized, **options)
         elif name == "is_sparse" and self.is_sparse is not None:
-            result = ConstantVariable(self.is_sparse, **options)
+            result = ConstantVariable.create(self.is_sparse, **options)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -317,7 +314,9 @@ class TensorVariable(VariableTracker):
             if self.size:
                 length = self.size[0]
             else:
-                dyn_length = self.call_method(tx, "size", [ConstantVariable(0)], {})
+                dyn_length = self.call_method(
+                    tx, "size", [ConstantVariable.create(0)], {}
+                )
                 # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values prouced through
                 # symbolic_shapes, but that end up as int/sympy.Integer
                 assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
@@ -360,11 +359,11 @@ class TensorVariable(VariableTracker):
 
             def make_const_size_variable(x, **options):
                 return SizeVariable(
-                    [ConstantVariable(y, **options) for y in x], **options
+                    [ConstantVariable.create(y, **options) for y in x], **options
                 )
 
             RetVariable = (
-                make_const_size_variable if name == "size" else ConstantVariable
+                make_const_size_variable if name == "size" else ConstantVariable.create
             )
 
             # Technically, this should not be necessary, but I'm including it
@@ -374,7 +373,7 @@ class TensorVariable(VariableTracker):
                 if dim is None:
                     return RetVariable(r, **options)
                 else:
-                    return ConstantVariable(r[dim], **options)
+                    return ConstantVariable.create(r[dim], **options)
 
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
@@ -387,7 +386,7 @@ class TensorVariable(VariableTracker):
                 else:
                     fake_r = getattr(fake, name)(dim)
                     if not free_symbols(fake_r):
-                        return ConstantVariable(int(fake_r), **options)
+                        return ConstantVariable.create(int(fake_r), **options)
 
             # Oops, it's not constant.  Do the dynamic shapes path.
             return wrap_fx_proxy(
@@ -402,13 +401,13 @@ class TensorVariable(VariableTracker):
 
         elif name in ("numel", "nelement"):
             if self.size is not None:
-                return ConstantVariable(product(self.size), **options)
+                return ConstantVariable.create(product(self.size), **options)
 
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 fake_r = fake.numel()
                 if not free_symbols(fake_r):
-                    return ConstantVariable(int(fake_r), **options)
+                    return ConstantVariable.create(int(fake_r), **options)
 
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
 
@@ -424,15 +423,17 @@ class TensorVariable(VariableTracker):
             )
 
         elif name in ("ndimension", "dim") and self.ndim is not None:
-            constant_result = ConstantVariable(self.ndim, **options)
+            constant_result = ConstantVariable.create(self.ndim, **options)
         elif name == "is_floating_point" and self.dtype is not None:
-            constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
+            constant_result = ConstantVariable.create(
+                self.dtype.is_floating_point, **options
+            )
         elif name == "is_contiguous" and self.is_contiguous is not None:
             if "memory_format" in kwargs:
                 memory_format = kwargs.pop("memory_format").as_python_constant()
             else:
                 memory_format = torch.contiguous_format
-            constant_result = ConstantVariable(
+            constant_result = ConstantVariable.create(
                 memory_format in self.is_contiguous, **options
             )
         elif (
@@ -445,11 +446,11 @@ class TensorVariable(VariableTracker):
                 0
             ]
             if self.device.type == "cuda":
-                constant_result = ConstantVariable(
+                constant_result = ConstantVariable.create(
                     f"torch.cuda.{tensortype.__name__}", **options
                 )
             else:
-                constant_result = ConstantVariable(
+                constant_result = ConstantVariable.create(
                     f"torch.{tensortype.__name__}", **options
                 )
         elif (
@@ -461,7 +462,7 @@ class TensorVariable(VariableTracker):
             # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
             # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
             tensor_type = args[0].as_python_constant()
-            tensor_type_const = ConstantVariable(fqn(tensor_type), **options)
+            tensor_type_const = ConstantVariable.create(fqn(tensor_type), **options)
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -473,7 +474,7 @@ class TensorVariable(VariableTracker):
             )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
-            constant_result = ConstantVariable(index, **options)
+            constant_result = ConstantVariable.create(index, **options)
         else:
             constant_result = None
 
@@ -551,7 +552,9 @@ class TensorVariable(VariableTracker):
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
         elif name == "__len__":
-            return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
+            return self.call_method(
+                tx, "size", [ConstantVariable.create(0, **options)], {}
+            )
         elif name == "__setitem__":
             key, value = args
 
@@ -578,7 +581,7 @@ class TensorVariable(VariableTracker):
                 operator.setitem,
                 *proxy_args_kwargs([self] + list(args), kwargs),
             )
-            return ConstantVariable(None, **options)
+            return ConstantVariable.create(None, **options)
         elif name in ("resize_", "resize_as_"):
             if "memory_format" in kwargs:
                 memory_format = kwargs["memory_format"].as_python_constant()
@@ -680,65 +683,36 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
+
             if not self.source:
                 # Intermediary
-
-                # This function is only invoked if the passed-in func has no source,
-                # useful for intermediary created functions.
-                def _lifted_fn_src(name):
-                    base = name
-                    for i in itertools.count():
-                        if name not in tx.output.global_scope:
-                            src = GlobalSource(name)
-                            tx.output.guards.add(
-                                src.make_guard(GuardBuilder.WEAKREF_ALIVE)
-                            )
-                            tx.output.install_global(name, weakref.ref(fn))
-                            break
-                        name = f"{base}_{i}"
-                    return src
-
-                # Either we have a source already, or we must make a weakref to the original fn
-                # and reference that.
-                src = fn_var.source if fn_var.source else _lifted_fn_src(name)
-
-                from .builder import GraphArg
+                src = fn_var.source
+                if src or (
+                    isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
+                    and not fn_var.func.source
+                ):
+                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                torch._guards.TracingContext.get().requires_compiled_autograd = True
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
                 fn = functools.partial(trace_wrapped, fn=fn)
 
-                # This little piece of logic ensures we only ever lift a given hook up once
-                # this important, because a dynamo->aot_autograd invariant is no duplicate sources in inputs.
-                hook_proxy = None
-                for node in tx.output.root_tracer.graph.nodes:
-                    if node.op == "placeholder":
-                        if "source" in node.meta:
-                            if node.meta["source"] == src:
-                                hook_proxy = node.meta["proxy"]
-                                break
+                def _register_hook_trampoline(tensor):
+                    tensor.register_hook(fn)
+                    return tensor
 
-                if hook_proxy is None:
-                    hook_proxy = tx.output.root_tracer.create_graph_input(
-                        name, type(fn), source=src
-                    )
-                    hook_proxy.node.meta["source"] = src
-                    grapharg = GraphArg(src, fn, False, None)
-                    hook_proxy.node.meta["grapharg"] = grapharg
-                    hook_proxy.node.meta["proxy"] = hook_proxy
-                # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
-                # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
-                # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
-                self.as_proxy().register_hook(hook_proxy)
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        _register_hook_trampoline,
+                        (self.as_proxy(),),
+                        {},
+                    ),
+                    **options,
+                )
 
-                if fn_var.source:
-                    tx.output.guards.add(
-                        fn_var.source.make_guard(GuardBuilder.ID_MATCH)
-                    )
-            else:
-                assert (
-                    fn_var.source
-                ), "Unreachable - See unimplemented for lambdas above"
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
 
@@ -776,7 +750,7 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable(int(sym_num))
+            return ConstantVariable.create(int(sym_num))
 
         return SymNodeVariable(proxy, sym_num, **options)
 
@@ -1028,14 +1002,14 @@ class NumpyNdarrayVariable(TensorVariable):
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
         elif name in ("ndim", "itemsize"):
-            return ConstantVariable(getattr(example_ndarray, name), **options)
+            return ConstantVariable.create(getattr(example_ndarray, name), **options)
         elif name in ("shape", "stride"):
             if not free_symbols(r := getattr(example_ndarray, name)):
-                return ConstantVariable(tuple(int(r) for r in r), **options)
+                return ConstantVariable.create(tuple(int(r) for r in r), **options)
             return insert_into_graph()
         elif name == "size":
             if not free_symbols(r := example_ndarray.size):
-                return ConstantVariable(int(r), **options)
+                return ConstantVariable.create(int(r), **options)
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
@@ -1097,7 +1071,7 @@ class UnspecializedPythonVariable(TensorVariable):
             if g.is_volatile:
                 g.create_fn = GuardBuilder.CONSTANT_MATCH
 
-        return ConstantVariable(value=self.raw_value, guards=self.guards)
+        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
 
 
 class FakeItemVariable(TensorVariable):

@@ -28,6 +28,7 @@ from ..exc import (
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
+from .dicts import ConstDictVariable
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable
 
@@ -71,13 +72,13 @@ def dynamo_enable_grad(tx):
         GradModeVariable.create(tx, org_value)
 
 
-def are_tensors(var):
-    from . import TensorVariable
-
-    if isinstance(var, TensorVariable):
+def only_consist_of(var, types):
+    if isinstance(var, types):
         return True
     if isinstance(var, (TupleVariable, ListVariable)):
-        return all(are_tensors(item) for item in var.items)
+        return all(only_consist_of(item, types) for item in var.items)
+    if isinstance(var, ConstDictVariable):
+        return all(only_consist_of(item, types) for item in var.items.values())
     return False
 
 
@@ -134,10 +135,21 @@ def validate_args_and_maybe_create_graph_inputs(
                 tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
         else:
-            raise unimplemented(
-                f"HigherOrderOperator with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
+            if manually_set_subgraph_inputs:
+                raise unimplemented(
+                    f"HigherOrderOperator with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            else:
+                # leverage tracer's lifting mechanism to lift these args.
+                if only_consist_of(
+                    a, (ConstantVariable, SymNodeVariable, TensorVariable)
+                ):
+                    new_arg = a
+                else:
+                    unimplemented(
+                        "HigherOrderOperator with body that accepts non-Tensors as input that can't be lifted by tracer."
+                    )
 
         args.append(new_arg)
     return args
@@ -153,6 +165,9 @@ def speculate_subgraph(
     checkpoint,
     description,
     *,
+    # source_target is the .value of HigherOrderOpVariable and is the
+    # target of the proxy that we created for the higherOrderOperator.
+    source_target=None,
     always_restore=False,
     enable_grad=False,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
@@ -175,7 +190,7 @@ def speculate_subgraph(
         )
 
     try:
-        with tx.output.new_subtracer() as tracer:
+        with tx.output.new_subtracer(source_target) as tracer:
             args = validate_args_and_maybe_create_graph_inputs(
                 sub_args, tracer, tx, manually_set_subgraph_inputs
             )
@@ -211,7 +226,9 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
             else:
-                if not are_tensors(output):
+                from . import TensorVariable
+
+                if not only_consist_of(output, TensorVariable):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
@@ -241,9 +258,14 @@ def speculate_subgraph(
                 )
 
     except Unsupported as ex:
+        from . import UserFunctionVariable
+
+        f_name = f"{type(f).__name__}"
+        if isinstance(f, UserFunctionVariable):
+            f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
-            f"to trace function `{f.get_name()}` into a single graph. This means "
+            f"to trace function `{f_name}` into a single graph. This means "
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
@@ -433,6 +455,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 graph_checkpoint,
                 checkpoint,
                 "cond",
+                source_target=self.value,
             )
 
             if not isinstance(ret_val, TensorVariable):
@@ -566,7 +589,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
         first_dim = args[1].call_method(
-            tx, "__getitem__", args=[ConstantVariable(0)], kwargs={}
+            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
         )
 
         # TODO: Support kwargs
@@ -585,6 +608,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx.output.graph,
             checkpoint,
             "torch.ops.higher_order.map",
+            source_target=self.value,
         )
 
         body_nn_modules = tx.copy_graphstate().output.nn_modules
@@ -720,6 +744,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             "torch.func.grad",
+            source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
         )
@@ -814,21 +839,25 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 items = []
                 for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable(idx),), {}
+                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable(items)
         else:  # case: has_aux.value = True
             # fx_proxy -> Tuple(grads, aux)
-            grads = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(0),), {})
-            aux = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(1),), {})
+            grads = fx_proxy.call_method(
+                tx, "__getitem__", (ConstantVariable.create(0),), {}
+            )
+            aux = fx_proxy.call_method(
+                tx, "__getitem__", (ConstantVariable.create(1),), {}
+            )
             if isinstance(argnums_v, int):
                 return TupleVariable([grads.call_method(tx, "contiguous", (), {}), aux])
             else:
                 items = []
                 for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable(idx),), {}
+                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable([TupleVariable(items), aux])
@@ -907,7 +936,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if in_dim is not None:
                 assert isinstance(arg, TensorVariable)
                 unbatched_arg = arg.call_method(
-                    tx, "select", [in_dim, ConstantVariable(0)], {}
+                    tx, "select", [in_dim, ConstantVariable.create(0)], {}
                 )
                 unbatched_input_args.append(unbatched_arg)
             else:
@@ -931,6 +960,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 graph_checkpoint,
                 checkpoint,
                 "torch.vmap",
+                source_target=self.value,
             )
 
         body_name = add_subgraph(
@@ -949,7 +979,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         updated_in_dims = TupleVariable(
             broadcasted_in_dims.unpack_var_sequence(tx)
             + [
-                ConstantVariable(None),
+                ConstantVariable.create(None),
             ]
             * len(body_lifted_freevars)
         )
@@ -1041,6 +1071,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             graph_checkpoint,
             checkpoint,
             "the user-defined autograd.Function",
+            source_target=self.value,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
@@ -1098,6 +1129,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             description,
+            source_target=self.value,
             manually_set_subgraph_inputs=False,
         )
 

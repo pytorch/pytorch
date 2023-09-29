@@ -89,6 +89,22 @@ _SCALAR_AND_SYMBOLIC_TYPES = (
     torch.SymBool,
 )
 
+_NEP50_FUNCS_TENSOR_ONLY = (
+    "minimum",
+    "maximum",
+    "logaddexp",
+    "logaddexp2",
+    "lcm",
+    "gcd",
+    "hypot",
+    "heaviside",
+    "fmod",
+    "fmin",
+    "fmax",
+    "copysign",
+    "arctan2",
+)
+
 
 def is_scalar(x):
     return isinstance(x, _SCALAR_TYPES)
@@ -108,6 +124,18 @@ def _dtype_for_scalar(py_type):
         torch.SymFloat: torch.float64,
         complex: torch.complex128,
     }[py_type]
+
+
+def _dtype_for_scalar_or_tensor(x):
+    return x.dtype if isinstance(x, torch.Tensor) else _dtype_for_scalar(type(x))
+
+
+def is_float_or_fp_tensor(x):
+    return _dtype_for_scalar_or_tensor(x).is_floating_point
+
+
+def is_complex_or_complex_tensor(x):
+    return _dtype_for_scalar_or_tensor(x).is_complex
 
 
 def _category(dtype):
@@ -132,7 +160,7 @@ def _category(dtype):
     }[dtype]
 
 
-def nep50_to_tensors(x1, x2, handle_weaks):
+def nep50_to_tensors(x1, x2, handle_weaks, function_name):
     """If either of inputs is a python scalar, type-promote with NEP 50."""
 
     def to_tensor(scalar, dtype=None):
@@ -179,8 +207,8 @@ def nep50_to_tensors(x1, x2, handle_weaks):
             raise OverflowError(
                 f"Python integer {weak} out of bounds for {not_weak.dtype}"
             )
-
-    # finally, can make `weak` into a 0D tensor
-    weak = to_tensor(weak, dt)
+    if weak_dtype != dt or function_name in _NEP50_FUNCS_TENSOR_ONLY:
+        # finally, can make `weak` into a 0D tensor, if both parameters are required to be tensor.
+        weak = to_tensor(weak, dt)
 
     return (weak, not_weak) if x1_is_weak else (not_weak, weak)
