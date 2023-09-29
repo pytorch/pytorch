@@ -774,6 +774,20 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         with warnings.catch_warnings(record=True):
             torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
 
+    def test_transformer(self):
+        model = torch.nn.Transformer(
+            d_model=16,
+            nhead=4,
+            num_encoder_layers=1,
+            num_decoder_layers=1,
+            batch_first=False,
+        )
+        src = torch.randn(3, 1, 16, dtype=torch.float32)
+        tgt = torch.randn(5, 1, 16, dtype=torch.float32)
+        f = io.BytesIO()
+        with warnings.catch_warnings(record=True):
+            torch.onnx.export(model, ({"src": src, "tgt": tgt},), f, verbose=False)
+
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
