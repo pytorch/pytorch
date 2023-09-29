@@ -2288,9 +2288,7 @@ class TritonScheduling(BaseScheduling):
                     if (
                         node not in done
                         and fits_in_main_body(other_node)
-                        and not (
-                            current_loop_writes & other_node.recursive_predecessors
-                        )
+                        and not (current_loop_writes & other_node.ancestors)
                     ):
                         done.add(node)
                         current_loop_writes.add(node.get_name())
@@ -2314,7 +2312,7 @@ class TritonScheduling(BaseScheduling):
             def requires_closing_previous_reduction(node, node_schedule):
                 if rnumel == 1:
                     return False
-                if not current_loop_writes & node.recursive_predecessors:
+                if not current_loop_writes & node.ancestors:
                     return False
                 assert node_schedule and not isinstance(
                     node_schedule[-1], (EnableReduction, DisableReduction)
