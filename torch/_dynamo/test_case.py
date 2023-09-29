@@ -1,6 +1,7 @@
 import contextlib
 import importlib
 import sys
+import unittest
 
 import torch
 import torch.testing
@@ -54,6 +55,14 @@ class TestCase(TorchTestCase):
 
     def setUp(self):
         super().setUp()
+        if TEST_WITH_TORCHDYNAMO:
+            raise unittest.SkipTest(
+                "Cannot run the Dynamo tests with "
+                "PYTORCH_TEST_WITH_TORCHDYNAMO=1 "
+                "because torch._dynamo.reset() may not be called "
+                "inside of a Dynamo-optimized function"
+            )
+
         reset()
         utils.counters.clear()
 

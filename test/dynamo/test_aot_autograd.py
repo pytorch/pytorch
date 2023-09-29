@@ -32,7 +32,6 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
 class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
-    @torch.testing._internal.common_utils.skipIfTorchDynamo()
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):

@@ -20,8 +20,6 @@ from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
-from torch.testing._internal.common_utils import skipIfTorchDynamo
-
 
 try:
     from . import test_functions
@@ -1025,7 +1023,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
     test_submodules1 = make_test(SubmoduleExample())
-    test_submodules2 = skipIfTorchDynamo()(make_test(SubmoduleExample()))
+    test_submodules2 = make_test(SubmoduleExample())
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
     test_module_call_module_with_static_forward = make_test(
@@ -1040,21 +1038,21 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_istraining2 = make_test(IsTrainingCheck())
     test_iseval1 = make_test(IsEvalCheck())
     test_iseval2 = make_test(IsEvalCheck())
-    test_viamodulecall = skipIfTorchDynamo()(make_test(ViaModuleCall()))
-    test_isnonelayer = skipIfTorchDynamo()(make_test(IsNoneLayer()))
-    test_layerlist = skipIfTorchDynamo()(make_test(LayerList()))
+    test_viamodulecall = make_test(ViaModuleCall())
+    test_isnonelayer = make_test(IsNoneLayer())
+    test_layerlist = make_test(LayerList())
     test_tensorlist = make_test(TensorList())
-    test_intarg = skipIfTorchDynamo()(make_test(IntArg()))
+    test_intarg = make_test(IntArg())
     test_cfgmod = make_test(CfgModule())
-    test_stringmember = skipIfTorchDynamo()(make_test(StringMember()))
+    test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
     test_modulelist = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
     test_moduledict = make_test(CustomGetItemModuleDict())
-    test_parameterdict = skipIfTorchDynamo()(make_test(ParameterDict()))
-    test_parameterdict = skipIfTorchDynamo()(make_test(CustomGetItemParameterDict()))
-    test_super1 = skipIfTorchDynamo()(make_test(SuperModule()))
-    test_super2 = skipIfTorchDynamo()(make_test(SuperModule2()))
+    test_parameterdict = make_test(ParameterDict())
+    test_parameterdict = make_test(CustomGetItemParameterDict())
+    test_super1 = make_test(SuperModule())
+    test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
     test_named_children = make_test(NamedChildren())
@@ -1065,17 +1063,17 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
     test_access_by_keys = make_test(AccessByKeys())
-    test_module_class_method = skipIfTorchDynamo()(make_test(ModuleClassMethodCall()))
+    test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
-    test_module_guard_name_is_valid = skipIfTorchDynamo()(make_test(ModuleGuardNameIsValid()))
+    test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
     test_sequential_with_duplicated_module = make_test(SequentialWithDuplicatedModule())
     test_sequential_with_duplicated_module2 = make_test(
         SequentialWithDuplicatedModule2()
     )
-    test_module_comparison = skipIfTorchDynamo()(make_test(ModuleComparison()))
+    test_module_comparison = make_test(ModuleComparison())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()

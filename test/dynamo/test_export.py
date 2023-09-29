@@ -3189,7 +3189,6 @@ def forward(self, x):
                     + str(aten_graph),
                 )
 
-    @common_utils.skipIfTorchDynamo()
     def test_export_with_symbool_inputs(self):
         def f(pred: bool, x: torch.Tensor):
             if pred:
