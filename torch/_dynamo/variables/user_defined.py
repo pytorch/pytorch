@@ -68,6 +68,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 obj.__func__, self, source=source, **options
             )
+        elif source and inspect.ismemberdescriptor(obj):
+            return VariableBuilder(tx, source)(obj.__get__(self.value)).add_options(
+                options
+            )
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -348,6 +352,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 return variables.TorchVariable(obj.__class__).call_function(
                     tx, args, kwargs
+                )
+
+            if (
+                func is torch.autograd.grad_mode.inference_mode.clone
+                and obj.__class__ is torch.autograd.grad_mode.inference_mode
+            ):
+                # simulate the inference_mode.clone implementation
+                var = variables.ConstantVariable(obj.mode)
+                return variables.TorchVariable(obj.__class__).call_function(
+                    tx, [var], kwargs
                 )
         elif (
             istype(self.value, functools.partial)

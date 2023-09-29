@@ -51,11 +51,11 @@ tensor_dunder_fns = [
     torch.Tensor.__rpow__,
     torch.Tensor.__rsub__,
     torch.Tensor.__rdiv__,
-    torch._C._TensorBase.__radd__,
-    torch._C._TensorBase.__rmul__,
-    torch._C._TensorBase.__ror__,
-    torch._C._TensorBase.__rxor__,
-    torch._C._TensorBase.__rand__,
+    torch._C.TensorBase.__radd__,
+    torch._C.TensorBase.__rmul__,
+    torch._C.TensorBase.__ror__,
+    torch._C.TensorBase.__rxor__,
+    torch._C.TensorBase.__rand__,
 ]
 
 torch_special_class_types = (torch._C.Generator,)
@@ -97,31 +97,31 @@ if torch.distributed.is_available():
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
-    return torch._C._TensorBase.__radd__(*args)
+    return torch._C.TensorBase.__radd__(*args)
 
 
 def remap_as_fn___rmul__(*args):
-    return torch._C._TensorBase.__rmul__(*args)
+    return torch._C.TensorBase.__rmul__(*args)
 
 
 def remap_as_fn___ror__(*args):
-    return torch._C._TensorBase.__ror__(*args)
+    return torch._C.TensorBase.__ror__(*args)
 
 
 def remap_as_fn___rxor__(*args):
-    return torch._C._TensorBase.__rxor__(*args)
+    return torch._C.TensorBase.__rxor__(*args)
 
 
 def remap_as_fn___rand__(*args):
-    return torch._C._TensorBase.__rand__(*args)
+    return torch._C.TensorBase.__rand__(*args)
 
 
 tensor_dunder_fns_remap = {
-    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
-    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
-    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
-    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
-    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+    torch._C.TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C.TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C.TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C.TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C.TensorBase.__rand__: remap_as_fn___rand__,
 }
 
 
@@ -222,6 +222,7 @@ class TorchVariable(VariableTracker):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            InferenceModeVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -328,6 +329,10 @@ class TorchVariable(VariableTracker):
             ).add_guards(GradModeVariable._guards_singleton)
         elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
             return DeterministicAlgorithmsVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.inference_mode:
+            return InferenceModeVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
         elif self.value is torch.are_deterministic_algorithms_enabled:
@@ -471,6 +476,9 @@ class TorchVariable(VariableTracker):
             # these setter or getter functions, producing an incorrect graph
             # when it comes to rng states.
             unimplemented(f"RNG state getter/setter function - {self.value}")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         elif (
             self.value == torch.numel
             and len(args) == 1

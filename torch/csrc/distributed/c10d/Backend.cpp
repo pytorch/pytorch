@@ -6,17 +6,7 @@
 
 namespace c10d {
 
-Backend::Backend(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
-  C10_LOG_API_USAGE_ONCE("c10d.backend");
-}
-
-Backend::~Backend() = default;
-
-void Backend::init() {
-  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
-}
-
+namespace {
 void commonEventinit(
     details::EventInfo& evt,
     const Backend& backend,
@@ -27,6 +17,18 @@ void commonEventinit(
   evt.backend = backend.getBackendName();
   evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
+}
+}
+
+Backend::Backend(int rank, int size)
+    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
+  C10_LOG_API_USAGE_ONCE("c10d.backend");
+}
+
+Backend::~Backend() = default;
+
+void Backend::init() {
+  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
 }
 
 void Backend::emitCollectiveStart(const Work& work) {
