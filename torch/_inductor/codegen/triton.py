@@ -323,7 +323,13 @@ class TritonOverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, triton_constant(other))
+
+        # Take dtype from result to prevent accidental promotion
+        other = V.kernel.cse.generate(
+            V.kernel.compute,
+            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+        )
+        return ops.where(new_mask, result, other)
 
     @staticmethod
     def lgamma(x):
@@ -1689,7 +1695,23 @@ class TritonKernel(Kernel):
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
-                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
+
+                if src_dtype == torch.bool:
+                    # This is only really used for aten.any. It changes the
+                    # final reduction of a non-persistent reduction from
+                    #     tmp5 = triton_helpers.max(_tmp5, 1)[:, None]
+                    # to
+                    #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
+                    # which is needed because tl.reduce doesn't support tl.int1
+                    accumulator = f"{accumulator}.to(tl.int8)"
+                    result_type = triton_compute_type(dtype)
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
+                    )
+                else:
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}"
+                    )
 
         self.cse.reduction_cache[cache_key] = result_var
 
@@ -2276,9 +2298,7 @@ class TritonScheduling(BaseScheduling):
                     if (
                         node not in done
                         and fits_in_main_body(other_node)
-                        and not (
-                            current_loop_writes & other_node.recursive_predecessors
-                        )
+                        and not (current_loop_writes & other_node.ancestors)
                     ):
                         done.add(node)
                         current_loop_writes.add(node.get_name())
@@ -2302,7 +2322,7 @@ class TritonScheduling(BaseScheduling):
             def requires_closing_previous_reduction(node, node_schedule):
                 if rnumel == 1:
                     return False
-                if not current_loop_writes & node.recursive_predecessors:
+                if not current_loop_writes & node.ancestors:
                     return False
                 assert node_schedule and not isinstance(
                     node_schedule[-1], (EnableReduction, DisableReduction)

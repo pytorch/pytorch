@@ -1110,7 +1110,7 @@ class BuiltinVariable(VariableTracker):
                             for i, b in enumerate(bases)
                         ]
                     elif len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C._TensorBase
+                        bases[0] is object or bases[0] is torch._C.TensorBase
                     ):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:

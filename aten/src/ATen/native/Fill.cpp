@@ -55,7 +55,13 @@ Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  self.copy_(value);
+  // Check if value is a view of self and if it is we clone
+  // it to avoid overwriting self prematurely
+  if(self.is_alias_of(value)) {
+    self.copy_(value.clone());
+  } else{
+    self.copy_(value);
+  }
   return self;
 }
 

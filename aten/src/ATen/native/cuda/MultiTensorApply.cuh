@@ -108,10 +108,6 @@ __global__ void multi_tensor_apply_kernel(
 
 } // namespace
 
-// NOTE(crcrpar): [Handling of zero-size tensors]
-// Basically we want to skip any index whose tesor(s) are zero-size
-// but if it's the last index, we have to check if there are any non-zero
-// tensors in order to avoid not applying any math.
 template <int depth, typename scalar_T, typename T, typename... ArgTypes>
 void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -122,53 +118,47 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
-  size_t n_zero_tensors = 0;
   using scalar_vals_t = typename T::opmath_t;
   TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (size_t t = 0; t < n_tensors; t++) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
     if (tensor_lists[0][t].numel() == 0) {
-      n_zero_tensors++;
-      if (t != n_tensors - 1) {
-        continue;
-      }
-    } else {
-      tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>();
-      tensorListMeta.numel_for_tensor[loc_tensor_info] =
-          tensor_lists[0][t].numel();
-      for (int d = 0; d < depth; d++) {
-        tensorListMeta.addresses[d][loc_tensor_info] =
-            tensor_lists[d][t].const_data_ptr();
-      }
-      loc_tensor_info++;
-    }
-
-    if (n_zero_tensors == n_tensors) {
       continue;
     }
-    const auto chunks = (tensor_lists[0]
-                                     [t -
-                                      static_cast<size_t>(
-                                          (t == n_tensors - 1) &&
-                                          (tensor_lists[0][t].numel() == 0))]
-                                         .numel() +
-                         kChunkSize - 1) /
-        kChunkSize;
+    tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>();
+    tensorListMeta.numel_for_tensor[loc_tensor_info] =
+        tensor_lists[0][t].numel();
+    for (int d = 0; d < depth; d++) {
+      tensorListMeta.addresses[d][loc_tensor_info] =
+          tensor_lists[d][t].const_data_ptr();
+    }
+    loc_tensor_info++;
+
+    // now we enter [chunking territory].
+    // we will launch a kernel when EITHER the blocks get filled up OR
+    // the tensors get filled up. There will always be at least one block
+    // per tensor since the zero-sized ones will not enter the loop, so
+    // the nested forloop within represents iterating through the chunks
+    // of a single tensor.
+    const auto chunks =
+        (tensor_lists[0][t].numel() + kChunkSize - 1) / kChunkSize;
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
       loc_block_info++;
 
+      // a tensor is not considered full unless all its chunks have been
+      // processed
       const bool tensors_full =
           (loc_tensor_info == depth_to_max_tensors_scalarlist[depth - 1] &&
            chunk == chunks - 1);
       const bool blocks_full =
           (loc_block_info == depth_to_max_blocks[depth - 1]);
-      const bool last_chunk = (t == n_tensors - 1 && chunk == chunks - 1);
 
-      if (tensors_full || blocks_full || last_chunk) {
+      if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -179,9 +169,10 @@ void multi_tensor_apply(
 
         // Reset.
         loc_block_info = 0;
-        if (chunk == chunks - 1) {
+        if (chunk ==
+            chunks - 1) { // all chunks have already been handled in the kernel
           loc_tensor_info = 0;
-        } else {
+        } else { // blocks were full and tensor chunks remain
           tensorListMeta.numel_for_tensor[0] =
               tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
           tensorListMeta.scalar_vals[0] =
@@ -195,6 +186,18 @@ void multi_tensor_apply(
       }
     }
   }
+
+  // note: [finishing what we started]
+  // if there's remaining work to be done but the tensors/blocks aren't full
+  // yet we are at the end, submit the kernel to do the work!
+  if (loc_block_info != 0) {
+    multi_tensor_apply_kernel<<<
+        loc_block_info,
+        kBlockSize,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 template <int depth, typename T, typename... ArgTypes>
@@ -206,39 +209,27 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
-  size_t n_zero_tensors = 0;
   TensorListMetadata<depth> tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (size_t t = 0; t < n_tensors; t++) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
     if (tensor_lists[0][t].numel() == 0) {
-      n_zero_tensors++;
-      if (t != n_tensors - 1) {
-        continue;
-      }
-    } else {
-      tensorListMeta.numel_for_tensor[loc_tensor_info] =
-          tensor_lists[0][t].numel();
-      for (int d = 0; d < depth; d++) {
-        tensorListMeta.addresses[d][loc_tensor_info] =
-            tensor_lists[d][t].const_data_ptr();
-      }
-      loc_tensor_info++;
-    }
-
-    if (n_zero_tensors == n_tensors) {
       continue;
     }
-    const auto chunks = (tensor_lists[0]
-                                     [t -
-                                      static_cast<size_t>(
-                                          (t == n_tensors - 1) &&
-                                          (tensor_lists[0][t].numel() == 0))]
-                                         .numel() +
-                         kChunkSize - 1) /
-        kChunkSize;
+    tensorListMeta.numel_for_tensor[loc_tensor_info] =
+        tensor_lists[0][t].numel();
+    for (int d = 0; d < depth; d++) {
+      tensorListMeta.addresses[d][loc_tensor_info] =
+          tensor_lists[d][t].const_data_ptr();
+    }
+    loc_tensor_info++;
+
+    // see note: [chunking territory].
+    const auto chunks =
+        (tensor_lists[0][t].numel() + kChunkSize - 1) / kChunkSize;
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
@@ -249,9 +240,8 @@ void multi_tensor_apply(
            chunk == chunks - 1);
       const bool blocks_full =
           (loc_block_info == depth_to_max_blocks[depth - 1]);
-      const bool last_chunk = (t == n_tensors - 1 && chunk == chunks - 1);
 
-      if (tensors_full || blocks_full || last_chunk) {
+      if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -278,6 +268,16 @@ void multi_tensor_apply(
       }
     }
   }
+
+  // see note: [finishing what we started]
+  if (loc_block_info != 0) {
+    multi_tensor_apply_kernel<<<
+        loc_block_info,
+        kBlockSize,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 template <int depth, typename T, typename... ArgTypes>
@@ -290,41 +290,28 @@ void multi_tensor_apply_for_fused_optimizer(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
   const auto num_tensors = tensor_lists[0].size();
-  auto num_zero_tensors = 0;
   FusedOptimizerTensorListMetadata<depth> tensorListMeta;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (const auto& tensor_index : c10::irange(num_tensors)) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
     if (tensor_lists[0][tensor_index].numel() == 0) {
-      num_zero_tensors++;
-      if (tensor_index != num_tensors - 1) {
-        continue;
-      }
-    } else {
-      tensorListMeta.state_steps_addresses[loc_tensor_info] =
-          state_steps[tensor_index].const_data_ptr();
-      tensorListMeta.numel_for_tensor[loc_tensor_info] =
-          tensor_lists[0][tensor_index].numel();
-      for (const auto& d : c10::irange(depth)) {
-        tensorListMeta.addresses[d][loc_tensor_info] =
-            tensor_lists[d][tensor_index].const_data_ptr();
-      }
-      loc_tensor_info++;
-    }
-
-    if (static_cast<decltype(num_tensors)>(num_zero_tensors) == num_tensors) {
       continue;
     }
+    tensorListMeta.state_steps_addresses[loc_tensor_info] =
+        state_steps[tensor_index].const_data_ptr();
+    tensorListMeta.numel_for_tensor[loc_tensor_info] =
+        tensor_lists[0][tensor_index].numel();
+    for (const auto& d : c10::irange(depth)) {
+      tensorListMeta.addresses[d][loc_tensor_info] =
+          tensor_lists[d][tensor_index].const_data_ptr();
+    }
+    loc_tensor_info++;
+
+    // see above note: [chunking territory]
     const int64_t chunks =
-        (tensor_lists[0]
-                     [tensor_index -
-                      static_cast<decltype(tensor_index)>(
-                          (tensor_index == num_tensors - 1) &&
-                          (tensor_lists[0][tensor_index].numel() == 0))]
-                         .numel() +
-         kChunkSize - 1) /
-        kChunkSize;
+        (tensor_lists[0][tensor_index].numel() + kChunkSize - 1) / kChunkSize;
     TORCH_CHECK(chunks > -1);
     for (const auto& chunk : c10::irange(chunks)) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
@@ -335,10 +322,8 @@ void multi_tensor_apply_for_fused_optimizer(
           (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
            chunk == chunks - 1);
       const auto blocks_full = loc_block_info == depth_to_max_blocks[depth - 1];
-      const auto last_chunk =
-          (tensor_index == num_tensors - 1 && chunk == chunks - 1);
 
-      if (tensor_full || blocks_full || last_chunk) {
+      if (tensor_full || blocks_full) {
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -364,6 +349,16 @@ void multi_tensor_apply_for_fused_optimizer(
         }
       }
     }
+  }
+
+  // see above note: [finishing what we've started]
+  if (loc_block_info != 0) {
+    multi_tensor_apply_kernel<<<
+        loc_block_info,
+        kBlockSize,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 

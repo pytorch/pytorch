@@ -320,6 +320,9 @@ public:
   Vectorized<T> atan() const {
     return map(Sleef_atanf8_u10);
   }
+  Vectorized<T> atanh() const {
+    return map(Sleef_atanhf8_u10);
+  }
   Vectorized<T> atan2(const Vectorized<T> &b) const {
     __m256 lo, hi;
     __m256 b1, b2;
