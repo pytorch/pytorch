@@ -277,13 +277,19 @@ class ConvertIntSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        # Note: name() is used to create guard for the outer SymBool. Because we fakes the SymBool
-        # inputs with SymInts in dynamo, the guards produced are for the symints.
-        # But the guard must be checked against the outer SymBool. To do that, we need to cast the
-        # outer SymBool into an outer SymInt before the guard code generated for dynamo's SymInt is executed.
+        # Note: When creating a guard, we use the `name()` function. Since we simulate SymBool inputs with SymInts in Dynamo,
+        # the guards produced are for the SymInts. However, these guards must be checked against the outer SymBool.
+        # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression generated for Dynamo's SymInt.
         #
-        # Moreover, we don't want to create a proxy for the casting logic during guard checking.
-        # The proxy will be created when the optimized python byte code is executed.
+        # Additionally, instead of creating a SymInt in the outer shape_env, we inspect the hint of the SymBool.
+        # This approach prevents the creation of a new guard in the outer shape_env, which is unnecessary because
+        # we have already propagated the guard to the outer shape_env when constructing SHAPE_ENV guard during Dynamo's tracing phase.
+        # If the guard check succeeds, we reuse the cached code, and no new guard is created. If the guard check fails,
+        # a new guard will be installed after Dynamo recompiles. In either case, we avoid installing a guard in the outer shape_env
+        # during guard checking, opting to rely on the hint to determine if recompilation is required.
+        #
+        # Furthermore, we avoid creating a proxy for the casting logic during guard checking.
+        # The proxy is generated when the optimized Python bytecode is executed.
         return f"convert_symbool_to_int_with_hint({self.base.name()})"
 
 
