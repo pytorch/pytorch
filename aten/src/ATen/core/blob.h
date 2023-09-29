@@ -3,12 +3,16 @@
 #include <cstddef>
 #include <sstream>
 #include <type_traits>
+#include <typeinfo>
+#include <vector>
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>
 #include <c10/macros/Macros.h>
 
 namespace caffe2 {
+
+class Tensor;
 
 /**
  * @brief Blob is a general container that hosts a typed pointer.

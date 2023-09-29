@@ -1,5 +1,6 @@
 #include <c10/util/StringUtil.h>
 
+#include <cstring>
 #include <string>
 
 namespace c10 {
