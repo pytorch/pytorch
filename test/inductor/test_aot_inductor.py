@@ -176,7 +176,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(model, example_inputs)
 
     def test_large(self):
         model = SimpleLinear((250112, 512))
