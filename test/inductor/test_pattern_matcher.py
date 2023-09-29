@@ -357,7 +357,7 @@ class TestPaternMatcher(TestCase):
             a1, a2 = torch.compile(fn)(*args)
             torch.testing.assert_close(a1, e1)
             torch.testing.assert_close(a2, e2)
-            count, nodes = 2, 4 if should_fuse else 0, 0
+            count, nodes = (2, 4) if should_fuse else (0, 0)
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
