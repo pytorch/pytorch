@@ -14,7 +14,7 @@ if(MSVC)
   add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
 endif(MSVC)
 
-add_library(shm SHARED core.cpp)
+add_library(shm core.cpp)
 if(HAVE_SOVERSION)
   set_target_properties(shm PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})

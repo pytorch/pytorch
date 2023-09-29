@@ -396,7 +396,7 @@ add_dependencies(torch_python gen_torch_version)
 # Github issue #61930
 if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Add Android Nnapi delegate library
-  add_library(nnapi_backend SHARED
+  add_library(nnapi_backend
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )

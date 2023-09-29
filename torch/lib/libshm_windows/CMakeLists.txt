@@ -3,7 +3,7 @@ if(NOT LIBSHM_INSTALL_LIB_SUBDIR)
   set(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
 endif()
 
-add_library(shm SHARED core.cpp)
+add_library(shm core.cpp)
 
 target_compile_definitions(shm PRIVATE
   "_CRT_SECURE_NO_DEPRECATE=1"
