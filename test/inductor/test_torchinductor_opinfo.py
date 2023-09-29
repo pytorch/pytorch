@@ -360,7 +360,7 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
-    ("nn.functional.triplet_margin_loss", "cuda", fp16):  {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_loss", "cuda", f16):  {"atol": 1e-4, "rtol": 0.02},
     ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
 }
 
