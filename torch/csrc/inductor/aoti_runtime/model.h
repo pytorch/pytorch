@@ -224,6 +224,10 @@ class AOTInductorModelBase {
     return shape(outputs_info_, idx);
   }
 
+  void update_constants_map(std::shared_ptr<ConstantMap>&& constants_map) {
+    constants_ = std::move(constants_map);
+  }
+
   /// Returns true if the model is complete.
   bool is_finished() {
     if (!run_finished_) {
