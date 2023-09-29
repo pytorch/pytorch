@@ -77,7 +77,7 @@ void calculateUniqueTensorIDs(
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
             for (auto& i : torch_op.inputs_) {
-              c10::visit(raw_tensors, i);
+              std::visit(raw_tensors, i);
             }
           },
           [&](ExtraFields<EventType::PyCall>& py_call) {
