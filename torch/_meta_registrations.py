@@ -287,8 +287,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
 @register_meta(aten.randperm.generator_out)
 def meta_randperm(n, *, generator=None, out):
-    assert out.ndim == 1 and out.size(0) == n
-    return out
+    return _maybe_resize_out(out, torch.Size([n]))
 
 
 @register_meta(aten.randperm.default)
@@ -1547,13 +1546,13 @@ def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
 
 
 @register_meta(aten.reflection_pad1d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_reflection_pad1d_backward(grad_output, input, padding):
     return _pad1d_backward_common(grad_output, input, padding, is_reflection=True)
 
 
 @register_meta(aten.replication_pad1d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_replication_pad1d_backward(grad_output, input, padding):
     return _pad1d_backward_common(grad_output, input, padding, is_reflection=False)
 
@@ -1631,7 +1630,7 @@ def meta_replication_pad2d(input, padding):
         aten.replication_pad2d_backward.grad_input,
     ]
 )
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
     dim_h = 1
@@ -1747,7 +1746,7 @@ def meta_replication_pad3d(input, padding):
         aten.replication_pad3d_backward.grad_input,
     ]
 )
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_pad3d_backward(grad_output, input, padding):
     torch._check(len(padding) == 6, lambda: "padding size is expected to be 6")
     assert input.ndim > 3
@@ -2492,7 +2491,7 @@ def meta_avg_pool3d(
 
 
 @register_meta(aten.avg_pool3d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_avg_pool3d_backward(
     grad_output,
     input,
@@ -2622,7 +2621,7 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
 
 
 @register_meta(aten._adaptive_avg_pool3d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta__adaptive_avg_pool3d_backward(grad_output, self):
     _adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool3d_backward")
     return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
@@ -2689,7 +2688,7 @@ def meta_adaptive_max_pool2d(input, output_size):
 
 
 @register_meta(aten.adaptive_max_pool2d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_adaptive_max_pool2d_backward(grad_output, input, indices):
     ndim = grad_output.ndim
     torch._check(
@@ -2753,7 +2752,7 @@ def meta_adaptive_max_pool3d(input, output_size):
 
 
 @register_meta(aten.adaptive_max_pool3d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_adaptive_max_pool3d_backward(grad_output, input, indices):
     _adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool3d_backward")
     return input.new_empty(input.shape)
@@ -2776,6 +2775,7 @@ def meta_complex(real, imag):
 
 
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
+@out_wrapper()
 def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
@@ -3594,6 +3594,7 @@ def meta_masked_scatter_(self, mask, source):
 
 
 @register_meta(aten.masked_scatter)
+@out_wrapper()
 def meta_masked_scatter(self, mask, source):
     self, mask = _maybe_broadcast(self, mask)
     output = torch.empty_like(self, memory_format=torch.contiguous_format)
@@ -4345,7 +4346,7 @@ def meta_max_pool3d_with_indices(
 
 
 @register_meta(aten.max_pool3d_with_indices_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_max_pool3d_with_indices_backward(
     grad_output,
     input,
@@ -4878,13 +4879,12 @@ def meta__scaled_dot_product_flash(
     head_dim = query.size(3)
 
     max_seqlen_batch_k = key.size(2)
+
     if device_hint(query) == "cpu":
-        Nnz_q = batch_size * max_seqlen_batch_q
-        query_t = query.transpose(1, 2)
-        query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
-        attention = torch.empty_like(query_reshaped, device=query.device)
-        attention = attention.view(
-            batch_size, max_seqlen_batch_q, num_heads, head_dim
+        attention = torch.empty(
+            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
+            dtype=query.dtype,
+            device=query.device,
         ).transpose(1, 2)
         logsumexp = torch.empty(
             (
@@ -4914,12 +4914,6 @@ def meta__scaled_dot_product_flash(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
         device=query.device,
-    )
-    cumulative_sequence_length_q = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
-    )
-    cumulative_sequence_length_k = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
     )
 
     if return_debug_mask:
@@ -4977,6 +4971,12 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
+    if device_hint(query) != "cpu":
+        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
+        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
+        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+        return grad_q, grad_k, grad_v
+
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
