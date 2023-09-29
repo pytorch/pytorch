@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     gradcheck, gradgradcheck, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
@@ -2531,7 +2531,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.08 if SM90OrLater else 0.05,
+        tf32_precision=0.08,
         default_dtype=torch.double,
     ),
     dict(
@@ -2576,7 +2576,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.05 if SM90OrLater else 0.03,
+        tf32_precision=0.05,
         default_dtype=torch.double,
     ),
     dict(
@@ -2806,8 +2806,7 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
         if weight is not None:
             # TODO: This code can path can be removed if #61309 is resolved
             # loss is normalized by the weights to be consistent with nll_loss_nd
-            ret = torch.sum(smooth_loss) / weight.gather(0,
-                                                         target.masked_select(ignore_mask.logical_not()).flatten()).sum()
+            ret = torch.sum(smooth_loss) / weight.gather(0, target.masked_select(ignore_mask.logical_not()).flatten()).sum()
         else:
             ret = torch.mean(smooth_loss.masked_select(ignore_mask.logical_not()))
     elif reduction == 'sum':
@@ -3597,8 +3596,7 @@ criterion_tests = [
         input_size=(5, 3),
         target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
         reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(
-                m), weight=get_weight(m), label_smoothing=0.15),
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
         check_bfloat16=False,
         default_dtype=torch.double,
     ),
@@ -3643,8 +3641,7 @@ criterion_tests = [
         input_size=(2, 3, 5),
         target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](
-                i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
         check_bfloat16=False,
         default_dtype=torch.double,
     ),
@@ -3667,8 +3664,7 @@ criterion_tests = [
         input_size=(2, 3, 5),
         target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](
-                i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
         check_bfloat16=False,
         default_dtype=torch.double,
     ),
@@ -3701,8 +3697,7 @@ criterion_tests = [
         input_size=(15, 10),
         target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](
-                i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=3),
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=3),
         check_bfloat16=False,
         default_dtype=torch.double,
     ),
@@ -3714,8 +3709,7 @@ criterion_tests = [
         input_size=(15, 10),
         target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(
-                m), weight=get_weight(m), label_smoothing=0.15),
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
         check_bfloat16=False,
         default_dtype=torch.double,
     ),
@@ -4871,7 +4865,6 @@ def _test_bfloat16_ops(test_case, op, device, inp_dims=(), prec=1e-2, scale_fact
 
     test_case.assertEqual(out1, out2, atol=prec, rtol=prec, exact_dtype=False)
     test_case.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=prec, exact_dtype=False)
-
 
 def _test_module_empty_input(test_case, module, inp, check_size=True, inference=False):
     if not inference:
