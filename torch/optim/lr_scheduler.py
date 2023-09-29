@@ -714,7 +714,7 @@ class PolynomialLR(LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
-        power (int): The power of the polynomial. Default: 1.0.
+        power (float): The power of the polynomial. Default: 1.0.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
