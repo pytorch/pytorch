@@ -159,13 +159,7 @@ class AutogradCompilerInstance:
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
         assert isinstance(t, (torch.Tensor, torch.SymInt))
-        fetched_tensor = fetch_tensor_proxy(self.fx_tracer)(t)
-        if hasattr(fetched_tensor, "proxy"):
-            return fetched_tensor.proxy
-        else:
-            return self.fx_tracer.unwrap_proxy(
-                torch._functorch.aot_autograd.from_fun(fetched_tensor)
-            )
+        return fetch_tensor_proxy(self.fx_tracer)(t).proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):

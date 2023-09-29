@@ -687,10 +687,14 @@ class TensorVariable(VariableTracker):
             if not self.source:
                 # Intermediary
                 src = fn_var.source
-                if src or (
-                    isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
-                    and not fn_var.func.source
+                if (
+                    not src
+                    and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
+                    and fn_var.func.source
                 ):
+                    src = fn_var.func.source
+
+                if src:
                     tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
                 torch._guards.TracingContext.get().requires_compiled_autograd = True
 

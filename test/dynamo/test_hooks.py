@@ -406,7 +406,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         class SomePyClass:
             count = 0
 
-            def write_grad_as_str_and_do_stuff(self, grad):
+            def do_stuff(self, grad):
                 if self.count % 2 == 0:
                     r = grad * grad
                 else:
@@ -415,7 +415,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 return r
 
         def complex_state_touching_hook(grad, *, obj):
-            return obj.write_grad_as_str_and_do_stuff(grad)
+            return obj.do_stuff(grad)
 
         class MyMod(torch.nn.Module):
             def forward(self, x, obj):
@@ -433,6 +433,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         eager_out = mod(x0, obj)
         eager_out[0].backward(torch.ones(4))
 
+        # Eager 2
+        self.assertEqual(obj.count, 2)
         x2 = torch.ones(4, requires_grad=True)
         with compiled_autograd.enable(compiler_fn):
             dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2, obj)
@@ -440,6 +442,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(dynamo_out, eager_out)
 
+        # Eager 2 + compiled 2
+        self.assertEqual(obj.count, 4)
         self.assertEqual(x0.grad, x2.grad)
 
     def test_complex_state_mutation_in_intermediary_hooks_same_on_inductor_with_graph_break(
@@ -485,6 +489,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.exc.Unsupported, ".*BuiltinVariable\\(str\\).*"
             ):
                 dynamo_out[0].backward(torch.ones(4))
+
+        self.assertEqual(obj.count, 2)
 
     def test_intermediary_hooks_same_on_aot_eager_no_compile_bwd(self):
         def my_hook(grad, *, k=0):

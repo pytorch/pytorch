@@ -3200,7 +3200,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with tracing(saved_context):
-                        if saved_context and torch._guards.TracingContext.get().requires_compiled_autograd and not ctx._is_compiled_autograd_tracing():
+                        if (
+                            saved_context
+                            and torch._guards.TracingContext.get().requires_compiled_autograd
+                            and not ctx._is_compiled_autograd_tracing()
+                        ):
                             # Something upstream mandated that we must be in compiled autograd, and we are not. Bypass compiled bwd.
                             # Note - alternatively, this could just be an assert when we detect the case in forward...
                             CompiledFunction.compiled_bw = bw_module

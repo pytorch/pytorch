@@ -429,39 +429,32 @@ class SideEffects:
             #    - We lift the fn up as an input.
             #    - We then manually insert a register_hook call into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
-            if tensor.source:
-                cg(tensor)
-                cg.extend_output([cg.create_load_attr("register_hook")])
-                cg(hook)
-                cg.extend_output(create_call_function(1, True))
-                # Let's go over how handles work.
-                #
-                # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
-                # time after that, or never. In dynamo, we track and associate a name with a handle (user_code_variable_name) to
-                # determine if a handle is accessed. If a handle has no user_code_variable_name, we just pop the produced value
-                # off the top of the stack, discarding the handle.
-                #
-                # If a handle is seen, we store it under that name. This is extremely important, because, the handle
-                # can be generated at any time after this point, and can be generated multiple times! If we were to defer
-                # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
-                # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
-                # esentially a lookup.
-                if (
-                    hasattr(handle, "user_code_variable_name")
-                    and handle.user_code_variable_name
-                ):
-                    # register_hook stored with variable name assigned to the handle
-                    cg.extend_output([cg.create_store(handle.user_code_variable_name)])
-                else:
-                    # register_hook stored w/o a variable name assigned to the handle
-                    cg.extend_output([create_instruction("POP_TOP")])
+            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
+            cg(tensor)
+            cg.extend_output([cg.create_load_attr("register_hook")])
+            cg(hook)
+            cg.extend_output(create_call_function(1, True))
+            # Let's go over how handles work.
+            #
+            # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
+            # time after that, or never. In dynamo, we track and associate a name with a handle (user_code_variable_name) to
+            # determine if a handle is accessed. If a handle has no user_code_variable_name, we just pop the produced value
+            # off the top of the stack, discarding the handle.
+            #
+            # If a handle is seen, we store it under that name. This is extremely important, because, the handle
+            # can be generated at any time after this point, and can be generated multiple times! If we were to defer
+            # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
+            # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
+            # esentially a lookup.
+            if (
+                hasattr(handle, "user_code_variable_name")
+                and handle.user_code_variable_name
+            ):
+                # register_hook stored with variable name assigned to the handle
+                cg.extend_output([cg.create_store(handle.user_code_variable_name)])
             else:
-                if (
-                    hasattr(handle, "user_code_variable_name")
-                    and handle.user_code_variable_name
-                ):
-                    cg(handle)
-                    cg.extend_output([cg.create_store(handle.user_code_variable_name)])
+                # register_hook stored w/o a variable name assigned to the handle
+                cg.extend_output([create_instruction("POP_TOP")])
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
