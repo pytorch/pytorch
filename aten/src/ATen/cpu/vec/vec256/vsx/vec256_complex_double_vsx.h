@@ -478,32 +478,6 @@ class Vectorized<ComplexDbl> {
     return map(at::native::sgn_impl);
   }
 
-  Vectorized<ComplexDbl> hypot(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> nextafter(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> igamma(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> igammac(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> atan2(const Vectorized<ComplexDbl>& b) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> erf() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> erfc() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexDbl> operator<(const Vectorized<ComplexDbl>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
