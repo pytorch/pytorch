@@ -306,19 +306,53 @@ class IRNode:
 
     @cache_on_self
     def get_read_names(self):
-        return {dep.name for dep in self.get_reads()}  # type: ignore[attr-defined]
-
-    def get_layout(self):
-        raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
-
-    def get_size(self):
-        raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+        return {dep.name for dep in self.get_reads()}
 
     def get_numel(self):
         return sympy_product(self.get_size())
 
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+
+    def get_device(self):
+        raise NotImplementedError(f"get_device() is not implemented by {type(self)}!")
+
+    def get_dtype(self):
+        raise NotImplementedError(f"get_dtype() is not implemented by {type(self)}!")
+
+    def get_layout(self):
+        raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
+
+    def get_name(self):
+        raise NotImplementedError(f"get_name() is not implemented by {type(self)}!")
+
+    def get_reads(self):
+        raise NotImplementedError(f"get_reads() is not implemented by {type(self)}!")
+
+    def get_size(self):
+        raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
+    def get_storage_numel(self):
+        raise NotImplementedError(
+            f"get_storage_numel() is not implemented by {type(self)}!"
+        )
+
+    def has_exceeded_max_reads(self):
+        raise NotImplementedError(
+            f"has_exceeded_max_reads() is not implemented by {type(self)}!"
+        )
+
+    def make_loader(self):
+        raise NotImplementedError(f"make_loader() is not implemented by {type(self)}!")
+
+    def make_indexer(self):
+        raise NotImplementedError(f"make_indexer() is not implemented by {type(self)}!")
+
+    def mark_reuse(self, users):
+        raise NotImplementedError(f"mark_reuse() is not implemented by {type(self)}!")
+
+    def realize_hint(self):
+        raise NotImplementedError(f"mark_reuse() is not implemented by {type(self)}!")
 
     def realize(self):
         """
@@ -408,13 +442,13 @@ class Loops(IRNode):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
-                    self.make_loader(),  # type: ignore[attr-defined]
+                    self.make_loader(),
                     self.get_size(),
                     self.get_reduction_size(),
                 ).reads
             else:
                 return extract_read_writes(
-                    self.make_loader(),  # type: ignore[attr-defined]
+                    self.make_loader(),
                     self.get_size(),
                 ).reads
 
@@ -611,7 +645,7 @@ class Reduction(Loops):
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
-        loader = self.make_loader()  # type: ignore[attr-defined]
+        loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Reduction(
             device,
@@ -1430,7 +1464,7 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
-        # the ReinterpretView either, so dont pass along those arguments
+        # the ReinterpretView either, so don't pass along those arguments
         buffer, _ = as_storage_and_layout(
             x.data,
             freeze=freeze,
@@ -1460,7 +1494,7 @@ class BaseView(IRNode):
         raise NotImplementedError(f"make_reindexer NYI on {self}")
 
     def make_indexer(self):
-        inner = self.data.make_indexer()  # type: ignore[attr-defined]
+        inner = self.data.make_indexer()
         reindex = self.make_reindexer()
 
         def indexer(idx):
@@ -1469,7 +1503,7 @@ class BaseView(IRNode):
         return indexer
 
     def make_loader(self):
-        inner = self.data.make_loader()  # type: ignore[attr-defined]
+        inner = self.data.make_loader()
         reindex = self.make_reindexer()
 
         def loader(idx):
@@ -1478,34 +1512,34 @@ class BaseView(IRNode):
         return loader
 
     def get_dtype(self):
-        return self.data.get_dtype()  # type: ignore[attr-defined]
+        return self.data.get_dtype()
 
     def get_layout(self):
-        return self.data.get_layout()  # type: ignore[attr-defined]
+        return self.data.get_layout()
 
     def get_device(self):
-        return self.data.get_device()  # type: ignore[attr-defined]
+        return self.data.get_device()
 
     def get_origin_node(self):
         return None
 
     def get_name(self):
-        return self.data.get_name()  # type: ignore[attr-defined]
+        return self.data.get_name()
 
     def mark_reuse(self, users):
-        return self.data.mark_reuse(users)  # type: ignore[attr-defined]
+        return self.data.mark_reuse(users)
 
     def has_exceeded_max_reads(self):
-        return self.data.has_exceeded_max_reads()  # type: ignore[attr-defined]
+        return self.data.has_exceeded_max_reads()
 
     def realize(self):
         return self.data.realize()
 
     def realize_hint(self):
-        return self.data.realize_hint()  # type: ignore[attr-defined]
+        return self.data.realize_hint()
 
     def get_storage_numel(self):
-        return self.data.get_storage_numel()  # type: ignore[attr-defined]
+        return self.data.get_storage_numel()
 
     def is_extern(self):
         return self.data.is_extern()  # type: ignore[attr-defined]
@@ -1871,7 +1905,7 @@ class ReinterpretView(BaseView):
     __repr__ = __str__
 
     def get_name(self):
-        return self.data.get_name()  # type: ignore[attr-defined]
+        return self.data.get_name()
 
     def get_device(self):
         return self.layout.device
@@ -2292,8 +2326,7 @@ class AliasedLayout(Layout):
 
 
 class MutationLayout(Layout):
-    def __init__(self, target: Union["Buffer", BaseView, "MutableBox"]):
-        assert isinstance(target, (Buffer, BaseView, MutableBox)), type(target)
+    def __init__(self, target: IRNode):
         super().__init__(
             target.get_device(),
             target.get_dtype(),
@@ -2447,7 +2480,7 @@ class Buffer(IRNode):
 
     def get_alias_names(self):
         if isinstance(self.layout, AliasedLayout):
-            return [self.layout.view.get_name()]  # type: ignore[attr-defined]
+            return [self.layout.view.get_name()]
         return ()
 
     def get_mutation_names(self):
@@ -3616,13 +3649,9 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
         else:
-            wrapper.writeline(
-                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
 class DynamicScalar(IRNode):
@@ -3661,6 +3690,10 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
@@ -3860,6 +3893,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overlad_name,
                 self.op_overload,
                 exported_args,
+                self.outputs,
             )
         else:
             super().codegen(wrapper)
@@ -3913,7 +3947,8 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output, [])
+        packed.outputs = generate_output(example_output, [])
+        return packed.outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3933,7 +3968,7 @@ class MultiOutput(ExternKernel):
             elif itype == tuple:
                 # cpp wrapper code needs to use std::get<> to access a tuple
                 tuple_access = V.graph.wrapper_code.codegen_tuple_access(
-                    basename, str(i)
+                    basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
             else:
@@ -3942,10 +3977,10 @@ class MultiOutput(ExternKernel):
             return basename
 
     def codegen(self, wrapper):
-        line = wrapper.declare
-        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
-        line += wrapper.ending
-        wrapper.writeline(line)
+        wrapper.codegen_multi_output(
+            self.get_name(),
+            self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
+        )
         self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
@@ -5211,6 +5246,7 @@ class MutableBox(IRNode):
     data: IRNode
 
     def __getattr__(self, name):
+        # TODO replace this by explicit calls to self.data.{name}() in order to make it easier for mypy
         fn = getattr(self.data, name)
         if callable(fn):
             return fn
@@ -5223,11 +5259,41 @@ class MutableBox(IRNode):
     def layout(self):
         return self.data.layout  # type: ignore[attr-defined]
 
+    def get_device(self):
+        return self.data.get_device()
+
+    def get_dtype(self):
+        return self.data.get_dtype()
+
     def get_layout(self):
         return self.layout
 
+    def get_name(self):
+        return self.data.get_name()
+
+    def get_reads(self):
+        return self.data.get_reads()
+
     def get_size(self):
         return self.data.get_size()
+
+    def get_storage_numel(self):
+        return self.data.get_storage_numel()
+
+    def has_exceeded_max_reads(self):
+        return self.data.has_exceeded_max_reads()
+
+    def make_loader(self):
+        return self.data.make_loader()
+
+    def make_indexer(self):
+        return self.data.make_indexer()
+
+    def mark_reuse(self, users):
+        return self.data.mark_reuse(users)
+
+    def realize_hint(self):
+        return self.data.realize_hint()
 
     def __str__(self):
         if isinstance(self.data, MutableBox):

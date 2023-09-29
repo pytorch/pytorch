@@ -21,7 +21,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, overload, Tuple, Union
+from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
 
 import sympy
 
@@ -144,6 +144,9 @@ class IndexPropVar:
         ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
+IndexPropResult = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
+
+
 class IndexPropagation:
     """Ops wrapper that tries to propagate constant and index_expr values through the computation.
 
@@ -176,24 +179,29 @@ class IndexPropagation:
 
         return a.value
 
-    # FIXME MYPYNOFOLLOW thinks this overload clashes with the one below because it doesn't follow the import of
-    # sympy, so it treats sympy.Symbol as an Any type. We can probably remove the type-ignore once we remove the nofollow.
-    @overload
-    def wrap(self, a: Union[List[Any], Tuple[Any]]) -> Tuple[IndexPropVar]:  # type: ignore[misc]
-        ...
-
-    @overload
-    def wrap(self, a: Union[torch.fx.Proxy, sympy.Symbol, TypedExpr]) -> IndexPropVar:
-        ...
-
-    def wrap(self, a):
+    def wrap(self, a) -> IndexPropResult:
         if isinstance(a, (list, tuple)):
             return tuple(self.wrap(v) for v in a)
         return IndexPropVar(a)
 
+    @overload
+    def fallback(
+        self,
+        name: Literal["indirect_indexing"],
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ) -> IndexPropVar:
+        ...
+
+    @overload
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Union[IndexPropVar, Tuple[IndexPropVar, ...]]:
+    ) -> IndexPropResult:
+        ...
+
+    def fallback(
+        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> IndexPropResult:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
         new_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
@@ -201,7 +209,7 @@ class IndexPropagation:
 
     def propagate_sympy(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Union[IndexPropVar, Tuple[IndexPropVar, ...]]:
+    ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
             if not isinstance(a, IndexPropVar):
@@ -221,8 +229,8 @@ class IndexPropagation:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
-    def __getattr__(self, name: str) -> Callable[..., Union[Any, IndexPropVar]]:
-        def inner(*args: Any, **kwargs: Any) -> Union[Any, IndexPropVar]:
+    def __getattr__(self, name: str) -> Callable[..., IndexPropResult]:
+        def inner(*args: Any, **kwargs: Any) -> IndexPropResult:
             if not hasattr(SymPyOps, name):
                 return self.fallback(name, args, kwargs)
 
@@ -249,4 +257,4 @@ class IndexPropagation:
             # If we are turning a indirect indexing into direct, we need to wrap it.
             index = index.value.expr
             return index + Where(index >= 0, 0, size)
-        return self.fallback("indirect_indexing", (index, size, check), {}).value  # type: ignore[union-attr]
+        return self.fallback("indirect_indexing", (index, size, check), {}).value

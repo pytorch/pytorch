@@ -362,7 +362,12 @@ def _advise_is_size(a):
     # was responsible for expect_true'ing this
     assert a >= 0
 
-    if isinstance(a, SymInt) and isinstance(a.node.expr, sympy.Symbol):
+    # NB: it's important not to constrain range for size for *hinted* SymInts,
+    # because it is not only unsound, it will immediately trip our asserts
+    # that hints have to be consistent with static analysis!  If you somehow
+    # have an unbounded SymInt that later constrains to 1, this will be
+    # inconsistent with the range
+    if isinstance(a, SymInt) and isinstance(a.node, SymNode) and not a.node.has_hint() and isinstance(a.node.expr, sympy.Symbol):
         _constrain_range_for_size(a)
 
 @record_shapeenv_event()
@@ -2604,8 +2609,10 @@ class ShapeEnv:
 
     def add_fx_node_metadata(self, node: torch.fx.Node) -> None:
         from torch._dynamo.utils import get_current_node
-        node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
-        node.meta[CURRENT_NODE_KEY] = get_current_node()
+
+        if self.should_record_events:
+            node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
+            node.meta[CURRENT_NODE_KEY] = get_current_node()
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
