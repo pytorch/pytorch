@@ -95,6 +95,8 @@ class AveragedModel(Module):
             an equally weighted average is used (default: None)
         use_buffers (bool): if ``True``, it will compute running averages for
             both the parameters and the buffers of the model. (default: ``False``)
+        should_deepcopy (bool): if ``True``, it will deepcopy the model. This is useful
+            to set ``False`` if model needs to be preprocessed prior, like wrapped in FSDP
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
@@ -162,12 +164,15 @@ class AveragedModel(Module):
     .. _Polyak averaging:
         https://paperswithcode.com/method/polyak-averaging
     """
-    def __init__(self, model, device=None, avg_fn=None, multi_avg_fn=None, use_buffers=False):
+    def __init__(self, model, device=None, avg_fn=None, multi_avg_fn=None, use_buffers=False, should_deepcopy=True):
         super().__init__()
         assert avg_fn is None or multi_avg_fn is None, 'Only one of avg_fn and multi_avg_fn should be provided'
-        self.module = deepcopy(model)
-        if device is not None:
-            self.module = self.module.to(device)
+        if should_deepcopy:
+            self.module = deepcopy(model)
+            if device is not None:
+                self.module = self.module.to(device)
+        else:
+            self.module = model
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
         self.avg_fn = avg_fn
