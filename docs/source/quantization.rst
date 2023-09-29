@@ -550,7 +550,7 @@ API Example::
   # run calibration
   # calibrate(m, sample_inference_data)
   m = convert_pt2e(m)
-  
+
   # Step 3. lowering
   # lower to target backend
 
