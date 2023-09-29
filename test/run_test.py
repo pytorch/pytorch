@@ -302,6 +302,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
+    "test_nestedtensor",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",

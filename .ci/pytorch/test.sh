@@ -258,7 +258,6 @@ test_dynamo_shard() {
       test_public_bindings \
       test_dataloader \
       test_reductions \
-      test_nestedtensor \
       test_namedtensor \
       test_namedtuple_return_api \
       profiler/test_profiler \
