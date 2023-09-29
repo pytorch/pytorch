@@ -282,17 +282,20 @@ def fmin(self, other):
 def fmax(self, other):
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
+
 @register_decomposition(aten.amax)
 def amax(self, dim=None, keepdim=False):
     if self.dtype == torch.bool:
         return torch.any(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
+
 @register_decomposition(aten.amin)
 def amin(self, dim=None, keepdim=False):
     if self.dtype == torch.bool:
         return torch.all(self, dim=dim, keepdim=keepdim)
     return NotImplemented
+
 
 @register_decomposition([aten.narrow_copy])
 def narrow_copy(self, dim, start, length):
