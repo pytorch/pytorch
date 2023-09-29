@@ -1869,5 +1869,7 @@ else:
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
+from torch._higher_order_ops.cond import cond
+
 from . import _logging
 _logging._init_logs()
