@@ -1,15 +1,15 @@
 import torch
 
 from torch._export.db.case import export_case
-from torch._export import dynamic_dim
+from torch.export import Dim
 
 x = torch.ones(3, 2)
-dynamic_constraint = dynamic_dim(x, 1)
+dim1_x = Dim("dim1_x")
 
 @export_case(
     example_inputs=(x,),
     tags={"torch.dynamic-shape"},
-    constraints=[dynamic_constraint]
+    dynamic_shapes={"x": {1: dim1_x}},
 )
 def scalar_output(x):
     """

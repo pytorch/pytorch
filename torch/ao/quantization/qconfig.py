@@ -1,4 +1,5 @@
 from collections import namedtuple
+from functools import partial
 from typing import Optional, Any, Union, Type
 
 import torch
@@ -458,6 +459,13 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig],
 QConfigAny = Optional[QConfig]
 QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
+def _get_factory_kwargs_based_on_module_device(module):
+    assert isinstance(module, torch.nn.Module)
+    devices = {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
+    device = next(iter(devices)) if len(devices) > 0 else None
+    return None if device is None else {'device': device}
+
 def _add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
         module: Optional[nn.Module]) -> Any:
@@ -477,19 +485,14 @@ def _add_module_to_qconfig_obs_ctr(
     if module is None or qconfig is None or qconfig._fields != ('activation', 'weight'):
         return qconfig
 
-    def get_factory_kwargs_based_on_module_device():
-        assert isinstance(module, torch.nn.Module)
-        devices = {p.device for p in module.parameters()} | \
-            {p.device for p in module.buffers()}
-        device = next(iter(devices)) if len(devices) > 0 else None
-        return None if device is None else {'device': device}
 
     def configure_constructor_to_put_obs_on_module_device(original_constructor):
+        get_factory_kwargs_based_on_module_device_with_model = partial(_get_factory_kwargs_based_on_module_device, module)
         try:
             # check if constructor can accept factory_kwargs
             check = original_constructor.with_args(factory_kwargs=None)
             check()
-            return original_constructor.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+            return original_constructor.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device_with_model)
         except AttributeError:  # qconfig doesn't have activation or weight
             return original_constructor
         except TypeError:  # the class doesn't accept factory_kwargs argument

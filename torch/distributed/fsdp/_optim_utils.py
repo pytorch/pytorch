@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
 )
 from torch.distributed.fsdp._debug_utils import SimpleProfiler
+from torch.distributed.fsdp._flat_param import FlatParameter, FlatParamHandle
 from torch.distributed.fsdp._fsdp_extensions import (
     _ext_chunk_dtensor,
     _ext_chunk_tensor,
@@ -45,7 +46,6 @@ from torch.distributed.fsdp._runtime_utils import (
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
-from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 from torch.utils._pytree import tree_map_only
 
 
