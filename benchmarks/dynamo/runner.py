@@ -226,11 +226,11 @@ def parse_args():
         help="Log operator inputs",
     )
     parser.add_argument(
-        "--geomean-include-slowdowns",
-        "--geomean_include_slowdowns",
+        "--include-slowdowns",
+        "--include_slowdowns",
         action="store_true",
         default=False,
-        help="Include slowdowns in geomean. By default, slowdowns are ignored. "
+        help="Include slowdowns in geomean performance speedup report. By default, slowdowns are ignored. "
         "This is because one can always use eager if compile is not speeding things up",
     )
 
@@ -633,7 +633,7 @@ class ParsePerformanceLogs(Parser):
         flag_compilers,
         mode,
         output_dir,
-        geomean_include_slowdowns=False,
+        include_slowdowns=False,
     ):
         super().__init__(
             suites,
@@ -654,7 +654,7 @@ class ParsePerformanceLogs(Parser):
         ]
         self.bottom_k = 50
         self.parse()
-        self.geomean_include_slowdowns = geomean_include_slowdowns
+        self.include_slowdowns = include_slowdowns
 
     def plot_graph(self, df, title):
         labels = df.columns.values.tolist()
@@ -790,7 +790,7 @@ class ParsePerformanceLogs(Parser):
 
     def geomean(self, compiler, df):
         cleaned_df = self.get_passing_entries(compiler, df)
-        if not self.geomean_include_slowdowns:
+        if not self.include_slowdowns:
             cleaned_df = cleaned_df.clip(1)
         if cleaned_df.empty:
             return "0.0x"
@@ -1004,7 +1004,7 @@ class ParsePerformanceLogs(Parser):
 def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
     build_summary(args)
-    geomean_include_slowdowns = args.geomean_include_slowdowns
+    include_slowdowns = args.include_slowdowns
 
     parser_class = ParsePerformanceLogs
     parser = parser_class(
@@ -1015,7 +1015,7 @@ def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_
         flag_compilers,
         mode,
         output_dir,
-        geomean_include_slowdowns,
+        include_slowdowns,
     )
     parser.gen_summary_files()
     return
