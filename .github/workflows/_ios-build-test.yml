@@ -3,10 +3,15 @@ name: ios-build-test
 on:
   workflow_call:
     inputs:
+      trigger-event:
+        type: string
+        default: ""
+        description: |
+          The trigger event from the caller that determines whether or not to upload
       build-environment:
         required: true
         type: string
-        description: Top-level label for what's being built/tested.
+        description: Top-level label for what is being built/tested.
       sync-tag:
         required: false
         type: string
@@ -19,6 +24,13 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+    secrets:
+      AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID:
+        required: false
+      AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY:
+        required: false
+      COCOAPODS_TRUNK_TOKEN:
+        required: false
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -255,7 +267,7 @@ jobs:
     runs-on: macos-12
     needs: build
     # NB: Only upload release build, if we need it, we could also turn on nightly here
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    environment: ${{ ((inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -404,15 +416,15 @@ jobs:
           path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
 
       - name: Set DRY_RUN
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Upload the artifact to S3
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY }}
           IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ env.DEST_DIR }}
@@ -441,7 +453,7 @@ jobs:
           # We need to set this secret to upload to cocoapods. However, we might want
           # to NOT set this for PROD release so that we can upload the artifacts manually
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN || '' }}
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
+        if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
