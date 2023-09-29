@@ -2325,6 +2325,10 @@ class MutationLayout(Layout):
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
+        # NOTE: We must realize users of `dst` before we realize `src`, since
+        # realization order determines scheduling order. Otherwise, src's
+        # mutation would be scheduled before the existing users of dst!
+        V.graph.mark_buffer_mutated(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -3891,12 +3895,23 @@ class FallbackKernel(ExternKernelAlloc):
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
-        if isinstance(self.outputs, (list, tuple)):
+        if isinstance(self.outputs, tuple):
+            # For tuple returns, e.g "-> (Tensor, Tensor)"
             output_arguments = [
                 export_schema.Argument.create(
                     as_tensor=export_schema.TensorArgument(name=output.get_name())
                 )
                 for output in self.outputs
+            ]
+        elif isinstance(self.outputs, list):
+            # For list of tensor, e.g. "-> List[Tensor]"
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensors=[
+                        export_schema.TensorArgument(name=output.get_name())
+                        for output in self.outputs
+                    ]
+                )
             ]
         else:
             output_arguments = [
