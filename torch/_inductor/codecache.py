@@ -688,7 +688,7 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
 
 
 def cpp_wrapper_flags() -> str:
