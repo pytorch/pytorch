@@ -331,6 +331,12 @@ class TestPaternMatcher(TestCase):
                 True,
             ),
             (
+                torch.randn(8, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 8, device="cuda"),
+                True,
+            ),
+            (
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(1, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),

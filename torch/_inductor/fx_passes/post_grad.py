@@ -10,7 +10,7 @@ from sympy import Expr
 import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -788,10 +788,8 @@ def is_valid_addmm_fusion(match):
         return False  # Input is a number
 
     in_shape = inp.meta["val"].shape
-    matched = len(in_shape) <= 2
     mm_shape = mat1.meta["val"].shape[0], mat2.meta["val"].shape[1]
-    for i, m in zip(in_shape, mm_shape):
-        matched &= i == 1 or i == m
+    matched = is_expandable_to(in_shape, mm_shape)
     if not matched:
         return False  # Shape mismatch
 
