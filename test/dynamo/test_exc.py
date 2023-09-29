@@ -212,16 +212,16 @@ ReluCompileError:""",
 translation validation failed.
 
 Model:
-  ==> L['shape'][0]: 2
-  ==> L['shape'][1]: 2
-  ==> L['shape'][2]: 4
-  ==> L['x'].size()[0]: 9
+  ==> L['shape'][0]: 0
+  ==> L['shape'][1]: 0
+  ==> L['shape'][2]: 0
+  ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s0: 9
-  ==> s1: 2
-  ==> s2: 2
-  ==> s3: 4
+  ==> s0: 3
+  ==> s1: 0
+  ==> s2: 0
+  ==> s3: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -234,39 +234,30 @@ Assertions:
   ==> (True)
 
 Target Expressions:
-  ==> (!= (+ s3 (* 2 s1)) s0)
-  ==> (!= s1 s3)
-  ==> (<= (* 2 s1) (+ s0 (* -1 s3)))
-  ==> (<= (* 2 s1) s0)
-  ==> (<= (* 2 s1) s0)
-  ==> (<= (+ s3 (* 2 s1)) s0)
-  ==> (<= 0 (+ s0 (* -1 s1)))
   ==> (<= 0 s1)
+  ==> (<= 0 s2)
   ==> (<= 0 s3)
-  ==> (<= 2 s1)
-  ==> (<= 2 s2)
-  ==> (<= 2 s3)
-  ==> (<= 6 s0)
-  ==> (<= s1 s0)
+  ==> (<= 2 s0)
+  ==> (== 0 L['shape'][0])
+  ==> (== 0 L['shape'][1])
+  ==> (== 0 L['shape'][2])
   ==> (== 0 L['x'].storage_offset())
+  ==> (== 0 s1)
+  ==> (== 0 s2)
+  ==> (== 0 s3)
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s1)
-  ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
-  ==> (== s2 s1)
   ==> (> s0 0)
-  ==> (>= 9223372036854775802 s1)
-  ==> (>= 9223372036854775802 s2)
-  ==> (>= 9223372036854775802 s3)
   ==> (>= 9223372036854775806 s0)
-  ==> (And (<= (* 2 s1) s0) (<= (* -1 s0) (* 2 s1)))
-  ==> (And (<= s1 s0) (<= (* -1 s0) s1))
+  ==> (>= 9223372036854775806 s1)
+  ==> (>= 9223372036854775806 s2)
+  ==> (>= 9223372036854775806 s3)
 
 Failed Source Expressions:
-  ==> (!= L['shape'][0] L['shape'][1])
-  ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])
-  ==> (== L['shape'][0] L['shape'][2])""",
+  ==> (!= 0 L['shape'][0])
+  ==> (!= 0 L['shape'][1])
+  ==> (!= 0 L['shape'][2])
+  ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
 
     @skipIf(not TEST_Z3, "z3 not installed")
@@ -290,7 +281,7 @@ Failed Source Expressions:
 translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
 
 Failure ocurred while running node:
-    %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
+    %split : [num_users=1] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
   ==> L['shape'][0]: -9223372036854775807
