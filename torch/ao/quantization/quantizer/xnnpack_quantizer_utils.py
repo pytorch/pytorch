@@ -214,28 +214,18 @@ def _annotate_conv(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    conv_partitions = get_source_partitions(
-        gm.graph,
-        [
-            torch.nn.Conv2d,
-            torch.nn.functional.conv2d,
-            torch.nn.Conv1d,
-            torch.nn.functional.conv1d,
-        ],
-        filter_fn,
-    )
-    conv_partitions = list(itertools.chain(*conv_partitions.values()))
     annotated_partitions = []
-    for conv_partition in conv_partitions:
-        if len(conv_partition.output_nodes) > 1:
-            raise ValueError("conv partition has more than one output node")
-        conv_node = conv_partition.output_nodes[0]
-        if conv_node.op != "call_function" or conv_node.target not in [
+    for n in gm.graph.nodes:
+        if n.op != "call_function" or n.target not in [
             torch.ops.aten.conv1d.default,
             torch.ops.aten.conv2d.default,
         ]:
-            raise ValueError(f"{conv_node} is not an aten conv1d or conv2d operator")
-        # skip annotation if it is already annotated
+            continue
+        conv_node = n
+
+        if filter_fn and not filter_fn(conv_node):
+            continue
+
         if _is_annotated([conv_node]):
             continue
 
@@ -257,8 +247,8 @@ def _annotate_conv(
             output_qspec=get_output_act_qspec(quantization_config),
             _annotated=True,
         )
-        _mark_nodes_as_annotated(conv_partition.nodes)
-        annotated_partitions.append(conv_partition.nodes)
+        _mark_nodes_as_annotated([conv_node])
+        annotated_partitions.append([conv_node])
     return annotated_partitions
 
 
@@ -268,36 +258,27 @@ def _annotate_conv_relu(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    fused_partitions1 = find_sequential_partitions(
-        gm, [torch.nn.Conv2d, torch.nn.ReLU], filter_fn
-    )
-    fused_partitions2 = find_sequential_partitions(
-        gm, [torch.nn.Conv1d, torch.nn.ReLU], filter_fn
-    )
     annotated_partitions = []
-    for fused_partition in fused_partitions1 + fused_partitions2:
-        conv_partition, relu_partition = fused_partition
-        if len(relu_partition.output_nodes) > 1:
-            raise ValueError("Relu partition has more than one output node")
-        relu_node = relu_partition.output_nodes[0]
-        if len(conv_partition.output_nodes) > 1:
-            raise ValueError("conv partition has more than one output node")
-        conv_node = conv_partition.output_nodes[0]
-
-        if not isinstance(conv_node, Node):
-            raise ValueError(f"{conv_node} is not a Node")
-        if conv_node.op != "call_function" or conv_node.target not in [
-            torch.ops.aten.conv1d.default,
-            torch.ops.aten.conv2d.default,
-        ]:
-            raise ValueError(f"{conv_node} is not an aten conv1d or conv2d operator")
-        if relu_node.op != "call_function" or relu_node.target not in [
+    for n in gm.graph.nodes:
+        if n != "call_function" or n.target not in [
             torch.ops.aten.relu.default,
             torch.ops.aten.relu_.default,
         ]:
-            raise ValueError(f"{relu_node} is not an aten relu operator")
+            continue
+        relu_node = n
+        maybe_conv_node = n.args[0]
+        if not isinstance(maybe_conv_node, Node) or maybe_conv_node != "call_function" or maybe_conv_node.target not in [
+            torch.ops.aten.conv1d.default,
+            torch.ops.aten.conv2d.default,
+        ]:
+            continue
+        conv_node = maybe_conv_node
+        parition = [relu_node, conv_node]
 
-        if _is_annotated([relu_node, conv_node]):
+        if filter_fn and any(not filter_fn(n) for n in partition):
+            continue
+
+        if _is_annotated(partition):
             continue
 
         input_qspec_map = {}
@@ -320,8 +301,8 @@ def _annotate_conv_relu(
             output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True,
         )
-        _mark_nodes_as_annotated(conv_partition.nodes + relu_partition.nodes)
-        annotated_partitions.append(conv_partition.nodes + relu_partition.nodes)
+        _mark_nodes_as_annotated(partition)
+        annotated_partitions.append(partition)
     return annotated_partitions
 
 
