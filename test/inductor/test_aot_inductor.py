@@ -596,6 +596,27 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_zero_grid_with_unbacked_symbols(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                nz = torch.nonzero(x)
+                b = torch.ones_like(nz, dtype=torch.float16)
+                c = torch.zeros_like(nz, dtype=torch.float16)
+                d = (b + c) @ y
+                return d.sum()
+
+        example_inputs = (
+            torch.tensor([1, 1, 1], device="cuda"),
+            torch.randn((1, 32), dtype=torch.float16, device="cuda"),
+        )
+        with torch._dynamo.config.patch(
+            {"add_runtime_assertions_for_inline_constraints": False}
+        ):
+            self.check_model(Repro(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -621,6 +642,9 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_zero_grid_with_unbacked_symbols": TestFailure(
+            ("abi_compatible_cpu",), is_skip=True
+        ),
     },
 )
 
@@ -633,7 +657,15 @@ class AOTInductorTestABICompatibleCuda(TestCase):
 
 
 copy_tests(
-    AOTInductorTestsTemplate, AOTInductorTestABICompatibleCuda, "abi_compatible_cuda"
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCuda,
+    "abi_compatible_cuda",
+    # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_zero_grid_with_unbacked_symbols": TestFailure(
+            ("abi_compatible_cuda",), is_skip=True
+        ),
+    },
 )
 
 
