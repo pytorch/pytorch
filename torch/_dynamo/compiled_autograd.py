@@ -168,18 +168,28 @@ class AutogradCompilerInstance:
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
 
+compiled_autograd_enabled = False
+
+
 @contextlib.contextmanager
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
+    global compiled_autograd_enabled
+    compiled_autograd_enabled = True
     with torch.autograd.set_multithreading_enabled(False):
         yield
+    if not prior:
+        compiled_autograd_enabled = False
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
 def disable():
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    compiled_autograd_enabled = False
     yield
+    if prior:
+        compiled_autograd_enabled = True
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
