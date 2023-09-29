@@ -8,9 +8,10 @@ Copied from fftpack.helper by Pearu Peterson, October 2005
 import torch._numpy as np
 from torch._numpy import fft, pi
 from torch._numpy.testing import assert_array_almost_equal
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestFFTShift:
+class TestFFTShift(TestCase):
     def test_definition(self):
         x = [0, 1, 2, 3, 4, -4, -3, -2, -1]
         y = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
@@ -124,7 +125,7 @@ class TestFFTShift:
                     )
 
 
-class TestFFTFreq:
+class TestFFTFreq(TestCase):
     def test_definition(self):
         x = [0, 1, 2, 3, 4, -4, -3, -2, -1]
         assert_array_almost_equal(9 * fft.fftfreq(9), x)
@@ -134,7 +135,7 @@ class TestFFTFreq:
         assert_array_almost_equal(10 * pi * fft.fftfreq(10, pi), x)
 
 
-class TestRFFTFreq:
+class TestRFFTFreq(TestCase):
     def test_definition(self):
         x = [0, 1, 2, 3, 4]
         assert_array_almost_equal(9 * fft.rfftfreq(9), x)
@@ -144,7 +145,7 @@ class TestRFFTFreq:
         assert_array_almost_equal(10 * pi * fft.rfftfreq(10, pi), x)
 
 
-class TestIRFFTN:
+class TestIRFFTN(TestCase):
     def test_not_last_axis_success(self):
         ar, ai = np.random.random((2, 16, 8, 32))
         a = ar + 1j * ai
@@ -156,6 +157,4 @@ class TestIRFFTN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()
