@@ -66,12 +66,11 @@ arch = nil
 if options[:platform] == 'SIMULATOR'
     sdk = 'iphonesimulator'
     arch = 'x86_64'
+    exec "xcodebuild clean build -project #{xcodeproj_path} -target #{target.name} -sdk #{sdk} -configuration Release -arch #{arch}"
 elsif options[:platform] == 'OS'
     sdk = 'iphoneos'
     arch = 'arm64'
+    exec "xcodebuild clean build -project #{xcodeproj_path} -alltargets -sdk #{sdk} -configuration Release -arch #{arch}"
 else
     raise "unsupported platform #{options[:platform]}"
 end
-
-# run xcodebuild
-exec "xcodebuild clean build -project #{xcodeproj_path} -alltargets -sdk #{sdk} -configuration Release -arch #{arch}"
