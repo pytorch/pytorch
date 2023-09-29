@@ -1440,7 +1440,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 output_handle_name = f"{name}_handle"
                 assert (
                     output.indices[0][1] == idx
-                ), f"expected {output.indices[1]=} == {idx=} for {output_name_base=}"
+                ), f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
                 self.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
                 output_raii_handles.append(
