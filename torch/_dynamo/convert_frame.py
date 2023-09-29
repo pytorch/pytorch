@@ -48,7 +48,7 @@ from .exc import (
     unimplemented,
     Unsupported,
 )
-from .guards import CheckFunctionManager, GuardedCode
+from .guards import CheckFunctionManager, guard_fail_hook, GuardedCode
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
@@ -247,6 +247,14 @@ def convert_frame_assert(
     def _convert_frame_assert(
         frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
     ):
+        # compute guard failure reasons using cache_entry
+        cur_cache_entry = cache_entry
+        while cur_cache_entry is not None:
+            guard_fail_hook(
+                cur_cache_entry.check_fn, cur_cache_entry.code, frame.f_locals
+            )
+            cur_cache_entry = cur_cache_entry.next
+
         increment_frame()
 
         code = frame.f_code

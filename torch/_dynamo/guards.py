@@ -49,7 +49,7 @@ from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from . import config, convert_frame, mutation_guard
-from .eval_frame import set_guard_error_hook, set_guard_fail_hook
+from .eval_frame import set_guard_error_hook
 from .exc import unimplemented
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -1213,13 +1213,6 @@ class CheckFunctionManager:
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS\n", guard_body)
 
-        if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
-            # Guard fail hook is called everytime guard eval fails. For a cache
-            # lookup where there are multiple entries in the same cache line,
-            # this can lead to very high performance overhead. So, we have
-            # decided to hide this behing a config flag.
-            set_guard_fail_hook(guard_fail_hook)
-
         out: Dict[str, Any] = dict()
         exec(pycode, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
@@ -1310,24 +1303,17 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
-stashed_first_fail_reason = None
-
-
 def guard_fail_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    index: int,
-    last: bool,
 ) -> None:
     """
-    called whenever a guard fails.
+    called to compute a guard failure's reason.
     """
-    first = index == 0
-    global stashed_first_fail_reason
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
+    if not is_guard_failure_reporting_enabled() and guard_fn.guard_fail_fn is None:
         return
+
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
@@ -1346,21 +1332,8 @@ def guard_fail_hook(
             reason = part
             break
 
-    if first:
-        stashed_first_fail_reason = reason
+    guard_failures[orig_code_map[code]].append(reason)
 
-    if not last:
-        return
-
-    # Technically, we're failing our last guard, which is our oldest guard due to the
-    # eval_frame.c logic that moves newest frames to head, but for logging purposes
-    # it's more useful to see the 'first' failure (if we never got a hit) since it's
-    # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
-    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
-    stashed_first_fail_reason = None
-
-    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
