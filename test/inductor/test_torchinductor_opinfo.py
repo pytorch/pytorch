@@ -288,13 +288,10 @@ def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-<<<<<<< HEAD
 torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
     wrapper_noop_set_seed
 )
 
-=======
->>>>>>> a62192f7ba4... TorchInductor Opinfo fixes for rng ops
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
     torch.testing._internal.common_utils.disable_functorch
