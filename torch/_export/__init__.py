@@ -730,10 +730,11 @@ def _export(
         (args, kwargs),
     )
 
-    if len(range_constraints) > 0 or len(equality_constraints) > 0:
-        exported_program = exported_program._transform(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-        )
+    if torch._dynamo.config.add_runtime_assertions_for_inline_constraints:
+        if len(range_constraints) > 0 or len(equality_constraints) > 0:
+            exported_program = exported_program._transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+            )
     exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
