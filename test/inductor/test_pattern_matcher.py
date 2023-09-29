@@ -328,28 +328,58 @@ class TestPaternMatcher(TestCase):
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
+                True,
+            ),
+            (
+                torch.randn(8, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 8, device="cuda"),
+                True,
             ),
             (
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(1, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
+                False,
             ),
             (
                 torch.randn(1, 16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
+                False,
             ),
-            (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
+            (
+                4,
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                False,
+            ),
         ]
-        for args in args_list:
+        for a, b, c, should_fuse in args_list:
             torch._dynamo.reset()
             counters.clear()
+            args = (a, b, c)
             e1, e2 = fn(*args)
             a1, a2 = torch.compile(fn)(*args)
             torch.testing.assert_close(a1, e1)
             torch.testing.assert_close(a2, e2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+            count, nodes = (2, 4) if should_fuse else (0, 0)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
+
+    def test_addmm_symbolic_scalar(self):
+        def fn(m1, m2):
+            bias = m1.size(0)
+            return torch.add(bias, torch.mm(m1, m2)), torch.mm(m1, m2) + bias
+
+        m1 = torch.randn(16, 16, device="cuda")
+        m2 = torch.randn(16, 16, device="cuda")
+
+        counters.clear()
+        expect = fn(m1, m2)
+        actual = torch.compile(fn, dynamic=True)(m1, m2)
+        self.assertEqual(expect, actual)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
     def test_cat_mm(self):
         def fn(a, b, c):
