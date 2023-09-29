@@ -6,16 +6,7 @@
 
 namespace c10d {
 
-Backend::Backend(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
-  C10_LOG_API_USAGE_ONCE("c10d.backend");
-}
-
-Backend::~Backend() = default;
-
-void Backend::init() {
-  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
-}
+namespace {
 
 std::string exceptionPtrWhat(const std::exception_ptr& eptr) {
   try {
@@ -40,6 +31,18 @@ void commonEventinit(
   // isCompleted is mutable :facepalm:
   if (const_cast<Work&>(work).isCompleted() && !work.isSuccess())
     evt.error_message = exceptionPtrWhat(work.exception());
+}
+}
+
+Backend::Backend(int rank, int size)
+    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
+  C10_LOG_API_USAGE_ONCE("c10d.backend");
+}
+
+Backend::~Backend() = default;
+
+void Backend::init() {
+  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
 }
 
 void Backend::emitCollectiveStart(const Work& work) {

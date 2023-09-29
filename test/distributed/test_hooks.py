@@ -3,9 +3,9 @@
 import os
 import sys
 import threading
-from functools import partial, wraps
-from datetime import timedelta
 import time
+from datetime import timedelta
+from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
@@ -68,12 +68,10 @@ class PgHooks(MultiProcessTestCase):
         self.assertEqual(len(pgs), 2)
         self.assertEqual(pgs[1][0], pg0 if self.rank < 2 else pg1)
 
+
 def with_comms(func=None, timeout=c10d.default_pg_timeout):
     if func is None:
-        return partial(
-            with_comms,
-            timeout=timeout
-        )
+        return partial(with_comms, timeout=timeout)
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -143,7 +141,6 @@ class CollectiveHooks:
         check_op(0, "ALLGATHER")
         check_op(1, "ALLREDUCE")
 
-
     def _test_failure(self):
         # it's ok to access them directly since there's a single bg thread poking at them.
         starts = []
@@ -181,7 +178,7 @@ class CollectiveHooks:
         self.assertEqual(2, len(starts))
         self.assertEqual(2, len(ends))
 
-        def check_op(idx, coll_name, end_fail = False):
+        def check_op(idx, coll_name, end_fail=False):
             self.assertEqual(default_pg_name, starts[idx].pg_name)
             self.assertEqual(self.backend_name, starts[idx].backend)
             self.assertGreaterEqual(starts[idx].sequence_number, 0)
@@ -222,7 +219,7 @@ class GlooHooks(MultiProcessTestCase, CollectiveHooks):
             rank=self.rank,
             world_size=self.world_size,
             store=dist.FileStore(self.file_name, self.world_size),
-            timeout=timeout
+            timeout=timeout,
         )
 
     def destroy_comms(self):
@@ -256,7 +253,7 @@ class NcclHooks(MultiProcessTestCase, CollectiveHooks):
             rank=self.rank,
             world_size=self.world_size,
             store=dist.FileStore(self.file_name, self.world_size),
-            timeout=timeout
+            timeout=timeout,
         )
 
     def destroy_comms(self):
