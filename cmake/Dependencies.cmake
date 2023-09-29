@@ -127,10 +127,9 @@ endif()
 find_package(Threads REQUIRED)
 if(TARGET Threads::Threads)
   list(APPEND Caffe2_DEPENDENCY_LIBS Threads::Threads)
-  add_library(caffe2::Threads ALIAS Threads::Threads)
 else()
   message(FATAL_ERROR
-      "Cannot find threading library. Caffe2 requires Threads to compile.")
+      "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
 if(USE_TBB)
