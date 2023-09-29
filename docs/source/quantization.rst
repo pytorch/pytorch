@@ -1220,7 +1220,7 @@ An example::
 
 Symbolic Trace Error when using FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Symbolic traceability is a requirement for `(Prototype) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
+Symbolic traceability is a requirement for `(Prototype - maintaince mode) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
 
   torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
 
