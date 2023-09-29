@@ -489,12 +489,10 @@ class ConstantLR(LRScheduler):
         if self.last_epoch == 0:
             return [group['lr'] * self.factor for group in self.optimizer.param_groups]
 
-        if (self.last_epoch > self.total_iters or
-                (self.last_epoch != self.total_iters)):
+        if self.last_epoch != self.total_iters:
             return [group['lr'] for group in self.optimizer.param_groups]
 
-        if (self.last_epoch == self.total_iters):
-            return [group['lr'] * (1.0 / self.factor) for group in self.optimizer.param_groups]
+        return [group['lr'] * (1.0 / self.factor) for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
         return [base_lr * (self.factor + (self.last_epoch >= self.total_iters) * (1 - self.factor))
