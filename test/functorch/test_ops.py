@@ -326,6 +326,8 @@ vjp_fail = {
     decorate('nn.functional.layer_norm', decorator=skipIfRocm),
     # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
+    decorate('svd', decorator=skipIfTorchDynamo()),
+    decorate('linalg.svd', decorator=skipIfTorchDynamo()),
 }
 
 aliasing_ops = {
@@ -940,6 +942,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),  # calls as_strided
         xfail('index_reduce', ''),  # .item() call
         decorate('svd', decorator=skipIfTorchDynamo()),
+        decorate('linalg.svd', decorator=skipIfTorchDynamo()),
         # ---------------------------------------------------------------------
     })
 
@@ -1227,6 +1230,7 @@ class TestOperators(TestCase):
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
         decorate('svd', decorator=skipIfTorchDynamo()),
+        decorate('linalg.svd', decorator=skipIfTorchDynamo()),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
