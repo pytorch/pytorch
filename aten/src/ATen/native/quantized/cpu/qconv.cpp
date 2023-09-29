@@ -35,7 +35,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.

@@ -185,7 +185,7 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
-- func: sym_constrain_range_for_size(Scalar size, *, int? min, int? max) -> ()
+- func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range_for_size
 
@@ -7129,7 +7129,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    CompositeImplicitAutogradNestedTensor: NestedTensor_unbind
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
