@@ -15,7 +15,7 @@ namespace metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
-static Tensor& leaky_relu_(Tensor& input, const Scalar& negative_slope_val) {
+Tensor& leaky_relu_(Tensor& input, const Scalar& negative_slope_val) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   IntArrayRef outputSize = input.sizes();
@@ -49,7 +49,7 @@ static Tensor& leaky_relu_(Tensor& input, const Scalar& negative_slope_val) {
   return input;
 }
 
-static Tensor leaky_relu(const at::Tensor& input, const Scalar& negative_slope_val) {
+Tensor leaky_relu(const at::Tensor& input, const Scalar& negative_slope_val) {
   MPSImage* X = imageFromTensor(input);
   IntArrayRef outputSize = input.sizes();
   MetalTensorImplStorage mt{outputSize.vec()};
