@@ -10,7 +10,7 @@ from sympy import Expr
 import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import is_boolean_dtype, is_integer_dtype
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -281,6 +281,10 @@ def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
 )
 def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
     """Based on a pattern in OPTForCausalLM"""
+
+    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        # cumsum promotes all integral types to int64
+        dtype = torch.int64
 
     def repl(*shape):
         dim_size = shape[dim]

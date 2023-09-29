@@ -339,9 +339,9 @@ def logspace(
 
 
 def arange(
-    start: Optional[ArrayLike] = None,
-    stop: Optional[ArrayLike] = None,
-    step: Optional[ArrayLike] = 1,
+    start: Optional[ArrayLikeOrScalar] = None,
+    stop: Optional[ArrayLikeOrScalar] = None,
+    step: Optional[ArrayLikeOrScalar] = 1,
     dtype: Optional[DTypeLike] = None,
     *,
     like: NotImplementedType = None,
@@ -359,22 +359,23 @@ def arange(
 
     # the dtype of the result
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes().int_dtype
-    # XXX: default values do not get normalized
-    start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
+        dtype = (
+            _dtypes_impl.default_dtypes().float_dtype
+            if any(_dtypes_impl.is_float_or_fp_tensor(x) for x in (start, stop, step))
+            else _dtypes_impl.default_dtypes().int_dtype
+        )
+    work_dtype = torch.float64 if dtype.is_complex else dtype
 
-    dummy = torch.empty(1, dtype=dtype)
-    target_dtype = _dtypes_impl.result_type_impl(start, stop, step, dummy)
-
-    # work around RuntimeError: "arange_cpu" not implemented for 'ComplexFloat'
-    work_dtype = torch.float64 if target_dtype.is_complex else target_dtype
+    # RuntimeError: "lt_cpu" not implemented for 'ComplexFloat'. Fall back to eager.
+    if any(_dtypes_impl.is_complex_or_complex_tensor(x) for x in (start, stop, step)):
+        raise NotImplementedError
 
     if (step > 0 and start > stop) or (step < 0 and start < stop):
         # empty range
-        return torch.empty(0, dtype=target_dtype)
+        return torch.empty(0, dtype=dtype)
 
     result = torch.arange(start, stop, step, dtype=work_dtype)
-    result = _util.cast_if_needed(result, target_dtype)
+    result = _util.cast_if_needed(result, dtype)
     return result
 
 
@@ -875,7 +876,7 @@ def take(
 def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
     (arr,), axis = _util.axis_none_flatten(arr, axis=axis)
     axis = _util.normalize_axis_index(axis, arr.ndim)
-    return torch.gather(arr, axis, indices)
+    return torch.take_along_dim(arr, indices, axis)
 
 
 def put(
@@ -1328,6 +1329,16 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
         # set the global state to handle the optimize=... argument, restore on exit
         if opt_einsum.is_available():
             old_strategy = torch.backends.opt_einsum.strategy
+            old_enabled = torch.backends.opt_einsum.enabled
+
+            # torch.einsum calls opt_einsum.contract_path, which runs into
+            # https://github.com/dgasmith/opt_einsum/issues/219
+            # for strategy={True, False}
+            if optimize is True:
+                optimize = "auto"
+            elif optimize is False:
+                torch.backends.opt_einsum.enabled = False
+
             torch.backends.opt_einsum.strategy = optimize
 
         if sublist_format:
@@ -1347,6 +1358,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     finally:
         if opt_einsum.is_available():
             torch.backends.opt_einsum.strategy = old_strategy
+            torch.backends.opt_einsum.enabled = old_enabled
 
     result = maybe_copy_to(out, result)
     return wrap_tensors(result)

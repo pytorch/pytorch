@@ -87,8 +87,6 @@ from .utils import (
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
-    nnmodule_doc_url_msg,
-    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -267,26 +265,37 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # In export mode, we force the shape_env to strictly disallow any constraining
-        # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                co_fields=self.co_fields,
-            ),
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.init_ambient_guards()
-
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+
+        shape_env = ShapeEnv(
+            # Reference Cycle!
+            # Share a reference to the list of TrackedFake.
+            #
+            # ShapeEnv needs this in order to be able to reproduce the call
+            # to produce_guards at an arbitrary time point. That is because
+            # TrackedFake instances may have its metadata changed throughout
+            # the program execution.
+            tracked_fakes=self.tracked_fakes,
+            allow_scalar_outputs=config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            co_fields=self.co_fields,
+        )
+
+        # In export mode, we force the shape_env to strictly disallow any constraining
+        # of the user marked dynamic dims
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=shape_env,
+            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+            allow_non_fake_inputs=True if self.export else False,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.init_ambient_guards()
+
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
@@ -365,6 +374,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+
     @property
     def root_tracer(self):
         return self.tracers[0]
@@ -410,11 +421,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def new_subtracer(self):
+    def new_subtracer(self, source_target):
         new_scope_ctx = enter_new_scope()
         try:
             new_scope_ctx.__enter__()
-            tracer = SubgraphTracer(self, parent=self.current_tracer)
+            tracer = SubgraphTracer(
+                self, parent=self.current_tracer, source_target=source_target
+            )
             self.tracers.append(tracer)
             yield tracer
         finally:
@@ -597,7 +610,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
         for i in itertools.count():
-            var = f"___{name}_{i}"
+            var = f"{name}_{i}"
             if var not in existing:
                 self.code_options["co_varnames"] += (var,)
                 return var
@@ -673,23 +686,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(target, check_forward_hooks=True):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
-                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
-                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
-                    "to ensure recompiling after changing hooks."
-                    f"{nnmodule_doc_url_msg} ",
-                )
-            if nnmodule_has_hooks(
-                target, check_backward_hooks=True, check_state_dict_hooks=True
-            ):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module state_dict and backward hooks are not yet supported by torch.compile, "
-                    f"but were detected in your model and will be silently ignored. {nnmodule_doc_url_msg}",
-                )
 
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
@@ -866,6 +862,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
+            self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -877,6 +874,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
+            self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass2)
@@ -986,7 +984,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -1176,7 +1173,9 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(self, output_graph, parent=None, export_root=False):
+    def __init__(
+        self, output_graph, parent=None, export_root=False, source_target=None
+    ):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
@@ -1215,6 +1214,16 @@ class SubgraphTracer(fx.Tracer):
         self._orig_gm_meta = None
         self._orig_gm_lineno_map = None
         self._orig_gm_firstlineno = None
+        # Each SubgraphTracer is associated with a source target, which indicates
+        # which operator this subgraph is attached to. We compute a source_fn_stack
+        # based on the source tareget. For the root tracer, it's set to [].
+        # This is useful for debugging and transforming the exported graph.
+        if self.parent is None:
+            self.source_fn_stack = []
+        else:
+            self.source_fn_stack = self.parent.source_fn_stack + [
+                (self.graph._target_to_str(source_target), source_target)
+            ]
 
     def create_proxy(
         self,
@@ -1310,6 +1319,24 @@ class SubgraphTracer(fx.Tracer):
                 self._orig_gm_meta = None
                 self._orig_gm_lineno_map = None
                 self._orig_gm_firstlineno = None
+        nn_module_stack = tx.nn_module_stack
+        if nn_module_stack:
+            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                (rv.node.name, target)
+            ]
+        elif kind == "call_module":
+            if self.parent is not None:
+                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+            # For modules we store the class
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                (
+                    rv.node.name,
+                    rv.node.meta["nn_module_stack"][target][1],
+                )
+            ]
 
         # preserve original meta if it is available
         if (
@@ -1325,36 +1352,44 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
-                for key in ("nn_module_stack", "source_fn", "stack_trace"):
-                    if key in meta:
-                        rv.node.meta[key] = meta[key]
-                return rv
+                if "stack_trace" in meta:
+                    rv.node.meta["stack_trace"] = meta["stack_trace"]
+                if "nn_module_stack" in meta and "source_fn_stack" in meta:
+                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
+                    rv.node.meta["source_fn_stack"] = meta["source_fn_stack"]
 
-        nn_module_stack = tx.nn_module_stack
-        if nn_module_stack:
-            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+        if "nn_module_stack" not in rv.node.meta:
+            nn_module_stack = tx.nn_module_stack
+            if nn_module_stack:
+                rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = (rv.node.name, target)
-        elif kind == "call_module":
-            if self.parent is not None:
-                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
-            # For modules we store the class
-            rv.node.meta["source_fn"] = (
-                rv.node.name,
-                rv.node.meta["nn_module_stack"][target][1],
-            )
+        if "source_fn_stack" not in rv.node.meta:
+            if kind in {"call_function", "call_method"}:
+                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                    (rv.node.name, target)
+                ]
+            elif kind == "call_module":
+                if self.parent is not None:
+                    unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+                # For modules we store the class
+                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                    (
+                        rv.node.name,
+                        rv.node.meta["nn_module_stack"][target][1],
+                    )
+                ]
 
-        frame_summaries: List[traceback.FrameSummary] = []
-        while tx:
-            frame_summaries.append(tx.frame_summary())
-            tx = getattr(tx, "parent", None)
-        # Reverse the frame_summaries, such that the innermost frame is at the last
-        frame_summaries.reverse()
+        if "stack_trace" not in rv.node.meta:
+            frame_summaries: List[traceback.FrameSummary] = []
+            while tx:
+                frame_summaries.append(tx.frame_summary())
+                tx = getattr(tx, "parent", None)
+            # Reverse the frame_summaries, such that the innermost frame is at the last
+            frame_summaries.reverse()
 
-        # official from_list stub doesn't have new-style type
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = "".join(msgs)
+            # official from_list stub doesn't have new-style type
+            msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
+            rv.node.stack_trace = "".join(msgs)
 
         return rv
 

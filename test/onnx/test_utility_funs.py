@@ -1094,6 +1094,45 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertIn(ln_node.attribute[0], expected_ln_attrs)
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
+    # This test cases checks the issue where an object does not have an attribute.
+    # When enabling `export_modules_as_functions = True`, the exporter could return an
+    # AttributeError. With this test case, we check that the export passes successfully
+    # without any AttributeError exceptions.
+    # See https://github.com/pytorch/pytorch/pull/109759 for an example. The exception that
+    # this test tries to avoid is `AttributeError: 'Embedding' object has no attribute 'freeze'`.
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_subset_of_predefined_attributes(self):
+        class M(torch.nn.Module):
+            num_layers: int
+
+            def __init__(self, num_layers):
+                super().__init__()
+                self.embed_layer = torch.nn.Embedding.from_pretrained(
+                    torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+                )
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList(
+                    [torch.nn.LayerNorm(3, eps=1e-4) for _ in range(num_layers)]
+                )
+
+            def forward(self, x):
+                e = self.embed_layer(torch.LongTensor([1]))
+                for ln in self.lns:
+                    x = ln(x)
+                return x, e
+
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        model = M(3)
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            export_modules_as_functions=True,
+            opset_version=self.opset_version,
+            verbose=True,  # Allows the test case to print `Skipping module attribute 'freeze'`
+        )
+
     def test_node_scope(self):
         class N(torch.nn.Module):
             def __init__(self):
