@@ -22,7 +22,7 @@ hf_Bart,pass,0
 hf_DistilBert,pass,0
 hf_GPT2,pass,0
 hf_Reformer,pass,5
-hf_T5_generate,pass,22
+hf_T5_generate,pass,21
 hf_T5_large,pass_due_to_skip,0
 hf_Whisper,pass,0
 lennard_jones,pass,0
@@ -31,7 +31,7 @@ maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
-moco,pass,16
+moco,pass,11
 nanogpt,pass,0
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,32
