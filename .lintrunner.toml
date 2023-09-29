@@ -1452,7 +1452,6 @@ exclude_patterns = [
     'test/quantization/jit/test_quantize_jit.py',
     'test/quantization/pt2e/test_graph_utils.py',
     'test/quantization/pt2e/test_quantize_pt2e.py',
-    'test/quantization/pt2e/test_quantize_pt2e_fx.py',
     'test/quantization/pt2e/test_x86inductor_quantizer.py',
     'test/scripts/cuda_memcheck_common.py',
     'test/scripts/run_cuda_memcheck.py',

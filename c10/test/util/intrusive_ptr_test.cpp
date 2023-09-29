@@ -88,7 +88,7 @@ class NullType2 final {
   }
 };
 SomeClass NullType2::singleton_;
-static_assert(NullType1::singleton() != NullType2::singleton(), "");
+static_assert(NullType1::singleton() != NullType2::singleton());
 } // namespace
 
 static_assert(
