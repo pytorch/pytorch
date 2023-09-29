@@ -784,7 +784,9 @@ def is_valid_addmm_fusion(match):
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
-    if not isinstance(inp, torch.fx.Node):
+    if not (
+        isinstance(inp, torch.fx.Node) and isinstance(inp.meta["val"], torch.Tensor)
+    ):
         return False  # Input is a number
 
     in_shape = inp.meta["val"].shape

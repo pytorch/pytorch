@@ -367,6 +367,20 @@ class TestPaternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
+    def test_addmm_symbolic_scalar(self):
+        def fn(m1, m2):
+            bias = m1.size(0)
+            return torch.add(bias, torch.mm(m1, m2)), torch.mm(m1, m2) + bias
+
+        m1 = torch.randn(16, 16, device="cuda")
+        m2 = torch.randn(16, 16, device="cuda")
+
+        counters.clear()
+        expect = fn(m1, m2)
+        actual = torch.compile(fn, dynamic=True)(m1, m2)
+        self.assertEqual(expect, actual)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
