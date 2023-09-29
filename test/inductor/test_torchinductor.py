@@ -1,4 +1,9 @@
 # Owner(s): ["module: inductor"]
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.common_utils import slowTest
+from torch._inductor.utils import has_torchvision_roi_align
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor import config, test_operators
 import contextlib
 import copy
 import dataclasses
@@ -47,7 +52,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
-    with_tf32_off
+    with_tf32_off,
 )
 
 from torch.testing._internal.common_device_type import _has_sufficient_memory
@@ -78,13 +83,6 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch._inductor import config, test_operators
-
-from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-from torch._inductor.utils import has_torchvision_roi_align
-
-from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -165,7 +163,7 @@ class InputGen:
 
     def strided(self):
         return torch.randn((self.n * 2, self.n * 3), device=self.device)[
-            self.n :, self.n :: 2
+            self.n:, self.n:: 2
         ]
 
     def broadcast1(self):
@@ -1588,9 +1586,9 @@ class CommonTemplate:
             return a + 4
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
-        t[2**30 :] = 0
+        t[2**30:] = 0
         compiled_fn = torch._dynamo.optimize()(fn)
-        actual = compiled_fn(t[2**30 :])
+        actual = compiled_fn(t[2**30:])
         self.assertTrue((actual == 4).all())
 
     def test_large_strided_reduction(self):
@@ -3434,7 +3432,7 @@ class CommonTemplate:
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
         # test broadcasted shape bail
-        fn = lambda x: x + torch.zeros(  # noqa: E731
+        def fn(x): return x + torch.zeros(  # noqa: E731
             [256, 256, 256], dtype=torch.bfloat16, device=self.device
         )
         out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
@@ -4734,7 +4732,7 @@ class CommonTemplate:
         with torch.no_grad():
             x = torch.randn(1024, device=self.device)
             self.assertEqual(fn(x[0:]), x[16:][:16])
-            self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
+            self.assertEqual(fn(x[128:]), x[128 + 16:][:16])
 
     # from GPT2ForSequenceClassification
     def test_index_tensor(self):
