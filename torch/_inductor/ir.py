@@ -2325,6 +2325,10 @@ class MutationLayout(Layout):
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
+        # NOTE: We must realize users of `dst` before we realize `src`, since
+        # realization order determines scheduling order. Otherwise, src's
+        # mutation would be scheduled before the existing users of dst!
+        V.graph.mark_buffer_mutated(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
