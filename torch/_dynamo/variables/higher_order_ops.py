@@ -1022,6 +1022,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # We compute the example_value by actually calling
         # `vmap` with FakeTensors.
+        if not all(isinstance(a, TensorVariable) for a in batch_input_args):
+            types = [type(a).__name__ for a in batch_input_args]
+            unimplemented(f"calling vmap with unsupported arg types: {types}")
+
         fake_batched_fn_args = itertools.chain(
             (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
             (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
