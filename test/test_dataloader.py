@@ -2265,6 +2265,19 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+    def test_nested_tensor_multiprocessing(self):
+        dataset = [torch.nested.nested_tensor([torch.randn(5)]) for _ in range(100)]
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=4,
+            collate_fn=lambda x: x,
+        )
+
+        for batch in loader:
+            self.assertTrue(batch[0].is_nested)
+
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
