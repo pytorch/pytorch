@@ -2071,7 +2071,7 @@ class Layout(IRNode):
         device: torch.device,
         dtype: torch.dtype,
         size: List[Expr],
-        stride: Optional[List[Expr]],
+        stride: Optional[Sequence[Union[Expr, int]]],
         offset: Expr = Integer(0),
     ):
         assert stride is None or len(size) == len(
@@ -2182,7 +2182,7 @@ class FixedLayout(Layout):
         device: torch.device,
         dtype: torch.dtype,
         size: Union[List[Expr], List[int]],
-        stride: Optional[Union[List[Expr], List[int]]] = None,
+        stride: Optional[Sequence[Union[Expr, int]]] = None,
         offset: Union[Expr, int] = Integer(0),
     ):
         if stride is None:

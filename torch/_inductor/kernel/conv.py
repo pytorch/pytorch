@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Tuple, TypedDict
+from typing import cast, List, Optional, Tuple, TypedDict
 
 import torch
 from .. import config, ir
@@ -228,7 +228,7 @@ class ConvLayoutParams(TypedDict):
 def conv_layout(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
+    bias: Optional[TensorBox],
     stride: tuple[int, ...],
     padding: tuple[int, ...],
     dilation: tuple[int, ...],
