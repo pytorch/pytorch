@@ -1332,6 +1332,34 @@ class GetItemGuardAccessor : public GuardAccessor {
   PyObject* _attr_name;
 };
 
+/**
+ * Represents global acccessor.
+ */
+class GlobalsGuardAccessor : public GuardAccessor {
+ public:
+  GlobalsGuardAccessor(RootGuardManager* root, py::dict globals_dict)
+      : GuardAccessor(root, globals_dict),
+        _py_globals_dict(globals_dict),
+        _globals_dict(globals_dict.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // Ignore the obj arg. Just pass on the globals dict to the child managers.
+    return _guard_manager->check_nopybind(_globals_dict);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // Ignore the obj arg. Just pass on the globals dict to the child managers.
+    return _guard_manager->check_verbose_nopybind(obj);
+  }
+
+ private:
+  py::dict _py_globals_dict; // holds a reference to the globals dict
+  PyObject* _globals_dict;
+};
+
 void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
   // Adds tensor X is not tensor Y. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
@@ -1446,6 +1474,10 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<GetDictItemGuardAccessor>>(
       py_m, "GetDictItemGuardAccessor");
+  py::class_<
+      GlobalsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1486,6 +1518,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "dict_get_item_manager",
           &GuardManager::get_child_manager<GetDictItemGuardAccessor>,
+          py::return_value_policy::reference)
+      .def(
+          "globals_dict_manager",
+          &GuardManager::get_child_manager<GlobalsGuardAccessor>,
           py::return_value_policy::reference);
 
   // Guard Manager
