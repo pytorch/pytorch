@@ -73,8 +73,10 @@ mkdir -p ../models
 # This requires numpy==1.23.1
 python coreml_backend.py
 
-echo "Setting up the TestApp for LiteInterpreter"
-# NB: Need to also set the team ID with -t if you are running this locally
+# NB: Also need to set the team ID with -t if you are running this locally. This
+# command setups an app that could be used to launch TestAppTests on device. On
+# the other hand, adding the --benchmark flag to build the one that runs benchmark
+# instead.
 ruby setup.rb --lite 1
 popd
 
