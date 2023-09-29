@@ -107,12 +107,12 @@ class CollectiveHooks:
         dhooks.register_collective_start_hook(coll_start)
         dhooks.register_collective_end_hook(coll_end)
 
-        tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
+        tensor = torch.ones([2, 3]).to(self.device) * self.rank
         tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
 
         dist.all_gather(tensor_list, tensor)
 
-        tensor2 = torch.ones([2, 3]).cuda(self.rank) * self.rank
+        tensor2 = torch.ones([2, 3]).to(self.device) * self.rank
         dist.all_reduce(tensor2)
 
         with cv:
@@ -229,6 +229,10 @@ class GlooHooks(MultiProcessTestCase, CollectiveHooks):
     def backend_name(self):
         return "gloo"
 
+    @property
+    def device(self):
+        return "cpu"
+
     @with_comms
     def test_collective_hooks(self):
         self._collective_hooks()
@@ -262,6 +266,10 @@ class NcclHooks(MultiProcessTestCase, CollectiveHooks):
     @property
     def backend_name(self):
         return "nccl"
+
+    @property
+    def device(self):
+        return f"cuda:{self.rank}"
 
     @skip_if_lt_x_gpu(4)
     @with_comms

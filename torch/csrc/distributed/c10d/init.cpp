@@ -310,7 +310,7 @@ py::object c10d_dequeue_python_event() {
   if (evt.error_message)
     data["error_message"] = evt.error_message.value();
 
-  return data;
+  return std::move(data);
 }
 
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
