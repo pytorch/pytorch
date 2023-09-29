@@ -2,6 +2,15 @@ name: Build Official Docker Images
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Channel to use (nightly, test, release)"
+        required: false
+        type: choice
+        default: test
+        options:
+          - release
+          - test
   pull_request:
     paths:
       - Dockerfile
@@ -14,6 +23,7 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - ciflow/nightly/*
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -45,6 +55,7 @@ jobs:
     env:
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
       BUILD_PLATFORMS: ${{ matrix.platform }}
+      CHANNEL: ${{ inputs.repository }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
@@ -86,6 +97,9 @@ jobs:
         run: |
           {
             echo "INSTALL_CHANNEL=pytorch-test";
+            if [[ ${CHANNEL} == "release" ]]; then
+              echo "INSTALL_CHANNEL=pytorch";
+            fi
             echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
           } >> "${GITHUB_ENV}"
       - name: Run docker build / push
