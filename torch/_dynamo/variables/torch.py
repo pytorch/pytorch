@@ -359,6 +359,12 @@ class TorchVariable(VariableTracker):
             )
             assert len(args) == 1
             return CUDAStreamContextVariable.create(tx, args[0], **options)
+        elif self.value in (torch.overrides.has_torch_function_variadic, torch.overrides.has_torch_function_unary):
+            assert not kwargs
+            def has_torch_function(a):
+                return isinstance(a, TensorWithTFOverrideVariable) or isinstance(a, UserDefinedObjectVariable) and hasattr(a.value, "__torch_function__")
+
+            return ConstantVariable.create(any(has_torch_function(a) for a in args), **options)
         elif self.value is torch.cuda.streams.Stream:
             return wrap_fx_proxy_cls(
                 CUDAStreamVariable,
