@@ -55,7 +55,7 @@ jobs:
     env:
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
       BUILD_PLATFORMS: ${{ matrix.platform }}
-      CHANNEL: ${{ inputs.repository }}
+      CHANNEL: ${{ inputs.channel }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
