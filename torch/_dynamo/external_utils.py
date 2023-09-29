@@ -27,3 +27,7 @@ def call_hook(hook, *args):
     if result is None:
         return args[0]
     return result
+
+
+def tensor_contiguous(tensor):
+    return tensor.contiguous()
