@@ -279,11 +279,13 @@ class ConvertIntSource(ChainedSource):
     def name(self):
         # Note: When creating a guard, we use the `name()` function. Since we simulate SymBool inputs with SymInts in Dynamo,
         # the guards produced are for the SymInts. However, these guards must be checked against the outer SymBool.
-        # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression generated for Dynamo's SymInt.
+        # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression
+        # generated for Dynamo's SymInt.
         #
         # Additionally, instead of creating a SymInt in the outer shape_env, we inspect the hint of the SymBool.
         # This approach prevents the creation of a new guard in the outer shape_env, which is unnecessary because
-        # we have already propagated the guard to the outer shape_env when constructing SHAPE_ENV guard during Dynamo's tracing phase.
+        # we have already propagated the guard to the outer shape_env when constructing SHAPE_ENV guard during Dynamo's
+        # tracing phase.
         # If the guard check succeeds, we reuse the cached code, and no new guard is created. If the guard check fails,
         # a new guard will be installed after Dynamo recompiles. In either case, we avoid installing a guard in the outer shape_env
         # during guard checking, opting to rely on the hint to determine if recompilation is required.
