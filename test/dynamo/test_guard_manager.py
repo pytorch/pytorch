@@ -14,6 +14,12 @@ NoTensorAliasingGuard = guards.NoTensorAliasingGuard
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
 
+global_pair = {
+    "x": torch.randn(4),
+    "y": 1,
+}
+
+
 def equals_match(x, expected):
     return x == expected
 
@@ -384,3 +390,21 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             first_debug_info.num_guards_executed > second_debug_info.num_guards_executed
         )
+
+    def test_globals(self):
+        guard_manager = RootGuardManager()
+        gpair_mgr = guard_manager.globals_dict_manager(globals()).dict_get_item_manager(
+            "global_pair"
+        )
+
+        gpair_mgr.add_lambda_guard(
+            lambda x: isinstance(x, dict)
+            and isinstance(x["x"], torch.Tensor)
+            and isinstance(x["y"], int),
+            lambda x: "global guard fail",
+        )
+
+        global global_pair
+        self.assertTrue(guard_manager.check(global_pair))
+        global_pair["y"] = "foo"
+        self.assertFalse(guard_manager.check(global_pair))
