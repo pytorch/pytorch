@@ -255,7 +255,6 @@ test_dynamo_shard() {
       test_jit \
       test_proxy_tensor \
       test_quantization \
-      test_nestedtensor \
       test_public_bindings \
       test_dataloader \
       test_reductions \
