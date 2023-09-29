@@ -1032,39 +1032,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * this function will execute the callback immediately.
    */
   template <typename T>
-  void addCallback(T callback) {
+  void addCallback(T callback, bool uses_future = true) {
 #if __cpp_lib_is_invocable >= 201703
-    static_assert(std::disjunction<std::is_invocable_r<void, T, Future&>, std::is_invocable_r<void, T>>::value,
-                  "The callback must have signature void(Future&) or void()");
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&) or void()");
 #endif
-
-    constexpr bool uses_future = []() -> bool {
-      if constexpr (std::is_invocable_r<void, T, Future&>::value) {
-        return true;
-      } else if constexpr (std::is_invocable_r<void, T>::value) {
-        return false;
-      } else {
-        TORCH_INTERNAL_ASSERT(false, "Function should have signature void(Future&) or void()");
-      }
-    }();
-
-    auto wrapped_callback = [ callback = std::move(callback) ]() -> auto {
-      if constexpr (std::is_invocable_r<void, T, Future&>::value) {
-        return [callback = std::move(callback)](Future& future) mutable { callback(future); };
-      } else {
-        return [callback = std::move(callback)](Future& /* unused */) mutable { callback(); };
-      }
-    }();
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-
-      invokeCallback(std::move(wrapped_callback), uses_future);
+      invokeCallback(std::move(callback), uses_future);
       return;
     }
-
-    callbacks_.emplace_back(std::move(wrapped_callback), uses_future);
+    callbacks_.emplace_back(std::move(callback), uses_future);
   }
 
   /**
@@ -1201,9 +1182,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       }
       c10::MultiStreamGuard streamGuard(streams);
       synchronizeWithCurrentStreams();
+      callback(*this);
+    } else {
+      callback(*this);
     }
-
-    callback(*this);
   }
 
   // This method should be called before this future's value is used, as it

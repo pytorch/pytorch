@@ -5,6 +5,7 @@
 #include <mutex>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <ATen/Context.h>
 #include <c10/core/Device.h>
@@ -85,7 +86,7 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   c10::optional<AllocationID> allocation_id_;
 };
 
-using op_input_t = c10::variant<
+using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,

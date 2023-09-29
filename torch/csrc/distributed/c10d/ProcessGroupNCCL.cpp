@@ -1586,6 +1586,9 @@ float ProcessGroupNCCL::WorkNCCL::getDuration() const {
       "getDuration can only be called after work is succeeded.")
   return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
 }
+uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
+  return seq_;
+}
 
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
@@ -1817,7 +1820,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     // ncclEndEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
       work->future_->addCallback(
-          [work]() { work->recordFunctionEndCallback_(); });
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          /*uses_future=*/false);
     }
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
@@ -1996,7 +2002,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // ncclEndEvents_ ensuring appropriate synchronization.
   if (work->recordFunctionEndCallback_) {
     work->future_->addCallback(
-        [work]() { work->recordFunctionEndCallback_(); });
+        [work](at::ivalue::Future& /* unused */) {
+          work->recordFunctionEndCallback_();
+        },
+        /*uses_future=*/false);
   }
 
   return work;

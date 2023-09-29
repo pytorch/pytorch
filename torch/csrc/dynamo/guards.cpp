@@ -651,6 +651,23 @@ static PyObject* NNModuleGuard_call(
   Py_RETURN_TRUE;
 }
 
+static PyObject* NNModuleGuard_repr(PyObject* self) {
+  // Prints versions of the module and the attributes.
+  NNModuleGuard* guard = (NNModuleGuard*)self;
+  std::ostringstream oss;
+  oss << "versions(mod=" << guard->dict_version_tag;
+
+  for (size_t index = 0;
+       index < sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0]);
+       index++) {
+    oss << ", " << module_guard_attrs[index] << "="
+        << guard->attr_tags[index].dict_version_tag;
+  }
+
+  oss << ")";
+  return Py_BuildValue("s", oss.str().c_str());
+}
+
 static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
   // Uses a private tags introduced in PEP 509 - ma_version_tag to check if
   // there are any changes in the dict.
@@ -763,6 +780,7 @@ PyObject* torch_c_dynamo_guards_init() {
   NNModuleGuardType.tp_call = NNModuleGuard_call;
   NNModuleGuardType.tp_dealloc = (destructor)NNModuleGuard_dealloc;
   NNModuleGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
+  NNModuleGuardType.tp_repr = NNModuleGuard_repr;
 
   GlobalStateGuardType.tp_name = "torch._C._dynamo.guards.GlobalStateGuard";
   GlobalStateGuardType.tp_basicsize = sizeof(GlobalStateGuard);
