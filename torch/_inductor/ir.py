@@ -3700,16 +3700,7 @@ class FallbackKernel(ExternKernelAlloc):
         assert pos < len(
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        v = self.args_default_value[pos]["value"]
-        if v is None:
-            arg_type = self.args_default_value[pos]["type"]
-            # TODO: extend the support here
-            assert (
-                str(arg_type) in default_value_map
-            ), f"unsupported default_value arg_type: {str(arg_type)}"
-            return default_value_map[str(arg_type)]()
-        else:
-            return v
+        return self.args_default_value[pos]["value"]
 
     def codegen_args(self):
         @dataclasses.dataclass
