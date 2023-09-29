@@ -128,9 +128,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                     gm, quantization_config
                 )
                 _tag_partitions(backend_string, "linear", annotated_partitions)
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
-                    gm, quantization_config
-                )
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
                 annotated_partitions = OP_TO_ANNOTATOR["adaptive_avg_pool2d"](
                     gm, quantization_config
@@ -189,9 +187,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                     gm, quantization_config
                 )
                 _tag_partitions(backend_string, "linear", annotated_partitions)
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
-                    gm, quantization_config
-                )
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -232,9 +228,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                 quantization_config = get_symmetric_quantization_config(
                     is_per_channel=True
                 )
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
-                    gm, quantization_config
-                )
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
                 annotated_partitions = OP_TO_ANNOTATOR["adaptive_avg_pool2d"](
                     gm, quantization_config
@@ -305,7 +299,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                 quantization_config_dynamic = get_symmetric_quantization_config(
                     is_per_channel=True, is_dynamic=True
                 )
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](
                     gm, quantization_config_dynamic
                 )
                 _tag_partitions(backend_string, "conv2d_dynamic", annotated_partitions)
