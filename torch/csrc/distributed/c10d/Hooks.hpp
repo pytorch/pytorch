@@ -5,11 +5,7 @@
 
 namespace c10d {
 
-TORCH_API void enable_event_collection(int sync_pipe);
-
-namespace details {
-
-enum class EventKind { CollectionStart, CollectionEnd };
+enum class TORCH_API EventKind { CollectionStart, CollectionEnd };
 
 struct TORCH_API EventInfo {
   EventKind event_kind;
@@ -22,8 +18,34 @@ struct TORCH_API EventInfo {
   c10::optional<std::string> error_message;
 };
 
+typedef std::function<void(const EventInfo&)> CollectiveEventCallback;
+
+/**
+ * Register a callback that is invoked whenever a collective event happens.
+ *
+ * Locking:
+ *  Registration takes a subsystem specific lock.
+ *  callback invocation happens when the same lock held.
+ *
+ * Callbacks must not block or run for a long period of time.
+ * They are invoked from threads are part of PyTorch's critical distributed
+ * infrastrucute. The recomended pattern is for callbacks to enqueue the events
+ * on some queue and have a separate thread process those events. If the
+ * callback deadlocks, it will hang the whole process and stop PyTorch from
+ * detecting failures. Do not call into CUDA.
+ *
+ * n.b. Currently the user needs to call ProcessGroup::enableCollectivesTiming
+ *   to enable start event collection.
+ *
+ * @param callback  callback to invoke on collective every event.
+ */
+
+TORCH_API void register_collective_callback(CollectiveEventCallback&& callback);
+
+namespace details {
+
 // TODO do we want to expose something else here?
-TORCH_API bool dequeue_c10d_event(EventInfo& evt);
+// TORCH_API bool dequeue_c10d_event(EventInfo& evt);
 TORCH_API void enqueue_c10d_event(EventInfo&& evt);
 
 } // namespace details

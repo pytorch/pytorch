@@ -19,7 +19,7 @@ std::string exceptionPtrWhat(const std::exception_ptr& eptr) {
 }
 
 void commonEventinit(
-    details::EventInfo& evt,
+    ::c10d::EventInfo& evt,
     const Backend& backend,
     const Work& work) {
   evt.timestamp =
@@ -46,18 +46,18 @@ void Backend::init() {
 }
 
 void Backend::emitCollectiveStart(const Work& work) {
-  details::EventInfo evt;
+  EventInfo evt;
   commonEventinit(evt, *this, work);
 
-  evt.event_kind = details::EventKind::CollectionStart;
+  evt.event_kind = EventKind::CollectionStart;
   details::enqueue_c10d_event(std::move(evt));
 }
 
 void Backend::emitCollectiveEnd(const Work& work) {
-  details::EventInfo evt;
+  EventInfo evt;
   commonEventinit(evt, *this, work);
 
-  evt.event_kind = details::EventKind::CollectionEnd;
+  evt.event_kind = EventKind::CollectionEnd;
   // FIXME change getDuration to return Optional<float>
   try {
     evt.duration_ms = work.getDuration();

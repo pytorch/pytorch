@@ -292,9 +292,40 @@ void _register_builtin_comm_hook(
   reducer.register_builtin_comm_hook(comm_hook_type);
 }
 
+std::atomic<bool> event_queue_enabled = false;
+int sync_pipe;
+std::mutex event_queue_lock;
+std::deque<::c10d::EventInfo> event_queue;
+
+void enqueue_event_for_python(const ::c10d::EventInfo& evt) {
+  if (!event_queue_enabled.load())
+    return;
+
+  std::unique_lock<std::mutex> lock(event_queue_lock);
+  event_queue.push_back(evt);
+  char m = 'x';
+  write(sync_pipe, &m, 1);
+}
+
+void enable_event_collection(int pipe) {
+  sync_pipe = pipe;
+  event_queue_enabled.store(true);
+  ::c10d::register_collective_callback(enqueue_event_for_python);
+}
+
+bool dequeue_c10d_event(::c10d::EventInfo& evt) {
+  std::unique_lock<std::mutex> lock(event_queue_lock);
+  if (event_queue.size() == 0) {
+    return false;
+  }
+  evt = event_queue.front();
+  event_queue.pop_front();
+  return true;
+}
+
 py::object c10d_dequeue_python_event() {
-  ::c10d::details::EventInfo evt;
-  if (!::c10d::details::dequeue_c10d_event(evt)) {
+  ::c10d::EventInfo evt;
+  if (!dequeue_c10d_event(evt)) {
     return py::none();
   }
 
@@ -688,7 +719,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
       .def(
           "_enable_event_collection",
-          &::c10d::enable_event_collection,
+          &enable_event_collection,
           "(Enables events collection).",
           py::call_guard<py::gil_scoped_release>())
       .def(
