@@ -1,12 +1,17 @@
+import copy
 import dataclasses
 import io
-import re
 import pathlib
+import re
+import sys
+import warnings
+
 import types
 import weakref
 import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -20,7 +25,6 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.export import Constraint, _create_constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -30,6 +34,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.export import _create_constraint, _Dim, Constraint
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -53,6 +58,7 @@ from .exported_program import (
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
+from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
@@ -60,7 +66,153 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 from .wrappers import _wrap_submodules
 
 
-def dynamic_dim(t: torch.Tensor, index: int):
+def export__RC__(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
+) -> ExportedProgram:
+    """
+    API for exporting with dynamic shape specifications instead of constraints.
+    It should be considered "release candidate" (RC), meant to replace `export`.
+
+    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
+    argument names of `f` to dynamic shape specifications, as follows:
+    - The dynamic shape of a tensor argument can be specified as:
+      - Either a dict from dynamic dimension indices to Dim types. It is not
+        required to include static dimension indices in this dict, but when
+        they are, they should be mapped to None.
+      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
+        dimensions, whereas static dimensions are denoted by None.
+    - Arguments that are dicts or tuples of tensors are recursively specified
+      by using mappings or sequences of contained specifications.
+
+    See `export` for documentation of `f`, `args`, `kwargs` and return.
+    """
+    if dynamic_shapes is None:
+        return export(f, args, kwargs)
+
+    kwargs = kwargs if kwargs is not None else {}
+
+    from collections.abc import Mapping, Sequence
+
+    def tree_zip(combined_args, dynamic_shapes):
+        if isinstance(combined_args, (tuple, list)):
+            if not isinstance(dynamic_shapes, Sequence):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
+                    f"got {dynamic_shapes} instead",
+                )
+            if len(combined_args) != len(dynamic_shapes):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+                )
+            for i, shape in enumerate(dynamic_shapes):
+                yield from tree_zip(combined_args[i], shape)
+        elif isinstance(combined_args, dict):
+            if not isinstance(dynamic_shapes, Mapping):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
+                    f"got {dynamic_shapes} instead",
+                )
+            if len(combined_args) != len(dynamic_shapes):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+                )
+            for k, shape in dynamic_shapes.items():
+                yield from tree_zip(combined_args[k], shape)
+        elif dataclasses.is_dataclass(combined_args):
+            if not type(dynamic_shapes) == type(combined_args):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
+                    f"got {dynamic_shapes} instead",
+                )
+            for f in dataclasses.fields(combined_args):
+                yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
+        elif isinstance(combined_args, torch.Tensor):
+            yield (combined_args, dynamic_shapes)
+        else:
+            if dynamic_shapes is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be None, "
+                    f"got {dynamic_shapes} instead",
+                )
+
+    from collections import defaultdict
+    symbols = defaultdict(list)
+
+    def to_constraint(dim, tensor, i):
+        constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
+        if dim.min != 2:
+            constraint = constraint >= dim.min
+        if dim.max != sys.maxsize - 1:
+            constraint = constraint <= dim.max
+        return constraint
+
+    def update_symbols(tensor, shape):
+        if isinstance(shape, dict):
+            for i, dim in shape.items():
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
+                else:
+                    if dim is not None:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                            "try None instead",
+                        )
+        elif isinstance(shape, (tuple, list)):
+            for i, dim in enumerate(shape):
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
+                else:
+                    if dim is not None:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                            "try None instead",
+                        )
+        else:
+            if shape is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Unexpected dynamic_shape {shape} of Tensor, "
+                    "try None instead",
+                )
+
+    if isinstance(f, ExportedProgram):
+        combined_args = {
+            k: args[i] if i < len(args) else kwargs[k]
+            for i, k in enumerate(dynamic_shapes)
+        }
+    else:
+        import inspect
+        signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+        combined_args = signature.bind(*args, **kwargs).arguments
+
+    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
+        update_symbols(tensor, shape)
+
+    constraints = []
+    for dynamic_dims in symbols.values():
+        primary, *others = dynamic_dims
+        if others:
+            for other in others:
+                constraints.append(primary == other)
+        else:
+            constraints.append(primary)
+
+    return _export(f, args, kwargs, constraints=constraints)
+
+
+def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     if not isinstance(t, torch.Tensor):
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
@@ -87,6 +239,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
         StrictMinMaxConstraint(
             vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
         ),
+        debug_name=debug_name,
     )
 
 
@@ -101,6 +254,17 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 DECOMP_TABLE = core_aten_decompositions()
+
+
+# TODO(zhxchen17) This is not needed if we output pre_dispatch graph upfront from export().
+@contextmanager
+def _disable_decomp_table():
+    global DECOMP_TABLE
+    prev, DECOMP_TABLE = DECOMP_TABLE, {}
+    try:
+        yield
+    finally:
+        DECOMP_TABLE = prev
 
 
 @compatibility(is_backward_compatible=False)
@@ -242,11 +406,58 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 if path == root and ty is root_cls:
                     add_root = False
             if add_root:
-                # TODO(zhxchen17) normalize all the way down to dot strings.
-                node.meta["nn_module_stack"] = {root_key: (root, root_cls), **nn_module_stack}
+                def normalize_path(path):
+                    try:
+                        parts = []
+
+                        class Path:
+                            def __getattr__(self, name):
+                                parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
+
+                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                node.meta["nn_module_stack"] = {
+                    key: (normalize_path(path), ty)
+                    for key, (path, ty) in nn_module_stack.items()
+                }
 
 
 def export(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+    *,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+) -> ExportedProgram:
+
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints,
+        preserve_module_call_signature=preserve_module_call_signature,
+    )
+
+
+def _export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
@@ -516,13 +727,14 @@ def export(
         equality_constraints,
         [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
-        (args, {}),
+        (args, kwargs),
     )
 
     if len(range_constraints) > 0 or len(equality_constraints) > 0:
         exported_program = exported_program._transform(
             _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
         )
+    exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
 
@@ -602,7 +814,9 @@ def aot_compile(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
+    *,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, ExportedProgram]:
     """
@@ -622,25 +836,74 @@ def aot_compile(
         constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
+        dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
+            A dict mapping argument names of ``f`` to their dynamic shape
+            specifications, as follows. Dynamic shape specifications can be a
+            dict from dynamic dimensions to ``Dim`` types, or a tuple/list of
+            ``Optional[Dim]`` corresponding to each input dimension.
+
         options: A dictionary of options to control inductor
 
     Returns:
         Path to the generated shared library, and the exported program
     """
-    from torch._inductor.compile_fx import compile_fx_aot
+    if constraints is not None:
+        warnings.warn(
+            "The constraints field is deprecated. "
+            "Please use dynamic_shapes instead."
+        )
+
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
     DECOMP_TABLE = select_decomp_table()
-    ep = export(f, args, kwargs, constraints)
+    if constraints is not None:
+        ep = export(f, args, kwargs, constraints)
+    else:
+        ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
-    param_buffer_values = list(ep.state_dict.values())
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]
     )
-    all_args = (*param_buffer_values, *flat_example_inputs)
 
-    so_path = torch._inductor.aot_compile(ep.graph_module, list(all_args), options)
-    return so_path, ep
+    unlifted_module = ep.module()
+    unlifted_module.graph.set_codegen(torch.fx.CodeGen())  # type: ignore[attr-defined]
+    unlifted_module.recompile()
+    options = (
+        {"from_export": True}
+        if options is None
+        else {**options, "from_export": True}
+    )
+    so_path = torch._inductor.aot_compile(unlifted_module, flat_example_inputs, options)  # type: ignore[arg-type]
+
+    user_inputs = []
+    user_outputs = []
+    for node in unlifted_module.graph.nodes:
+        if node.op == "placeholder":
+            user_inputs.append(node.name)
+        elif node.op == "output":
+            user_outputs = [arg.name for arg in node.args[0]]
+
+    unlifted_ep = ExportedProgram(
+        unlifted_module,
+        unlifted_module.graph,
+        ExportGraphSignature(
+            parameters=[],
+            buffers=[],
+            user_inputs=user_inputs,
+            user_outputs=user_outputs,
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
+        ),
+        call_spec=copy.deepcopy(ep.call_spec),
+        state_dict={},
+        range_constraints=copy.deepcopy(ep.range_constraints),
+        equality_constraints=copy.deepcopy(ep.equality_constraints),
+        module_call_graph=ep.module_call_graph,
+    )
+
+    return so_path, unlifted_ep

@@ -4,9 +4,10 @@ import unittest
 from typing import Dict, List
 
 import torch
+
+import torch._dynamo.config
 import torch._dynamo.test_case
 from torch import nn
-
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import NoTest
@@ -20,6 +21,7 @@ except ImportError:
     HAS_TORCHREC = False
 
 
+@torch._dynamo.config.patch(force_unspec_int_unbacked_size_like_on_torchrec_kjt=True)
 class BucketizeMod(torch.nn.Module):
     def __init__(self, feature_boundaries: Dict[str, List[float]]):
         super().__init__()

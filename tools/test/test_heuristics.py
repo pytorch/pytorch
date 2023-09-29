@@ -21,7 +21,7 @@ try:
 
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
-    exit(1)
+    sys.exit(1)
 
 
 def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:

@@ -51,7 +51,7 @@ from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.checkpoint._traverse import set_element
 
-logger: logging.Logger = logging.getLogger(__file__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 __all__ = [

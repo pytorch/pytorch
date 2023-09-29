@@ -18,6 +18,7 @@ from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,
     OpInfo,
+    sample_inputs_spectral_ops,
     SampleInput,
     SpectralFuncInfo,
     SpectralFuncType,
@@ -84,6 +85,22 @@ def error_inputs_fftn(op_info, device, **kwargs):
     )
 
 
+def sample_inputs_fft_with_min(
+    op_info, device, dtype, requires_grad=False, *, min_size, **kwargs
+):
+    yield from sample_inputs_spectral_ops(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+    if TEST_WITH_ROCM:
+        # FIXME: Causes floating point exception on ROCm
+        return
+
+    # Check the "Invalid number of data points" error isn't too strict
+    # https://github.com/pytorch/pytorch/pull/109083
+    a = make_tensor(min_size, dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(a)
+
+
 def sample_inputs_fftshift(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(
@@ -116,6 +133,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -141,6 +159,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -167,6 +186,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -193,6 +213,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=2),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -228,6 +249,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -269,6 +291,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -305,6 +328,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,))
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -326,6 +350,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,))
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -349,6 +374,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,))
         ),
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -366,6 +392,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ref=np.fft.ifft,
         ndimensional=SpectralFuncType.OneD,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -391,6 +418,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ref=np.fft.ifft2,
         ndimensional=SpectralFuncType.TwoD,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -423,6 +451,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ref=np.fft.ifftn,
         ndimensional=SpectralFuncType.ND,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -455,6 +484,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_r2c",
         ref=np.fft.ihfft,
         ndimensional=SpectralFuncType.OneD,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fft,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -475,6 +505,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_r2c",
         ref=scipy.fft.ihfftn if has_scipy_fft else None,
         ndimensional=SpectralFuncType.TwoD,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -507,6 +538,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_r2c",
         ref=scipy.fft.ihfftn if has_scipy_fft else None,
         ndimensional=SpectralFuncType.ND,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -538,6 +570,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2r",
         ref=np.fft.irfft,
         ndimensional=SpectralFuncType.OneD,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 2)),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -564,6 +597,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2r",
         ref=np.fft.irfft2,
         ndimensional=SpectralFuncType.TwoD,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -597,6 +631,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2r",
         ref=np.fft.irfftn,
         ndimensional=SpectralFuncType.ND,
+        sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -650,70 +685,26 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",
-        skips=(
-            # _refs.fft.* functions have inconsistent behavior for empty tensors
-            # https://github.com/pytorch/pytorch/issues/105986
-            DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft",
         torch_opinfo_name="fft.ifft",
-        skips=(
-            # _refs.fft.* functions have inconsistent behavior for empty tensors
-            # https://github.com/pytorch/pytorch/issues/105986
-            DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft",
         torch_opinfo_name="fft.rfft",
-        skips=(
-            # _refs.fft.* functions have inconsistent behavior for empty tensors
-            # https://github.com/pytorch/pytorch/issues/105986
-            DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft",
         torch_opinfo_name="fft.irfft",
-        skips=(
-            # _refs.fft.* functions have inconsistent behavior for empty tensors
-            # https://github.com/pytorch/pytorch/issues/105986
-            DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # TODO: internally promoted to complex64 so not rejected
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft",
         torch_opinfo_name="fft.hfft",
-        skips=(
-            # _refs.fft.* functions have inconsistent behavior for empty tensors
-            # https://github.com/pytorch/pytorch/issues/105986
-            DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: https://github.com/pytorch/pytorch/issues/108204
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft",
         torch_opinfo_name="fft.ihfft",
-        skips=(
-            # _refs.fft.* functions have inconsistent behavior for empty tensors
-            # https://github.com/pytorch/pytorch/issues/105986
-            DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fftn",
@@ -725,15 +716,6 @@ python_ref_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # FIXME: https://github.com/pytorch/pytorch/issues/108204
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifftn",
@@ -745,15 +727,6 @@ python_ref_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # FIXME: https://github.com/pytorch/pytorch/issues/108204
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
@@ -769,15 +742,6 @@ python_ref_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # FIXME: https://github.com/pytorch/pytorch/issues/108204
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfftn",
@@ -789,21 +753,6 @@ python_ref_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # FIXME: https://github.com/pytorch/pytorch/issues/108204
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-            ),
-            # FIXME: https://github.com/pytorch/pytorch/issues/108205
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fftn_invalid",
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
@@ -815,14 +764,6 @@ python_ref_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # FIXME: https://github.com/pytorch/pytorch/issues/108205
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fftn_invalid",
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft2",
