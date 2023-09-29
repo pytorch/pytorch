@@ -67,7 +67,9 @@ class SymPyOps:
         return TypedExpr(value, dtype)
 
     @staticmethod
-    def to_dtype(value: Any, dtype: torch.dtype) -> Union[int, TypedExpr]:
+    def to_dtype(
+        value: Any, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+    ) -> Union[int, TypedExpr]:
         if isinstance(value.expr, (sympy.Integer, sympy.Float)):
             return SymPyOps.constant(value.expr, dtype)
         elif is_integer_dtype(dtype) and is_integer_dtype(value.dtype):

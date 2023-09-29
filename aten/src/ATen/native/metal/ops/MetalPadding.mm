@@ -14,7 +14,7 @@ namespace native {
 namespace metal {
 
 API_AVAILABLE(ios(11.0), macos(10.13))
-Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
+static Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   TORCH_CHECK(input.is_metal());
 
   const int pad_dim = padding.size();
