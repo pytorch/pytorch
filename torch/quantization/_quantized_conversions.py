@@ -11,10 +11,23 @@ def pack_int4_to_int8(weight):
     return ((weight[:, 1::2] & 0xF) << 4) | (weight[:, 0::2] & 0xF)
 
 
+# Unpack quandruples of bits in int8 values into int4 values, in row
+# major order; lower 4 bits go into first int4 value goes, and upper 4
+# bits go into second int4 value.
+def unpack_int8_to_int4(weight):
+    assert weight.dim() == 2
+    assert weight.dtype == torch.int8
+    return torch.stack((weight & 0xF, (weight >> 4) & 0xF), dim=2).view(
+        weight.shape[0], 2 * weight.shape[1]
+    )
+
+
 # Transpose the weight matrix, and then reorder its elements according
 # to underlying requirements of CUTLASS library, so that it could be
 # used for CUTLASS-based mixed datatypes linear operation.
-def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(weight, dtypeq):
+def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
+    weight, dtypeq, transpose=False
+):
     assert weight.dim() == 2
     assert weight.dtype == torch.int8
     assert dtypeq == torch.int8 or dtypeq == torch.quint4x2
@@ -22,16 +35,18 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(weight, dtypeq):
 
     device = weight.device
 
-    # for the linear operator, weight matrix would be transposed first
-    # here
+    # subbyte_transpose
+    if not transpose:
+        if dtypeq == torch.int8:
+            outp = weight.T
+        elif dtypeq == torch.quint4x2:
+            outp = pack_int4_to_int8(unpack_int8_to_int4(weight.view(torch.int8)).T)
+    else:
+        outp = weight
 
-    ncols, nrows = weight.shape  # because input would be transposed
-    # above
+    ncols, nrows = outp.shape
     assert nrows % (32 if dtypeq == torch.quint4x2 else 64) == 0
     assert ncols % 64 == 0
-
-    # subbyte_transpose
-    # not needed as input would be transposed above
 
     # permute_B_rows_for_mixed_gemm
     # (permute cols actually, as transpose is applied first here)
@@ -55,7 +70,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(weight, dtypeq):
                 nrows // 16, 16
             )
         ).view(-1)
-    outp = weight.index_copy(1, cols_permuted, weight)
+    outp = outp.index_copy(1, cols_permuted, outp)
 
     # interleave_column_major_tensor
     magic0 = 4 if dtypeq == torch.quint4x2 else 2

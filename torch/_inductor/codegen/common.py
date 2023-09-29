@@ -818,7 +818,7 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
-        self.cse = CSE(self.newvar_prefix, self.suffix)
+        self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
         # set in set_current_node
@@ -830,6 +830,8 @@ class Kernel(CodeGen):
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
         self.inplace_update_buffers = dict()
+        # Set minimum number of elements processed per thread.
+        self.min_elem_per_thread = 1
 
     @contextlib.contextmanager
     def set_current_node(self, node):
