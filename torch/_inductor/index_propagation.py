@@ -144,7 +144,7 @@ class IndexPropVar:
         ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
-IndexPropResult = Union[IndexPropVar, Tuple[IndexPropResult, ...]]
+IndexPropResult = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
 
 
 class IndexPropagation:
