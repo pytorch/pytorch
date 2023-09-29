@@ -27,6 +27,7 @@ import functools
 import types
 import warnings
 from typing import Dict, Set, List, Any, Callable, Iterable, Type, Tuple
+from functools import wraps
 import contextlib
 
 import torch
@@ -49,7 +50,38 @@ __all__ = [
     "enable_reentrant_dispatch",
 ]
 
+
+def _disable_user_warnings(
+        func: Callable, regex: str = '.*is deprecated, please use.*', module: str = 'torch') -> Callable:
+    """
+    Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
+    given ``regex`` pattern.
+
+    Arguments
+    ---------
+    func : function
+        Function to disable the warnings for.
+    regex : str
+        A regex pattern compilable by ``re.compile``. This is used to match the ``UserWarning`` message.
+    module : str
+        The python module to which the filtering should be restricted.
+
+    Returns
+    -------
+    function
+        The wrapped function.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message=regex, module=module)
+            return func(*args, **kwargs)
+    return wrapper
+
+
 @functools.lru_cache(None)
+@_disable_user_warnings
 def get_ignored_functions() -> Set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
@@ -354,6 +386,7 @@ def get_default_nowrap_functions() -> Set[Callable]:
 
 
 @functools.lru_cache(None)
+@_disable_user_warnings
 def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
@@ -1714,6 +1747,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
             overridable_funcs[namespace].append(func)
     return overridable_funcs, index
 
+@_disable_user_warnings
 def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
@@ -1725,6 +1759,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """
     return _get_overridable_functions()[0]
 
+@_disable_user_warnings
 def resolve_name(f):
     """Get a human readable string name for a function passed to
     __torch_function__
@@ -1751,6 +1786,7 @@ def _get_tensor_methods() -> Set[Callable]:
     methods = set(overridable_funcs[torch.Tensor])
     return methods
 
+@_disable_user_warnings
 def is_tensor_method_or_property(func: Callable) -> bool:
     """
     Returns True if the function passed in is a handler for a
