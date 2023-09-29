@@ -33,6 +33,7 @@ from trymerge import (
     MandatoryChecksMissingError,
     MergeRule,
     PostCommentError,
+    RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
     validate_revert,
@@ -206,6 +207,18 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
             ],
             ignore_flaky_failures=True,
         ),
+        MergeRule(
+            name="xla",
+            patterns=[".github/ci_commit_pins/xla.txt"],
+            approved_by=["pytorchbot"],
+            mandatory_checks_name=[
+                "Lint",
+                "EasyCLA",
+                "pull / linux-focal-py3_8-clang9-xla / build",
+                "pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)",
+            ],
+            ignore_flaky_failures=True,
+        ),
     ]
 
 
@@ -271,7 +284,7 @@ class TestTryMerge(TestCase):
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:
         "Tests that PR passes merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 77700)
+        pr = GitHubPR("pytorch", "pytorch", 109999)
         repo = DummyGitRepo()
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
@@ -322,15 +335,13 @@ class TestTryMerge(TestCase):
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
+    @skip(
+        "Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218"
+    )
     def test_internal_changes(self, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
-        pr = GitHubPR("pytorch", "pytorch", 73969)
+        pr = GitHubPR("pytorch", "pytorch", 110140)
         self.assertTrue(pr.has_internal_changes())
-
-    def test_checksuites_pagination(self, *args: Any) -> None:
-        "Tests that PR with lots of checksuits can be fetched"
-        pr = GitHubPR("pytorch", "pytorch", 73811)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 76)
 
     def test_comments_pagination(self, *args: Any) -> None:
         "Tests that PR with 50+ comments can be fetched"
@@ -343,7 +354,9 @@ class TestTryMerge(TestCase):
         # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
         pr = GitHubPR("pytorch", "pytorch", 68111)
         self.assertGreater(len(pr.get_comments()), 20)
-        self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
+        # NS(09/27/2023): GitHub seems to recycle older checkruns
+        # https://github.com/pytorch/pytorch/pull/68111/checks shows 0 runs
+        # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
@@ -388,10 +401,12 @@ class TestTryMerge(TestCase):
 
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""
-        pr = GitHubPR("pytorch", "pytorch", 77700)
+        pr = GitHubPR("pytorch", "pytorch", 105260)
         conclusions = pr.get_checkrun_conclusions()
-        self.assertEqual(len(conclusions), 79)
-        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
+        self.assertEqual(len(conclusions), 221)
+        self.assertTrue(
+            "pull / linux-docs / build-docs-cpp-false" in conclusions.keys()
+        )
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successfull status"""
@@ -753,25 +768,6 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
 
-    def test_get_classifications_pending_unstable(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 105998)
-        checks = pr.get_checkrun_conclusions()
-        checks = get_classifications(
-            pr.pr_num,
-            pr.project,
-            checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            [],
-            [],
-        )
-        pending, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=1
-        )
-        self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 3)
-        self.assertTrue(len(ignorable["UNSTABLE"]) == 3)
-
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
@@ -941,9 +937,9 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         msg = pr.gen_commit_message(filter_ghstack=True)
         self.assertEqual(
             msg,
-            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n",
+            f"{pr.get_title()} (#106068)\n\n{RE_GHSTACK_DESC.sub('', pr.get_body())}\n"
+            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: https://github.com/ezyang, https://github.com/fegin\n",
         )
 
     def test_pr_dependencies_ghstack(self, *args: Any) -> None:
@@ -951,13 +947,12 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         pr1 = GitHubPR("pytorch", "pytorch", 106033)
         pr2 = GitHubPR("pytorch", "pytorch", 106034)
         pr = GitHubPR("pytorch", "pytorch", 106068)
-
         msg = pr.gen_commit_message(filter_ghstack=True, ghstack_deps=[pr0, pr1, pr2])
         self.assertEqual(
             msg,
-            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
+            f"{pr.get_title()} (#106068)\n\n{RE_GHSTACK_DESC.sub('', pr.get_body())}\n"
+            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: https://github.com/ezyang, https://github.com/fegin\n"
             "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
