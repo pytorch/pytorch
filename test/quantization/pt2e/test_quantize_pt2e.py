@@ -1031,6 +1031,48 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_add_scalar_not_quantized(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config()
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            # not quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+        }
+        node_list = [
+            torch.ops.aten.add.Tensor,
+        ]
+        self._test_quantizer(
+            TestHelperModules.AddScalar(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
+    def test_mul_scalar_not_quantized(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config()
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            # not quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+        }
+        node_list = [
+            torch.ops.aten.mul.Tensor,
+        ]
+        self._test_quantizer(
+            TestHelperModules.MulScalar(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
     def test_save_load(self):
         """Test save/load a quantized model
         """
