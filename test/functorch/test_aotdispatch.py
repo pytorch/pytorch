@@ -2898,8 +2898,6 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
-    # Worked with real but not with fake
-    xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
@@ -2939,7 +2937,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
@@ -2961,7 +2958,6 @@ symbolic_aot_autograd_failures = {
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),

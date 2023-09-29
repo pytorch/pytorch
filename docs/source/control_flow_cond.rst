@@ -1,17 +1,10 @@
+.. _control_flow_cond:
+
 Control Flow - Cond
 ====================
 
-Export supports the structured control flow operator `torch.ops.higher_order.cond`. It can be used to specify if-else like control flow.
-
-.. warning::
-
-    `torch.ops.higher_order.cond` is a prototype feature in PyTorch, included as a part of the torch.export release.
-    Using torch.ops.higher_order.cond directly is not recommended. Please look forward to a more stable implementation
-    in a future version of PyTorch.
-
-
-`torch.ops.higher_order.cond` conditionally applies `true_fn` or `false_fn`. It can logically be seen as
-implemented as follows:
+`torch.cond`is a structured control flow operator. It can be used to specify if-else like control flow
+and can logically be seen as implemented as follows.
 
 .. code-block:: python
 
@@ -26,69 +19,28 @@ implemented as follows:
         else:
             return false_fn(*operands)
 
-Parameters
-~~~~~~~~~~
+Its unique power lies in its aibilty of expressing **data-dependent control flow**: it lowers to a conditional
+operator (`torch.ops.higher_order.cond`), which preserves predicate, true function and false functions in it.
+This unlocks great flexibilty in writing and deploying models that change model architecture based on
+the **value** or **shape** of inputs or intermediates.
 
-- `pred (Union[bool, torch.Tensor])`: A boolean expression or a tensor with one element,
-  indicating which branch function to apply, or a boolean expression.
+Examples
+~~~~~~~~
 
-- `true_fn (Callable)`: A callable function (a -> b) that is within the
-  scope that is being traced.
-
-- `false_fn (Callable)`: A callable function (a -> b) that is within the
-  scope that is being traced. The true branch and false branch must have
-  consistent input and outputs, meaning the inputs have to be the same, and
-  the outputs have to be the same type and shape.
-
-- `operands (Tuple[torch.Tensor])`: A tuple of inputs to the true_fn or false_fn.
-
-Returns
-~~~~~~~
-
-- Value (b) of either `true_fn(*operands)` or `false_fn(*operands)`,
-  depending on the value of `pred`.
-
-Restrictions
-~~~~~~~~~~~~
-
-- The conditional statement (aka `pred`) must meet one of the following constraints:
-
-  - It's a `torch.Tensor` with only one element, e.g. `torch.tensor(10)` or
-    `torch.tensor([[10]])`, etc.
-
-  - It's a boolean expression, e.g. `x.shape[0] > 10` or `x.dim() > 1 and x.shape[1] > 10`
-
-- The branch function (aka `true_fn`/`false_fn`) must meet all of the following constraints:
-
-  - The function signature must match with operands.
-
-  - The function must return a tensor with the same metadata, e.g. shape,
-    dtype, etc.
-
-  - The function cannot have in-place mutations on inputs or global variables. (Note: in-place tensor operations such as `add_` for intermediate results are allowed in a branch)
-
-Temporal Limitations
-~~~~~~~~~~~~~~~~~~~~
-
-- `torch.ops.higher_order.cond` is only supported for **inference** right now. Autograd will be allowed in the future.
-
-- The **operands** must be a **tuple of tensors**. Pytree of tensors will be allowed in the future.
-
-- The **output** of branches must be a **single Tensor**. Pytree of tensors will be allowed in the future.
-
-Example
-~~~~~~~
-
-An example of exporting `torch.ops.higher_order.cond` operator:
-
+Below is an example that uses cond to branch based on input shape:
 .. code-block:: python
 
     import torch
-    from torch.export import export, dynamic_dim
+
+    def true_fn(x: torch.Tensor):
+        return x.cos() + x.sin()
+
+    def false_fn(x: torch.Tensor):
+        return x.sin()
 
     class DynamicShapeCondPredicate(torch.nn.Module):
         """
-        A basic usage of control flow based on dynamic shape predicate.
+        A basic usage of cond based on dynamic shape predicate.
         """
 
         def __init__(self):
@@ -101,12 +53,38 @@ An example of exporting `torch.ops.higher_order.cond` operator:
             def false_fn(x: torch.Tensor):
                 return x.sin()
 
-            return torch.ops.higher_order.cond(x.shape[0] > 4, true_fn, false_fn, (x,))
+            return torch.cond(x.shape[0] > 4, true_fn, false_fn, (x,))
+
+    dyn_shape_mod = DynamicShapeCondPredicate()
+
+We can eagerly run the model and expect the results vary based on input shape:
+.. code-block:: python
+
+    inp = torch.randn(3)
+    inp2 = torch.randn(5)
+    assert torch.equal(dyn_shape_mod(inp), false_fn(inp))
+    assert torch.equal(dyn_shape_mod(inp2), true_fn(inp2))
+
+We can torch.compile the model with eager backend and get the expected results:
+
+.. code-block:: python
+
+    inp = torch.randn(3)
+    inp2 = torch.randn(5)
+    opt_dyn_mod = torch.compile(dyn_shape_mod, backend="eager")
+    assert torch.equal(opt_dyn_mod(inp), false_fn(inp))
+    assert torch.equal(opt_dyn_mod(inp2), true_fn(inp2))
+
+We can export the model for further transformations and deployment:
+
+.. code-block:: python
 
     inp = torch.randn(4, 3)
-    ep = export(DynamicShapeCondPredicate(), (inp,), {}, constraints=[dynamic_dim(inp, 0)])
+    dim_batch = torch.export.Dim("batch", min=2)
+    ep = torch.export.export(DynamicShapeCondPredicate(), (inp,), {}, dynamic_shapes={"x": {0: dim_batch}})
+    print(ep)
 
-For the above example, if we run `ep.graph_module.print_readable()`, we get the exported graph as shown below:
+This gives us an exported program as shown below:
 
 .. code-block:: python
 
@@ -114,41 +92,88 @@ For the above example, if we run `ep.graph_module.print_readable()`, we get the 
         def forward(self, arg0_1: f32[s0, 3]):
             sym_size: Sym(s0) = torch.ops.aten.sym_size.int(arg0_1, 0)
             gt: Sym(s0 > 4) = sym_size > 4;  sym_size = None
-            submodule_0 = self.submodule_0
-            submodule_1 = self.submodule_1
-            cond: f32[s0, 3] = torch.ops.higher_order.cond(gt, submodule_0, submodule_1, [arg0_1]);  gt = submodule_0 = submodule_1 = arg0_1 = None
-            return (cond,)
+            true_graph_0 = self.true_graph_0
+            false_graph_0 = self.false_graph_0
+            conditional: f32[s0, 3] = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+            return (conditional,)
 
-    # True graph module
+        class <lambda>(torch.nn.Module):
+            def forward(self, arg0_1: f32[s0, 3]):
+                cos: f32[s0, 3] = torch.ops.aten.cos.default(arg0_1)
+                sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+                add: f32[s0, 3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+                return add
+
+        class <lambda>(torch.nn.Module):
+            def forward(self, arg0_1: f32[s0, 3]):
+                sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+                return sin
+
+Notice that `torch.cond` is lowered to `torch.ops.higher_order.cond`, its predicate becomes a Symbolic expression over the shape of input,
+and branch functions becomes two sub-graph attributes of the top level graph module.
+
+Here is another exmaple that showcases how to express a data-dependet control flow:
+
+.. code-block:: python
+
+    class DataDependentCondPredicacte(torch.nn.Module):
+        """
+        A basic usage of cond based on data dependent predicate.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return torch.cond(x.sum() > 4.0, true_fn, false_fn, (x,))
+
+The exported program we get after export:
+
+.. code-block:: python
+
     class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: f32[s0, 3]):
-            cos: f32[s0, 3] = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-            return cos
+            sum_1: f32[] = torch.ops.aten.sum.default(arg0_1)
+            gt: b8[] = torch.ops.aten.gt.Scalar(sum_1, 4.0);  sum_1 = None
 
-    # False graph module
-    class GraphModule(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, 3]):
-            sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-            return sin
+            true_graph_0 = self.true_graph_0
+            false_graph_0 = self.false_graph_0
+            conditional: f32[s0, 3] = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+            return (conditional,)
 
-Invariants after torch.export
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        class <lambda>(torch.nn.Module):
+            def forward(self, arg0_1: f32[s0, 3]):
+                cos: f32[s0, 3] = torch.ops.aten.cos.default(arg0_1)
+                sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+                add: f32[s0, 3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+                return add
 
-There are several useful invariants we get after torch.export `torch.ops.higher_order.cond`:
+        class <lambda>(torch.nn.Module):
+            def forward(self, arg0_1: f32[s0, 3]):
+                sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+                return sin
+
+
+Invariants of torch.ops.higher_order.cond
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+There are several useful invariants for `torch.ops.higher_order.cond`:
 
 - For predicate:
-    - Dynamicness of predicate is preserved via sym_bool (e.g. `gt` shown in the above example)
-    - If the predicate in user-program is constant (e.g. boolean expression of shape of a static sized tensor or a python bool constant), the `pred` in IR node will be a constant.
+    - Dynamicness of predicate is preserved (e.g. `gt` shown in the above example)
+    - If the predicate in user-program is constant (e.g. a python bool constant), the `pred` of the operator will be a constant.
 
 - For branches:
     - The input and output signature will be a flattened tuple.
     - They are `torch.fx.GraphModule`.
-    - Tensors used in the GraphModule are explicit inputs. No closures.
-    - No mutations for inputs/globals.
+    - Closures in original function becomes explicit inputs. No closures.
+    - No mutations on inputs or globals are allowed.
 
 - For operands:
     - It will also be a flat tuple.
 
-- Nesting of `torch.ops.higher_order.cond` in user program becomes nested graph modules.
+- Nesting of `torch.cond` in user program becomes nested graph modules.
 
-See examples of advanced usage of `torch.ops.higher_order.cond` operator in ExportDB.
+
+API Reference
+-------------
+.. autofunction:: torch._higher_order_ops.cond.cond

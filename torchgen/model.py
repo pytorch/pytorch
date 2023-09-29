@@ -84,10 +84,13 @@ class DispatchKey(Enum):
     Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
+    NestedTensor = auto()
 
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
+    Conjugate = auto()
+    Negative = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()
@@ -99,6 +102,7 @@ class DispatchKey(Enum):
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
     FuncTorchBatched = auto()
+    BatchedNestedTensor = auto()
     FuncTorchVmapMode = auto()
     FuncTorchDynamicLayerFrontMode = auto()
     Functionalize = auto()
@@ -208,6 +212,7 @@ class DispatchKey(Enum):
 class _TorchDispatchModeKey(Enum):
     FAKE = auto()
     PROXY = auto()
+    FUNCTIONAL = auto()
 
 
 def codegen_per_backend_entries() -> str:
