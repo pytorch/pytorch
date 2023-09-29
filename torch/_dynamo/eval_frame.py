@@ -4,6 +4,7 @@ import contextlib
 import dis
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -382,9 +383,14 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            any_arg_is_proxy = any(
+                isinstance(arg, torch.fx.Proxy)
+                for arg in itertools.chain(args, kwargs.values())
+            )
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()
+                and any_arg_is_proxy
             ):
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
@@ -1225,14 +1231,10 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
-            if forced_specializations:
-                msg = (
-                    "Some dynamic dimensions need to be specialized because "
-                    "the constraints inferred for them are too complex to specify.\n"
-                    f"{forced_specializations}\n{msg}"
-                )
+            msg = dim_constraints.prettify_results(
+                original_signature, constraint_violation_error, forced_specializations
+            )
             if constraint_violation_error:
                 constraint_violation_error.args = (
                     constraint_violation_error.args[0] + msg,
@@ -1410,7 +1412,6 @@ class TorchPatcher:
 
         disabled_multi_tensor_opt_modules = {
             adamax,
-            nadam,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
@@ -1464,10 +1465,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
-        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
-        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

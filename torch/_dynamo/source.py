@@ -3,6 +3,8 @@ import dataclasses
 import enum
 from typing import Any, Optional, Union
 
+import torch
+
 from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
@@ -108,23 +110,6 @@ class RandomValueSource(Source):
 
     def name(self):
         return f"random_value_{self.random_call_index}"
-
-
-@dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -264,13 +249,42 @@ class ConvertIntSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        return self.base.reconstruct(codegen)
+        # Note: reconstruct(codegen) is used when dynamo generates the opimized python byte code.
+        # To re-use all the infra we've built for SymInt, when dynamo sees a SymBool inputs,
+        # we make dynamo create graphs that take SymInt inputs instead.
+        #
+        # To provide the correct SymInt inputs for dynamo extracted graph, we additionally insert a
+        # cast_symbool_to_symint higher order operator call into the byte code.
+        # This is to ensure the conversion from SymBool to SymInt can be properly traced.
+        cast_fn_name = "__cast_symbool_to_symint_guardless"
+        if cast_fn_name not in codegen.tx.output.global_scope:
+            codegen.tx.output.install_global(
+                cast_fn_name,
+                torch._higher_order_ops.cast_symbool_to_symint.cast_symbool_to_symint,
+            )
+
+        def _create_cast_instructions():
+            instructions = [
+                *codegen.load_function_name(cast_fn_name, True),
+                *self.base.reconstruct(codegen),
+                *create_call_function(1, False),
+            ]
+            return instructions
+
+        return _create_cast_instructions()
 
     def guard_source(self):
         return self.base.guard_source()
 
     def name(self):
-        return f"cast_symbool_to_symint_guardless({self.base.name()})"
+        # Note: name() is used to create guard for the outer SymBool. Because we fakes the SymBool
+        # inputs with SymInts in dynamo, the guards produced are for the symints.
+        # But the guard must be checked against the outer SymBool. To do that, we need to cast the
+        # outer SymBool into an outer SymInt before the guard code generated for dynamo's SymInt is executed.
+        #
+        # Moreover, we don't want to create a proxy for the casting logic during guard checking.
+        # The proxy will be created when the optimized python byte code is executed.
+        return f"convert_symbool_to_int_with_hint({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)

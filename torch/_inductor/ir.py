@@ -34,6 +34,7 @@ import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._prims_common import (
@@ -48,7 +49,6 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
@@ -640,7 +640,10 @@ class Reduction(Loops):
         if not should_split:
             return ReductionHint.DEFAULT, 1
 
-        num_sm = get_device_properties(device).multi_processor_count
+        device_interface = get_interface_for_device(get_device_type(device))
+        num_sm = device_interface.Worker.get_device_properties(
+            device
+        ).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -1910,7 +1913,7 @@ class SliceView(View):
         end = cls.handle_negative_index(end, new_size[dim])
 
         end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(sizevars.evaluate_min(start, new_size[dim]), end)
+        start = sizevars.evaluate_min(start, end)
         if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
             sizevars.guard_equals(end, new_size[dim])
             return x
@@ -2411,11 +2414,7 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self, writer=None):
-        return (
-            self.get_name() + ".get()"
-            if V.graph.cpp_wrapper and config.aot_inductor.abi_compatible
-            else self.get_name()
-        )
+        return self.get_name()
 
     def decide_layout(self):
         pass
@@ -3586,13 +3585,9 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
         else:
-            wrapper.writeline(
-                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
 class DynamicScalar(IRNode):
@@ -3815,10 +3810,12 @@ class FallbackKernel(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
             exported_args = None
+            args = None
             if config.is_fbcode():
                 exported_args = self.export_extern_kernel_node()
+            else:
+                args = [*self.codegen_args(), *self.codegen_kwargs()]
 
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
                 self.kernel,
@@ -3910,11 +3907,11 @@ class MultiOutput(ExternKernel):
             return basename
 
     def codegen(self, wrapper):
-        line = V.graph.wrapper_code.declare
+        line = wrapper.declare
         line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
-        line += V.graph.wrapper_code.ending
-        V.graph.wrapper_code.writeline(line)
-        self.codegen_size_asserts(V.graph.wrapper_code)
+        line += wrapper.ending
+        wrapper.writeline(line)
+        self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())

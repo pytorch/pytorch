@@ -2815,7 +2815,9 @@ def forward(self, x):
             a = A()
             return x.sum() + type(a).func().sum()
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Can't call type()"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
+        ):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
 
         def f_correct(x):
@@ -3239,18 +3241,16 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        true_guard_code = ["convert_symbool_to_int_with_hint(L['pred']) == 1"]
         false_guard_code = [
-            "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
-            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
+            "Ne(convert_symbool_to_int_with_hint(L['pred']), 1)",
+            "-9223372036854775808 <= convert_symbool_to_int_with_hint(L['pred'])",
         ]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            # Outter shape env should have guard in it because when dynamo traces fn, it propagate the guards
-            # to outter shape env.
             [["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"]],
         )
 
@@ -3764,7 +3764,6 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
         self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
 
-    @unittest.expectedFailure
     def test_fx_pytree(self):
         def foo(args):
             flat_args, spec = torch.utils._pytree.tree_flatten(args)

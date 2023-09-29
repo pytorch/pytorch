@@ -12,7 +12,9 @@ import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
-from torch._dynamo.variables.tensor import InputSymNodeVariable, SymNodeVariable
+from torch._dynamo.variables.builtin import BuiltinVariable
+from torch._dynamo.variables.functions import UserFunctionVariable
+from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
 
@@ -363,7 +365,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ConstantVariable,
             TensorVariable,
             SymNodeVariable,
-            InputSymNodeVariable,
         ):
             unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
@@ -567,7 +568,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
         first_dim = args[1].call_method(
-            tx, "__getitem__", args=[ConstantVariable(0)], kwargs={}
+            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
         )
 
         # TODO: Support kwargs
@@ -815,21 +816,25 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 items = []
                 for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable(idx),), {}
+                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable(items)
         else:  # case: has_aux.value = True
             # fx_proxy -> Tuple(grads, aux)
-            grads = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(0),), {})
-            aux = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(1),), {})
+            grads = fx_proxy.call_method(
+                tx, "__getitem__", (ConstantVariable.create(0),), {}
+            )
+            aux = fx_proxy.call_method(
+                tx, "__getitem__", (ConstantVariable.create(1),), {}
+            )
             if isinstance(argnums_v, int):
                 return TupleVariable([grads.call_method(tx, "contiguous", (), {}), aux])
             else:
                 items = []
                 for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable(idx),), {}
+                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable([TupleVariable(items), aux])
@@ -876,22 +881,39 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "NYI - torch.func.vmap is not implemented when chunk_size is passed"
             )
 
-        flat_args, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
-        in_dims_v = in_dims.as_python_constant()
-        in_dims_v = in_dims_v if isinstance(in_dims_v, int) else list(in_dims_v)
-        broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
-            in_dims_v, arg_spec
+        # Trace into tree_flatten with the list of batch_input_args.
+        tree_flatten = UserFunctionVariable(pytree.tree_flatten)
+        flat_args, arg_spec = tree_flatten.call_function(
+            tx, [ListVariable(batch_input_args)], {}
+        ).unpack_var_sequence(tx)
+
+        # Transform in_dims into a list if it's not an integer literal.
+        in_dims_v = (
+            in_dims
+            if isinstance(in_dims.as_python_constant(), int)
+            else BuiltinVariable(list).call_function(tx, [in_dims], {})
+        )
+
+        # Trace into broadcast_to_and_flatten with the transformed in_dims.
+        broadcast_to_and_flatten = UserFunctionVariable(
+            pytree._broadcast_to_and_flatten
+        )
+        broadcasted_in_dims = broadcast_to_and_flatten.call_function(
+            tx, [in_dims_v, arg_spec], {}
         )
 
         # We want to pass unbatched input to speculate subgraph.
         # So we loop through the inputs and select only one sample
         # from the batch.
         unbatched_input_args = []
-        for arg, in_dim in zip(flat_args, broadcasted_in_dims):
+        for arg, in_dim in zip(
+            flat_args.unpack_var_sequence(tx),
+            broadcasted_in_dims.unpack_var_sequence(tx),
+        ):
             if in_dim is not None:
                 assert isinstance(arg, TensorVariable)
                 unbatched_arg = arg.call_method(
-                    tx, "select", (ConstantVariable(in_dim), ConstantVariable(0)), {}
+                    tx, "select", [in_dim, ConstantVariable.create(0)], {}
                 )
                 unbatched_input_args.append(unbatched_arg)
             else:
@@ -900,12 +922,17 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Ban ops like `stride`, `storage_offset` in the traced functions.
         # NOTE: We are conservatively banning more ops (vmap should be able
         #       to handle a few of them).
+        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
         with tx.strict_translation_mode():
             # trace through the function with unbatched inputs.
             _, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 fn,
-                torch.utils._pytree.tree_unflatten(unbatched_input_args, arg_spec),
+                # Returns a ListVariable, since that's where we started flattening.
+                # However, we really want to pass the inner Python list as argument.
+                tree_unflatten.call_function(
+                    tx, [ListVariable(unbatched_input_args), arg_spec], {}
+                ).unpack_var_sequence(tx),
                 {},
                 graph_checkpoint,
                 checkpoint,
@@ -926,9 +953,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #       as speculate_subgraph does not supports functions with non-Tensor args.
         #       (so we graph-break above)
         updated_in_dims = TupleVariable(
-            [ConstantVariable(dim) for dim in broadcasted_in_dims]
+            broadcasted_in_dims.unpack_var_sequence(tx)
             + [
-                ConstantVariable(None),
+                ConstantVariable.create(None),
             ]
             * len(body_lifted_freevars)
         )
@@ -1161,7 +1188,12 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
+        from torch.utils.checkpoint import noop_context_fn
         from .builder import wrap_fx_proxy
+
+        if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
+            context_fn = kwargs.pop("context_fn")
+            self.value.context_fn = context_fn.fn
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
