@@ -78,6 +78,10 @@ if TEST_Z3:
         # Ref: https://github.com/sympy/sympy/issues/25146
         DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
     )
+    unittest.expectedFailure(
+        # GuardOnDataDependentSymNode
+        DynamicShapesReproTests.test_convert_boxes_to_pooler_format_dynamic_shapes
+    )
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

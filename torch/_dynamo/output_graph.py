@@ -271,20 +271,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # In export mode, we force the shape_env to strictly disallow any constraining
-        # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=torch._guards.CompileContext.get_capture_dynamic_output_shape_ops(),
-                co_fields=self.co_fields,
-            ),
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.init_ambient_guards()
-
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
