@@ -32,7 +32,7 @@ void commonEventinit(
   if (const_cast<Work&>(work).isCompleted() && !work.isSuccess())
     evt.error_message = exceptionPtrWhat(work.exception());
 }
-}
+} // namespace
 
 Backend::Backend(int rank, int size)
     : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
