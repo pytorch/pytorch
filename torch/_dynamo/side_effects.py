@@ -407,10 +407,7 @@ class SideEffects:
             # because we are running residuals firmly before .backward() can be run, it is sound to invoke
             # `register_hook` on a known tensor.
             #
-            # For tensors without a source, the behavior is similar to the above case, except instead of doing the register_hook
-            # call in residuals, we write a register_hook call to the graph. As fx does not understand function
-            # arguments, we manually lift the hook up to an input, and use that to register hooks.
-            # This is done so that we can preserve the hook registration without graph breaking.
+            # For tensors without a source, we graph break.
             #
             # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
             # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
@@ -426,8 +423,8 @@ class SideEffects:
             #     - Incorporate a handle if one was established in the eager phase.
             #  - For tensors without sources:
             #    - We don't generate any instructions for registering a hook.
-            #    - We lift the fn up as an input.
-            #    - We then manually insert a register_hook call into the graph.
+            #    - We produce a call function that utilizes the trace_wrapped higher order op, closing over it.
+            #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
