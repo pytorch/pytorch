@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
 )
 from torch.distributed.fsdp._debug_utils import SimpleProfiler
+from torch.distributed.fsdp._flat_param import FlatParameter, FlatParamHandle
 from torch.distributed.fsdp._fsdp_extensions import (
     _ext_chunk_dtensor,
     _ext_chunk_tensor,
@@ -45,7 +46,6 @@ from torch.distributed.fsdp._runtime_utils import (
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
-from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 from torch.utils._pytree import tree_map_only
 
 
@@ -370,7 +370,9 @@ def _shard_orig_param_state(
     flat_param = fsdp_param_info.handle.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
     shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
-    optim_state = _gather_state_dict(optim_state, fsdp_state.process_group)
+    optim_state = _gather_state_dict(
+        optim_state, pg=fsdp_state.process_group, device=fsdp_state.compute_device
+    )
     if not shard_param_info.in_shard:
         return {}
     # Flatten and shard the state.
@@ -583,7 +585,9 @@ def _flatten_optim_state(
     # without
     unflat_param_states = [
         _gather_state_dict(
-            unflat_osd_state[unflat_param_name], pg=fsdp_state.process_group
+            unflat_osd_state[unflat_param_name],
+            pg=fsdp_state.process_group,
+            device=fsdp_state.compute_device,
         )
         if unflat_param_name in unflat_osd_state
         else None
