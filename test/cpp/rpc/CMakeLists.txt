@@ -18,9 +18,6 @@ if(USE_TENSORPIPE)
   list(APPEND TORCH_RPC_TEST_SOURCES
     ${TORCH_RPC_TEST_DIR}/test_tensorpipe_serialization.cpp
   )
-  list(APPEND TORCH_RPC_TEST_DEPENDENCY_LIBS
-    tensorpipe
-  )
 endif()
 
 add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})

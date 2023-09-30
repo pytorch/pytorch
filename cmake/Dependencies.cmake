@@ -1362,18 +1362,17 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_STATIC_OR_SHARED SHARED CACHE STRING "" FORCE)
-    set(OLD_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-    set(BUILD_SHARED_LIBS ON)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
-    set(BUILD_SHARED_LIBS ${OLD_BUILD_SHARED_LIBS})
+    set_target_properties(tensorpipe PROPERTIES POSITION_INDEPENDENT_CODE 1)
+    set_target_properties(tensorpipe_uv PROPERTIES POSITION_INDEPENDENT_CODE 1)
     if(USE_CUDA)
+      set_target_properties(tensorpipe_cuda PROPERTIES POSITION_INDEPENDENT_CODE 1)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
-      target_compile_options_if_supported(tensorpipe_cuda "-fPIC")
     elseif(USE_ROCM)
       message(WARNING "TensorPipe doesn't yet support ROCm")
       # Not yet...
