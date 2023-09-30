@@ -7586,10 +7586,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             @torch.compile
             def f(a, b):
                 return (a * b).sum(dim=-1)
+
             N = 512
-            inps = (torch.randn(N, N, N).permute(2, 1, 0), torch.randn(N, N, N).permute(1, 2, 0))
+            inps = (
+                torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
+                torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
+            )
             code = run_and_get_triton_code(f, *inps)
-            # self.assertTrue()
+            self.assertTrue(
+                "tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last'"
+                in code
+            )
+            self.assertTrue(
+                "tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first',"
+                in code
+            )
 
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)
