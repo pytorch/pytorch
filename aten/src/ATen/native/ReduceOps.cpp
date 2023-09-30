@@ -184,7 +184,7 @@ static void allany_meta(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim) {
   const auto& result = meta.maybe_get_output();
   check_result_is_bytebool(name, self, result);
@@ -192,18 +192,16 @@ static void allany_meta(
   resize_reduction(meta, self, dims, keepdim, out_dtype);
 }
 
-TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_META_FUNC2(all, dim)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
   allany_meta(*this, "all", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 TORCH_META_FUNC(all)(const Tensor& self) {
   allany_meta(*this, "all", self, {}, false);
 }
 
-TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  allany_meta(*this, "any", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+TORCH_META_FUNC2(any, dim)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
+  allany_meta(*this, "all", self, dim, keepdim);
 }
 
 TORCH_META_FUNC(any)(const Tensor& self) {
@@ -1497,7 +1495,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim) {
   if (self.is_cuda()) {
     // As CUDA supports dynamic type casting, we use this overload of
@@ -1514,7 +1512,7 @@ template <int identity, typename Stub>
 inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim,
     Stub& stub) {
   if (self.numel() == 0) {
@@ -1528,7 +1526,7 @@ inline void allany_impl(
 }
 
 TORCH_IMPL_FUNC(all_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
   allany_impl<1>(self, result, dim, keepdim, and_stub);
 }
 
@@ -1537,7 +1535,7 @@ TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
 }
 
 TORCH_IMPL_FUNC(any_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
   allany_impl<0>(self, result, dim, keepdim, or_stub);
 }
 
