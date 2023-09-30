@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     TEST_WITH_ASAN,
+    skipIfRocm,
 )
 
 try:
@@ -79,6 +80,7 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
