@@ -477,6 +477,9 @@ public:
     }
     return ret;
   }
+  Vectorized<T> trigamma() const {
+    return map(calc_trigamma);
+  }
   Vectorized<T> igammac(const Vectorized<T> &x) const {
     Vectorized<T> ret;
     for (const auto i : c10::irange(size())) {

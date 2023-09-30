@@ -333,7 +333,7 @@ C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
   return result;
 }
 
-static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
+static inline double calc_trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -351,7 +351,7 @@ static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   return sign * result;
 }
 
-static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
+static inline float calc_trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {
@@ -367,6 +367,14 @@ static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
   const float ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
   return sign * result;
+}
+
+static inline c10::BFloat16 calc_trigamma(c10::BFloat16 a) {
+  return calc_trigamma(static_cast<float>(a));
+}
+
+static inline c10::Half calc_trigamma(c10::Half a) {
+  return calc_trigamma(static_cast<float>(a));
 }
 
 /*

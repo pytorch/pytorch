@@ -350,6 +350,10 @@ class Vectorized<double> {
      return {Sleef_nextafterd2(_vec0, b._vec0), Sleef_nextafterd2(_vec1, b._vec1)};
   }
 
+  Vectorized<double> trigamma() const {
+    return map(calc_trigamma);
+  }
+
   Vectorized<double> igamma(const Vectorized<double>& x) const {
     return mapbi(calc_igamma, x);
   }

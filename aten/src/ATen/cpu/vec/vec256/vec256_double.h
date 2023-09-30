@@ -182,6 +182,9 @@ public:
   Vectorized<double> i0e() const {
     return map(calc_i0e);
   }
+  Vectorized<double> trigamma() const {
+    return map(calc_trigamma);
+  }
   Vectorized<double> igamma(const Vectorized<double> &x) const {
     __at_align__ double tmp[size()];
     __at_align__ double tmp_x[size()];

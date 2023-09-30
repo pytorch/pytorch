@@ -390,6 +390,10 @@ class Vectorized<float> {
     return {Sleef_nextafterf4(_vec0, b._vec0), Sleef_nextafterf4(_vec1, b._vec1)};
   }
 
+  Vectorized<float> trigamma() const {
+    return map(trigamma);
+  }
+
   Vectorized<float> igamma(const Vectorized<float>& x) const {
     return mapbi(calc_igamma, x);
   }

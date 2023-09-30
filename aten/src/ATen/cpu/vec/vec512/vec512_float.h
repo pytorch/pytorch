@@ -287,6 +287,9 @@ public:
     }
     return loadu(tmp);
   }
+  Vectorized<float> trigamma() const {
+    return map(calc_trigamma);
+  }
   Vectorized<float> igammac(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];
