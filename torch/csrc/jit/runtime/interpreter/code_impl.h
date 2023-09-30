@@ -16,8 +16,7 @@
 
 C10_DECLARE_bool(torch_jit_enable_expanded_stacks);
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
@@ -1059,5 +1058,4 @@ struct MobileCodeImpl : CodeImpl {
 };
 
 } // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

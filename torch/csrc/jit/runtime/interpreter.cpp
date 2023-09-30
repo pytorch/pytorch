@@ -55,8 +55,7 @@ C10_DEFINE_bool(
     false,
     "When true we will attemps to pre-expand node stacks and cache expanded stacks.");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using CodeImpl = interpreter::CodeImpl;
 
@@ -1207,5 +1206,4 @@ void InterpreterContinuation::operator()() {
 #endif
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
