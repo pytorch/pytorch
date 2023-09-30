@@ -119,12 +119,6 @@ def _disallowed_function_ids():
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
     ]
-    # TODO(ybliang): consider consolidating this with skipfiles
-    if torch.distributed.is_available():
-        from torch._dynamo.skipfiles import SUBMODULE_INLINELIST
-        from torch.distributed import _functional_collectives
-
-        SUBMODULE_INLINELIST.add(_functional_collectives)
 
     # extract all dtypes from torch
     dtypes = [
