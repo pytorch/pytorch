@@ -68,28 +68,32 @@ static void CanonicalizeOps(Block* block) {
     } else if (
         it->matches(
             "aten::chunk(Tensor self, int chunks, int dim, bool redistribute, bool drop_remainder) -> Tensor[]",
-            /*const_inputs=*/{attr::chunks, attr::dim, attr::redistribute, attr::drop_remainder})) {
+            /*const_inputs=*/
+            {attr::chunks,
+             attr::dim,
+             attr::redistribute,
+             attr::drop_remainder})) {
       auto redistribute = it->get<bool>(attr::redistribute);
       auto drop_remainder = it->get<bool>(attr::drop_remainder);
       if (!redistribute && !drop_remainder) {
-          // Replace aten::chunk (which returns a list) with ConstantChunk with the
-          // outputs unpacked.
-          if (auto orig_outputs = getChunkOutputs(*it)) {
-            WithInsertPoint guard(*it);
-            auto* self = it->namedInput(attr::self);
-            auto* graph = it->owningGraph();
-            const auto chunks = it->get<int64_t>(attr::chunks).value();
-            const auto dim = it->get<int64_t>(attr::dim).value();
-            auto* node =
-                graph->insertNode(graph->create(prim::ConstantChunk, chunks));
-            node->addInput(self);
-            node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
-            node->copyMetadata(*it);
-            for (const auto& orig_out : *orig_outputs) {
-              orig_out.val->replaceAllUsesWith(node->outputs()[orig_out.offset]);
-              node->outputs()[orig_out.offset]->setType(orig_out.val->type());
-            }
+        // Replace aten::chunk (which returns a list) with ConstantChunk with
+        // the outputs unpacked.
+        if (auto orig_outputs = getChunkOutputs(*it)) {
+          WithInsertPoint guard(*it);
+          auto* self = it->namedInput(attr::self);
+          auto* graph = it->owningGraph();
+          const auto chunks = it->get<int64_t>(attr::chunks).value();
+          const auto dim = it->get<int64_t>(attr::dim).value();
+          auto* node =
+              graph->insertNode(graph->create(prim::ConstantChunk, chunks));
+          node->addInput(self);
+          node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+          node->copyMetadata(*it);
+          for (const auto& orig_out : *orig_outputs) {
+            orig_out.val->replaceAllUsesWith(node->outputs()[orig_out.offset]);
+            node->outputs()[orig_out.offset]->setType(orig_out.val->type());
           }
+        }
       }
     }
   }
