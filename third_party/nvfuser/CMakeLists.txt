@@ -144,7 +144,7 @@ else()
     )
 endif()
 
-target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR})
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${TORCHLIB_FLAVOR})
 if(NOT USE_ROCM)
   target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${CUDA_NVRTC_LIB} torch::nvtoolsext)
   target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${CUDA_INCLUDE_DIRS})
