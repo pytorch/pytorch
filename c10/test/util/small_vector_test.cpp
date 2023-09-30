@@ -874,6 +874,7 @@ TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
 }
 
 struct notassignable {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   int& x;
   notassignable(int& x) : x(x) {}
 };
