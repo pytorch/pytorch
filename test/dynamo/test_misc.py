@@ -45,12 +45,16 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
+from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
+    constrain_range,
+    constrain_unify,
     ConstraintViolationError,
     expect_true,
     ShapeEnv,
@@ -1999,14 +2003,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_manual_seed(self):
-        def fn(a, b):
-            x = a + b
-            torch.manual_seed(9000)
-            return x + 1
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
-
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod
@@ -2485,20 +2481,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
+        from torch._dynamo.utils import counters
+
         cnts = torch._dynamo.testing.CompileCounter()
+        counters.clear()
 
         def fn(x):
             attention_seed = int(torch.seed() % sys.maxsize)
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(100, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        # Python code is needed here, since torch.manual_seed graph-breaks.
+        # Refs: https://github.com/pytorch/pytorch/issues/107187
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
+        # Only the torch.seed call is turned into an FX graph.
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+        # Graph breaks at manual_seed.
+        self.assertEqual(len(counters["graph_break"]), 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -7582,6 +7588,18 @@ ShapeEnv not equal: field values don't match:
         )
         self._replay_and_check(main)
 
+    def test_shape_env_recorded_function_fallback(self):
+        # Make sure the record/replay mechanism for ShapeEnv will fallback
+        # if no ShapeEnv instance is found.
+        constrain_range(5, min=2, max=10)
+        constrain_unify(5, 5)
+
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: _constrain_range_for_size(5, min=2, max=10),
+            """can only constrain range for SymInt""",
+        )
+
     def test_default_dtype_change(self):
         @torch.compile
         def foo():
@@ -7665,6 +7683,22 @@ ShapeEnv not equal: field values don't match:
         input2 = torch.randn(1)
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
+    def test_torch_dynamo_codegen_pow(self):
+        def pow(x):
+            return x**2
+
+        x = np.arange(8)
+        pow_opt = torch.compile(pow)
+
+        actual, source_code = run_and_get_code(pow_opt, x)
+        expect = pow(x)
+
+        self.assertEqual(expect, actual)
+
+        self.assertTrue(
+            all("aten.pow" not in code for code in source_code),
+            msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
+        )
 
 
 class TestTracer(JitTestCase):
