@@ -1503,6 +1503,18 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(len(a.items) == 0).add_options(self, a)
 
         return None
+    
+    def call_repeat(self, tx, a, b):
+        if isinstance(a, SymNodeVariable) and isinstance(b, ConstantVariable):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.repeat, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     call_eq = _comparison
     call_gt = _comparison
