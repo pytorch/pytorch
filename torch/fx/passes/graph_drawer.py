@@ -285,7 +285,7 @@ if HAS_PYDOT:
             if not hasattr(tm, "dtype"):
                 print("tm", tm)
             result += "|" + "dtype" + "=" + str(tm.dtype) + r"\n"
-            result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\n"
+            result += "|" + "shape" + "=" + str((tm.shape,) if isinstance(tm.shape, int) else tuple(tm.shape)) + r"\n"
             result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\n"
             result += "|" + "stride" + "=" + str(tm.stride) + r"\n"
             if tm.is_quantized:
