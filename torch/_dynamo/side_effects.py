@@ -407,7 +407,8 @@ class SideEffects:
             # because we are running residuals firmly before .backward() can be run, it is sound to invoke
             # `register_hook` on a known tensor.
             #
-            # For tensors without a source, we graph break.
+            # For tensors without a source, we support a limited subset of hooks. Global functions only, and
+            # compiled_autograd must be enabled or we will graph break.
             #
             # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
             # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
@@ -423,6 +424,7 @@ class SideEffects:
             #     - Incorporate a handle if one was established in the eager phase.
             #  - For tensors without sources:
             #    - We don't generate any instructions for registering a hook.
+            #    - Handles from intermediary hooks are NYI.
             #    - We produce a call function that utilizes the trace_wrapped higher order op, closing over it.
             #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
