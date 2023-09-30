@@ -171,6 +171,12 @@ blocklist = [
     "copy_",
 ]
 
+overload_blocklist = [
+    # Overloads which are more specific than another, so not needed
+    "all.dim",
+    "any.dim",
+]
+
 binary_ops = (
     "add",
     "sub",
@@ -253,8 +259,13 @@ def sig_for_ops(opname: str) -> List[str]:
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
     type_hints: List[str] = []
 
+    in_blocklist = (
+        sig_group.signature.name in blocklist
+        or str(sig_group.base.func.name) in overload_blocklist
+    )
+
     # Some deprecated ops that are on the blocklist are still included in pyi
-    if sig_group.signature.name in blocklist and not sig_group.signature.deprecated:
+    if in_blocklist and not sig_group.signature.deprecated:
         return type_hints
 
     # deprecated signatures have separate entries for their functional and out variants
