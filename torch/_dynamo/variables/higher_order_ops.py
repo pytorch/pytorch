@@ -18,13 +18,7 @@ from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
 
-from ..exc import (
-    UncapturedHigherOrderOpError,
-    unimplemented,
-    Unsupported,
-    UserError,
-    UserErrorType,
-)
+from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
@@ -739,12 +733,39 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         grad_args = (args[0], args[1], args[2])
 
         # get arguments
-        func, argnums, has_aux = grad_args
+        func, raw_variable_argnums, has_aux = grad_args
         kwargs = args[4].items
         if len(kwargs) > 0:
             # Since speculate_subgraph doesn't support kwargs, we can't handle this for now.
             unimplemented(
                 "torch.func.grad: kwargs arguments are currently unsupported."
+            )
+
+        raw_argnums = raw_variable_argnums.as_python_constant()
+        assert isinstance(raw_argnums, int) or (
+            isinstance(raw_argnums, tuple)
+            and all(isinstance(i, int) for i in raw_argnums)
+        ), f"argnums is expected to be int or tuple of ints. Got: {raw_argnums}"
+
+        grouped_flat_args = [
+            tree_flatten(tx, a)[0] for a in args[3].unpack_var_sequence(tx)
+        ]
+        raw_argnums_tuple = (
+            (raw_argnums,) if isinstance(raw_argnums, int) else raw_argnums
+        )
+        flat_argnums = []
+
+        base = 0
+        for i, flat_args in enumerate(grouped_flat_args):
+            if i in raw_argnums_tuple:
+                flat_argnums.extend(range(base, base + len(flat_args.items)))
+            base += len(flat_args.items)
+
+        if isinstance(raw_argnums, int) and len(flat_argnums) == 1:
+            flat_variable_argnums = ConstantVariable(raw_argnums)
+        else:
+            flat_variable_argnums = TupleVariable(
+                [ConstantVariable(i) for i in flat_argnums]
             )
 
         # Trace through the `func`
@@ -781,9 +802,11 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
         body_node = make_attr(tx, body_name)
+
         grad_proxy_args = (
             body_node,
-            *(arg.as_proxy() for arg in grad_args[1:]),
+            flat_variable_argnums.as_proxy(),
+            has_aux.as_proxy(),
         )
 
         # Model `grad_fn = grad(fn, *grad_args, **grad_kwargs)`
@@ -797,10 +820,12 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Pass lifted freevars to the call to `grad_fn`
         args = args[3].items
-        flattened_args, _ = tree_flatten(tx, ListVariable(args))
-        grad_fn_args = tuple(
-            arg.as_proxy() for arg in flattened_args.unpack_var_sequence(tx)
-        ) + tuple(body_lifted_freevars)
+        flat_args = [
+            a for arg in grouped_flat_args for a in arg.unpack_var_sequence(tx)
+        ]
+        grad_fn_args = tuple(arg.as_proxy() for arg in flat_args) + tuple(
+            body_lifted_freevars
+        )
 
         # Call grad_fn with inputs.
         # grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
@@ -811,40 +836,11 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
-        def _from_args(idx):
-            return pytree.tree_map(
-                lambda a: a.node.meta["example_value"].contiguous(),
-                args[idx].as_proxy(),
-            )
-
-        def to_python_ints(argnums):
-            if not isinstance(argnums, (ConstantVariable, TupleVariable)):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"argnums is expected to be int or tuple of ints. Got {argnums}.",
-                )
-
-            if isinstance(argnums, ConstantVariable):
-                if not isinstance(argnums.value, (int, tuple)):
-                    raise UserError(
-                        UserErrorType.INVALID_INPUT,
-                        f"argnums is expected to be int or tuple of ints. Got {argnums}.",
-                    )
-                return argnums.value
-            else:
-                const_vars = argnums.unpack_var_sequence(tx)
-                if not all(
-                    isinstance(var, ConstantVariable) and isinstance(var.value, int)
-                    for var in const_vars
-                ):
-                    raise UserError(
-                        UserErrorType.INVALID_INPUT,
-                        f"argnums is expected to contain int only. Got {const_vars}.",
-                    )
-                return tuple(var.value for var in const_vars)
-
-        argnums_v = to_python_ints(argnums)
-        example_value = pytree.tree_map(_from_args, argnums_v)
+        example_value = tuple(
+            flat_args[i].as_proxy().node.meta["example_value"] for i in flat_argnums
+        )
+        if len(example_value) == 1:
+            example_value = example_value[0]
 
         if has_aux.value:
             # case : has_aux = True
@@ -859,29 +855,25 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         fx_proxy = wrap_fx_proxy(tx=tx, proxy=grad_output, example_value=example_value)
 
-        # Call contiguous on all the computed grads.
-        if not has_aux.value:
-            from torch._dynamo.external_utils import tensor_contiguous
+        def call_contiguous(variable):
+            return variable.call_method(tx, "contiguous", (), {})
 
-            return tree_map(tx, UserFunctionVariable(tensor_contiguous), fx_proxy)
-        else:  # case: has_aux.value = True
-            # fx_proxy -> Tuple(grads, aux)
-            grads = fx_proxy.call_method(
-                tx, "__getitem__", (ConstantVariable.create(0),), {}
+        # Call contiguous on all the computed grads.
+        if not has_aux.value and len(flat_argnums) == 1:
+            return call_contiguous(fx_proxy)
+        elif not has_aux.value and len(flat_argnums) > 1:
+            return TupleVariable(
+                [call_contiguous(v) for v in fx_proxy.unpack_var_sequence(tx)]
             )
-            aux = fx_proxy.call_method(
-                tx, "__getitem__", (ConstantVariable.create(1),), {}
+
+        grads, aux = fx_proxy.unpack_var_sequence(tx)
+        if len(flat_argnums) == 1:
+            return TupleVariable([call_contiguous(grads), aux])
+        else:
+            grads_variable = TupleVariable(
+                [call_contiguous(v) for v in grads.unpack_var_sequence(tx)]
             )
-            if isinstance(argnums_v, int):
-                return TupleVariable([grads.call_method(tx, "contiguous", (), {}), aux])
-            else:
-                items = []
-                for idx in range(len(argnums_v)):
-                    proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
-                    ).call_method(tx, "contiguous", (), {})
-                    items.append(proxy)
-                return TupleVariable([TupleVariable(items), aux])
+            return TupleVariable([grads_variable, aux])
 
 
 class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):

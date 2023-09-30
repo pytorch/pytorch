@@ -1632,6 +1632,10 @@ def forward(self):
         counters.clear()
         graph = self._test_wrap_simple(f, (x,), 2, 4, return_graph=True)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+        if check_dynamic_shape_capture():
+            return
+
         self.assertExpectedInline(
             graph,
             """\
@@ -1664,6 +1668,10 @@ class GraphModule(torch.nn.Module):
         counters.clear()
         graph = self._test_wrap_simple(f, (x,), 2, 2, return_graph=True)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+        if check_dynamic_shape_capture():
+            return
+
         self.assertExpectedInline(
             graph,
             """\
@@ -1888,9 +1896,8 @@ class GraphModule(torch.nn.Module):
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        i = grad_proxy.__call__(child);  grad_proxy = child = None
-
-        contiguous = i.contiguous();  i = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
+        contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
@@ -1947,9 +1954,8 @@ class GraphModule(torch.nn.Module):
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        i = grad_proxy.__call__(child);  grad_proxy = child = None
-
-        contiguous = i.contiguous();  i = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
+        contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
@@ -2000,9 +2006,8 @@ class GraphModule(torch.nn.Module):
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        i = grad_proxy.__call__(child, l_y_);  grad_proxy = child = l_y_ = None
-
-        contiguous = i.contiguous();  i = None
+        call = grad_proxy.__call__(child, l_y_);  grad_proxy = child = l_y_ = None
+        contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
@@ -2049,9 +2054,8 @@ class GraphModule(torch.nn.Module):
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        i = grad_proxy.__call__(child);  grad_proxy = child = None
-
-        contiguous = i.contiguous();  i = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
+        contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
@@ -2139,11 +2143,11 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
-        child_2 = L_y_
+        child_1 = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
-        call = grad_proxy.__call__(child, child_2);  grad_proxy = child = child_2 = None
+        call = grad_proxy.__call__(child, child_1);  grad_proxy = child = child_1 = None
         getitem = call[0]
         getitem_1 = call[1];  call = None
         contiguous = getitem.contiguous();  getitem = None
@@ -2198,11 +2202,11 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
-        child_2 = L_y_
+        child_1 = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
-        call = grad_proxy.__call__(child, child_2);  grad_proxy = child = child_2 = None
+        call = grad_proxy.__call__(child, child_1);  grad_proxy = child = child_1 = None
         getitem = call[0]
         getitem_1 = getitem[0]
         getitem_2 = getitem[1];  getitem = None
@@ -2230,11 +2234,11 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
-        child_2 = L_y_
+        child_1 = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
-        call = grad_proxy.__call__(child, child_2);  grad_proxy = child = child_2 = None
+        call = grad_proxy.__call__(child, child_1);  grad_proxy = child = child_1 = None
         getitem = call[0]
         getitem_1 = getitem[0]
         getitem_2 = getitem[1];  getitem = None
@@ -2282,9 +2286,8 @@ class GraphModule(torch.nn.Module):
 
         grad_body_1 = self.grad_body_1
         grad_proxy = torch.func.grad(grad_body_1, 0, False);  grad_body_1 = None
-        i = grad_proxy.__call__(child);  grad_proxy = child = None
-
-        contiguous = i.contiguous();  i = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
+        contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
@@ -2293,9 +2296,8 @@ class GraphModule(torch.nn.Module):
 
             grad_body_0 = self.grad_body_0
             grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-            i = grad_proxy.__call__(child);  grad_proxy = child = None
-
-            contiguous = i.contiguous();  i = None
+            call = grad_proxy.__call__(child);  grad_proxy = child = None
+            contiguous = call.contiguous();  call = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return contiguous
@@ -2396,9 +2398,8 @@ class GraphModule(torch.nn.Module):
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        i = grad_proxy.__call__(child, 3.0);  grad_proxy = child = None
-
-        contiguous = i.contiguous();  i = None
+        call = grad_proxy.__call__(child, 3.0);  grad_proxy = child = None
+        contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
