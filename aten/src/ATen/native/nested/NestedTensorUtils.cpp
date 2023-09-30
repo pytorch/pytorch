@@ -72,6 +72,12 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "chunk() cannot be applied to a 0-dim tensor.");
   }
+  TORCH_CHECK(
+      !redistribute,
+      "Chunk with redistribute=True for nested tensors is not supported yet.");
+  TORCH_CHECK(
+      !drop_remainder,
+      "Chunk with drop_remainder=True for nested tensors is not supported yet.");
   dim = maybe_wrap_dim(dim, ndim);
   TORCH_CHECK(self.dim() - 1 == dim,
            "Chunk for nested tensors is currently only supported for the last dimension.");
@@ -139,10 +145,6 @@ std::vector<Tensor> split_with_sizes_nested(
     TORCH_CHECK(total_size == self_size,
             "split_with_sizes expects split_sizes to sum exactly to ", self_size,
             " (input tensor's size at dimension ", dim, "), but got split_sizes=", split_sizes);
-  } else {
-    TORCH_CHECK(total_size == self_size,
-      "split_with_sizes expects split_sizes to sum less or equal to to ", self_size,
-      " (input tensor's size at dimension ", dim, "), but got split_sizes=", split_sizes);
   }
 
   int64_t n_tensors = self.size(0);

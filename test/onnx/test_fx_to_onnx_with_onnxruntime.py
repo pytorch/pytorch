@@ -274,6 +274,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "Got invalid dimensions for input: arg0 for the following indices index: 0 Got: 3 Expected: 1"
     )
     @skip_if_no_torchvision
+    @pytorch_test_common.xfail("https://github.com/pytorch/pytorch/issues/110131")
     def test_shufflenet_v2(self):
         # TODO(bowbao): see Note [training vs eval in dynamo_export]
         model = torchvision.models.shufflenet_v2_x0_5(weights=None).eval()
