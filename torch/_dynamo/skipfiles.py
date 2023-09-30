@@ -286,17 +286,11 @@ def _check_verbose_inner(filename, allow_torch=False):
 
 def check_verbose(filename, allow_torch=False, extra_check=False):
     result = _check_verbose_inner(filename, allow_torch)
-    if extra_check and result.skipped:
-        if is_torch_inline_allowed(filename):
-            return SkipResult(
-                False,
-                "inlined according skipfiles.is_torch_inline_allowed returning True",
-            )
-        else:
-            return SkipResult(
-                True,
-                "skipped according skipfiles.is_torch_inline_allowed returning False",
-            )
+    if extra_check and result.skipped and is_torch_inline_allowed(filename):
+        return SkipResult(
+            False,
+            "inlined according skipfiles.is_torch_inline_allowed returning True",
+        )
     else:
         return result
 

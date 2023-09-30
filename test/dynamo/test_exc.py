@@ -170,7 +170,7 @@ Graph break: 'call_function graph_break in skip_files _dynamo/decorators.py, ski
     return fn002(x)
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
-""",
+""", # noqa: B950
         )
 
     @torch._dynamo.config.patch(suppress_errors=False)
