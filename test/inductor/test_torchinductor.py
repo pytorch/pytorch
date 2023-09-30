@@ -7422,7 +7422,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
                 for line in code.split("\n"):
                     if tl_fn in line:
-                        stmt = line.split("=")[-1]
+                        stmt = line.split(tl_fn)[-1]
                         # indirect indexing involves a `tmp` variable
                         self.assertTrue(
                             "tmp" in stmt,
