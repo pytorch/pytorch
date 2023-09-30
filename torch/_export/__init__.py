@@ -3,6 +3,7 @@ import dataclasses
 import io
 import pathlib
 import re
+import sys
 import warnings
 
 import types
@@ -95,50 +96,108 @@ def export__RC__(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    from typing import get_origin, get_args
 
-    def assoc_zip(combined_args, dynamic_shapes):
+    def tree_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, (tuple, list)):
-            assert isinstance(dynamic_shapes, Sequence)
-            assert len(combined_args) == len(dynamic_shapes)
+            if not isinstance(dynamic_shapes, Sequence):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
+                    f"got {dynamic_shapes} instead",
+                )
+            if len(combined_args) != len(dynamic_shapes):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+                )
             for i, shape in enumerate(dynamic_shapes):
-                yield from assoc_zip(combined_args[i], shape)
+                yield from tree_zip(combined_args[i], shape)
         elif isinstance(combined_args, dict):
-            assert isinstance(dynamic_shapes, Mapping)
-            assert len(combined_args) == len(dynamic_shapes)
+            if not isinstance(dynamic_shapes, Mapping):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
+                    f"got {dynamic_shapes} instead",
+                )
+            if len(combined_args) != len(dynamic_shapes):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+                )
             for k, shape in dynamic_shapes.items():
-                yield from assoc_zip(combined_args[k], shape)
+                yield from tree_zip(combined_args[k], shape)
         elif dataclasses.is_dataclass(combined_args):
-            assert type(dynamic_shapes) == type(combined_args)
+            if not type(dynamic_shapes) == type(combined_args):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
+                    f"got {dynamic_shapes} instead",
+                )
             for f in dataclasses.fields(combined_args):
-                yield from assoc_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
+                yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
+        else:
+            if dynamic_shapes is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be None, "
+                    f"got {dynamic_shapes} instead",
+                )
 
     from collections import defaultdict
     symbols = defaultdict(list)
+
+    def to_constraint(dim, tensor, i):
+        constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
+        if dim.min != 2:
+            constraint = constraint >= dim.min
+        if dim.max != sys.maxsize - 1:
+            constraint = constraint <= dim.max
+        return constraint
 
     def update_symbols(tensor, shape):
         if isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
-                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
-                    assert dim is None
+                    if dim is not None:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                            "try None instead",
+                        )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
-                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
-                    assert dim is None
+                    if dim is not None:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                            "try None instead",
+                        )
         else:
-            assert shape is None
+            if shape is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Unexpected dynamic_shape {shape} of Tensor, "
+                    "try None instead",
+                )
 
-    import inspect
-    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
-    combined_args = signature.bind(*args, **kwargs).arguments
+    if isinstance(f, ExportedProgram):
+        combined_args = {
+            k: args[i] if i < len(args) else kwargs[k]
+            for i, k in enumerate(dynamic_shapes)
+        }
+    else:
+        import inspect
+        signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+        combined_args = signature.bind(*args, **kwargs).arguments
 
-    for tensor, shape in assoc_zip(combined_args, dynamic_shapes):
+    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
     constraints = []
@@ -150,7 +209,7 @@ def export__RC__(
         else:
             constraints.append(primary)
 
-    return export(f, args, kwargs, constraints=constraints)
+    return _export(f, args, kwargs, constraints=constraints)
 
 
 def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
@@ -371,7 +430,34 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                     for key, (path, ty) in nn_module_stack.items()
                 }
 
+
 def export(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+    *,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+) -> ExportedProgram:
+
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints,
+        preserve_module_call_signature=preserve_module_call_signature,
+    )
+
+
+def _export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
@@ -644,10 +730,11 @@ def export(
         (args, kwargs),
     )
 
-    if len(range_constraints) > 0 or len(equality_constraints) > 0:
-        exported_program = exported_program._transform(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-        )
+    if torch._dynamo.config.add_runtime_assertions_for_inline_constraints:
+        if len(range_constraints) > 0 or len(equality_constraints) > 0:
+            exported_program = exported_program._transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+            )
     exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
