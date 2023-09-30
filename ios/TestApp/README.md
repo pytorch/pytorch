@@ -48,7 +48,10 @@ cd ios/TestApp/benchmark; python coreml_backend.py
 The test app and its test suite could also be run on actual devices via
 AWS Device Farm.
 
-1. Checkout PyTorch repo including all submodules
+1. The following steps could only be done on MacOS with Xcode installed.
+   I'm using Xcode 15.0 on MacOS M1 arm64
+
+2. Checkout PyTorch repo including all submodules
 
 2. Build PyTorch for iOS devices, not for simulator
 ```

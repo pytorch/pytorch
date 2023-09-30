@@ -144,24 +144,27 @@ def main() -> None:
     print(f"Run {unique_prefix} is scheduled as {run_arn}:")
 
     state = "UNKNOWN"
+    result = ""
     try:
         while True:
             r = client.get_run(arn=run_arn)
             state = r["run"]["status"]
 
-            if state == "ERRORED":
-                print("Run {unique_prefix} failed, exiting...")
-                sys.exit(1)
             if state == "COMPLETED":
+                result = r["run"]["result"]
                 break
 
             waiting_time = datetime.datetime.now() - start_time
             print(
                 f"Run {unique_prefix} in state {state} after {datetime.datetime.now() - start_time}"
             )
-            time.sleep(10)
+            time.sleep(30)
     except Exception as error:
         warnings.warn(f"Failed to run {unique_prefix}: {error}")
+        sys.exit(1)
+
+    if not result or result == "FAILED":
+        print(f"Run {unique_prefix} failed, exiting...")
         sys.exit(1)
 
 
