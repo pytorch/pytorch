@@ -502,19 +502,6 @@ class Vectorized<ComplexDbl> {
     return (ne.real() | ne.imag()) & vd_one;
   }
 
-  Vectorized<ComplexDbl> lt(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> le(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> gt(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> ge(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   DEFINE_MEMBER_OP(operator==, ComplexDbl, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, ComplexDbl, vec_cmpne)
 

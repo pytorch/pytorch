@@ -377,18 +377,6 @@ public:
 
   Vectorized<c10::complex<double>> eq(const Vectorized<c10::complex<double>>& other) const;
   Vectorized<c10::complex<double>> ne(const Vectorized<c10::complex<double>>& other) const;
-  Vectorized<c10::complex<double>> lt(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> le(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> gt(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> ge(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
 };
 
 template <> Vectorized<c10::complex<double>> inline operator+(const Vectorized<c10::complex<double>> &a,

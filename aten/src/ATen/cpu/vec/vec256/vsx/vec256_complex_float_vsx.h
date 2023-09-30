@@ -573,22 +573,6 @@ class Vectorized<ComplexFlt> {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
-  Vectorized<ComplexFlt> lt(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> le(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> gt(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> ge(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   DEFINE_MEMBER_OP(operator==, ComplexFlt, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, ComplexFlt, vec_cmpne)
 
