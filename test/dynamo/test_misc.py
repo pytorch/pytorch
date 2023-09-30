@@ -7683,7 +7683,6 @@ ShapeEnv not equal: field values don't match:
         input2 = torch.randn(1)
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
-
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
             return x**2
