@@ -2325,6 +2325,10 @@ class MutationLayout(Layout):
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
+        # NOTE: We must realize users of `dst` before we realize `src`, since
+        # realization order determines scheduling order. Otherwise, src's
+        # mutation would be scheduled before the existing users of dst!
+        V.graph.mark_buffer_mutated(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -3728,26 +3732,47 @@ class FallbackKernel(ExternKernelAlloc):
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
-        self.outputs = []
+        self.outputs: Sequence[Any] = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
 
-        op_overload_packet = (
-            kernel._overloadpacket
-            if isinstance(kernel, torch._ops.OpOverload)
-            else kernel
-        )
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
+        assert isinstance(
+            kernel,
+            (
+                torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
+                torch._ops.HigherOrderOperator,
+            ),
+        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if (
-            getattr(torch.ops.aten, op_overload_packet.__name__, None)
-            is op_overload_packet
-        ):
-            self.kernel = (
-                f"at::{op_overload_packet.__name__}"
-                if V.graph.cpp_wrapper
-                else f"aten.{kernel.__name__}"
+        if kernel.__module__ == "torch._ops.aten":
+            op_base_name = (
+                kernel.__name__.split(".")[0]
+                if isinstance(kernel, torch._ops.OpOverload)
+                else kernel.__name__
             )
+            if V.graph.cpp_wrapper:
+                if (
+                    isinstance(kernel, torch._ops.OpOverload)
+                    and kernel._overloadname != "default"
+                ):
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    #
+                    # In theory, we should be able to do the following codegen for all aten fallback ops, but more
+                    # plumbing needs to be done in order to make that happen.
+                    # TODO: follow up on this
+                    self.kernel = f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    schema = kernel._schema
+                else:
+                    self.kernel = f"at::{op_base_name}"
+            else:
+                self.kernel = f"aten.{op_base_name}"
+
             if schema is not None:
                 self.args_default_value = [
                     {"type": x.real_type, "value": x.default_value}
@@ -3891,12 +3916,23 @@ class FallbackKernel(ExternKernelAlloc):
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
-        if isinstance(self.outputs, (list, tuple)):
+        if isinstance(self.outputs, tuple):
+            # For tuple returns, e.g "-> (Tensor, Tensor)"
             output_arguments = [
                 export_schema.Argument.create(
                     as_tensor=export_schema.TensorArgument(name=output.get_name())
                 )
                 for output in self.outputs
+            ]
+        elif isinstance(self.outputs, list):
+            # For list of tensor, e.g. "-> List[Tensor]"
+            output_arguments = [
+                export_schema.Argument.create(
+                    as_tensors=[
+                        export_schema.TensorArgument(name=output.get_name())
+                        for output in self.outputs
+                    ]
+                )
             ]
         else:
             output_arguments = [
@@ -3991,8 +4027,12 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        packed.outputs = generate_output(example_output, [])
-        return packed.outputs
+        outputs = generate_output(example_output, [])
+        if isinstance(outputs, (list, tuple)):
+            packed.outputs = outputs
+        else:
+            packed.outputs = [outputs]
+        return outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
