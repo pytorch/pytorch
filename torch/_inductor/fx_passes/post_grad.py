@@ -518,10 +518,14 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     return False
 
 
+@register_noop_decomp(aten.repeat)
+def repeat_noop(self, repeats):
+    return all(r == 1 for r in repeats)
+
+
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
-    if all(p == 0 for p in padding):
-        return True
+    return all(p == 0 for p in padding)
 
 
 @register_noop_decomp(torch.ops.prims.convert_element_type)
