@@ -1,3 +1,4 @@
+import copy
 import re
 from typing import Callable, Dict, Optional, Set, Union
 
@@ -196,6 +197,10 @@ def split_const_subgraphs(
         return 0 if node in const_nodes else 1
 
     split = split_module(mod_traced, module, mod_partition)
+    # Note: Split doesn't respect custom codegen. However split is used by const_fold
+    # for the outer wrapper for running the graph, so we need to copy over the original
+    # graph's codegen into split to ensure the graph module pre/post-processes I/O.
+    split.graph.set_codegen(copy.deepcopy(mod_traced.graph._codegen))
 
     const_gm, non_const_gm = split.submod_0, split.submod_1
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"

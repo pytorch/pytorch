@@ -5,6 +5,7 @@ import operator
 import torch
 import torch.fx
 from torch.fx.experimental import const_fold
+from torch.fx.graph import _PyTreeCodeGen
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.testing._internal.common_utils import TestCase
 
@@ -705,4 +706,31 @@ class TestConstFold(TestCase):
         # Now run both folded and non-folded to check results equal.
         base_result = mod(in_x, in_y)
         fold_result = mod_folded(in_x, in_y)
+        self.assertTrue(torch.equal(fold_result, base_result))
+
+    def test_fold_with_codegen(self):
+        r"""
+        Folding should still respect custom codegen.
+        """
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr_1 = torch.nn.Parameter(torch.tensor([[-0.9]]))
+                self.attr_2 = torch.nn.Parameter(torch.tensor([[17.1]]))
+
+            def forward(self, x):
+                a = self.attr_1 + self.attr_2
+                return x["input"] * a
+
+        mod = ConstFoldTestModule()
+        gm = torch.fx.symbolic_trace(mod, {"x": {"input": torch.fx.PH}})
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(gm)
+        self._verify_const_fold_mod(mod_folded)
+        self.assertTrue(isinstance(mod_folded.graph._codegen, _PyTreeCodeGen))
+
+        # Now run both folded and non-folded to check results equal.
+        in_x = {"input": torch.tensor([[-0.45]])}
+        base_result = mod(in_x)
+        fold_result = mod_folded(in_x)
         self.assertTrue(torch.equal(fold_result, base_result))
