@@ -605,6 +605,15 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 class FunctoolsPartialVariable(VariableTracker):
     def __init__(self, func, args, keywords, original=None, **kwargs):
+        # Note: DO NOT update the guards directly of the parent class. Make sure you make
+        # a copy before initializing it to make sure wonky things don't happen.
+        additional_guards = {}
+        additional_guards.update(VariableTracker.propagate(func)["guards"])
+        for arg in args:
+            additional_guards.update(VariableTracker.propagate(arg)["guards"])
+        for val in keywords.values():
+            additional_guards.update(VariableTracker.propagate(val)["guards"])
+        kwargs["guards"] = kwargs.get("guards".set()).union(additional_guards)
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
@@ -612,12 +621,6 @@ class FunctoolsPartialVariable(VariableTracker):
         assert isinstance(keywords, dict)
         self.keywords = keywords
         self.original = original
-
-        self.guards.update(VariableTracker.propagate(func)["guards"])
-        for arg in args:
-            self.guards.update(VariableTracker.propagate(arg)["guards"])
-        for val in keywords.values():
-            self.guards.update(VariableTracker.propagate(val)["guards"])
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
