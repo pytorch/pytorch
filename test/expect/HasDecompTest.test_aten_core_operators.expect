@@ -49,6 +49,8 @@ aten::amin.out
 aten::any
 aten::any.all_out
 aten::any.dim
+aten::any.dims
+aten::any.dims_out
 aten::any.out
 aten::arange.out
 aten::arange.start_out
