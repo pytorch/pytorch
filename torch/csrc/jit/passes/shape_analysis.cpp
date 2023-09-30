@@ -1310,6 +1310,9 @@ class ShapePropagator : public PropertyPropBase {
     //   - Has a bool keepdim argument
     static const register_formula_for dim_reduce_ops{
         {
+            "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
+            "aten::any(Tensor self, int dim, bool keepdim) -> Tensor",
+
             // Ops returning indices as second output
             "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
             "aten::max(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
@@ -1329,23 +1332,6 @@ class ShapePropagator : public PropertyPropBase {
                 output_types.back()->withScalarType(at::kLong));
           }
           return output_types;
-        }};
-
-    static const register_formula_for multidim_reduce_ops{
-        {
-            "aten::all(Tensor self, int[]? dim, bool keepdim) -> Tensor",
-            "aten::any(Tensor self, int[]? dim, bool keepdim) -> Tensor",
-            "aten::amax(Tensor self, int[] dim, bool keepdim) -> Tensor",
-            "aten::amin(Tensor self, int[] dim, bool keepdim) -> Tensor",
-        },
-        [](Node* node) -> type_vec_t {
-          auto type = node->input(0)->type()->cast<TensorType>();
-          auto dim = node->get<c10::List<int64_t>>(attr::dim);
-          if (!dim.has_value()) {
-            return {type->withDim(0)};
-          }
-          return multidim_reduce_with_keepdim(
-              node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/false);
         }};
 
     // Requirements:
