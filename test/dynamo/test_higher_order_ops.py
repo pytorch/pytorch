@@ -154,28 +154,28 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # - there are no graph breaks
         # - eager vs torch.compile has the same result
         # - after dynamo capture, the wrap has the expected number of args
-        first_iter_graph = None
-        for args in args_generator:
-            backend = EagerAndRecordGraphs()
-            cnt = CompileCounterWithBackend(backend)
-
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        # always return the first version graph
+        graph = None
+        for i, args in enumerate(args_generator):
             expected = func(*args)
             result = torch.compile(func, fullgraph=True, backend=cnt)(*args)
-
+            # check result correctness for every iteration
             self.assertEqual(result, expected)
 
-            self.assertEqual(cnt.frame_count, 1)
-            self.assertEqual(cnt.op_count, expected_opcount)
-
-            self.assertEqual(len(backend.graphs), 1)
-            graph = backend.graphs[0]
-            if first_iter_graph is None:
-                first_iter_graph = graph
-            wrap_node = find_first_node(graph, wrap)
-            self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
-        # We always return/check first iter graph if return_graph = True
+            # check compilation metrics only for the first iteration,
+            # since automatic_dynamic_shapes would compile dynamic version for later iterations.
+            if i == 0:
+                self.assertEqual(cnt.frame_count, 1)
+                self.assertEqual(cnt.op_count, expected_opcount)
+                self.assertEqual(len(backend.graphs), 1)
+                graph = backend.graphs[0]
+                wrap_node = find_first_node(graph, wrap)
+                self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
+        # We always return/check first version graph if return_graph = True
         if return_graph:
-            return normalize_gm(first_iter_graph.print_readable(print_output=False))
+            return normalize_gm(graph.print_readable(print_output=False))
 
     def test_error_message_sane(self):
         foo = []
