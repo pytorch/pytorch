@@ -19,6 +19,8 @@ import torch.random
 from torch._dynamo import compiled_autograd
 
 from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo import compiled_autograd
+
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
@@ -758,10 +760,8 @@ class TensorVariable(VariableTracker):
                 ):
                     src = fn_var.func.source
 
-                if not src:
-                    unimplemented("No source for register_hook target fn")
-
-                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                if src:
+                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
                 if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):
