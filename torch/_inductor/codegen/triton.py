@@ -1360,7 +1360,9 @@ class TritonKernel(Kernel):
         strides = {}
         for range_tree in self.range_trees:
             s = sympy_symbol(range_tree.name)
-            strides[s] = index_in_tile_vars.subs({s: 1}) - index_in_tile_vars.subs({s: 0})
+            strides[s] = index_in_tile_vars.subs({s: 1}) - index_in_tile_vars.subs(
+                {s: 0}
+            )
         return strides
 
     def load(self, name: str, index: sympy.Expr):
@@ -1371,12 +1373,17 @@ class TritonKernel(Kernel):
 
         # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
         #  1) We are doing broadcasting
-        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
-        #   2.1) We are in a reduction loop
-        #   2.2) Its not its last use
-        #   2.3) This load will not be lifted to the body
+        #  2) It is a non-coalesced load. The intuition is that if it's
+        #  non-coalesced, we will likely load each element multiple times in
+        #  practice.
+        #  3) It will be used later and it won't be CSE'd. Equiv., if all the following hold
+        #   3.1) We are in a reduction loop
+        #   3.2) Its not its last use
+        #   3.3) This load will not be lifted to the body
         #
-        is_coalesced = any([i == 1 for i in self.get_strides_of_load(original_index).values()])
+        is_coalesced = any(
+            i == 1 for i in self.get_strides_of_load(original_index).values()
+        )
         if self.is_broadcasted(original_index):
             ep = ", eviction_policy='evict_last'"
         elif not is_coalesced:

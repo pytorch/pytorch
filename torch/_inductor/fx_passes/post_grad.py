@@ -548,6 +548,7 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         return True
     return False
 
+
 @register_noop_decomp(aten.repeat)
 def repeat_noop(self, repeats):
     return all(r == 1 for r in repeats)
