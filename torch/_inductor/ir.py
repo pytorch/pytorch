@@ -3916,29 +3916,37 @@ class FallbackKernel(ExternKernelAlloc):
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
-        if isinstance(self.outputs, tuple):
-            # For tuple returns, e.g "-> (Tensor, Tensor)"
-            output_arguments = [
-                export_schema.Argument.create(
-                    as_tensor=export_schema.TensorArgument(name=output.get_name())
+        def handle_single_output(return_type, output):
+            if isinstance(output, list):
+                # For single TensorList
+                assert isinstance(return_type, torch.ListType) and isinstance(
+                    return_type.getElementType(), torch.TensorType
                 )
-                for output in self.outputs
-            ]
-        elif isinstance(self.outputs, list):
-            # For list of tensor, e.g. "-> List[Tensor]"
-            output_arguments = [
-                export_schema.Argument.create(
+                return export_schema.Argument.create(
                     as_tensors=[
-                        export_schema.TensorArgument(name=output.get_name())
-                        for output in self.outputs
+                        export_schema.TensorArgument(name=out.get_name())
+                        for out in output
                     ]
                 )
-            ]
-        else:
-            output_arguments = [
-                export_schema.Argument.create(
-                    as_tensor=export_schema.TensorArgument(name=self.outputs.get_name())
+            else:
+                # for single Tensor
+                assert isinstance(return_type, torch.TensorType)
+                return export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=output.get_name())
                 )
+
+        target = self.op_overload
+        returns = target._schema.returns
+        if len(returns) == 1:
+            return_type = returns[0].real_type
+            output_arguments = [handle_single_output(return_type, self.outputs)]
+        else:
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            assert isinstance(self.outputs, tuple)
+            assert len(returns) == len(self.outputs)
+            output_arguments = [
+                handle_single_output(return_schema.real_type, output)
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
