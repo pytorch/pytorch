@@ -21112,21 +21112,11 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        supports_multiple_dims=False,
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
                 dtypes=[torch.uint8]),
-            # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -21156,16 +21146,11 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
-        supports_multiple_dims=True,
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
                 dtypes=[torch.uint8]),
-            # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
