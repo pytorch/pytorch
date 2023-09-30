@@ -1356,12 +1356,12 @@ class TritonKernel(Kernel):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
-        index_in_tile_vars = index.subs(index_to_tile_indexes)
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
         strides = {}
         for range_tree in self.range_trees:
             s = sympy_symbol(range_tree.name)
-            strides[s] = index_in_tile_vars.subs({s: 1}) - index_in_tile_vars.subs(
-                {s: 0}
+            strides[s] = sympy_subs(index_in_tile_vars, {s: 1}) - sympy_subs(
+                index_in_tile_vars, {s: 0}
             )
         return strides
 
