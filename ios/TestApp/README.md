@@ -53,7 +53,7 @@ AWS Device Farm.
 
 2. Checkout PyTorch repo including all submodules
 
-2. Build PyTorch for iOS devices, not for simulator
+3. Build PyTorch for iOS devices, not for simulator
 ```
 export BUILD_LITE_INTERPRETER=1
 export USE_PYTORCH_METAL=1
@@ -64,7 +64,7 @@ export IOS_ARCH=arm64
 ./scripts/build_ios.sh
 ```
 
-3. Build the test app locally
+4. Build the test app locally
 ```
 # Use the pytorch nightly build to generate models
 pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
@@ -87,7 +87,7 @@ popd
 ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "OS"
 ```
 
-4. Prepare the artifacts
+5. Prepare the artifacts
 https://docs.aws.amazon.com/devicefarm/latest/developerguide/test-types-ios-xctest.html
 
 ```
@@ -109,7 +109,7 @@ cp TestApp.app/PlugIns/TestAppTests.xctest.zip .
 popd
 ```
 
-5. Upload the artifacts to AWS Device Farm and run the tests
+6. Upload the artifacts to AWS Device Farm and run the tests
 ```
 export PYTORCH_ARN="arn:aws:devicefarm:us-west-2:308535385114:project:b531574a-fb82-40ae-b687-8f0b81341ae0"
 
@@ -123,7 +123,7 @@ AWS_DEFAULT_REGION=us-west-2 python run_on_aws_devicefarm.py \
 popd
 ```
 
-6. The script will continue polling for the outcome. A visual output of
+7. The script will continue polling for the outcome. A visual output of
    the test results could be view on AWS Device Farm console for [PyTorch project](https://us-west-2.console.aws.amazon.com/devicefarm/home#/mobile/projects/b531574a-fb82-40ae-b687-8f0b81341ae0/runs)
 
 ## Debug Test Failures
