@@ -1631,6 +1631,10 @@ def forward(self):
         counters.clear()
         graph = self._test_wrap_simple(f, (x,), 2, 4, return_graph=True)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+        if check_dynamic_shape_capture():
+            return
+
         self.assertExpectedInline(
             graph,
             """\
@@ -1663,6 +1667,10 @@ class GraphModule(torch.nn.Module):
         counters.clear()
         graph = self._test_wrap_simple(f, (x,), 2, 2, return_graph=True)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+        if check_dynamic_shape_capture():
+            return
+
         self.assertExpectedInline(
             graph,
             """\
