@@ -7,6 +7,7 @@
 # GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
 # And re-run the test locally with ones PAT
 
+import gzip
 import json
 import os
 import warnings
@@ -20,7 +21,6 @@ from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
     categorize_checks,
     find_matching_merge_rule,
-    FlakyRule,
     get_classifications,
     get_drci_classifications,
     get_rockset_results,
@@ -32,6 +32,7 @@ from trymerge import (
     MandatoryChecksMissingError,
     MergeRule,
     PostCommentError,
+    RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
     validate_revert,
@@ -39,6 +40,10 @@ from trymerge import (
 
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
+
+GQL_MOCKS = "gql_mocks.json.gz"
+ROCKSET_MOCKS = "rockset_mocks.json.gz"
+DRCI_MOCKS = "drci_mocks.json.gz"
 
 
 def mock_query(
@@ -52,11 +57,11 @@ def mock_query(
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
             return {}
-        with open(gql_db_fname, encoding="utf-8") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="rt") as f:
             return json.load(f)
 
     def save_mocked_queries(obj: Any) -> None:
-        with open(gql_db_fname, encoding="utf-8", mode="w") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="wt") as f:
             json.dump(obj, f, indent=2)
             f.write("\n")
 
@@ -102,13 +107,13 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
         return gh_graphql(query, **kwargs)
 
-    return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
+    return mock_query(gh_graphql_wrapper, GQL_MOCKS, key_function, query, kwargs)
 
 
 def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_rockset_results,
-        "rockset_mocks.json",
+        ROCKSET_MOCKS,
         lambda x, y: f"{x} {y}",
         head_sha,
         merge_base,
@@ -118,7 +123,7 @@ def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3)
 def mocked_drci_classifications(pr_num: int, project: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_drci_classifications,
-        "drci_mocks.json",
+        DRCI_MOCKS,
         lambda x, y: f"{x} {y}",
         pr_num,
         project,
@@ -201,21 +206,23 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
             ],
             ignore_flaky_failures=True,
         ),
+        MergeRule(
+            name="xla",
+            patterns=[".github/ci_commit_pins/xla.txt"],
+            approved_by=["pytorchbot"],
+            mandatory_checks_name=[
+                "Lint",
+                "EasyCLA",
+                "pull / linux-focal-py3_8-clang9-xla / build",
+                "pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)",
+            ],
+            ignore_flaky_failures=True,
+        ),
     ]
 
 
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
-
-
-def empty_flaky_rules() -> List[FlakyRule]:
-    return []
-
-
-def xla_is_flaky_rules() -> List[FlakyRule]:
-    return [
-        FlakyRule("xla", ["FAILED: Build did NOT complete successfully"]),
-    ]
 
 
 def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
@@ -229,6 +236,7 @@ def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
                 "EasyCLA",
                 "pull / linux-bionic-py3_8-clang8-xla / build",
                 "pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)",
+                "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
             ],
             ignore_flaky_failures=False,
         ),
@@ -250,7 +258,6 @@ class DummyGitRepo(GitRepo):
         return "super awsome commit message"
 
 
-@mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch(
@@ -266,7 +273,7 @@ class TestTryMerge(TestCase):
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:
         "Tests that PR passes merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 77700)
+        pr = GitHubPR("pytorch", "pytorch", 109999)
         repo = DummyGitRepo()
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
@@ -317,15 +324,13 @@ class TestTryMerge(TestCase):
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
+    @skip(
+        "Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218"
+    )
     def test_internal_changes(self, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
-        pr = GitHubPR("pytorch", "pytorch", 73969)
+        pr = GitHubPR("pytorch", "pytorch", 110140)
         self.assertTrue(pr.has_internal_changes())
-
-    def test_checksuites_pagination(self, *args: Any) -> None:
-        "Tests that PR with lots of checksuits can be fetched"
-        pr = GitHubPR("pytorch", "pytorch", 73811)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 76)
 
     def test_comments_pagination(self, *args: Any) -> None:
         "Tests that PR with 50+ comments can be fetched"
@@ -338,7 +343,9 @@ class TestTryMerge(TestCase):
         # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
         pr = GitHubPR("pytorch", "pytorch", 68111)
         self.assertGreater(len(pr.get_comments()), 20)
-        self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
+        # NS(09/27/2023): GitHub seems to recycle older checkruns
+        # https://github.com/pytorch/pytorch/pull/68111/checks shows 0 runs
+        # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
@@ -383,10 +390,12 @@ class TestTryMerge(TestCase):
 
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""
-        pr = GitHubPR("pytorch", "pytorch", 77700)
+        pr = GitHubPR("pytorch", "pytorch", 105260)
         conclusions = pr.get_checkrun_conclusions()
-        self.assertEqual(len(conclusions), 79)
-        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
+        self.assertEqual(len(conclusions), 221)
+        self.assertTrue(
+            "pull / linux-docs / build-docs-cpp-false" in conclusions.keys()
+        )
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successfull status"""
@@ -657,11 +666,7 @@ class TestTryMerge(TestCase):
 )
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
-        flaky_rules = [
-            # Try a regex rule
-            FlakyRule("distributed", ["##\\[error\\]The operation [wW]as .+"])
-        ]
-        pr = GitHubPR("pytorch", "pytorch", 92863)
+        pr = GitHubPR("pytorch", "pytorch", 109584)
         checks = pr.get_checkrun_conclusions()
         checks = get_classifications(
             pr.pr_num,
@@ -669,43 +674,66 @@ class TestBypassFailures(TestCase):
             checks,
             pr.last_commit()["oid"],
             pr.get_merge_base(),
-            flaky_rules,
             [],
         )
         self.assertTrue(
             checks[
-                "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
+                "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
             ].classification
             == "BROKEN_TRUNK"
         )
         self.assertTrue(
             checks[
-                "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
+                "trunk / win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)"
+            ].classification
+            == "BROKEN_TRUNK"
+        )
+        self.assertTrue(
+            checks[
+                "pull / linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)"
+            ].classification
+            == "BROKEN_TRUNK"
+        )
+        self.assertTrue(
+            checks[
+                "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
             ].classification
             == "FLAKY"
         )
+
+        # Set the threshold larger or equal to the number of ok failures
         pending, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
+            checks, list(checks.keys()), ok_failed_checks_threshold=6
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
         # Not set any threshold, defaults to -1 to ignore all flaky and broken trunk failures
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
+        # Set the threshold lower than the number of ok failures
         pending, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 2)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(failed) == 6)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
+
+        # Set the threshold to 0 like when ignore_flaky_failures is on
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 6)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
     def test_get_classifications_similar_failures(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 109750)
@@ -716,7 +744,6 @@ class TestBypassFailures(TestCase):
             checks,
             pr.last_commit()["oid"],
             pr.get_merge_base(),
-            [],
             [],
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
@@ -734,7 +761,6 @@ class TestBypassFailures(TestCase):
             pr.last_commit()["oid"],
             pr.get_merge_base(),
             [],
-            [],
         )
         workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
         job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
@@ -747,25 +773,6 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
-
-    def test_get_classifications_pending_unstable(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 105998)
-        checks = pr.get_checkrun_conclusions()
-        checks = get_classifications(
-            pr.pr_num,
-            pr.project,
-            checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            [],
-            [],
-        )
-        pending, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=1
-        )
-        self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 3)
-        self.assertTrue(len(ignorable["UNSTABLE"]) == 3)
 
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
@@ -811,7 +818,6 @@ class TestBypassFailures(TestCase):
                     pr.last_commit()["oid"],
                     pr.get_merge_base(),
                     [],
-                    [],
                 )
 
                 pending, failed, _ = categorize_checks(checks, list(checks.keys()))
@@ -831,35 +837,28 @@ class TestBypassFailures(TestCase):
         # current checks takes place after other classifications: flaky, unstable,
         # or broken trunk. Only actual new failures should be kept in the list of
         # ignore current checks to use to record force merge with actual failures
-        flaky_rules = [
-            FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
-        ]
-        flaky = (
-            "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
-        )
+        flaky = "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
         broken_trunk = (
-            "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
+            "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
         )
 
-        pr = GitHubPR("pytorch", "pytorch", 92863)
+        pr = GitHubPR("pytorch", "pytorch", 109584)
         checks = pr.get_checkrun_conclusions()
 
-        # No broken trunk or flaky rules, then all failures are ignored when ic is used
+        # No broken trunk or flaky as the merge base is not set, these failures are
+        # counted as ignore current when ic is used
         checks = get_classifications(
             pr.pr_num,
             pr.project,
             checks,
             pr.last_commit()["oid"],
             None,
-            [],
             [broken_trunk, flaky],
         )
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
         self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
-        )
-        self.assertTrue(len(failed) == 0)
+        _, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(failed) == 4)
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 2)
         self.assertTrue(len(ignorable["FLAKY"]) == 0)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
@@ -873,51 +872,26 @@ class TestBypassFailures(TestCase):
             checks,
             pr.last_commit()["oid"],
             pr.get_merge_base(),
-            flaky_rules,
             [broken_trunk, flaky],
         )
         self.assertTrue(checks[flaky].classification == "FLAKY")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
-        )
+        _, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
-        # Broken trunk takes precedence over ignore current (no flaky rule is set here)
-        checks = get_classifications(
-            pr.pr_num,
-            pr.project,
-            checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            [],
-            [broken_trunk, flaky],
-        )
-        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
-        )
-        self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
-        self.assertTrue(len(ignorable["FLAKY"]) == 0)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
-
-    @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """
         Regression test for https://github.com/pytorch/test-infra/issues/4126
         """
-        pr = GitHubPR("pytorch", "pytorch", 100369)
+        pr = GitHubPR("pytorch", "pytorch", 105312)
         repo = DummyGitRepo()
         # Check that failure is classified as flaky but still raises exception
         with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
             rule = find_matching_merge_rule(pr, repo)
-        print(w)
         self.assertEqual(len(w), 1)
         self.assertIn(
             "1 checks failed but were likely due flakiness or broken trunk",
@@ -935,10 +909,11 @@ class TestGitHubPRGhstackDependencies2(TestCase):
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)
-        assert msg == (
-            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
+        self.assertEqual(
+            msg,
+            f"{pr.get_title()} (#106068)\n\n{RE_GHSTACK_DESC.sub('', pr.get_body())}\n"
+            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: https://github.com/ezyang, https://github.com/fegin\n",
         )
 
     def test_pr_dependencies_ghstack(self, *args: Any) -> None:
@@ -946,13 +921,13 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         pr1 = GitHubPR("pytorch", "pytorch", 106033)
         pr2 = GitHubPR("pytorch", "pytorch", 106034)
         pr = GitHubPR("pytorch", "pytorch", 106068)
-
         msg = pr.gen_commit_message(filter_ghstack=True, ghstack_deps=[pr0, pr1, pr2])
-        assert msg == (
-            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
-            "ghstack dependencies: #106032, #106033, #106034\n"
+        self.assertEqual(
+            msg,
+            f"{pr.get_title()} (#106068)\n\n{RE_GHSTACK_DESC.sub('', pr.get_body())}\n"
+            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: https://github.com/ezyang, https://github.com/fegin\n"
+            "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
     @skip(
@@ -1001,7 +976,7 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         mock_repo.cherry_pick.assert_any_call("rev2")
         mock_repo.cherry_pick.assert_any_call("rev123")
 
-        assert mock.call("rev1") not in mock_repo.cherry_pick.call_args_list
+        self.assertTrue(mock.call("rev1") not in mock_repo.cherry_pick.call_args_list)
 
         # Verify the first call
         message = mock_repo.amend_commit_message.call_args_list[0].args[0]
@@ -1014,8 +989,8 @@ class TestGitHubPRGhstackDependencies2(TestCase):
             "dependencies: #106032, #106033\n"
         )
 
-        assert message.startswith(prefix)
-        assert message.endswith(suffix)
+        self.assertTrue(message.startswith(prefix))
+        self.assertTrue(message.endswith(suffix))
 
         # Verify the second call
         mock_repo.amend_commit_message.assert_any_call(

@@ -175,6 +175,10 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }
 
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_dynamo/_trace_wrapped_higher_order_op.py",
+}
+
 SKIP_DIRS_RE = None
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
