@@ -257,7 +257,7 @@ class SkipResult:
     reason: Optional[str]
 
 
-# TODO(ybliang): This is a temp solution, we should consolidate this with check_verbose.
+# TODO(ybliang): This is a temp function, we should consolidate this with check_verbose.
 def _check_verbose_inner(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
@@ -286,11 +286,17 @@ def _check_verbose_inner(filename, allow_torch=False):
 
 def check_verbose(filename, allow_torch=False, extra_check=False):
     result = _check_verbose_inner(filename, allow_torch)
-    if extra_check and result.skipped and not is_torch_inline_allowed(filename):
-        return SkipResult(
-            True,
-            "skipped according to skipfiles.is_torch_inline_allowed",
-        )
+    if extra_check and result.skipped:
+        if is_torch_inline_allowed(filename):
+            return SkipResult(
+                False,
+                "inlined according skipfiles.is_torch_inline_allowed returning True",
+            )
+        else:
+            return SkipResult(
+                True,
+                "skipped according skipfiles.is_torch_inline_allowed returning False",
+            )
     else:
         return result
 
