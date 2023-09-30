@@ -703,18 +703,18 @@ class TestBypassFailures(TestCase):
 
         # Set the threshold larger or equal to the number of ok failures
         pending, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=5
+            checks, list(checks.keys()), ok_failed_checks_threshold=6
         )
         self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 1)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
         # Not set any threshold, defaults to -1 to ignore all flaky and broken trunk failures
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 1)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
         # Set the threshold lower than the number of ok failures
@@ -723,7 +723,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 6)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
         # Set the threshold to 0 like when ignore_flaky_failures is on
@@ -732,7 +732,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 6)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
     def test_get_classifications_similar_failures(self, *args: Any) -> None:
@@ -877,9 +877,9 @@ class TestBypassFailures(TestCase):
         self.assertTrue(checks[flaky].classification == "FLAKY")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
         _, failed, ignorable = categorize_checks(checks, list(checks.keys()))
-        self.assertTrue(len(failed) == 1)
+        self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
