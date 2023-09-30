@@ -3500,6 +3500,7 @@ def minimum(g: jit_utils.GraphContext, input, other):
 
 
 @_onnx_symbolic("aten::amax")
+@_onnx_symbolic("aten::any")
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
@@ -3508,6 +3509,7 @@ def amax(g: jit_utils.GraphContext, self, dim, keepdim):
 
 
 @_onnx_symbolic("aten::amin")
+@_onnx_symbolic("aten::all")
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
@@ -5406,37 +5408,6 @@ def nonzero_numpy(g: jit_utils.GraphContext, input, _outputs=None):
 def isnan(g: jit_utils.GraphContext, input):
     output = g.op("IsNaN", input)
     return output
-
-
-@_onnx_symbolic("aten::any")
-@_beartype.beartype
-def _any(g: jit_utils.GraphContext, *args):
-    # aten::any(Tensor self)
-    if len(args) == 1:
-        input = args[0]
-        dim, keepdim = None, 0
-    # aten::any(Tensor self, int dim, bool keepdim)
-    else:
-        input, dim, keepdim = args
-        dim = [symbolic_helper._parse_arg(dim, "i")]
-        keepdim = symbolic_helper._parse_arg(keepdim, "i")
-    input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
-    input_sum = symbolic_helper._reducesum_helper(
-        g, input, axes_i=dim, keepdims_i=keepdim
-    )
-    return gt(g, input_sum, g.op("Constant", value_t=torch.tensor(0, dtype=torch.long)))
-
-
-@_onnx_symbolic("aten::all")
-@_beartype.beartype
-def _all(g: jit_utils.GraphContext, *args):
-    input = g.op("Not", args[0])
-    # aten::all(Tensor self)
-    if len(args) == 1:
-        return g.op("Not", _any(g, input))
-    # aten::all(Tensor self, int dim, bool keepdim)
-    else:
-        return g.op("Not", _any(g, input, args[1], args[2]))
 
 
 @_onnx_symbolic("aten::narrow")
