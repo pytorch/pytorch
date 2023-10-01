@@ -626,6 +626,39 @@ class AOTInductorTestsTemplate:
         ):
             self.check_model(Repro(), example_inputs)
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2, "The test requires multiple devices"
+    )
+    def test_non_default_cuda_device(self):
+        class Model(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        weight = torch.randn(10, 10)
+        inputs = (torch.randn(10, 10), torch.randn(10, 10))
+        result_cpu = Model(weight)(*inputs)
+
+        with torch.cuda.device(0), torch.no_grad(), config.patch(
+            "aot_inductor.abi_compatible", self.abi_compatible
+        ):
+            result_cuda_0 = AOTInductorModelRunner.run(
+                Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
+            )
+
+        with torch.cuda.device(1), torch.no_grad(), config.patch(
+            "aot_inductor.abi_compatible", self.abi_compatible
+        ):
+            result_cuda_1 = AOTInductorModelRunner.run(
+                Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
+            )
+
+        self.assertTrue(same(result_cpu, result_cuda_0.cpu()))
+        self.assertTrue(same(result_cpu, result_cuda_1.cpu()))
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
