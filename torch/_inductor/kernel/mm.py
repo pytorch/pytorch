@@ -64,7 +64,7 @@ mm_template = TritonTemplate(
         strides=(stride_am, stride_ak),
         offsets=(block_offset_m, 0),
         block_shape=(BLOCK_M, BLOCK_K),
-        order=(1, 0),
+        order=(1, 0) if stride_am >= stride_ak else (0, 1),
     )
     B_block_ptr = tl.make_block_ptr(
         base=B,
@@ -72,7 +72,7 @@ mm_template = TritonTemplate(
         strides=(stride_bk, stride_bn),
         offsets=(0, pid_n * BLOCK_N),
         block_shape=(BLOCK_K, BLOCK_N),
-        order=(1, 0)
+        order=(1, 0) if stride_bk >= stride_bn else (0, 1)
     )
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
