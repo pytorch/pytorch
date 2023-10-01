@@ -57,10 +57,8 @@ class Adamax(Optimizer):
             state_values[0]["step"]
         )
         if not step_is_tensor:
-            for group in self.param_groups:
-                for p in group:
-                    s = self.state[p]
-                    s["step"] = torch.tensor(float(s["step"]), device=p.device)
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         for p in group["params"]:
@@ -274,9 +272,20 @@ def _single_tensor_adamax(
         exp_avg.lerp_(grad, 1 - beta1)
         # Update the exponentially weighted infinity norm.
         if not differentiable:
-            exp_inf = torch.maximum(exp_inf, grad.abs_().add_(eps))
+            torch.maximum(
+                exp_inf.mul_(beta2),
+                grad.abs_().add_(eps),
+                out=exp_inf,
+            )
         else:
-            exp_inf.copy_(torch.maximum(exp_inf, grad.abs_().add_(eps)))
+            # exp_inf.copy_(torch.maximum(
+            #     exp_inf.mul_(beta2),
+            #     grad.abs().add_(eps)
+            # ))
+            norm_buf = torch.cat(
+                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
+            )
+            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
         bias_correction = 1 - beta1 ** _get_value(step_t)
         clr = lr / bias_correction
@@ -332,7 +341,11 @@ def _multi_tensor_adamax(
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
         for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-            exp_inf = torch.maximum(exp_inf, grad.abs_().add_(eps))
+            torch.max(
+                exp_inf,
+                grad.abs_().add_(eps),
+                out=exp_inf,
+            )
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         step_size = [(lr / bc) * -1 for bc in bias_corrections]
