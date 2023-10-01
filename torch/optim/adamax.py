@@ -58,7 +58,7 @@ class Adamax(Optimizer):
         )
         if not step_is_tensor:
             for group in self.param_groups:
-                for p in group.params:
+                for p in group:
                     s = self.state[p]
                     s["step"] = torch.tensor(float(s["step"]), device=p.device)
 
