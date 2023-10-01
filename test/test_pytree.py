@@ -318,11 +318,11 @@ class TestGenericPytree(TestCase):
             result = pytree_impl._broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
-
     @parametrize("pytree_impl", [py_pytree, cxx_pytree])
     def test_pytree_serialize_bad_input(self, pytree_impl):
         with self.assertRaises(TypeError):
             pytree_impl.treespec_dumps("random_blurb")
+
 
 class TestPythonPytree(TestCase):
     def test_treespec_equality(self):
@@ -648,7 +648,6 @@ class TestCxxPytree(TestCase):
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
-
 
 
 instantiate_parametrized_tests(TestGenericPytree)
