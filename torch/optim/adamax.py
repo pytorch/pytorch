@@ -270,14 +270,10 @@ def _single_tensor_adamax(
         # Update biased first moment estimate.
         exp_avg.lerp_(grad, 1 - beta1)
         # Update the exponentially weighted infinity norm.
-        norm_buf = torch.cat(
-            [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
-        )
-
         if not differentiable:
-            torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+            exp_inf = torch.maximum(exp_inf, grad.abs_().add_(eps))
         else:
-            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
+            exp_inf.copy_(torch.maximum(exp_inf, grad.abs_().add_(eps)))
 
         bias_correction = 1 - beta1 ** _get_value(step_t)
         clr = lr / bias_correction
@@ -333,7 +329,7 @@ def _multi_tensor_adamax(
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
         for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-            exp_inf = torch.maximum(exp_inf, grad.abs().add_(eps))
+            exp_inf = torch.maximum(exp_inf, grad.abs_().add_(eps))
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         step_size = [(lr / bc) * -1 for bc in bias_corrections]
