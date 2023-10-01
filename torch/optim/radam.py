@@ -321,7 +321,7 @@ def _single_tensor_radam(
             exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
         else:
             exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-        adaptive_lr = torch.where(rect > 1.0, math.sqrt(bias_correction2) / exp_avg_sq_sqrt, 1.0)
+        adaptive_lr = torch.where(torch.tensor(rho_t > 5), math.sqrt(bias_correction2) / exp_avg_sq_sqrt, 1.0)
         param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
 
 def _multi_tensor_radam(
@@ -389,7 +389,7 @@ def _multi_tensor_radam(
                 0.0
             ) for rho_t in rho_t_list
         ]
-        unrectified = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
+        unrectified = [torch.where(r > 0, 0.0, 1.0) for r in rect]
 
         bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         unrect_step_size = [(lr * _get_value(rect) / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)]
