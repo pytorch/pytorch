@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (
-    Optimizer, _use_grad_for_differentiable, 
+    Optimizer, _use_grad_for_differentiable,
     _get_value, _default_to_fused_or_foreach,
     _differentiable_doc, _maximize_doc, _foreach_doc
 )
@@ -278,10 +278,6 @@ def _single_tensor_adamax(
                 out=exp_inf,
             )
         else:
-            # exp_inf.copy_(torch.maximum(
-            #     exp_inf.mul_(beta2),
-            #     grad.abs().add_(eps)
-            # ))
             norm_buf = torch.cat(
                 [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
             )
