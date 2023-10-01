@@ -341,7 +341,7 @@ def _multi_tensor_adamax(
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
         for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-            torch.max(
+            torch.maximum(
                 exp_inf,
                 grad.abs_().add_(eps),
                 out=exp_inf,
