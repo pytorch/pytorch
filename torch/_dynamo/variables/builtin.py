@@ -1263,11 +1263,7 @@ class BuiltinVariable(VariableTracker):
         if py_type is not None:
             return ConstantVariable.create(py_type)
 
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            f"Can't call type() on generated custom object {obj}. "
-            "Please use __class__ instead",
-        )
+        return obj.__class__
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
