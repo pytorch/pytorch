@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import itertools
 import logging
@@ -26,13 +28,13 @@ class CUDATemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        input_nodes: List[IRNode],
+        input_nodes: List[Layout | Buffer],
         layout: Layout,
         input_reorder: Optional[List[int]] = None,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node = Buffer("buf_out", layout)
+        self.output_node: Layout | Buffer = Buffer("buf_out", layout)
         self.input_reorder = input_reorder
 
     def generate(self, **kwargs) -> CUDATemplateCaller:

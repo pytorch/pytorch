@@ -96,6 +96,9 @@ class StarDep(typing.NamedTuple):
 # Used for tracking mutation ordering
 # if A reads a buffer and B mutates it
 # B must be ordered after A
+#
+# It is weak because if it turns out A's read is never used, we can still
+# eliminate it
 class WeakDep(typing.NamedTuple):
     name: str
 
@@ -330,7 +333,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 
 def extract_read_writes(
-    fn: Callable[[sympy.Expr], Any],
+    fn: Callable[..., Any],
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",
