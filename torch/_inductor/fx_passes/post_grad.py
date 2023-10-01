@@ -93,6 +93,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(f"Print graph after recompile in post grad passes: {get_everpaste_url(str(gm.graph))}")
+
 
 @init_once_fakemode
 def lazy_init():
