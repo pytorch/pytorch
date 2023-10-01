@@ -74,6 +74,7 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
+    torch.promote_types,
     torch.iinfo,
     torch.is_autocast_cache_enabled,
     torch.is_autocast_cpu_enabled,
