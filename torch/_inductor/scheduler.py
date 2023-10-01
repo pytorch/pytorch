@@ -972,7 +972,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), 0)
+        self.group = (nodes[0].get_device(), "foreach")
 
         self.origins = set()
 
