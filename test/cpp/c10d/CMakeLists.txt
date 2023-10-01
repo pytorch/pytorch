@@ -1,8 +1,8 @@
 if(USE_CUDA)
   add_library(c10d_cuda_test CUDATest.cu)
   target_include_directories(c10d_cuda_test PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-  target_link_libraries(c10d_cuda_test torch_cuda)
-  add_dependencies(c10d_cuda_test torch_cuda)
+  target_link_libraries(c10d_cuda_test PUBLIC torch_cuda)
+  target_compile_definitions(c10d_cuda_test PUBLIC USE_CUDA)
 endif()
 
 function(c10d_add_test test_src)
@@ -31,11 +31,11 @@ endif()
 
 if(USE_CUDA)
   if(USE_GLOO AND USE_C10D_GLOO)
-    c10d_add_test(ProcessGroupGlooTest.cpp torch_cpu c10d_cuda_test gtest_main)
+    c10d_add_test(ProcessGroupGlooTest.cpp c10d_cuda_test gtest_main)
     if(INSTALL_TEST)
       install(TARGETS ProcessGroupGlooTest DESTINATION bin)
     endif()
-    c10d_add_test(ProcessGroupGlooAsyncTest.cpp torch_cpu c10d_cuda_test gtest_main)
+    c10d_add_test(ProcessGroupGlooAsyncTest.cpp c10d_cuda_test gtest_main)
   endif()
   if(USE_NCCL AND USE_C10D_NCCL)
     # NCCL is a private dependency of libtorch, but the tests include some
@@ -44,10 +44,10 @@ if(USE_CUDA)
     # a private dependency of the tests as well.
     c10d_add_test(
       ProcessGroupNCCLTest.cpp
-      torch_cpu c10d_cuda_test gtest_main __caffe2_nccl)
+      c10d_cuda_test gtest_main __caffe2_nccl)
     c10d_add_test(
       ProcessGroupNCCLErrorsTest.cpp
-      torch_cpu c10d_cuda_test gtest_main __caffe2_nccl)
+      c10d_cuda_test gtest_main __caffe2_nccl)
     if(INSTALL_TEST)
       install(TARGETS ProcessGroupNCCLTest DESTINATION bin)
       install(TARGETS ProcessGroupNCCLErrorsTest DESTINATION bin)
@@ -61,7 +61,7 @@ if(USE_CUDA)
     # a private dependency of the tests as well.
     c10d_add_test(
       ProcessGroupUCCTest.cpp
-      torch_cpu c10d_cuda_test gtest_main __caffe2_ucc)
+      c10d_cuda_test gtest_main __caffe2_ucc)
     if(INSTALL_TEST)
       install(TARGETS ProcessGroupUCCTest DESTINATION bin)
       install(TARGETS c10d_cuda_test DESTINATION lib)
