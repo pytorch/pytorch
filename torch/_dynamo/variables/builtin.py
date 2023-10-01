@@ -20,6 +20,7 @@ from ..exc import (
     UserErrorType,
 )
 from ..guards import GuardBuilder
+from ..polyfill import all_polyfill
 from ..replay_record import DummyModule
 from ..source import (
     AttrSource,
@@ -55,6 +56,7 @@ from .lists import (
 )
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
+
 
 log = logging.getLogger(__name__)
 
@@ -1522,7 +1524,7 @@ class BuiltinVariable(VariableTracker):
                 return SymNodeVariable.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", all, *proxy_args_kwargs([it], {})
+                        "call_function", all_polyfill, *proxy_args_kwargs([it], {})
                     ),
                     sym_num=None,
                 )
