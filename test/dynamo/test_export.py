@@ -964,7 +964,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
-                self.assertTrue(node.meta["source_fn"] is not None)
+                self.assertTrue(node.meta["source_fn_stack"] is not None)
 
         torch._dynamo.reset()
 
@@ -974,7 +974,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
-                self.assertTrue(node.meta["source_fn"] is not None)
+                self.assertTrue(node.meta["source_fn_stack"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
                 self.assertTrue(node.meta["original_aten"] is not None)
 
@@ -4018,7 +4018,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 self.assertEqual(
                     nd1.meta["nn_module_stack"], nd2.meta["nn_module_stack"]
                 )
-            self.assertEqual(nd1.meta["source_fn"], nd2.meta["source_fn"])
             self.assertEqual(nd1.meta["stack_trace"], nd2.meta["stack_trace"])
 
     def test_preserve_fx_node_metadata_recompile(self):
