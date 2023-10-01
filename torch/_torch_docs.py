@@ -2723,9 +2723,9 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :math:`A` is a batch of matrices then the output has the same batch dimensions.
 
 Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
-                consisting of symmetric positive-definite matrices
-                where :math:`*` is zero or more batch dimensions.
+    input (Tensor): input matrix :math:`u` of size :math:`(*, m, m)`,
+                where :math:`*` is zero of more batch dimensions composed of
+                upper or lower triangular Cholesky factor
     upper (bool, optional): flag that indicates whether to return a
                 upper or lower triangular matrix. Default: False
 
@@ -2751,10 +2751,9 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
     >>> a = torch.randn(3, 2, 2) # Example for batched input
     >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.linalg.cholesky(a)
-    >>> z = l @ l.mT
-    >>> torch.dist(z, a)
-    tensor(3.5894e-07)
+    >>> u = torch.linalg.cholesky(a)
+    >>> torch.dist(torch.inverse(a), torch.cholesky_inverse(u))
+    tensor(1.9769e-06)
 """,
 )
 
