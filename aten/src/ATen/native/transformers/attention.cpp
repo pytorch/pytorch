@@ -6,7 +6,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -17,6 +16,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -551,12 +551,8 @@ at::Tensor pad_last_dim(const at::Tensor& attn_bias) {
 at::Tensor post_process_flash_output(
     at::Tensor out,
     c10::SymInt const& og_size) {
-  if (!out.is_nested()) {
+  if (!out.is_nested() && out.sym_size(-1) != og_size) {
     out = out.slice_symint(-1, 0, og_size);
-  } else {
-    TORCH_CHECK(
-        out.size(-1) == og_size,
-        "FlashAttentionV2 returned a nested tensor with an incorrect size")
   }
   return out;
 }

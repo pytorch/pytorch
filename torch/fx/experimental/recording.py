@@ -359,8 +359,10 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     env2_vars = vars(env2).copy()
 
     for v in non_state_variable_names:
-        env1_vars.pop(v)
-        env2_vars.pop(v)
+        if v in env1_vars:
+            env1_vars.pop(v)
+        if v in env2_vars:
+            env2_vars.pop(v)
 
     # Function for transforming the mismatched values into string.
     # Needed, since dict and set entries order might not be the same every time.
