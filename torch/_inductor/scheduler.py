@@ -945,6 +945,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self.scheduler = scheduler
             self.snodes = nodes
 
+            self.node = None
+            self.users = None
+
             self.set_read_writes(
                 dependencies.ReadWrites.merge_list(
                     [prev_node_1.read_writes, prev_node_2.read_writes]
@@ -1223,7 +1226,26 @@ class Scheduler:
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
+        unbacked_symbol_to_origin_node = {}
+
         for node in self.nodes:
+            # unbacked symbols don't follow ordinary buffer dependencies, so
+            # we track their def/uses separately
+            for s in node.node.get_unbacked_symbol_defs():
+                assert s not in unbacked_symbol_to_origin_node
+                unbacked_symbol_to_origin_node[s] = node
+
+            # if a kernel takes unbacked symints, register dependencies
+            for s in node.node.get_unbacked_symbol_uses():
+                # NB: This is not actually a mutation dep, but we do need to
+                # record this ordering dependency
+                assert (
+                    s in unbacked_symbol_to_origin_node
+                ), f"{s} not in {unbacked_symbol_to_origin_node}"
+                node.add_mutation_dep(
+                    StarDep(unbacked_symbol_to_origin_node[s].get_name())
+                )
+
             # a node will mutate either 0 or 1 buffers
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)

@@ -346,7 +346,7 @@ class TestExport(TestCase):
                 node.name in ep.graph_signature.inputs_to_buffers or
                 node.name in ep.graph_signature.inputs_to_parameters
             ):
-                self.assertTrue("source_fn" in node.meta)
+                self.assertTrue("source_fn_stack" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
     def test_export_api_with_dynamic_shapes(self):
@@ -1255,9 +1255,7 @@ class TestExport(TestCase):
             torch._dynamo.exc.UserError,
             "Cannot provide constraints for already exported program.",
         ):
-            _ = torch.export.export(
-                exported, (inp,), dynamic_shapes={"args": [{0: dim0_x}]}
-            )
+            _ = torch.export.export(exported, (inp,), dynamic_shapes={"x": {0: dim0_x}})
         # Reexported program should still work for dynamic shapes.
         reexported = torch.export.export(exported, (inp,))
         self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
@@ -1359,8 +1357,13 @@ class TestExport(TestCase):
         for mod in gm.modules():
             for node in mod.graph.nodes:
                 if node.name in {"sin", "cos"}:
-                    actual_source_fns.append(node.meta.get("source_fn", None))
-        exp_source_fns = [("cos", "cos"), ("sin", "sin")]
+                    source_fn_st = node.meta.get("source_fn_stack", None)
+                    if source_fn_st is not None:
+                        source_names = []
+                        for source_fn in source_fn_st:
+                            source_names.append(source_fn[0])
+                        actual_source_fns.append(source_names)
+        exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
     def test_lift_constants(self) -> None:
