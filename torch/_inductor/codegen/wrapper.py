@@ -96,13 +96,16 @@ def get_cpp_op_schema(kernel):
     # use x.real_type instead of x.type so that we get ScalarType instead of int
     arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
     arg_names = [x.name for x in kernel._schema.arguments]
-    # TODO: only support len(returns) == 1 for now.
-    returns = [repr(x.type) for x in kernel._schema.returns]
-    assert (
-        len(returns) == 1
-    ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
-    return_value = returns[0]
-    cpp_return_value = convert_return_type(return_value)
+    returns = [repr(x.real_type) for x in kernel._schema.returns]
+
+    num_retunrs = len(returns)
+    assert num_retunrs > 0, "must have at least one return value"
+
+    if num_retunrs == 1:
+        cpp_return_value = convert_return_type(returns[0])
+    elif num_retunrs > 1:
+        tuple_returns = ", ".join([convert_return_type(r) for r in returns])
+        cpp_return_value = f"std::tuple<{tuple_returns}>"
 
     cpp_arg_type = [
         f"{convert_arg_type(arg_type)} {arg_name}"
@@ -1670,10 +1673,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 ir.ComputedBuffer,
                 ir.ConcatKernel,
                 ir.ExternKernelOut,
+                ir.MultiOutput,
             )
 
             if isinstance(arg_type, torch.TensorType):
-                assert isinstance(arg, inductor_tensor_buffers)
+                assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
                 new_tensor_args.append(f"{arg.name}.get()")
             elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
                 # int or SymInt
@@ -1752,17 +1756,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise AssertionError(f"Unsupport return type found: {return_type}")
 
-        assert (
-            len(output_args) == 1
-        ), "Support for multiple returns is not implemented yet"
         for output_arg, return_type in zip(output_args, return_types):
-            # TODO: check schema here
-            # assume it's a tensor now
             if output_arg is not None:
                 if isinstance(return_type, torch.OptionalType):
                     fill_output_arg(output_arg, return_type.getElementType())
-                else:
+                elif isinstance(return_type, torch.TensorType):
                     fill_output_arg(output_arg, return_type)
+                else:
+                    raise NotImplementedError(
+                        "Only Tensor and OptionalTensor return type is supported."
+                    )
 
         return new_tensor_args, new_int_args
 
