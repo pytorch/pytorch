@@ -54,8 +54,10 @@ class Adamax(Optimizer):
             state_values[0]["step"]
         )
         if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+            for group in self.param_groups:
+                for p in group.params:
+                    s = self.state[p]
+                    s["step"] = torch.tensor(float(s["step"]), device=p.device)
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         for p in group["params"]:
@@ -70,7 +72,7 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = torch.tensor(0.0)
+                state["step"] = torch.tensor(0.0, device=p.device)
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -337,6 +339,7 @@ def _multi_tensor_adamax(
             torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-        clr = _stack_if_compiling([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
+        step_size = [(lr / bc) * -1 for bc in bias_corrections]
 
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, clr)
+        torch._foreach_mul_(grouped_exp_avgs, step_size)
+        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs)
