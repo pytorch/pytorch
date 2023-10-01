@@ -52,18 +52,25 @@ class AOTInductorModelRunner:
             constraints=constraints,
         )
 
-        launcher = aot_inductor_launcher
         is_cpu = all(x.device.type == "cpu" for x in example_inputs)
-        if is_cpu:
-            launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+        if IS_FBCODE:
+            from .fb import test_aot_inductor_model_runner_pybind
 
-        optimized = torch.utils.cpp_extension.load_inline(
-            name="aot_inductor",
-            cpp_sources=[launcher],
-            functions=["run"],
-            extra_ldflags=[so_path],
-            with_cuda=True,  # TODO: change this to not is_cpu
-        ).run
+            optimized = test_aot_inductor_model_runner_pybind.Runner(
+                so_path, is_cpu
+            ).run
+        else:
+            launcher = aot_inductor_launcher
+            if is_cpu:
+                launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+
+            optimized = torch.utils.cpp_extension.load_inline(
+                name="aot_inductor",
+                cpp_sources=[launcher],
+                functions=["run"],
+                extra_ldflags=[so_path],
+                with_cuda=True,  # TODO: change this to not is_cpu
+            ).run
 
         return optimized, exported
 
@@ -144,7 +151,6 @@ def check_model_with_multiple_inputs(
     self.assertTrue(same(list_actual, list_expected))
 
 
-@unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
 class AOTInductorTestsTemplate:
     def test_simple(self):
         class Model(torch.nn.Module):
@@ -303,6 +309,7 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_seq(self):
         layernorm = torch.nn.LayerNorm(10)
         net = torch.nn.Sequential(
@@ -562,6 +569,7 @@ class AOTInductorTestsTemplate:
         )
 
     # scaled_dot_product_flash_attention
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_sdpa(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -577,6 +585,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self):
