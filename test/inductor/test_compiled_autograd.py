@@ -350,6 +350,7 @@ def load_test_module(name):
 
 test_autograd = load_test_module("test_autograd")
 
+
 class EagerAutogradTests(TestCase):
     @classmethod
     def add_test(cls, name, fn):
@@ -359,12 +360,10 @@ class EagerAutogradTests(TestCase):
             with compiled_autograd.enable(compiler_fn):
                 return fn(self)
 
-
         if not callable(fn):
             return
         elif known_failures_re.match(name) or name in known_failing_tests:
-            wrapped = unittest.expectedFailure
-            setattr(cls, name, wrapped)
+            setattr(cls, name, unittest.expectedFailure)
         elif name.startswith("test"):
             setattr(cls, name, wrapped)
         else:
@@ -372,7 +371,9 @@ class EagerAutogradTests(TestCase):
 
 
 # These groups of tests aren't supported yet
-known_failures_re = re.compile(r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)")
+known_failures_re = re.compile(
+    r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)"
+)
 
 # Bugs needing investigation:
 known_failing_tests = {
@@ -445,9 +446,6 @@ known_failing_tests = {
     "test_grad_unreachable_discovery",  # specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_hessian_vector",  # compiled_autograd does not support keep_graph
     "test_hook_closure_cycle",  # compiled_autograd does not support keep_graph
-    "test_hook_closure_cycle",  # compiled_autograd does not support keep_graph
-    "test_hook_closure_cycle",  # compiled_autograd does not support keep_graph
-    "test_hook_closure_cycle",  # compiled_autograd does not support keep_graph
     "test_hook_edge_case_when_called_with_grad",  # compiled_autograd does not support keep_graph
     "test_hook_none",  # type object 'NoneGradientFunction' has no attribute '_compiled_autograd_key'
     "test_hooks",  # compiled_autograd does not support keep_graph
@@ -471,7 +469,7 @@ known_failing_tests = {
     "test_post_accumulate_grad_hook_multiple_hooks",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
     "test_post_accumulate_grad_hook_multiple_tensors",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
     "test_post_accumulate_grad_hook_ordering",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_returns_not_None",  # "hooks should return None." does not match "tensor_post_acc_grad_hooks not im...
+    "test_post_accumulate_grad_hook_returns_not_None",  # "hooks should return None." does not match
     "test_prehook_ordering",  # compiled_autograd does not support keep_graph
     "test_reentrant_child_error",  # "Simulate error" does not match "type object 'ReentrantFunc' has no attribute...
     "test_reentrant_priority",  # type object 'Reentrant' has no attribute '_compiled_autograd_key'
