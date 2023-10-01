@@ -3774,7 +3774,7 @@ class TestIO(TestCase):
         filename = tmp_path / "file"
         if request.param == "string":
             filename = str(filename)
-        yield filename
+        return filename
 
     def test_nofile(self):
         # this should probably be supported as a file

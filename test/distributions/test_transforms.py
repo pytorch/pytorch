@@ -252,7 +252,7 @@ base_dist1 = Dirichlet(torch.ones(4, 4))
 base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
 
 
-@pytest.mark.parametrize('batch_shape, event_shape, dist', [
+@pytest.mark.parametrize(('batch_shape', 'event_shape', 'dist'), [
     ((4, 4), (), base_dist0),
     ((4,), (4,), base_dist1),
     ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
