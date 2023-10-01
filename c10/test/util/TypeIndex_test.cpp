@@ -6,6 +6,7 @@ using c10::string_view;
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;
 
+// NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
 
 static_assert(get_type_index<int>() == get_type_index<int>(), "");
@@ -211,3 +212,4 @@ TEST(TypeIndex, FunctionArgumentsAndReturns) {
 }
 } // namespace test_function_arguments_and_returns
 } // namespace
+// NOLINTEND(modernize-unary-static-assert)
