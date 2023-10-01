@@ -1408,7 +1408,6 @@ class TorchPatcher:
         disabled_multi_tensor_opt_modules = {
             adamax,
             radam,  # data-dependent control flow
-            sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
         for opt_mod in optimizer_modules:
