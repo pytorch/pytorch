@@ -30,6 +30,15 @@ def maybe_clone(x):
     return x
 
 
+def keep_graph(graph, keep_graph):
+    graph.keep_graph = keep_graph
+    return graph
+
+
+def should_keep_graph(graph):
+    return graph.keep_graph
+
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -44,6 +53,7 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy = None
+        self.keep_graph = False
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)

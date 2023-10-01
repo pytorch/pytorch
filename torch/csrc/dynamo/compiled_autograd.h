@@ -174,6 +174,7 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+  bool keep_graph = false;
 };
 
 class CompiledNodeArgs {

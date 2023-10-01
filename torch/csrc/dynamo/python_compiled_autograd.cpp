@@ -80,6 +80,8 @@ static void check(bool result) {
     check(nullptr);
 }
 
+static bool call_should_keep_graph(PyObject* graph);
+
 struct CacheNode {
   // A node in the shadow graph, we follow next edges until we reach the end of
   // the graph
@@ -122,6 +124,12 @@ struct CacheNode {
   CacheNode(const CacheNode&) = delete;
   CacheNode& operator=(const CacheNode&) = delete;
   CacheNode& operator=(CacheNode&&) = delete;
+
+  bool check_keep_graph(AutogradCompilerCall& call) {
+    bool cache_hit = compiled_fn.get() != nullptr;
+    return cache_hit &&
+        (call.keep_graph == call_should_keep_graph(compiled_fn.get()));
+  }
 
   bool check_dynamic_sizes(AutogradCompilerCall& call) {
     /*
@@ -287,6 +295,58 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
+static PyObject* call_keep_graph(PyObject* graph, bool keep_graph) {
+  PyObject *dynamo_module, *compiled_autograd_module, *keep_graph_fn,
+      *keep_graph_args, *keep_graph_res;
+
+  dynamo_module = PyImport_ImportModule("torch._dynamo");
+  compiled_autograd_module =
+      PyObject_GetAttrString(dynamo_module, "compiled_autograd");
+  keep_graph_fn =
+      PyObject_GetAttrString(compiled_autograd_module, "keep_graph");
+
+  if (PyCallable_Check(keep_graph_fn)) {
+    PyObject* py_keep_graph = keep_graph ? Py_True : Py_False;
+    keep_graph_args = PyTuple_Pack(2, graph, py_keep_graph);
+    keep_graph_res = PyObject_CallObject(keep_graph_fn, keep_graph_args);
+    Py_XDECREF(keep_graph_args);
+  }
+
+  Py_XDECREF(keep_graph_fn);
+  Py_XDECREF(compiled_autograd_module);
+  Py_XDECREF(dynamo_module);
+
+  return keep_graph_res;
+}
+
+static bool call_should_keep_graph(PyObject* graph) {
+  PyObject *dynamo_module, *compiled_autograd_module, *keep_graph_fn,
+      *keep_graph_args, *keep_graph_res;
+
+  dynamo_module = PyImport_ImportModule("torch._dynamo");
+  compiled_autograd_module =
+      PyObject_GetAttrString(dynamo_module, "compiled_autograd");
+  keep_graph_fn =
+      PyObject_GetAttrString(compiled_autograd_module, "should_keep_graph");
+
+  bool result = false;
+  if (PyCallable_Check(keep_graph_fn)) {
+    keep_graph_args = PyTuple_Pack(1, graph);
+    keep_graph_res = PyObject_CallObject(keep_graph_fn, keep_graph_args);
+    if (keep_graph_res != nullptr) {
+      result = PyObject_IsTrue(keep_graph_res) != 0;
+      Py_XDECREF(keep_graph_res);
+    }
+    Py_XDECREF(keep_graph_args);
+  }
+
+  Py_XDECREF(keep_graph_fn);
+  Py_XDECREF(compiled_autograd_module);
+  Py_XDECREF(dynamo_module);
+
+  return result;
+}
+
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
   ~ClosingTHPObjectPtr() {
@@ -320,6 +380,8 @@ variable_list compiled_autograd(
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
+  compiler_call.keep_graph = graph_task.keep_graph_;
+
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
         .mark_output(output_edges[i].input_nr, i);
@@ -369,7 +431,9 @@ variable_list compiled_autograd(
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
-  if (!cache->check_dynamic_sizes(compiler_call)) {
+  // TODO(voz): Replace with a general cache check fn
+  if (!cache->check_dynamic_sizes(compiler_call) ||
+      !cache->check_keep_graph(compiler_call)) {
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
@@ -461,16 +525,20 @@ variable_list compiled_autograd(
       }
     }
 
-    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    auto graph = call_end_capture(py_compiler, state.outputs);
+    graph = call_keep_graph(graph, graph_task.keep_graph_);
+    cache->compiled_fn = check(graph);
     cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
-  }
+  } // End cache miss region
 
   // TODO(jansel): we should release all the variables and then use a
   //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
-  for (auto& call : calls) {
-    call->node->release_variables();
+  if (!graph_task.keep_graph_) {
+    for (auto& call : calls) {
+      call->node->release_variables();
+    }
   }
 
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
