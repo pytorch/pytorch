@@ -333,10 +333,7 @@ def _multi_tensor_adamax(
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
         for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-            norm_buf = torch.cat(
-                [exp_inf.unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
-            )
-            torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+            exp_inf = torch.maximum(exp_inf, grad.abs().add_(eps))
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         step_size = [(lr / bc) * -1 for bc in bias_corrections]
