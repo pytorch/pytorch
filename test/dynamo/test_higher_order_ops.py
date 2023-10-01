@@ -136,22 +136,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # Given a `func` that has a single call to `wrap`,
         # we check that:
         # - there are no graph breaks
-        # - eager vs torch.compile has the same result
-        # - other compilation metrics, e.g, dynamo frame count, # of ops in the dynamo captured graph,
+        # - eager vs torch.compile has the same result (correctness)
+        # - other compilation metrics, e.g, # of ops in the dynamo captured graph,
         #   the wrap has the expected number of args, etc
         #
         # we have one or multiple runs through with each of the args from args_generator,
-        # but we check:
-        # - eager vs torch.compile has the same result for every run
-        # - other compilation metrics only for the first run, since automatic_dynamic_shapes may
-        #   compile another dynamic version graph for the later runs
+        # and we will check:
+        # - correctness and no graph breaks for every run
+        # - other compilation metrics only for the first run, since automatic_dynamic_shapes
+        #   may compile another dynamic version graph for the later runs
         graph = None
         for i, args in enumerate(args_generator):
             backend = EagerAndRecordGraphs()
             cnt = CompileCounterWithBackend(backend)
             expected = func(*args)
             result = torch.compile(func, fullgraph=True, backend=cnt)(*args)
-            # check correctness
+            # check correctness and no graph breaks
             self.assertEqual(result, expected)
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(len(backend.graphs), 1)
@@ -161,7 +161,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 graph = backend.graphs[0]
                 wrap_node = find_first_node(graph, wrap)
                 self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
-        # We always return/check the graph for the first run if return_graph = True
+        # We always return/check the graph from the first run if return_graph = True
         if return_graph:
             return normalize_gm(graph.print_readable(print_output=False))
 
