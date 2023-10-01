@@ -246,8 +246,8 @@ class XNNPACKQuantizer(Quantizer):
     # static quantization ops (both PTQ and QAT)
     STATIC_OPS = [
         "linear",
-        "conv2d_relu",
-        "conv2d",
+        "conv_relu",
+        "conv",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",
