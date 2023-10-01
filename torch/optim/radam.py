@@ -9,6 +9,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _dispatch_sqrt,
+    _dispatch_abs,
     _foreach_doc,
     _get_value,
     _stack_if_compiling,
@@ -77,7 +78,7 @@ class RAdam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
+                    state["step"] = torch.tensor(0.0, device=p.device)
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -306,24 +307,22 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
-        if rho_t > 5.0:
-            # Compute the variance rectification term and update parameters accordingly
-            rect = math.sqrt(
+        rect = torch.where(torch.tensor(rho_t > 5), 
+            math.sqrt(abs(
                 (rho_t - 4)
                 * (rho_t - 2)
                 * rho_inf
                 / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            )
-            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-            if differentiable:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
-            else:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
-            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
+            )),
+            1.0
+        )
+        exp_avg_sq_sqrt = exp_avg_sq.sqrt()
+        if differentiable:
+            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
         else:
-            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
-
+            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+        adaptive_lr = torch.where(rect > 1.0, math.sqrt(bias_correction2) / exp_avg_sq_sqrt, 1.0)
+        param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
 
 def _multi_tensor_radam(
     params: List[Tensor],
@@ -378,23 +377,21 @@ def _multi_tensor_radam(
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del grouped_grads
 
-        rect = [
-            _dispatch_sqrt(
+        rect = [torch.where(torch.tensor(rho_t > 5), 
+            _dispatch_sqrt(_dispatch_abs(
                 (rho_t - 4)
                 * (rho_t - 2)
                 * rho_inf
                 / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            )
-            if rho_t > 5
-            else 0
-            for rho_t in rho_t_list
-        ]
-        unrectified = [0 if rect > 0 else 1.0 for rect in rect]
+            )),
+            0.0
+        ) for rho_t in rho_t_list]
+        unrectified = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
 
         bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-        unrect_step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
+        unrect_step_size = [(lr * _get_value(rect) / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)]
         bias_correction2_sqrt_times_rect_step_size = [
-            _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
+            _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * _get_value(rect) / bc) * -1
             for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
         ]
 

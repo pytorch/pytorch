@@ -99,6 +99,12 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
         return x.sqrt()
     else:
         return math.sqrt(x)
+    
+def _dispatch_abs(x: float):  # float annotation is needed because of torchscript type inference
+    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
+        return x.abs()
+    else:
+        return abs(x)
 
 # For any optimizer with a faster implementation, we attempt to default to the
 # fastest + stablest whenever possible. For foreach, the requirements are to have

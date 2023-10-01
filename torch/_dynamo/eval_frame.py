@@ -1401,7 +1401,7 @@ class TorchPatcher:
 
         disabled_multi_tensor_opt_modules = {
             adamax,
-            radam,  # data-dependent control flow
+            # radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
@@ -1433,7 +1433,7 @@ class TorchPatcher:
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
         excluded_optimizer_classes = {
             torch.optim.SparseAdam,
-            torch.optim.RAdam,
+            # torch.optim.RAdam,
             torch.optim.LBFGS,
         }
         for opt in optimizer_classes:
