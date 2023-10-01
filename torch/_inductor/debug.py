@@ -134,10 +134,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         )
         func_name = f"{node_type}: {fused_name}"
         node_func = get_fake_func(func_name)
-        kwargs = {}
-        if hasattr(snode, "get_device"):
-            kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=None)
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
