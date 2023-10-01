@@ -50,7 +50,7 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                state["step"] = torch.tensor(0.0, device=p.device)
+                state["step"] = torch.tensor(0.0)
                 init_value = (
                     complex(initial_accumulator_value, initial_accumulator_value)
                     if torch.is_complex(p)
@@ -236,7 +236,7 @@ def _make_sparse(grad, grad_indices, values):
     size = grad.size()
     if grad_indices.numel() == 0 or values.numel() == 0:
         return torch.empty_like(grad)
-    return torch.sparse_coo_tensor(grad_indices, values, size, device=grad.device)
+    return torch.sparse_coo_tensor(grad_indices, values, size)
 
 
 def _single_tensor_adagrad(

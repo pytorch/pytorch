@@ -162,7 +162,7 @@ class CompiledOptimizerTests(TestCase):
 
     test_adamw = make_test(AdamW, lr=0.01)
     # Need to an impl which does not use python scalars
-    test_adamax = make_test(Adamax, kernel_count=5, lr=0.01)
+    test_adamax = make_test(Adamax, kernel_count=2, lr=0.01)
     test_nadam = make_test(NAdam, lr=0.01)
     test_nadam_weight_decay = make_test(NAdam, lr=0.01, weight_decay=0.01)
     test_nadam_momentum_decay = make_test(NAdam, lr=0.01, momentum_decay=6e-3)
@@ -172,7 +172,7 @@ class CompiledOptimizerTests(TestCase):
     test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
-    test_adagrad = make_test(Adagrad, kernel_count=2, lr=0.01)
+    test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
     test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
     test_asgd_foreach = make_test(ASGD, kernel_count=2, lr=0.1, foreach=True)
@@ -181,12 +181,12 @@ class CompiledOptimizerTests(TestCase):
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     # Need an impl which does not use python scalars
-    test_adamax_recompile = make_recompile_test(Adamax, kernel_count=5, lr=0.01)
+    test_adamax_recompile = make_recompile_test(Adamax, kernel_count=2, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=2, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=12, lr=0.01, foreach=False
