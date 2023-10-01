@@ -99,7 +99,7 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
         return x.sqrt()
     else:
         return math.sqrt(x)
-    
+
 def _dispatch_abs(x: float):  # float annotation is needed because of torchscript type inference
     if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
         return x.abs()

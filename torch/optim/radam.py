@@ -12,7 +12,6 @@ from .optimizer import (
     _dispatch_abs,
     _foreach_doc,
     _get_value,
-    _stack_if_compiling,
     _use_grad_for_differentiable,
 )
 
@@ -307,7 +306,7 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
-        rect = torch.where(torch.tensor(rho_t > 5), 
+        rect = torch.where(torch.tensor(rho_t > 5),
             math.sqrt(abs(
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -377,7 +376,7 @@ def _multi_tensor_radam(
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del grouped_grads
 
-        rect = [torch.where(torch.tensor(rho_t > 5), 
+        rect = [torch.where(torch.tensor(rho_t > 5),
             _dispatch_sqrt(_dispatch_abs(
                 (rho_t - 4)
                 * (rho_t - 2)
