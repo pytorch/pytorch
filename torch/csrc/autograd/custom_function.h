@@ -13,7 +13,7 @@ namespace autograd {
 
 using optional_variable_list = std::vector<c10::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
-using _view_as_fn_t = std::function<at::Tensor(at::Tensor, at::Tensor)>;
+using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
 TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
@@ -23,7 +23,7 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_fn_t& view_as_fn);
+    const _view_as_self_fn_t& view_as_self_fn);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -313,8 +313,8 @@ auto Function<T>::apply(Args&&... args)
         "Please open a feature request on GitHub if you need this.");
   };
 
-  auto view_as_fn = [](const at::Tensor& x, const at::Tensor& y) -> at::Tensor {
-    return x.view_as(y);
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
+    return x.view_as(x);
   };
 
   auto wrapped_outputs = _wrap_outputs(
@@ -325,7 +325,7 @@ auto Function<T>::apply(Args&&... args)
       is_executable ? node : nullptr,
       jvp_fn,
       {},
-      view_as_fn);
+      view_as_self_fn);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {

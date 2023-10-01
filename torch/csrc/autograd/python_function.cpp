@@ -507,11 +507,19 @@ static void _wrap_outputs(
     return results;
   };
 
-  auto view_as_fn = [](const at::Tensor& x, const at::Tensor& y) -> at::Tensor {
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
     pybind11::gil_scoped_acquire gil;
-    py::object py_x = py::cast(x);
-    py::function py_view_as_method = py_x.attr("view_as");
-    return py_view_as_method(y).cast<at::Tensor>();
+    THPObjectPtr py_x(THPVariable_Wrap(x));
+    THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
+    if (!py_view_as_method)
+      throw python_error();
+    THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
+    if (!args)
+      throw python_error();
+    THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
+    if (!result)
+      throw python_error();
+    return THPVariable_Unpack(result);
   };
 
   // Wrap only the tensor outputs.
@@ -523,7 +531,7 @@ static void _wrap_outputs(
       cdata_if_executable,
       jvp_user_function,
       to_save_if_setup_context,
-      view_as_fn);
+      view_as_self_fn);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
