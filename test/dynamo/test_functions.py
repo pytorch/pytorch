@@ -1206,7 +1206,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         self.assertEqual(opt_fn(x, y), fn(x, y))
 
-
     def test_partials_as_input_partials_lambda(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)

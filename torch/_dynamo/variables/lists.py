@@ -587,6 +587,7 @@ class SizeVariable(TupleVariable):
 
     def get_item_dyn(self, tx, arg: VariableTracker):
         from .tensor import SymNodeVariable
+
         if isinstance(arg, SymNodeVariable):
             index = arg.sym_num
         else:
