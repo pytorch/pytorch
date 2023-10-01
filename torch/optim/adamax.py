@@ -278,7 +278,7 @@ def _single_tensor_adamax(
         if not differentiable:
             torch.maximum(
                 exp_inf.mul_(beta2),
-                grad.abs_().add_(eps),
+                grad.abs().add_(eps),
                 out=exp_inf,
             )
         else:
@@ -343,12 +343,12 @@ def _multi_tensor_adamax(
         for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
             torch.maximum(
                 exp_inf,
-                grad.abs_().add_(eps),
+                grad.abs().add_(eps),
                 out=exp_inf,
             )
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         step_size = [(lr / bc) * -1 for bc in bias_corrections]
 
-        torch._foreach_mul_(grouped_exp_avgs, step_size)
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs)
+        num = torch._foreach_mul(grouped_exp_avgs, step_size)
+        torch._foreach_addcdiv_(grouped_params, num, grouped_exp_infs)
