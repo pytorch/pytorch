@@ -221,23 +221,26 @@ def clone_preserve_strides(x, device=None):
     return out
 
 
-@patch.object(config, "debug", True)
 def run_and_get_cpp_code(fn, *args, **kwargs):
-    torch._dynamo.reset()
-    import io
-    import logging
+    # We use the patch context manager instead of using it as a decorator.
+    # In this way, we can ensure that the attribute is patched and unpatched correctly
+    # even if this run_and_get_cpp_code function is called multiple times.
+    with patch.object(config, "debug", True):
+        torch._dynamo.reset()
+        import io
+        import logging
 
-    log_capture_string = io.StringIO()
-    ch = logging.StreamHandler(log_capture_string)
-    from torch._inductor.graph import output_code_log
+        log_capture_string = io.StringIO()
+        ch = logging.StreamHandler(log_capture_string)
+        from torch._inductor.graph import output_code_log
 
-    output_code_log.addHandler(ch)
-    prev_level = output_code_log.level
-    output_code_log.setLevel(logging.DEBUG)
-    fn(*args, **kwargs)
-    s = log_capture_string.getvalue()
-    output_code_log.setLevel(prev_level)
-    output_code_log.removeHandler(ch)
+        output_code_log.addHandler(ch)
+        prev_level = output_code_log.level
+        output_code_log.setLevel(logging.DEBUG)
+        fn(*args, **kwargs)
+        s = log_capture_string.getvalue()
+        output_code_log.setLevel(prev_level)
+        output_code_log.removeHandler(ch)
     return s
 
 
@@ -257,6 +260,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -368,6 +372,11 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
+        actual = output_process_fn_grad(actual)
+        correct = output_process_fn_grad(correct)
+        actual_flat = tree_flatten(actual)[0]
+        correct_flat = tree_flatten(correct)[0]
+
         # generate random unit norm gradients
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
@@ -430,6 +439,7 @@ def check_model_cuda(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -453,6 +463,7 @@ def check_model_cuda(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
+        output_process_fn_grad=output_process_fn_grad,
     )
 
     if check_lowp:
@@ -482,6 +493,7 @@ def check_model_cuda(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
+            output_process_fn_grad=output_process_fn_grad,
         )
 
 
@@ -951,6 +963,20 @@ class CommonTemplate:
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
+
+    def test_embedding_bag_byte_unpack(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("No CUDA implementation (it returns empty)")
+
+        def fn(a):
+            return torch.ops.quantized.embedding_bag_byte_unpack(a)
+
+        M, N = 32, 64
+        scales = torch.randn(M, 1).view(torch.uint8)
+        offsets = torch.randn(M, 1).view(torch.uint8)
+        data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
+        packed = torch.cat([data, scales, offsets], dim=-1)
+        self.common(fn, [packed])
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -1862,6 +1888,7 @@ class CommonTemplate:
 
     @slowTest
     @expectedFailureCodegenDynamic
+    @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
@@ -2801,6 +2828,16 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([1, 2, 4, 8]),),
+        )
+
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave_2(self):
+        def fn(x):
+            return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
+
+        self.common(
+            fn,
+            (torch.tensor([2, 4, 6]),),
         )
 
     @config.patch(fallback_random=True)
@@ -4339,6 +4376,24 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    def test_input_mutation5(self):
+        def fn(x):
+            tmp = x.ceil()
+            x.add_(10)
+            return tmp
+
+        opt_fn = torch._dynamo.optimize()(fn)
+
+        a = torch.zeros((), dtype=torch.int64, device=self.device)
+        a_expect = a.clone()
+        expect = fn(a_expect)
+
+        a_actual = a.clone()
+        actual = opt_fn(a_actual)
+
+        self.assertEqual(a_expect, a_actual)
+        self.assertEqual(expect, actual)
+
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -4465,6 +4520,16 @@ class CommonTemplate:
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
+
+    def test_multilayer_any(self):
+        def fn(x):
+            return (x.isinf().any(), x.isfinite().all())
+
+        sample = torch.rand(9, 3, 353, 353)
+        self.common(fn, [sample])
+
+        sample.view(-1)[-1] = float("inf")
+        self.common(fn, [sample])
 
     def test_inplace_activations(self):
         def fn(x):
@@ -6059,6 +6124,21 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_zero_element_mutation(self):
+        class CustomModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LeakyReLU(negative_slope=5.2955089, inplace=True)
+
+            def forward(self, inputs):
+                return self.layer1(inputs)
+
+        ip_size = [0]
+        input_tensor = torch.randn(ip_size)
+
+        mymodel = CustomModel()
+        self.common(mymodel, (input_tensor,))
+
     def test_lerp(self):
         # non-contiguous inputs for lerp
         def fn0(i0, i1):
@@ -7038,6 +7118,24 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    def test_mutations_loop_fusion(self):
+        def fn(tensor, index, source):
+            out = tensor.index_add(0, index, source, alpha=2.0) / 2
+            return out
+
+        device = "cpu"
+        tensor = torch.rand((1,), dtype=torch.double, device=device)
+        index = torch.tensor([0], dtype=torch.long, device=device)
+        source = torch.rand((1,), dtype=torch.double, device=device)
+        self.common(
+            fn,
+            (
+                tensor,
+                index,
+                source,
+            ),
+        )
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7355,7 +7453,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
                 for line in code.split("\n"):
                     if tl_fn in line:
-                        stmt = line.split("=")[-1]
+                        stmt = line.split(tl_fn)[-1]
                         # indirect indexing involves a `tmp` variable
                         self.assertTrue(
                             "tmp" in stmt,
@@ -7515,6 +7613,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        def test_evict_last_non_coalesced_loads(self):
+            @torch.compile
+            def f(a, b):
+                return (a * b).sum(dim=-1)
+
+            N = 512
+            inps = (
+                torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
+                torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
+            )
+            code = run_and_get_triton_code(f, *inps)
+            self.assertTrue(
+                "tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last'"
+                in code
+            )
+            self.assertTrue(
+                "tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first',"
+                in code
+            )
+
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)
         def test_computed_indirect_mask(self):
@@ -7526,7 +7644,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             fn_opt = torch.compile(fn)
             code = run_and_get_triton_code(fn_opt, x, 8)
             # load should be masked
-            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):

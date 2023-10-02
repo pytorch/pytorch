@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -126,6 +127,46 @@ class OperatorBase:
             return fn
 
         return inner
+
+    # Registers an implementation to all **3** variants of functionalization that we have:
+    # - DispatchKey.Functionalize
+    # - functorch.TransformType.Functionalize
+    # - FunctionalTensorMode
+    # Example:
+    #   @py_functionalize_impl
+    #   def functionalize_rule(ctx, inner_f, *args):
+    #       args_unwrapped = ctx.unwrap_tensors(args)
+    #       with ctx.redispatch_to_next():
+    #           out = ctx.functionalize(inner_f)(*args_unwrapped)
+    #           return ctx.wrap_tensors(out)
+    def py_functionalize_impl(self, fn):
+        from torch._subclasses.functional_tensor import (
+            CppFunctionalizeAPI as _CppFunctionalizeAPI,
+            FunctorchFunctionalizeAPI as _FunctorchFunctionalizeAPI,
+            PythonFunctionalizeAPI as _PythonFunctionalizeAPI,
+        )
+
+        # Construct our three flavors of functionalization,
+        # each of which have slightly different wrap/unwrap/redispatch policies
+        def functionalize_dk_fn(*args, **kwargs):
+            return fn(_CppFunctionalizeAPI(), *args, **kwargs)
+
+        def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
+            # Mode is unused (there's a global FunctionalTensorMode that we can access)
+            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+
+        def functionalize_functorch_fn(interpreter, *args, **kwargs):
+            return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
+
+        self.py_impl(torch._C.DispatchKey.Functionalize)(functionalize_dk_fn)
+        self.py_impl(torch._subclasses.functional_tensor.FunctionalTensorMode)(
+            functionalize_dispatch_mode_fn
+        )
+        self.py_impl(torch._C._functorch.TransformType.Functionalize)(
+            functionalize_functorch_fn
+        )
+
+        return fn
 
     def name(self):
         raise NotImplementedError()
@@ -832,6 +873,25 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def import_module(self, module):
+        """
+        Imports a Python module that has torch.library registrations.
+
+        Generally, to extend PyTorch with custom operators, a user will
+        create a Python module whose import triggers registration of
+        the custom operators via a torch.ops.load_library call or a call
+        to one or more torch.library.* APIs.
+
+        It is unexpected for Python modules to have side effects, so some
+        linters and formatters will complain. Use this API to import Python
+        modules that contain these torch.library side effects.
+
+        Args:
+            module (str): The name of the Python module to import
+
+        """
+        importlib.import_module(module)
 
     def load_library(self, path):
         """
