@@ -72,7 +72,6 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing import make_tensor
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
