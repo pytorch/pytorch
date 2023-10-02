@@ -8,7 +8,6 @@
 #include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
-#include <c10/util/overloaded.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/library.h>
@@ -68,23 +67,24 @@ struct TORCH_API Operator {
   struct JitOnlyOperator final {
     // The only valid transition for schema_ is from right->left, i.e.
     // when the schema gets parsed.
-    mutable std::variant<FunctionSchema, UnparsedFunctionSchema> schema_;
+    mutable c10::either<FunctionSchema, UnparsedFunctionSchema> schema_;
 
-    std::variant<Operation, OperationCreator> op_;
+    c10::either<Operation, OperationCreator> op_;
   };
 
  public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
-      : op_(C10Operator(
+      : op_(c10::make_left<C10Operator, JitOnlyOperator>(
             C10Operator{std::move(opHandle), std::move(operation)})) {}
 
   Operator(
       std::string schema,
       Operation op,
       c10::AliasAnalysisKind alias_analysis)
-      : op_(JitOnlyOperator{
-            UnparsedFunctionSchema{std::move(schema), alias_analysis},
-            Operation(std::move(op))}) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
       std::string name,
@@ -93,22 +93,24 @@ struct TORCH_API Operator {
       std::vector<Argument> returns,
       Operation op,
       c10::AliasAnalysisKind alias_analysis)
-      : op_(JitOnlyOperator{
-            FunctionSchema(varArgSchemaWithName(
-                std::move(name),
-                std::move(overload_name),
-                std::move(arguments),
-                std::move(returns),
-                alias_analysis)),
-            std::move(op)}) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                varArgSchemaWithName(
+                    std::move(name),
+                    std::move(overload_name),
+                    std::move(arguments),
+                    std::move(returns),
+                    alias_analysis)),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
       std::string schema,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
-      : op_(JitOnlyOperator{
-            UnparsedFunctionSchema{std::move(schema), alias_analysis},
-            op_creator}) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_right<Operation, OperationCreator>(op_creator)})) {}
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
@@ -118,84 +120,74 @@ struct TORCH_API Operator {
       Symbol name,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
-      : op_(JitOnlyOperator{
-            FunctionSchema(varArgSchemaWithName(name, alias_analysis)),
-            op_creator}) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                varArgSchemaWithName(name, alias_analysis)),
+            c10::make_right<Operation, OperationCreator>(op_creator)})) {}
 
   Operation getOperation(const Node* node = nullptr) const {
-    return std::visit(
-        c10::overloaded(
-            [](const C10Operator& op) { return op.op_; },
-            [node](const JitOnlyOperator& op) {
-              return std::visit(
-                  c10::overloaded(
-                      [](const Operation& op) { return op; },
-                      [node](const OperationCreator& op_creator) {
-                        return op_creator(node);
-                      }),
-                  op.op_);
-            }),
-        op_);
+    return op_.fold<Operation>(
+        [](const C10Operator& op) { return op.op_; },
+        [node](const JitOnlyOperator& op) {
+          return op.op_.fold<Operation>(
+              [](const Operation& op) { return op; },
+              [node](const OperationCreator& op_creator) {
+                return op_creator(node);
+              });
+        });
   }
 
   Operation getOperationForDispatchKey(c10::DispatchKey dk) const {
     // TODO: some sort of caching mechanism?
-    return std::visit(
-        c10::overloaded(
-            [dk](const C10Operator& op) {
-              return Operation([op, dk](Stack& stack) {
-                op.handle_.callBoxedForDispatchKey(dk, stack);
-              });
-            },
-            [](const JitOnlyOperator& op) {
-              TORCH_CHECK(
-                  false,
-                  "calling a JIT operator for dispatch key is not supported");
-              return Operation(nullptr);
-            }),
-        op_);
+    return op_.fold<Operation>(
+        [dk](const C10Operator& op) {
+          return [op, dk](Stack& stack) {
+            op.handle_.callBoxedForDispatchKey(dk, stack);
+          };
+        },
+        [](const JitOnlyOperator& op) {
+          TORCH_CHECK(
+              false,
+              "calling a JIT operator for dispatch key is not supported");
+          return nullptr;
+        });
   }
 
   const FunctionSchema& schema() const {
-    return std::visit(
-        c10::overloaded(
-            [](const C10Operator& op) -> const FunctionSchema& {
-              return op.handle_.schema();
-            },
-            [](const JitOnlyOperator& op) -> const FunctionSchema& {
-              // we lazily parse schema initialized from strings so that
-              // we do less work during static operator registration
-              if (op.schema_.index() == 1) {
-                auto& unmaterializedSchema =
-                    std::get<UnparsedFunctionSchema>(op.schema_);
-                FunctionSchema schema =
-                    parseSchema(unmaterializedSchema.schema_string_);
-                if (unmaterializedSchema.alias_analysis_.has_value()) {
-                  // TODO What if it gets set later?
-                  schema.setAliasAnalysis(
-                      *unmaterializedSchema.alias_analysis_);
-                }
-                op.schema_ = std::move(schema);
-              }
-              return std::get<FunctionSchema>(op.schema_);
-            }),
-        op_);
+    return op_.fold<const FunctionSchema&>(
+        [](const C10Operator& op) -> const FunctionSchema& {
+          return op.handle_.schema();
+        },
+        [](const JitOnlyOperator& op) -> const FunctionSchema& {
+          // we lazily parse schema initialized from strings so that
+          // we do less work during static operator registration
+          if (op.schema_.is_right()) {
+            auto& unmaterializedSchema = op.schema_.right();
+            FunctionSchema schema =
+                parseSchema(unmaterializedSchema.schema_string_);
+            if (unmaterializedSchema.alias_analysis_.has_value()) {
+              // TODO What if it gets set later?
+              schema.setAliasAnalysis(*unmaterializedSchema.alias_analysis_);
+            }
+            op.schema_ = c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                std::move(schema));
+          }
+          return op.schema_.left();
+        });
   }
 
   c10::ArrayRef<at::Tag> getTags() const {
-    return std::visit(
-        c10::overloaded(
-            [](const C10Operator& op) { return op.handle_.getTags(); },
-            [](const JitOnlyOperator& op) {
-              // Returns empty list of tags for JitOnlyOperators since it
-              // doesn't save c10::OperatorHandle
-              return c10::ArrayRef<at::Tag>();
-            }),
-        op_);
+    return op_.fold<c10::ArrayRef<at::Tag>>(
+        [](const C10Operator& op) { return op.handle_.getTags(); },
+        [](const JitOnlyOperator& op) {
+          // Returns empty list of tags for JitOnlyOperators since it
+          // doesn't save c10::OperatorHandle
+          return c10::ArrayRef<at::Tag>();
+        });
   }
 
   bool isC10Op() const {
-    return op_.index() == 0;
+    return op_.is_left();
   }
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
@@ -212,11 +204,9 @@ struct TORCH_API Operator {
   }
 
   bool hasOperation() const {
-    return std::visit(
-        c10::overloaded(
-            [](const C10Operator&) { return true; },
-            [](const JitOnlyOperator& op) { return op.op_.index() == 0; }),
-        op_);
+    return op_.fold<bool>(
+        [](const C10Operator&) { return true; },
+        [](const JitOnlyOperator& op) { return op.op_.is_left(); });
   }
 
  private:
@@ -251,7 +241,7 @@ struct TORCH_API Operator {
     return result;
   }
 
-  std::variant<C10Operator, JitOnlyOperator> op_;
+  c10::either<C10Operator, JitOnlyOperator> op_;
 };
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
