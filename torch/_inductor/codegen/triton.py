@@ -1734,11 +1734,10 @@ class TritonKernel(Kernel):
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
         )
 
-        default = triton_constant(init)
-        default = self.cse.generate(
-            self.compute,
-            "tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
-        )
+        default = triton_constant(ir.Reduction.default_value(scan_op, dtype))
+        default_tensor = self.cse.generate(
+            self.body,
+            f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         acc_type = triton_acc_type(dtype)
@@ -1748,7 +1747,7 @@ class TritonKernel(Kernel):
 
         if self.persistent_reduction:
             masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default})"
+                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
             )
             result_var = self.cse.generate(
                 self.compute,
@@ -1758,13 +1757,14 @@ class TritonKernel(Kernel):
             accumulator = self.cse.newvar()
             reduced_size = self.dense_size_list()
             reduced_size[-1] = "1"
+            reduced_size = f"[{', '.join(reduced_size)}]"
 
             self.body.writeline(
                 f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
             )
 
             masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default})"
+                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
             )
             partial_reduce = self.cse.generate(
                 self.compute,
