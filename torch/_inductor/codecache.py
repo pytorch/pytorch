@@ -726,7 +726,14 @@ def use_custom_generated_macros() -> str:
 def use_fb_internal_macros() -> str:
     if config.is_fbcode():
         openmp_lib = build_paths.openmp_lib()
-        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        preprocessor_flags = " ".join(
+            (
+                "-D C10_USE_GLOG",
+                "-D C10_USE_MINIMAL_GLOG",
+                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+            )
+        )
+        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
     else:
         return ""
 
