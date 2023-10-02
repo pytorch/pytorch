@@ -217,6 +217,7 @@ CI_SKIP[CI("inductor", training=False)] = [
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TorchBench
+    "DALLE2_pytorch",  # TypeError: 'type' object is not subscriptable
     "drq",  # Need to update torchbench
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
