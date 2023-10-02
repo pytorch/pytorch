@@ -7453,7 +7453,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
                 for line in code.split("\n"):
                     if tl_fn in line:
-                        stmt = line.split("=")[-1]
+                        stmt = line.split(tl_fn)[-1]
                         # indirect indexing involves a `tmp` variable
                         self.assertTrue(
                             "tmp" in stmt,
@@ -7613,6 +7613,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        def test_evict_last_non_coalesced_loads(self):
+            @torch.compile
+            def f(a, b):
+                return (a * b).sum(dim=-1)
+
+            N = 512
+            inps = (
+                torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
+                torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
+            )
+            code = run_and_get_triton_code(f, *inps)
+            self.assertTrue(
+                "tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last'"
+                in code
+            )
+            self.assertTrue(
+                "tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first',"
+                in code
+            )
+
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)
         def test_computed_indirect_mask(self):
@@ -7624,7 +7644,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             fn_opt = torch.compile(fn)
             code = run_and_get_triton_code(fn_opt, x, 8)
             # load should be masked
-            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):

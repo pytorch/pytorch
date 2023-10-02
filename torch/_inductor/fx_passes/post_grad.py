@@ -93,6 +93,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(f"Print graph after recompile in post grad passes: {get_everpaste_url(str(gm.graph))}")
+
 
 @init_once_fakemode
 def lazy_init():
@@ -518,10 +523,14 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     return False
 
 
+@register_noop_decomp(aten.repeat)
+def repeat_noop(self, repeats):
+    return all(r == 1 for r in repeats)
+
+
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
-    if all(p == 0 for p in padding):
-        return True
+    return all(p == 0 for p in padding)
 
 
 @register_noop_decomp(torch.ops.prims.convert_element_type)
