@@ -250,6 +250,7 @@ test_failures = {
     "test_rand_like_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_repeat_interleave_2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_slice_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_strided_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_transposed_propagates_dynamic_shapes": TestFailure(

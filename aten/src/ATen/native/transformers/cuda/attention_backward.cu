@@ -1,7 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <cstdint>
 #include <type_traits>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -15,6 +17,17 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_flash_attention_backward.h>
+#include <ATen/ops/_flash_attention_backward_native.h>
+#include <ATen/ops/_efficient_attention_backward.h>
+#include <ATen/ops/_efficient_attention_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
+#endif
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports

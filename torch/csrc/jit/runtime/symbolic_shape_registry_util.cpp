@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
   // clang-format off
@@ -125,5 +124,4 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
   return tensorexpr_elementwise_set;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

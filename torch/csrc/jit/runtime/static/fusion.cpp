@@ -17,8 +17,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
@@ -356,5 +355,4 @@ void performTensorExprFusion(
   GRAPH_DUMP("Graph after fusion: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
