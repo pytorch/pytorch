@@ -828,10 +828,11 @@ class TestOptim(TestCase):
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
 
-            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
+            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop", "Adamax"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
                 # RMSprop uses avg and grads
+                # Adamax uses numerator and grads (maximize=True/weight_decay!=0)
                 nintermediates = 2
 
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)

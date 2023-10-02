@@ -350,5 +350,5 @@ def _multi_tensor_adamax(
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         step_size = [(lr / bc) * -1 for bc in bias_corrections]
 
-        num = torch._foreach_mul(grouped_exp_avgs, step_size)
-        torch._foreach_addcdiv_(grouped_params, num, grouped_exp_infs)
+        numerator = torch._foreach_mul(grouped_exp_avgs, step_size)
+        torch._foreach_addcdiv_(grouped_params, numerator, grouped_exp_infs)
