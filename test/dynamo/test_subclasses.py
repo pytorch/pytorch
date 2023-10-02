@@ -312,19 +312,20 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
-            return add_
+            return (add_,)
 """
-        check_count_and_graph(1, 1, 1, expected_graph)
+        check_count_and_graph(1, 2, 1, expected_graph)
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 2, 2, expected_graph)
+        check_count_and_graph(2, 4, 2, expected_graph)
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -335,7 +336,7 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 3, 3, expected_graph)
+        check_count_and_graph(3, 6, 3, expected_graph)
 
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.

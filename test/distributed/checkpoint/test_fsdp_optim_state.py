@@ -26,7 +26,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 class FsdpOptimStateCheckpoint(DTensorTestBase):
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_distributed_tensor_planner(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
