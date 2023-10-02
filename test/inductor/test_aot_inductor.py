@@ -394,6 +394,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.rand(6, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_inf(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        x = torch.randn(10, 10, device=self.device)
+        x[0][0] = float("Inf")
+        example_inputs = (
+            x,
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(
+            Model().to(self.device),
+            example_inputs,
+            options={"debug_check_inf_and_nan": True},
+        )
+
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_nan(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        x = torch.randn(10, 10, device=self.device)
+        x[0][0] = float("nan")
+        example_inputs = (
+            x,
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(
+            Model().to(self.device),
+            example_inputs,
+            options={"debug_check_inf_and_nan": True},
+        )
+
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
