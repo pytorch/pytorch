@@ -1341,6 +1341,30 @@ class TritonKernel(Kernel):
 
         return sympy_symbol(str(var))
 
+    def get_strides_of_load(self, index: sympy.Expr):
+        """
+        This gets the stride of the index for each of the tiling variables
+        (technically, it does it at index 0)
+
+        For example, if
+        xindex = x0 + 512*x1 + 1024*r0
+        x0 = (xindex//512)
+        x1 = (xindex % 512)
+        r0 = rindex // 1024
+
+        this function would return
+        {xindex: 512, rindex: 1024}
+        """
+        index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
+        strides = {}
+        for range_tree in self.range_trees:
+            s = sympy_symbol(range_tree.name)
+            strides[s] = sympy_subs(index_in_tile_vars, {s: 1}) - sympy_subs(
+                index_in_tile_vars, {s: 0}
+            )
+        return strides
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -1349,11 +1373,20 @@ class TritonKernel(Kernel):
 
         # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
         #  1) We are doing broadcasting
-        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
-        #   2.1) We are in a reduction loop
-        #   2.2) Its not its last use
-        #   2.3) This load will not be lifted to the body
+        #  2) It is a non-coalesced load. The intuition is that if it's
+        #  non-coalesced, we will likely load each element multiple times in
+        #  practice.
+        #  3) It will be used later and it won't be CSE'd. Equiv., if all the following hold
+        #   3.1) We are in a reduction loop
+        #   3.2) Its not its last use
+        #   3.3) This load will not be lifted to the body
+        #
+        is_coalesced = any(
+            i == 1 for i in self.get_strides_of_load(original_index).values()
+        )
         if self.is_broadcasted(original_index):
+            ep = ", eviction_policy='evict_last'"
+        elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
             if name in self.args.inplace_buffers:
@@ -1362,7 +1395,10 @@ class TritonKernel(Kernel):
                 names = {name}
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and ("rmask" in mask or indirect_indexing)
-            ep = ", eviction_policy='evict_last'" if evict_last else ""
+            if evict_last:
+                ep = ", eviction_policy='evict_last'"
+            else:
+                ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737

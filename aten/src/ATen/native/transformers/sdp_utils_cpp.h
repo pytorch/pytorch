@@ -214,6 +214,13 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
       q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
   if (!same_num_heads) {
+    if (input_requires_grad(params)){
+      if (debug) {
+        TORCH_WARN(
+              "Both fused kernels do not support training with broadcasted NT inputs.");
+      }
+      return false;
+    }
     return try_broadcast_param_size(
         q_num_heads, k_num_heads, v_num_heads, "num heads ", debug);
   }
@@ -316,6 +323,13 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   if (has_nested_input) {
     bool broadcastable_batch_size = true;
     if (!same_batch_size) {
+      if (input_requires_grad(params)){
+        if (debug) {
+          TORCH_WARN(
+              "Both fused kernels do not support training with broadcasted NT inputs.");
+        }
+        return false;
+      }
       // try to broadcast batchsize
       broadcastable_batch_size = try_broadcast_param_size(
           q_batch_size, k_batch_size, v_batch_size, "batch size ", debug);
