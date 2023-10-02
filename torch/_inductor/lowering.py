@@ -2015,6 +2015,8 @@ make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
+# these are data-dependent, highly unlikely you can write a lowering
+make_fallback(aten.nonzero.default)
 
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
@@ -2260,7 +2262,20 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    return ir.DynamicScalar()
+    # This is interesting!  Most lowerings return tensors, so you can just
+    # return the buffer you allocated and it will get used (or not used, if
+    # it's dead.)  But _local_scalar_dense (aka item) returns an int,
+    # not a Tensor, so you would have a type mismatch if you return a buffer;
+    # we are obligated to return a sympy expression instead.  However,
+    # we need to actually codegen the .item() call somehow.  We do this
+    # by registering a faux buffer for the DynamicScalar IR node, which is
+    # solely responsible for generating this .item().  The buffer is
+    # not used for anything (notice we discard it); at codegen time,
+    # the "buffer" just gets assigned None.
+    sym = V.graph.current_node.meta["val"].node.expr
+    buffer = ir.DynamicScalar(sym, data)
+    buffer.name = V.graph.register_buffer(buffer)
+    return sym
 
 
 def _full(fill_value, device, dtype, size):

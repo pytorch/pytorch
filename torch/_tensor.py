@@ -366,6 +366,17 @@ class Tensor(torch._C.TensorBase):
                 ),
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
+        elif self.is_nested:
+            args_nested = (
+                # NB: values() currently returns the storage as a buffer in an unsafe way.
+                # Ideally, we'd use a private API for this instead. TODO: Switch to this if
+                # we ever get around to adding it.
+                self.values(),
+                self._nested_tensor_size(),
+                self._nested_tensor_strides(),
+                self._nested_tensor_storage_offsets(),
+            )
+            return (torch._nested_view_from_buffer, args_nested)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor

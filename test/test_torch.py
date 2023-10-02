@@ -5134,7 +5134,7 @@ else:
         # xc is a channels last tensor
         xc = input_generator_fn(device)
         # xc is not memory dense, but looks like channels last
-        # We dont preserve non-dense striding
+        # We don't preserve non-dense striding
         if not TEST_WITH_TORCHINDUCTOR:
             if memory_format == torch.channels_last:
                 xc = xc[..., ::2, ::2]
@@ -5171,7 +5171,7 @@ else:
         if compare_data:
             self.assertEqual(xc, clone.to(xc))
 
-        # TODO copy _like constructors to stride permutation instead of layout
+        # TODO copy _like constructors to stride permutation instead of just layout
         if not TEST_WITH_TORCHINDUCTOR:
             x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
             for i in range(10):
