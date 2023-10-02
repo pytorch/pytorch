@@ -994,21 +994,6 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   return at::stack(grads_tensors, dim);
 }
 
-Tensor unbind_backward_nested(
-    const variable_list& grads,
-    const variable_list& result,
-    int64_t dim) {
-  std::vector<Tensor> grads_tensors;
-  for (auto i : c10::irange(grads.size())) {
-    const auto& v = grads[i];
-    const auto& r = result[i];
-    grads_tensors.push_back(
-        v.defined() ? static_cast<Tensor>(v) : at::zeros_like(r));
-  }
-
-  return at::_nested_tensor_from_tensor_list(grads_tensors);
-}
-
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
@@ -1587,9 +1572,8 @@ Tensor renorm_backward(
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
 
-  auto acc_type = self.is_mps()
-      ? self.scalar_type()
-      : at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto acc_type =
+      at::toAccumulateType(self.scalar_type(), self.device().type());
   auto norm = at::linalg_vector_norm(
       self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
