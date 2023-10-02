@@ -3696,6 +3696,90 @@ class TestSparseCompressedTritonKernels(TestCase):
                     res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
                     self.assertEqual(res_tri, res_tri_grid)
 
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_scatter_mm(self, device, dtype):
+        from torch.sparse._triton_ops import scatter_mm
+        from functools import partial
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+        sizes = [8, 16]
+        for m, k, n in itertools.product(sizes, sizes, sizes):
+            blocks = torch.stack([tensor(m, k), tensor(m, k)])
+            others = torch.stack([tensor(k, n), tensor(k, n)])
+
+            expected = torch.stack([blocks[0] @ others[0] + blocks[1] @ others[0],
+                                    blocks[0] @ others[1],
+                                    blocks[1] @ others[1]])
+
+            tasks2 = (torch.tensor([0, 2, 3, 4], dtype=torch.int32, device=device),
+                      torch.tensor([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=torch.int32, device=device))
+
+            result = scatter_mm(blocks, others, indices_data=dict(tasks2=tasks2))
+
+            self.assertEqual(result, expected)
+
+            other = tensor(2 * k, 2 * n)
+
+            expected = torch.cat([
+                torch.cat([blocks[1], blocks[0]], dim=1),
+                torch.cat([torch.zeros_like(blocks[0]), blocks[1]], dim=1)], dim=0) @ other
+
+            tasks5 = (torch.tensor([0, 2, 4, 5, 6], dtype=torch.int32, device=device),
+                      torch.tensor([0, n, 2 * n * m, 2 * n * m + n], dtype=torch.int32, device=device),
+                      torch.tensor([[1, 0], [0, 2 * k * n],
+                                    [1, n], [0, 2 * k * n + n],
+                                    [1, 2 * k * n],
+                                    [1, 2 * k * n + n]], dtype=torch.int32, device=device),
+                      2)
+
+            result = scatter_mm(blocks, other, indices_data=dict(tasks5=tasks5))
+
+            self.assertEqual(result, expected)
+
+    @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_bsr_scatter_mm(self, device, dtype, blocksize):
+        import triton
+        from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
+        from functools import partial
+        if isinstance(blocksize, str):
+            blocksize = tuple(map(int, blocksize.split('x')))
+        else:
+            blocksize = (blocksize,) * 2
+        # Note that each value in a non-zero block is in range blocksize * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [()]
+        sizes = [blocksize[0], 2 * blocksize[0], 4 * blocksize[0]]
+        sizes_K = [blocksize[1], 2 * blocksize[1]]
+
+        for bd, bs, M, K, N in itertools.product(batches, batches, sizes, sizes_K, sizes):
+            bsr = tensor(bs + (M, K)).to_sparse_bsr(blocksize)
+            dense = tensor(bd + (K, N))
+            expected = bsr.to_dense() @ dense
+
+            splits_N = [N]
+            while splits_N[-1] > 1:
+                splits_N.append(max(1, splits_N[-1] // 2))
+
+            for SPLIT_N in splits_N:
+                for tasks_name, tasks in bsr_scatter_mm_indices_data(bsr, dense, SPLIT_N=SPLIT_N).items():
+                    try:
+                        result = bsr_scatter_mm(bsr, dense, indices_data={tasks_name: tasks})
+                    except triton.compiler.OutOfResources:
+                        # ensure that there was at least one succesful test:
+                        assert SPLIT_N < splits_N[0]
+                        break
+                    self.assertEqual(result, expected)
+
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
