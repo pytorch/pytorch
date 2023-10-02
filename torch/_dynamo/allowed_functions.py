@@ -114,7 +114,7 @@ def _disallowed_function_ids():
         torch.set_autocast_cpu_dtype,
         torch.set_autocast_cpu_enabled,
         torch.set_autocast_enabled,
-        torch.set_autocast_gpu_dtype,
+        torch.set_autocast_gpu_dtypset_autocast_gpu_dtypee,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
@@ -218,7 +218,6 @@ def _allowed_function_ids():
                     deprecated_func.grad,
                     torch.func.vmap,
                     deprecated_func.vmap,
-                    torch.nn.functional.triplet_margin_with_distance_loss,
                 ):
                     continue
 
