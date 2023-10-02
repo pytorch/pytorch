@@ -230,9 +230,7 @@ class LazyArgument:
             # or (isinstance(arg.type, ListType) and isSymIntType(arg.type.elem))
         )
 
-        self.is_lazy_value = isValueType(
-            self.lazy_type, properties
-        )
+        self.is_lazy_value = isValueType(self.lazy_type, properties)
 
     @property
     def lazy_type(self) -> CType:

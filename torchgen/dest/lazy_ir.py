@@ -288,7 +288,7 @@ class GenLazyIR(ABC):
             if isinstance(arg.lazy_type, OptionalCType):
                 value = f"{arg.name}.value()"
                 if arg.is_generator:
-                    value = "\"torch.Generator()\""
+                    value = '"torch.Generator()"'
                 members_to_string.append(
                     f"""if ({arg.name}.has_value()) {{
       ss << ", {arg.name}=" << {value};

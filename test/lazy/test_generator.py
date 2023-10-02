@@ -2,7 +2,7 @@
 
 import torch
 import torch._lazy.ts_backend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 torch._lazy.ts_backend.init()
 
@@ -14,6 +14,7 @@ class LazyGeneratorTest(TestCase):
         graph by setting different seeds before each call to
         generate_tensor but the resulting tensor is the same
         """
+
         def generate_tensor():
             t = torch.tensor(1.0)
             g = torch.Generator()
@@ -34,5 +35,3 @@ class LazyGeneratorTest(TestCase):
         torch._lazy.mark_step()
 
         assert torch.allclose(cpu_t, lazy_t.to("cpu"))
-
-
