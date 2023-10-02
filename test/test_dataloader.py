@@ -2276,16 +2276,22 @@ class TestDataLoaderDeviceType(TestCase):
     def test_nested_tensor_multiprocessing(self, device):
         dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(100)]
 
-        loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=1,
-            num_workers=4,
-            collate_fn=_identity,
-            multiprocessing_context=('spawn' if 'cuda' in device else 'fork'),
-        )
+        pin_memory_settings = [False]
+        if device == 'cpu' and torch.cuda.is_available():
+            pin_memory_settings.append(True)
 
-        for i, batch in enumerate(loader):
-            self.assertEqual(batch[0], dataset[i])
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_identity,
+                pin_memory=pin_memory,
+                multiprocessing_context=('spawn' if 'cuda' in device else 'fork'),
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
