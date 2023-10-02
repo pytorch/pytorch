@@ -2252,7 +2252,7 @@ def any(
     if isinstance(dim, (list, tuple)) and len(dim) == 0:
         result = a_.clone()
     else:
-        result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
+        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:

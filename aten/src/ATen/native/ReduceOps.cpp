@@ -1565,7 +1565,13 @@ template <bool is_all>
 Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
   // Default implementation in terms of all-reduce or single dim reduce
   if (!dim) {
-    auto out = is_all ? self.all() : self.any();
+    Tensor out;
+    if constexpr (is_all) {
+      return self.all();
+    } else {
+      return self.any();
+    }
+
     if (keepdim) {
       DimVector out_shape(self.dim(), 1);
       return out.expand(out_shape);
