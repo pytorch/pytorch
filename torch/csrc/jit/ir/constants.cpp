@@ -108,6 +108,9 @@ c10::optional<Value*> tryInsertConstant(
     ss << val.toDevice();
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
+  } else if (val.isGenerator()) {
+    n->ival_(attr::value, val);
+    n->output()->setType(GeneratorType::get());
   } else if (val.isStream()) {
     // packing into int64_t removed
     n->ival_(attr::value, val);
@@ -194,6 +197,8 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == DeviceObjType::get()) {
     auto d = c10::Device(node->s(attr::value));
     return d;
+  } else if (type == GeneratorType::get()) {
+    return node->ival(attr::value);
   } else if (type == StreamObjType::get()) {
     // int64_t packing removed
     auto s = node->ival(attr::value).toStream();

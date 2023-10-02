@@ -644,6 +644,10 @@ std::ostream& IValue::repr(
       c10::printQuotedString(out, device_stream.str());
       return out << ")";
     }
+    case IValue::Tag::Generator: {
+      out << "torch.Generator(current_seed=" << v.toGenerator().current_seed() << ")";
+      return out;
+    }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
     case IValue::Tag::Enum: {

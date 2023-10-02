@@ -5900,7 +5900,6 @@ def normal(
     device=None,
     pin_memory=None,
 ):
-    assert generator is None
     assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
@@ -5937,6 +5936,7 @@ def normal(
         dtype=dtype,
         device=device,
         requires_grad=False,
+        generator=generator,
     )
     return std * normal_samples + mean
 

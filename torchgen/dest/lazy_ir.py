@@ -122,12 +122,8 @@ def gen_fallback_code(
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
-    or_has_generator = ""
-    if schema.generator_arg:
-        # generators are always optional and there is never more than one, at least currently
-        or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
-        if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
+        if (force_eager_fallback({aten_symbol(schema)})) {{
             return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
@@ -290,9 +286,12 @@ class GenLazyIR(ABC):
         members_to_string = []
         for arg in scalar_args:
             if isinstance(arg.lazy_type, OptionalCType):
+                value = f"{arg.name}.value()"
+                if arg.is_generator:
+                    value = "\"torch.Generator()\""
                 members_to_string.append(
                     f"""if ({arg.name}.has_value()) {{
-      ss << ", {arg.name}=" << {arg.name}.value();
+      ss << ", {arg.name}=" << {value};
     }} else {{
       ss << ", {arg.name}=null";
     }}"""
