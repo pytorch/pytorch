@@ -13,6 +13,11 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+if config.is_fbcode():
+    from torch._inductor.fb.utils import (  # type: ignore[import]  # noqa: F401
+        get_everpaste_url,
+    )
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401
@@ -564,7 +569,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 )
 
 
+def print_graph(graph: torch.fx.Graph, msg: str):
+    if config.is_fbcode():
+        log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))  # noqa: F401
+
+
 def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in post grads pass.")
     fusions: List[GroupBatchFusionBase] = []
 
     if config.group_fusion and has_fbgemm:
@@ -572,9 +583,11 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
 
 
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in pre grads pass.")
     fusions: List[GroupBatchFusionBase] = []
     if config.batch_fusion:
         fusions += [
@@ -585,3 +598,4 @@ def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
         ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
