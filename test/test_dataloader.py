@@ -110,6 +110,11 @@ JOIN_TIMEOUT = 60.0  # seconds
 supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
 
 
+# Identity function; defined globally here for pickle purposes.
+def _identity(x):
+    return x
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -2272,7 +2277,7 @@ except RuntimeError as e:
             dataset,
             batch_size=1,
             num_workers=4,
-            collate_fn=lambda x: x,
+            collate_fn=_identity,
         )
 
         for batch in loader:
