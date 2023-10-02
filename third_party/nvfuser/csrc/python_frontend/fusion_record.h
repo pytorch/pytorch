@@ -1373,7 +1373,7 @@ struct NormOpRecord : RecordFunctor {
         axes_(axes),
         correction_(correction),
         keep_dim_(keep_dim) {}
-  virtual ~NormOpRecord() = default;
+  ~NormOpRecord() override = default;
   RecordFunctor* clone() override = 0;
 
   // I am skipping the bassel's correction value in the hash because
