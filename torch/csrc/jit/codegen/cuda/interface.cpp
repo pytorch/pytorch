@@ -48,6 +48,8 @@ class LoadingNvfuserLibrary {
 
 static LoadingNvfuserLibrary loading_nvfuser_library_;
 
+static std::atomic<bool> cuda_fusion_guard_mode{true};
+
 bool isEnabled() {
   TORCH_WARN("torch::jit::fuser::cuda::isEnabled() is deprecated");
   return false;
@@ -88,7 +90,7 @@ bool setHorizontalFusion(bool value) {
 
 std::atomic<bool>& getCudaFusionGuardMode() {
   TORCH_WARN("torch::jit::fuser::cuda::getCudaFusionGuardMode() is deprecated");
-  return false;
+  return cuda_fusion_guard_mode;
 }
 
 CudaFuserInterface* getFuserInterface() {
