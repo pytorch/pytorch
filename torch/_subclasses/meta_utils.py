@@ -406,12 +406,9 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-
-                    (
-                        sizes,
-                        strides,
-                        storage_offset,
-                    ) = sym_sizes_strides_storage_offset(t, source)
+                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
+                        t, source
+                    )
 
                     def empty_create(inner_t, inner_src):
                         (

@@ -20,7 +20,6 @@ def get_tensor_id(tensor, coeff):
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
-    _size: Tuple[int, torch.SymInt, int]
     # NOTE [ Singleton ints for ragged sizes and strides ]
     #
     # Jagged layout tensors are tensors that represent a n-dim tensor with a
@@ -36,8 +35,10 @@ class NestedTensor(torch.Tensor):
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
     #
-    _ragged_size: torch.SymInt
-
+    _size: Tuple[int, torch.SymInt, int]
+    _stride: Tuple[torch.SymInt, int, int]
+    # Indicates that the nth dimension is ragged
+    _ragged_idx: int
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
@@ -86,10 +87,10 @@ class NestedTensor(torch.Tensor):
             ragged_size = get_tensor_id(offsets, 1)
         D = values.shape[1]
         B = offsets.shape[0] - 1
-        # TODO: factor out and generalize the stride computing logic
+        # TODO: generalize for generalized raggedness
         self._size = (B, ragged_size, D)
         self._strides = (ragged_size * D, D, 1)
-        self._ragged_size = ragged_size
+        self._ragged_idx = 1
 
         # TODO: error if values requires grad
         self._values = values.detach() if values.requires_grad else values
@@ -112,7 +113,7 @@ class NestedTensor(torch.Tensor):
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
-        return ["_values", "_offsets"], (self.requires_grad, self._ragged_size)
+        return ["_values", "_offsets"], (self.requires_grad, self._size[self._ragged_idx])
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta):

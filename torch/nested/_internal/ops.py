@@ -103,7 +103,7 @@ def new_nested_like(values, nt):
     # Construct a new nested tensor with the same metadata as nt given values
     kwargs = {
         "offsets": nt.offsets(),
-        "ragged_size": nt._ragged_size,
+        "ragged_size": nt._size[nt._ragged_idx],
     }
     return NestedTensor(values, **kwargs)
 
