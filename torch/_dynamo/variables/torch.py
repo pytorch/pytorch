@@ -74,7 +74,6 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
-    torch.promote_types,
     torch.iinfo,
     torch.is_autocast_cache_enabled,
     torch.is_autocast_cpu_enabled,
@@ -82,6 +81,7 @@ constant_fold_functions = [
     torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
+    torch.promote_types,
     torch._C._get_privateuse1_backend_name,
 ]
 
