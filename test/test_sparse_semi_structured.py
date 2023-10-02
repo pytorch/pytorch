@@ -294,8 +294,8 @@ class TestSparseSemiStructured(TestCase):
         input = torch.rand(64, 768, 768, device=device).half()
         model = (
             nn.Sequential(
-                nn.Linear(768, 768),
-                nn.Linear(768, 768),
+                nn.Linear(768, 3072),
+                nn.Linear(3072, 768),
             )
             .half()
             .to(device)
