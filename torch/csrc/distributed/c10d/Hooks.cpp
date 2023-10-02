@@ -6,6 +6,8 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#else
+#include <io.h>
 #endif
 
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
