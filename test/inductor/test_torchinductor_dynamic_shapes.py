@@ -158,7 +158,6 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(res, ref)
 
     # not supported yet on cpu, https://github.com/pytorch/pytorch/issues/109897
-    @onlyCUDA
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_bool_mask_nobreak(self, device):
         def f(x, b):
@@ -171,7 +170,6 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
-    @onlyCUDA
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -194,7 +192,6 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
-    @onlyCUDA
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
