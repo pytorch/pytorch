@@ -7,6 +7,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
+from torch._functorch.utils import exposed_in
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
@@ -27,6 +28,7 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
+@exposed_in(torch)
 def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies ``true_fn`` or ``false_fn``.
