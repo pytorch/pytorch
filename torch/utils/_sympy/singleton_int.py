@@ -69,14 +69,14 @@ def _eval_is_ge(a, b):
     raise ValueError("Symbolic SingletonInt: Relation is indeterminate")
 
 
-@dispatch(SingletonInt, sympy.Integer)
+@dispatch(SingletonInt, sympy.Integer)  # type: ignore[no-redef]
 def _eval_is_ge(a, b):  # noqa: F811
     if b <= 2:
         return sympy.true
     raise ValueError("Symbolic SingletonInt: Relation is indeterminate")
 
 
-@dispatch(SingletonInt, SingletonInt)
+@dispatch(SingletonInt, SingletonInt)  # type: ignore[no-redef]
 def _eval_is_ge(a, b):  # noqa: F811
     if a._val == b._val:
         if a._coeff >= b._coeff:
