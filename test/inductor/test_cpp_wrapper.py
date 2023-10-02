@@ -270,6 +270,7 @@ if RUN_CUDA:
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
+        BaseTest("test_repeat_interleave_2"),
         BaseTest("test_scalar_input"),
         BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scaled_dot_product_efficient_attention"),
