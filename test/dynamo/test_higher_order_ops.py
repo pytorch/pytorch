@@ -12,6 +12,7 @@ import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.nn as nn
+import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
@@ -103,7 +104,22 @@ def assert_dict_matches_regex(self, dct, dct_with_regex_keys):
 
 
 def default_args_generator(seed_value):
-    yield seed_value
+    flat_args, args_spec = pytree.tree_flatten(seed_value)
+    for i in range(3):
+        new_flat_arg = []
+        for val in flat_args:
+            if isinstance(val, torch.Tensor):
+                new_val = val + 0.1 * i
+            elif isinstance(val, int):
+                new_val = val + 1 * i
+            elif isinstance(val, float):
+                new_val = val + 0.1 * i
+            else:
+                raise AssertionError("unexpected arg type")
+
+            new_flat_arg.append(new_val)
+        new_args = pytree.tree_unflatten(new_flat_arg, args_spec)
+        yield new_args
 
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
@@ -265,9 +281,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         y = torch.tensor(2.0)
         z = torch.tensor(3.0)
         d = {"x": x, "y": (y, [x, y, z])}
+
+        def my_args_generator(t):
+            yield t
+            yield t[0] + 0.1, t[1], t[2]
+            yield t[0], t[1] + 0.1, t[2]
+
         actual_graph = self._test_wrap_simple(
             f,
-            default_args_generator((x, y, z)),
+            my_args_generator((x, y, z)),
             4,
             return_graph=True,
         )
@@ -360,7 +382,17 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3)
         y = torch.randn(3, 3)
-        self._test_wrap_simple(f, default_args_generator((x, y, (x, y))), 3)
+
+        def my_args_generator(t):
+            yield t
+            x1 = t[0] + 0.1
+            y1 = t[1] + 0.1
+            yield (x1, y1, (x1, y1))
+            x2 = t[0] + 0.2
+            y2 = t[0] + 0.2
+            yield (x2, y2, (x2, y2))
+
+        self._test_wrap_simple(f, my_args_generator((x, y, (x, y))), 3)
 
     def test_wrap_pytree_args_not_const_symint_tensor(self):
         class MyClass:
@@ -948,11 +980,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = 8
 
-        def my_args_generator(t):
-            for i in range(3):
-                yield (t[0] + i * 0.1, t[1] + i)
-
-        self._test_wrap_simple(f, my_args_generator((x, y)), ifdynstaticdefault(2, 3))
+        self._test_wrap_simple(
+            f, default_args_generator((x, y)), ifdynstaticdefault(2, 3)
+        )
 
     def test_wrap_all_kwarg(self):
         def f(y, x):
