@@ -131,15 +131,17 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
   c10::SymNode ge(const c10::SymNode& other) override {
     auto mb_si = other->singleton_int();
-    if ((mb_si.has_value() && val_ == *mb_si)
-        || (other->constant_int() && *other->constant_int() <= 2)) {
+    if ((mb_si.has_value() && val_ == *mb_si) ||
+        (other->constant_int() && *other->constant_int() <= 2)) {
       return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
           coeff_ >= other->singleton_coeff()));
     }
     TORCH_CHECK(
         false,
         "singleton ge: '",
-        this->str(), " >= ", (mb_si.has_value() ? *mb_si : *other->constant_int()),
+        this->str(),
+        " >= ",
+        (mb_si.has_value() ? *mb_si : *other->constant_int()),
         "' is indeterminate");
   }
 
@@ -153,7 +155,9 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     TORCH_CHECK(
         false,
         "singleton gt: '",
-        this->str(), " > ",(mb_si.has_value() ? *mb_si : *other->constant_int()),
+        this->str(),
+        " > ",
+        (mb_si.has_value() ? *mb_si : *other->constant_int()),
         "' is indeterminate");
   }
 
@@ -167,7 +171,9 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     TORCH_CHECK(
         false,
         "singleton lt: '",
-        this->str(), " < ", (mb_si.has_value() ? *mb_si : *other->constant_int()),
+        this->str(),
+        " < ",
+        (mb_si.has_value() ? *mb_si : *other->constant_int()),
         "' is indeterminate");
   }
 
@@ -187,7 +193,9 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     TORCH_CHECK(
         false,
         "singleton le: '",
-        this->str(), " <= ", (mb_si.has_value() ? *mb_si : *other->constant_int()),
+        this->str(),
+        " <= ",
+        (mb_si.has_value() ? *mb_si : *other->constant_int()),
         "' is indeterminate");
   }
 
