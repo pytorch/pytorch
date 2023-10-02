@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 if(NOT MSVC)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-ignored-qualifiers")
-  string(APPEND CMAKE_C_FLAGS " -Wno-ignored-qualifiers")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-absolute-value")
   string(APPEND CMAKE_C_FLAGS " -Wno-absolute-value")
 endif(NOT MSVC)
@@ -380,52 +378,33 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
 endif()
 
 if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
-  # Preserve values for the main build
-  set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
-  set(__aten_sleef_build_tests ${BUILD_TESTS})
-
-  # Unset our restrictive C++ flags here and reset them later.
-  # Remove this once we use proper target_compile_options.
-  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  set(CMAKE_CXX_FLAGS)
-
-  # Bump up optimization level for sleef to -O1, since at -O0 the compiler
-  # excessively spills intermediate vector registers to the stack
-  # and makes things run impossibly slowly
-  set(OLD_CMAKE_C_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG})
-  if(${CMAKE_C_FLAGS_DEBUG} MATCHES "-O0")
-    string(REGEX REPLACE "-O0" "-O1" CMAKE_C_FLAGS_DEBUG ${OLD_CMAKE_C_FLAGS_DEBUG})
-  else()
-    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O1")
-  endif()
-
   if(NOT USE_SYSTEM_SLEEF)
+    # Preserve values for the main build
+    set(SLEEF_build_shared_libs ${BUILD_SHARED_LIBS})
+    set(SLEEF_build_tests ${BUILD_TESTS})
+
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
     set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
     set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
-    set(OLD_CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE})
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
         set(DISABLE_SVE ON CACHE BOOL "Xcode's clang-12.5 crashes while trying to compile SVE code" FORCE)
       endif()
     endif()
-    if("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU" AND
-        CMAKE_C_COMPILER_VERSION VERSION_GREATER 6.9 AND CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
-      set(GCC_7 True)
-    else()
-      set(GCC_7 False)
-    endif()
-    if(GCC_7)
-      set(CMAKE_BUILD_TYPE Release)  # Always build Sleef as a Release build to work around a gcc-7 bug
-    endif()
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/sleef" ${CMAKE_BINARY_DIR}/sleef)
-    if(GCC_7)
-      set(CMAKE_BUILD_TYPE ${OLD_CMAKE_BUILD_TYPE})
+    target_include_directories(sleef PUBLIC ${CMAKE_BINARY_DIR}/include)
+    # Bump up optimization level for sleef to -O1, since at -O0 the compiler
+    # excessively spills intermediate vector registers to the stack
+    # and makes things run impossibly slowly
+    get_target_property(sleef_compile_options sleef COMPILE_OPTIONS)
+    if("${sleef_compile_options}" MATCHES "-O0")
+      string(REGEX REPLACE "-O0" "-O1" sleef_compile_options "${sleef_compile_options}")
+      set_target_property(sleef_compile_options sleef PROPERTIES COMPILE_OPTIONS "${sleef_compile_options}")
     endif()
-    set_property(TARGET sleef PROPERTY FOLDER "dependencies")
-    list(APPEND ATen_THIRD_PARTY_INCLUDE ${CMAKE_BINARY_DIR}/include)
-    link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
+
+    set(BUILD_SHARED_LIBS ${SLEEF_build_shared_libs} CACHE BOOL "Build shared libs" FORCE)
+    set(BUILD_TESTS ${SLEEF_build_tests} CACHE BOOL "Build tests" FORCE)
   else()
     add_library(sleef SHARED IMPORTED)
     find_library(SLEEF_LIBRARY sleef)
@@ -435,14 +414,11 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     message("Found sleef: ${SLEEF_LIBRARY}")
     set_target_properties(sleef PROPERTIES IMPORTED_LOCATION "${SLEEF_LIBRARY}")
   endif()
+  if(NOT MSVC)
+    target_compile_options(sleef PUBLIC "-Wno-ignored-qualifiers")
+    target_compile_options(sleef PUBLIC "-Wno-error=ignored-qualifiers")
+  endif()
   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
-
-  set(CMAKE_C_FLAGS_DEBUG ${OLD_CMAKE_C_FLAGS_DEBUG})
-  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
-
-  # Set these back. TODO: Use SLEEF_ to pass these instead
-  set(BUILD_SHARED_LIBS ${__aten_sleef_build_shared_libs} CACHE BOOL "Build shared libs" FORCE)
-  set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
