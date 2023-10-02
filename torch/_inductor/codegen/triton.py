@@ -1670,7 +1670,6 @@ class TritonKernel(Kernel):
 
     def scan(self, dtype, scan_op, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(scan_op, dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -1680,6 +1679,12 @@ class TritonKernel(Kernel):
 
         value = self.cse.generate(
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
+        )
+
+        default = triton_constant(ir.Reduction.default_value(scan_op, dtype))
+        default = self.cse.generate(
+            self.compute,
+            "tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
         )
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
@@ -1695,8 +1700,11 @@ class TritonKernel(Kernel):
             )
         else:
             accumulator = self.cse.newvar()
+            reduced_size = self.dense_size_list()
+            reduced_size[-1] = "1"
+
             self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
+                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
             )
 
             masked_value = self.cse.generate(
@@ -2043,7 +2051,7 @@ class TritonKernel(Kernel):
             sizes[idx] = ":"
         return f"[{', '.join(sizes)}]"
 
-    def dense_size_str(self):
+    def dense_size_list(self) -> List[str]:
         sizes = []
         for tree in self.range_trees:
             if self.no_x_dim and tree.prefix == "x":
@@ -2059,6 +2067,10 @@ class TritonKernel(Kernel):
         if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
             sizes[0:2] = reversed(sizes[0:2])
 
+        return sizes
+
+    def dense_size_str(self):
+        sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str, node: IRNode = None):
