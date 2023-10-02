@@ -20,7 +20,7 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
-from ..ir import ReductionHint
+from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
@@ -492,7 +492,6 @@ class TritonOverrides(OpOverrides):
 
 
 class TritonKernelOverrides(TritonOverrides):
-
     @classmethod
     def constant(cls, value, dtype):
         # NOTE: Cannot use shape=[] as it's not supported by triton-rocm
@@ -519,16 +518,12 @@ class TritonKernelOverrides(TritonOverrides):
             result = body()
         return ops.where(new_mask, result, triton_constant(other))
 
-
     @staticmethod
     def load_seed(name, offset):
         var = V.kernel.args.input(name)
         return (
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
-
-
-
 
 
 @dataclasses.dataclass
@@ -1696,7 +1691,6 @@ class TritonKernel(Kernel):
             DeferredLine(name, f"tl.store({var} + ({index}), {value}, {mask})")
         )
 
-
     def _lift_helper(self, fn, num_args) -> str:
         # Lift IR function into a triton function in the global namespace
         name = f"_triton_helper_fn{len(self.helper_functions)}"
@@ -1710,7 +1704,6 @@ class TritonKernel(Kernel):
         overrides = TritonOverrides(V.MockHandler())
 
         class CSEProxy:
-
             @staticmethod
             def __getattr__(name: str) -> Callable[..., CSEVariable]:
                 def inner(*args, **kwargs):
@@ -1718,6 +1711,7 @@ class TritonKernel(Kernel):
                         helper,
                         getattr(overrides, name)(*args, **kwargs),
                     )
+
                 return inner
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
@@ -1727,10 +1721,8 @@ class TritonKernel(Kernel):
         self.helper_functions.append(helper)
         return name
 
-
     def scan(self, dtype, combine_fn, value, init):
         assert self.inside_reduction
-        default = triton_constant(init)
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -1740,6 +1732,12 @@ class TritonKernel(Kernel):
 
         value = self.cse.generate(
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
+        )
+
+        default = triton_constant(init)
+        default = self.cse.generate(
+            self.compute,
+            "tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
         )
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
@@ -1753,23 +1751,31 @@ class TritonKernel(Kernel):
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
             result_var = self.cse.generate(
-                self.compute, f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})"
+                self.compute,
+                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
             )
         else:
             accumulator = self.cse.newvar()
+            reduced_size = self.dense_size_list()
+            reduced_size[-1] = "1"
+
             self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
+                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
             )
 
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
             partial_reduce = self.cse.generate(
-                self.compute, self.reduction_resize(f"tl.reduce({value}, {dim}, {combine_helper_fn})")
+                self.compute,
+                self.reduction_resize(
+                    f"tl.reduce({value}, {dim}, {combine_helper_fn})"
+                ),
             )
             acc_next = combine_fn(accumulator, partial_reduce)
             partial_scan = self.cse.generate(
-                self.compute, f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})"
+                self.compute,
+                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
             )
             result_var = self.cse.generate(
                 self.compute, combine_fn(accumulator, partial_scan)
@@ -2109,7 +2115,7 @@ class TritonKernel(Kernel):
             sizes[idx] = ":"
         return f"[{', '.join(sizes)}]"
 
-    def dense_size_str(self):
+    def dense_size_list(self) -> List[str]:
         sizes = []
         for tree in self.range_trees:
             if self.no_x_dim and tree.prefix == "x":
@@ -2125,9 +2131,13 @@ class TritonKernel(Kernel):
         if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
             sizes[0:2] = reversed(sizes[0:2])
 
+        return sizes
+
+    def dense_size_str(self):
+        sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, name: str):
+    def call_kernel(self, name: str, node: IRNode = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -2147,11 +2157,14 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
+        grid = wrapper.generate_default_grid(name, grid)
         wrapper.generate_kernel_call(
             name,
             call_args,
             grid,
             V.graph.scheduler.current_device.index,
+            cuda=True,
+            triton=True,
         )
 
     def warn_mix_layout(self, kernel_name):
@@ -2252,7 +2265,9 @@ class TritonScheduling(BaseScheduling):
                 return False
 
             if node1.is_template():
-                return True  # skip checks for compatible tiling
+                # Only allow fusion for TritonTemplates for now.
+                # Fusion for CUDATemplates are not supported.
+                return isinstance(node1.node, TritonTemplateBuffer)
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -2341,7 +2356,8 @@ class TritonScheduling(BaseScheduling):
                         node not in done
                         and fits_in_main_body(other_node)
                         and not (
-                            current_loop_writes & other_node.recursive_predecessors
+                            current_loop_reduced_writes
+                            & other_node.recursive_predecessors
                         )
                     ):
                         schedule_node_in_loop(node)
@@ -2669,11 +2685,16 @@ class TritonScheduling(BaseScheduling):
 
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
-            src_code = partial_code.finalize()
+            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            src_code = (
+                partial_code
+                if isinstance(partial_code, str)
+                else partial_code.finalize()
+            )
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name)
+        kernel.call_kernel(kernel_name, template_node.node)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
 

@@ -307,6 +307,12 @@ class IRNode:
     def get_read_names(self):
         return {dep.name for dep in self.get_reads()}
 
+    def get_layout(self):
+        raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
+
+    def get_size(self):
+        raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
     def get_numel(self):
         return sympy_product(self.get_size())
 
@@ -1597,6 +1603,9 @@ class BaseView(IRNode):
     def get_dtype(self):
         return self.data.get_dtype()
 
+    def get_layout(self):
+        return self.data.get_layout()
+
     def get_device(self):
         return self.data.get_device()
 
@@ -2021,12 +2030,16 @@ class ReinterpretView(BaseView):
     def freeze_layout(self):
         pass
 
-    def codegen_reference(self):
+    def codegen_reference(self, writer=None):
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
         return V.graph.wrapper_code.codegen_reinterpret_view(
-            self.get_name(), self.layout.size, self.layout.stride, self.layout.offset
+            self.get_name(),
+            self.layout.size,
+            self.layout.stride,
+            self.layout.offset,
+            writer,
         )
 
 
@@ -2444,23 +2457,23 @@ class MutationLayout(Layout):
         if isinstance(src, TensorBox):
             src = src.data
 
-        if not isinstance(src, StorageBox) or src.is_user_of(dst.get_name()):
-            need_copy = True
-        else:
-            src.realize()
-            need_copy = not isinstance(src.data.layout, FlexibleLayout)
+        # We copy the contents of src into dst. In most cases this should
+        # be fused into a single kernel by the scheduler.
+        # NOTE: We cannot change src's layout to mutate dst directly as this
+        # would alias src to dst, which is not correct as further mutations to
+        # dst would effect users of src.
+        src.realize_hint()
 
-        if need_copy:
-            src = Pointwise.create(
-                device=src.get_device(),
-                dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
-                ranges=[
-                    V.graph.sizevars.guard_equals(a, b)
-                    for a, b in zip(src.get_size(), dst.get_size())
-                ],
-            ).data
-            src.realize()
+        src = Pointwise.create(
+            device=src.get_device(),
+            dtype=src.get_dtype(),
+            inner_fn=src.make_loader(),
+            ranges=[
+                V.graph.sizevars.guard_equals(a, b)
+                for a, b in zip(src.get_size(), dst.get_size())
+            ],
+        ).data
+        src.realize()
 
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
@@ -2548,8 +2561,12 @@ class Buffer(IRNode):
     def is_no_op(self):
         return False
 
-    def codegen_reference(self):
-        return self.get_name()
+    def codegen_reference(self, writer=None):
+        return (
+            self.get_name() + ".get()"
+            if V.graph.cpp_wrapper and config.aot_inductor.abi_compatible
+            else self.get_name()
+        )
 
     def decide_layout(self):
         pass
@@ -2577,6 +2594,13 @@ class Buffer(IRNode):
     def realize(self):
         pass
 
+    def get_workspace_size(self):
+        """
+        Gets extra global memory size needed by this buffer.
+        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
+        """
+        return 0
+
 
 class InputBuffer(Buffer):
     pass
@@ -2599,7 +2623,7 @@ class ConstantBuffer(InputBuffer):
 
 
 class NoneAsConstantBuffer(IRNode):
-    def codegen_reference(self):
+    def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.none_str
 
 
@@ -2608,7 +2632,7 @@ class ShapeAsConstantBuffer(IRNode):
         super().__init__()
         self.shape = shape
 
-    def codegen_reference(self):
+    def codegen_reference(self, writer=None):
         expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
         if V.graph.cpp_wrapper:
             # wrap scalar to 0-d tensor for cpp wrapper
@@ -2913,6 +2937,26 @@ class TemplateBuffer(Buffer):
             ),
             None,
         )
+
+
+class TritonTemplateBuffer(TemplateBuffer):
+    pass
+
+
+class CUDATemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        workspace_size: int = 0,
+    ):
+        super().__init__(layout, inputs, make_kernel_render)
+        # Global memory (in bytes) needed for this template.
+        self.workspace_size = workspace_size
+
+    def get_workspace_size(self):
+        return self.workspace_size if self.workspace_size is not None else 0
 
 
 @dataclasses.dataclass
@@ -3489,9 +3533,7 @@ class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
-        V.graph.wrapper_code.generate_extern_kernel_alloc(
-            self.get_name(), self.kernel, args, self.get_origin_node()
-        )
+        V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5305,6 +5347,12 @@ class MutableBox(IRNode):
     def layout(self):
         return self.data.layout
 
+    def get_layout(self):
+        return self.layout
+
+    def get_size(self):
+        return self.data.get_size()
+
     def __str__(self):
         if isinstance(self.data, MutableBox):
             line0 = f"{type(self).__name__}({type(self.data).__name__}("
@@ -5642,7 +5690,6 @@ class LoopBodyBlock:
 
             @staticmethod
             def scan(dtype_proxy, combine_fn: Callable, value_proxy, init_proxy):
-
                 def shim(dtype, value, init):
                     return V.ops.scan(dtype, combine_fn, value, init)
 
@@ -5748,7 +5795,7 @@ class Wait(ExternKernelAlloc):
         # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
         collective_op.decide_layout()
         return Wait(
-            layout=collective_op.get_layout(),
+            layout=AliasedLayout(collective_op),
             inputs=[collective_op],
         )
 
@@ -5842,6 +5889,12 @@ class OutOfPlaceCollectiveKernel(CollectiveKernel):
         super().__init__(layout, inputs + outputs, constant_args)
         self.outputs = outputs
         self.original_inputs = inputs
+        # NOTE: As seen in issue #108780, output buffers of out-of-place collectives
+        # could be incorrectly reused. As a safety measure, here we just ban the reuse of them.
+        # TODO: A better fix is to figure out how to propagate the aliases properly,
+        # so that the buffer is only reused after all its users have consumed it.
+        for x in self.outputs:
+            V.graph.never_reuse_buffers.add(x.name)
 
     def should_allocate(self):
         return False
@@ -5952,6 +6005,9 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def should_allocate(self):
         return False
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
     @classmethod
     def create(
         cls,
@@ -5962,7 +6018,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         group_size: int,
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        layout = MultiOutputLayout(inputs[0].get_device())
+        layout = MutationLayout(inplace_inputs[0])
 
         _ = AllReduceCoalesced(
             layout=layout,
@@ -5987,12 +6043,15 @@ class AllReduce(InPlaceCollectiveKernel):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
     @classmethod
     def create(
         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        layout = MultiOutputLayout(inplace_inputs[0].get_device())
+        layout = MutationLayout(inplace_inputs[0])
 
         _ = AllReduce(
             layout=layout,
