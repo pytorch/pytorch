@@ -1232,7 +1232,7 @@ class BuiltinVariable(VariableTracker):
                     )
 
                     # same tensor identiy, setattr is a no-op
-                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                    mod_setattr = inspect.getattr_static(obj.value, "__setattr__")
                     if (
                         existing_fake_attr is assigning_fake_val
                         and mod_setattr is torch.nn.Module.__setattr__

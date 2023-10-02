@@ -74,16 +74,16 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = ["module_type", "module_key"]
+    _nonvar_fields = ["module_key"]
 
-    def __init__(self, module_type: type, module_key: str, **kwargs):
+    def __init__(self, value: torch.nn.Module, module_key: str, **kwargs):
         super().__init__(**kwargs)
-        self.module_type = module_type
+        self.value = value
         self.module_key = module_key
         assert self.source
 
     def python_type(self):
-        return self.module_type
+        return type(self.value)
 
     def _wrap_submodule(self, tx, source, submod, *key_extra, **options):
         return
@@ -285,10 +285,6 @@ class NNModuleVariable(VariableTracker):
                 return arg
 
             if is_lazy:
-                # The module type will change after it is called
-                if mod.cls_to_become is not None:
-                    self.module_type = mod.cls_to_become
-
                 # The pre-hook runs to initialize the module shapes, then deletes itself.  After this,
                 # the module is more or less not lazy and can be treated as a normal module regardless of
                 # is_allowed or other variations.
