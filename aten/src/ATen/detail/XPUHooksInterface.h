@@ -55,7 +55,7 @@ struct TORCH_API XPUHooksInterface {
         false,
         "Cannot get XPU device without Intel Extension for Pytorch. ",
         XPU_HELP);
-  };
+  }
 
   virtual DLDevice_& getDLPackDeviceFromATenDevice(
       DLDevice_& dl_device,
@@ -65,14 +65,14 @@ struct TORCH_API XPUHooksInterface {
         false,
         "Cannot get XPU DL device without Intel Extension for Pytorch. ",
         XPU_HELP);
-  };
+  }
 
   virtual Generator getXPUGenerator(DeviceIndex device_index = -1) const {
     (void)device_index; // Suppress unused variable warning
     TORCH_CHECK(false, "Cannot get XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 
-    const Generator& getDefaultXPUGenerator(DeviceIndex device_index = -1) const {
+  virtual const Generator& getDefaultXPUGenerator(DeviceIndex device_index = -1) const {
     (void)device_index; // Suppress unused variable warning
     TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }

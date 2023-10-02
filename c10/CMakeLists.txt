@@ -81,11 +81,11 @@ if(WERROR)
 endif()
 
 # ---[ Dependency of c10
-if(${USE_GFLAGS})
+if(C10_USE_GFLAGS)
    target_link_libraries(c10 PUBLIC gflags)
 endif()
 
-if(${USE_GLOG})
+if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
