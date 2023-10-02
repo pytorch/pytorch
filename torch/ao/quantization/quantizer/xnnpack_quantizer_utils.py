@@ -208,27 +208,33 @@ def _annotate_linear(
     return annotated_partitions
 
 
-@register_annotator("conv2d")
-def _annotate_conv2d(
+@register_annotator("conv")
+def _annotate_conv(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     conv_partitions = get_source_partitions(
-        gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d], filter_fn
+        gm.graph,
+        [
+            torch.nn.Conv2d,
+            torch.nn.functional.conv2d,
+            torch.nn.Conv1d,
+            torch.nn.functional.conv1d,
+        ],
+        filter_fn,
     )
     conv_partitions = list(itertools.chain(*conv_partitions.values()))
     annotated_partitions = []
     for conv_partition in conv_partitions:
-        annotated_partitions.append(conv_partition.nodes)
         if len(conv_partition.output_nodes) > 1:
             raise ValueError("conv partition has more than one output node")
         conv_node = conv_partition.output_nodes[0]
-        if (
-            conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.conv2d.default
-        ):
-            raise ValueError(f"{conv_node} is not an aten conv2d operator")
+        if conv_node.op != "call_function" or conv_node.target not in [
+            torch.ops.aten.conv1d.default,
+            torch.ops.aten.conv2d.default,
+        ]:
+            raise ValueError(f"{conv_node} is not an aten conv1d or conv2d operator")
         # skip annotation if it is already annotated
         if _is_annotated([conv_node]):
             continue
@@ -251,22 +257,26 @@ def _annotate_conv2d(
             output_qspec=get_output_act_qspec(quantization_config),
             _annotated=True,
         )
+        _mark_nodes_as_annotated(conv_partition.nodes)
+        annotated_partitions.append(conv_partition.nodes)
     return annotated_partitions
 
 
-@register_annotator("conv2d_relu")
-def _annotate_conv2d_relu(
+@register_annotator("conv_relu")
+def _annotate_conv_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    fused_partitions = find_sequential_partitions(
+    fused_partitions1 = find_sequential_partitions(
         gm, [torch.nn.Conv2d, torch.nn.ReLU], filter_fn
     )
+    fused_partitions2 = find_sequential_partitions(
+        gm, [torch.nn.Conv1d, torch.nn.ReLU], filter_fn
+    )
     annotated_partitions = []
-    for fused_partition in fused_partitions:
+    for fused_partition in fused_partitions1 + fused_partitions2:
         conv_partition, relu_partition = fused_partition
-        annotated_partitions.append(conv_partition.nodes + relu_partition.nodes)
         if len(relu_partition.output_nodes) > 1:
             raise ValueError("Relu partition has more than one output node")
         relu_node = relu_partition.output_nodes[0]
@@ -276,11 +286,11 @@ def _annotate_conv2d_relu(
 
         if not isinstance(conv_node, Node):
             raise ValueError(f"{conv_node} is not a Node")
-        if (
-            conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.conv2d.default
-        ):
-            raise ValueError(f"{conv_node} is not an aten conv2d operator")
+        if conv_node.op != "call_function" or conv_node.target not in [
+            torch.ops.aten.conv1d.default,
+            torch.ops.aten.conv2d.default,
+        ]:
+            raise ValueError(f"{conv_node} is not an aten conv1d or conv2d operator")
         if relu_node.op != "call_function" or relu_node.target not in [
             torch.ops.aten.relu.default,
             torch.ops.aten.relu_.default,
@@ -310,6 +320,8 @@ def _annotate_conv2d_relu(
             output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True,
         )
+        _mark_nodes_as_annotated(conv_partition.nodes + relu_partition.nodes)
+        annotated_partitions.append(conv_partition.nodes + relu_partition.nodes)
     return annotated_partitions
 
 

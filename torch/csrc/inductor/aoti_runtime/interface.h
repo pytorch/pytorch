@@ -31,11 +31,17 @@ using AOTIRuntimeError = int32_t;
   }
 
 extern "C" {
+struct AOTInductorModelOpaque;
+using AOTInductorModelHandle = AOTInductorModelOpaque*;
+
 struct AOTInductorModelContainerOpaque;
 using AOTInductorModelContainerHandle = AOTInductorModelContainerOpaque*;
 
 struct AOTInductorStreamOpaque;
 using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
+
+struct AOTInductorConstantMap;
+using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
 // Creates an AOTInductor model container. The parameter num_models
 // specifies the number of model instances that may be run concurrently for
@@ -111,5 +117,26 @@ AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
     size_t output_idx,
     const int64_t** ret_output_sizes,
     int64_t* ret_output_ndim);
+
+// Creates an AOTInductorModel instance.  This is a thin and light wrapper
+// around the compiled model; it doesn't handle concurrency, queueing, device
+// management, etc.  Use this if bare-metal performance is needed and you are
+// willing to handle other "management" aspects yourself.
+//
+// constant_map_handle is an opaque type to satisfy the C ABI.  It should be a
+// std::unordered_map<std::string, at::Tensor*>*.
+AOTIRuntimeError AOTInductorModelCreate(
+    AOTInductorModelHandle* model_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
+// Run an AOTInductorModel (see AOTInductorModelCreate for when one should use
+// this function versus AOTInductorModelContainerRun).
+AOTIRuntimeError AOTInductorModelRun(
+    AOTInductorModelHandle model_handle,
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles);
+
+// Delete an AOTInductorModel created by AOTInductorModelCreate.
+AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
 
 } // extern "C"
