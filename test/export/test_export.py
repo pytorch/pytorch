@@ -1114,6 +1114,36 @@ class TestExport(TestCase):
             nodes[2].name in ep.graph_signature.inputs_to_buffers
         )
 
+    def test_preserve_shape_dynamism_for_unused_inputs(self):
+        @dataclass
+        class Input:
+            f: torch.Tensor
+            p: torch.Tensor
+
+        torch._export.utils.register_dataclass_as_pytree_node(Input)
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Input):
+                return x.f + 1
+
+        mod = Module()
+        example_inputs = (Input(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
+        ep_static = export(mod, example_inputs)
+        for node in ep_static.graph.nodes:
+            if node.op == 'placeholder':
+                for s in node.meta['val'].shape:
+                    self.assertIsInstance(s, int)
+
+        x = example_inputs[0]
+        constraints = [dynamic_dim(x.f, 0), dynamic_dim(x.p, 0)]
+        ep_dynamic = export(mod, example_inputs, constraints=constraints)
+        for node in ep_dynamic.graph.nodes:
+            if node.op == 'placeholder':
+                for i, s in enumerate(node.meta['val'].shape):
+                    if i == 0:
+                        self.assertIsInstance(s, torch.SymInt)
+                    else:
+                        self.assertIsInstance(s, int)
 
 if __name__ == '__main__':
     run_tests()
