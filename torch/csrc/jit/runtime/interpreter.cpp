@@ -50,8 +50,7 @@ C10_DEFINE_bool(
     false,
     "enable rethrowing caught exception");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using CodeImpl = interpreter::CodeImpl;
 
@@ -1202,5 +1201,4 @@ void InterpreterContinuation::operator()() {
 #endif
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
