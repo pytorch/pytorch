@@ -315,13 +315,8 @@ class DefaultDictVariable(ConstDictVariable):
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-<<<<<<< HEAD
-                    if istensor(k):
-                        tx.store_global_weakref(global_key_name(k), k)
-=======
                     if is_valid_global_ref_key(k):
-                        tx.store_dict_key(global_key_name(k), k)
->>>>>>> 9796ba600ac ([FSDP][WIP] Trace FSDP)
+                        tx.store_global_weakref(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
