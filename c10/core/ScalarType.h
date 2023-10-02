@@ -46,15 +46,15 @@ namespace c10 {
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                     \
-  _(c10::Float8_e5m2, Float8_e5m2) /* 16 */              \
-  _(c10::Float8_e4m3fn, Float8_e4m3fn) /* 17 */          \
-  _(c10::quint4x2, QUInt4x2) /* 18 */                    \
-  _(c10::quint2x4, QUInt2x4) /* 19 */                    \
-  _(c10::bits1x8, Bits1x8) /* 20 */                      \
-  _(c10::bits2x4, Bits2x4) /* 21 */                      \
-  _(c10::bits4x2, Bits4x2) /* 22 */                      \
-  _(c10::bits8, Bits8) /* 23 */                          \
-  _(c10::bits16, Bits16) /* 24 */
+  _(c10::quint4x2, QUInt4x2) /* 16 */                    \
+  _(c10::quint2x4, QUInt2x4) /* 17 */                    \
+  _(c10::bits1x8, Bits1x8) /* 18 */                      \
+  _(c10::bits2x4, Bits2x4) /* 19 */                      \
+  _(c10::bits4x2, Bits4x2) /* 20 */                      \
+  _(c10::bits8, Bits8) /* 21 */                          \
+  _(c10::bits16, Bits16) /* 22 */                        \
+  _(c10::Float8_e5m2, Float8_e5m2) /* 23 */              \
+  _(c10::Float8_e4m3fn, Float8_e4m3fn) /* 24 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -510,6 +510,19 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
     return a;
   } else if (isBitsType(a) || isBitsType(b)) {
     return ScalarType::Undefined;
+  }
+
+  // To avoid 7 rows/cols consiting only of Undefined promotion
+  // related to qints and bits between bfloat16 and float8 dtypes,
+  // below ScalarTypes are decreased by 7.
+  // TODO since more dtypes will probably be added in future,
+  // it's worth to generalize this solution or come up with different one.
+  if (isFloat8Type(a)) {
+    a = static_cast<ScalarType>(static_cast<int>(a) - 7);
+  }
+
+  if (isFloat8Type(b)) {
+    b = static_cast<ScalarType>(static_cast<int>(b) - 7);
   }
 
   // Ignore the 5 bits types, since they are handled by the if statement
