@@ -945,7 +945,7 @@ def handle_log_file(
         for line in full_text.splitlines():
             if re.search("Running .* items in this shard:", line):
                 print_to_stderr(line.strip())
-        print_to_stderr()
+        print_to_stderr("")
         return
     # otherwise: print entire file and then remove it
     print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
