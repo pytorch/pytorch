@@ -20,20 +20,11 @@ namespace c10 {
 // a proxy to evaluate equality. We also constrain the range of values for this
 // as to enable inequality checks.
 //
-// We also support a positive integer scalar "factor" that is used for computing
-// strides. For example given, a [B, j0, D] tensor, it can be strided in two
-// different ways: [D * j0, D, 1] and [j0, 1, sum(j0)]. The factor is used to
-// differentiate the two cases.
-//
-// During tracing the strides of the outputs need to be a function of the size
-// and strides of the inputs so it is important that SingletonSymNode itself is
-// able to express this.
 class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val, int64_t factor)
-      : val_(val), factor_(factor) {}
+  explicit SingletonSymNodeImpl(int64_t val) : val_(val) {}
 
   bool bool_() override {
     return false;
@@ -76,83 +67,110 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   }
 
   std::string str() override {
-    if (factor_ == 1) {
-      return "j" + std::to_string(val_);
-    }
-    return std::to_string(factor_) + "*j" + std::to_string(val_);
+    return "j" + std::to_string(val_);
   }
 
+  // NOTE [ Inequalities with SingletonInt ]
+  //
+  // The semantics of SingletonInt when it comes to relations is that it is
+  // treated as integer known to be within a certain range,
+  //
+  //     j0 \in [2, int64_t::max]
+  //
+  // allowing us to answer queries like j0 >= 1 (True), and j0 == 0 (False).
+  // This is a useful default range for the raggedness pattern of a jagged
+  // tensor (1) since sizes are non-negative, and (2) we need to get past 0/1
+  // specialization checks. It would be cool to have the ability to arbitrarily
+  // constrain the range of values as we do for unbacked symints.
+  //
+  // [ Indeterminate inequalities error out ]
+  //
+  // Given the semantic defined above, certain relations like j0 < 3 and j0 == 3
+  // are thus indeterminable. In our impl today, evaluating such relations error
+  //
+  // It may seem convenient to just define indeterminate relations to return
+  // False, but the implementation we maintain in parallel using sympy does not
+  // allow this.
+  //
+  // sympy only allows overriding of Ge. The other relations (Lt, Gt, Le) are,
+  // by consequence, all derived from Ge e.g., Lt(a, b) := !Ge(a, b). This
+  // would mean that means that if we define the indeterminate j0 >= 3
+  // the also indeterminate j0 < 3 will be evaluated to be True!
+  //
   c10::SymNode eq(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = c.has_value() && val_ == *c && factor_ == other->factor();
+    bool ret = c.has_value() && val_ == *c;
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
   c10::SymNode ne(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = !c.has_value() || val_ != *c || factor_ != other->factor();
+    bool ret = !c.has_value() || val_ != *c;
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
-  // It would be cool to have the ability to arbitrarily constrain the range of
-  // values as we do for unbacked symints. For now a useful default
-  // range seems to be [2, int64_t::max()] (1) since sizes are non-negative, and
-  // (2) we need to get past 0/1 specialization checks.
-  //
-  // Factor is assumed to be a positive integer (maybe we should make it size_t)
   c10::SymNode ge(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
-          val_ == *mb_si && factor_ >= other->factor()));
+    auto mb_si = other->singleton_int();
+    if ((mb_si.has_value() && val_ == *mb_si)
+        || (other->constant_int() && *other->constant_int() <= 2)) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(true));
     }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c <= 2));
+    TORCH_CHECK(
+        false,
+        "singleton ge: '",
+        this->str(), " >= ", (mb_si.has_value() ? *mb_si : *other->constant_int()),
+        "' is indeterminate");
   }
 
-  // For gt and lt, note that we are not returning true for the case where
-  // 2 * [s_0, s_1, s_2] > 1 * [s_0, s_1, s_2] because s_0, s_1, s_2 could be
-  // all zeros. Probably not super important either way though.
   c10::SymNode gt(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
+    auto mb_si = other->singleton_int();
+    if (mb_si.has_value() && val_ == *mb_si) {
       return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    } else if (other->constant_int() && *other->constant_int() < 2) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(true));
     }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c < 2));
+    TORCH_CHECK(
+        false,
+        "singleton gt: '",
+        this->str(), " > ",(mb_si.has_value() ? *mb_si : *other->constant_int()),
+        "' is indeterminate");
   }
 
   c10::SymNode lt(const c10::SymNode& other) override {
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    auto mb_si = other->singleton_int();
+    if (mb_si.has_value() && val_ == *mb_si) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    } else if (other->constant_int() && *other->constant_int() < 2) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    }
+    TORCH_CHECK(
+        false,
+        "singleton lt: '",
+        this->str(), " < ", (mb_si.has_value() ? *mb_si : *other->constant_int()),
+        "' is indeterminate");
   }
 
   c10::SymNode le(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
-          val_ == *mb_si && factor_ <= other->factor()));
+    auto mb_si = other->singleton_int();
+    if (mb_si.has_value() && val_ == *mb_si) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(true));
+    } else if (other->constant_int()) {
+      if (*other->constant_int() < 2) {
+        return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+      } else if (
+          *other->constant_int() >= std::numeric_limits<int64_t>::max()) {
+        return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(true));
+      }
     }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
-        *c >= std::numeric_limits<int64_t>::max()));
-  }
-
-  c10::SymNode mul(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
-      TORCH_CHECK(false, "NYI");
-    }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(
-        c10::make_intrusive<SingletonSymNodeImpl>(val_, factor_ * *c));
+    TORCH_CHECK(
+        false,
+        "singleton le: '",
+        this->str(), " <= ", (mb_si.has_value() ? *mb_si : *other->constant_int()),
+        "' is indeterminate");
   }
 
   c10::optional<int64_t> singleton_int() override {
     return val_;
-  }
-
-  c10::optional<int64_t> factor() override {
-    return factor_;
   }
 
   bool is_symbolic() override {
@@ -193,7 +211,6 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
  private:
   int64_t val_;
-  int64_t factor_;
 };
 
 } // namespace c10
