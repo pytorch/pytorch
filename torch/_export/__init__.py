@@ -90,7 +90,7 @@ def export__RC__(
 
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
-    if dynamic_shapes is None:
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return export(f, args, kwargs)
 
     kwargs = kwargs if kwargs is not None else {}
