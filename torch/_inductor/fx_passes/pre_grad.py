@@ -76,7 +76,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     if config.is_fbcode():
         from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
 
-        log.info(f"Print graph after recompile in pre grad passes: {get_everpaste_url(str(gm.graph))}")
+        log.info(
+            "Print graph after recompile in pre grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
+        )
 
     return gm
 
