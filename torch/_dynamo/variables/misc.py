@@ -875,7 +875,7 @@ class SkipFilesVariable(VariableTracker):
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs, **options
+                fn, args=rest_args, keywords=kwargs, **options)
         elif (
             self.value is cast
             and isinstance(args[0], variables.UserDefinedClassVariable)
