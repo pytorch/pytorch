@@ -536,8 +536,6 @@ class TestTracer(JitTestCase):
             return z + 4
 
         with warnings.catch_warnings(record=True) as warns:
-            # nvfuser deprecation warning filter
-            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
         for warn in warns:
             self.assertIs(warn.category, torch.jit.TracerWarning)

@@ -144,6 +144,8 @@ class JitTestCase(JitCommonTestCase):
         if not JitTestCase._restored_warnings:
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
+            # nvfuser deprecation warning filter
+            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
         self.setHooks()
 
     def tearDown(self):
