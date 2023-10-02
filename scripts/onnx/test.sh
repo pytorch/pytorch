@@ -60,6 +60,7 @@ if [[ "$SHARD_NUMBER" == "2" ]]; then
       for suite in "huggingface" "timm_models"; do
         output_file="${log_folder}/${compiler}_${suite}_float32_inference_${device}_${mode}.csv"
         bench_file="benchmarks/dynamo/${suite}.py"
+        bench_args=("--${mode}" --float32 "-d${device}" "--output=${output_file}" "--output-directory=${top_dir}" --inference -n5 "--${compiler}" --no-skip --dashboard --batch-size 1)
         # Run only selected model for each suite to quickly validate the benchmark suite works as expected.
         case "$suite" in
             "torchbench")
@@ -76,7 +77,6 @@ if [[ "$SHARD_NUMBER" == "2" ]]; then
                 exit 1
                 ;;
         esac
-        bench_args=("--${mode}" --float32 "-d${device}" "--output=${output_file}" "--output-directory=${top_dir}" --inference -n5 "--${compiler}" --no-skip --dashboard --batch-size 1)
         python "${top_dir}/${bench_file}" "${bench_args[@]}"
       done
     done
