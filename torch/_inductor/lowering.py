@@ -499,11 +499,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
 
 def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
-    if x.get_dtype() == dtype:
+    src_dtype = x.get_dtype()
+    if src_dtype == dtype:
         return clone(x) if copy else x
 
     def _to_dtype(x):
-        return ops.to_dtype(x, dtype)
+        return ops.to_dtype(x, dtype, src_dtype=src_dtype)
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
@@ -821,6 +822,7 @@ def repeat(x, repeats):
     )
 
 
+@register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
 def view(x, sizes):
@@ -1485,23 +1487,12 @@ def _warn_complex_not_supported():
     )
 
 
-@functools.lru_cache(None)
-def _warn_float8_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
-    )
-
-
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
-        return True
-    # FP8 Tensors are currently not supported
-    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
-        _warn_float8_not_supported()
         return True
     return False
 
@@ -2024,6 +2015,8 @@ make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
+# these are data-dependent, highly unlikely you can write a lowering
+make_fallback(aten.nonzero.default)
 
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
@@ -2269,7 +2262,20 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    return ir.DynamicScalar()
+    # This is interesting!  Most lowerings return tensors, so you can just
+    # return the buffer you allocated and it will get used (or not used, if
+    # it's dead.)  But _local_scalar_dense (aka item) returns an int,
+    # not a Tensor, so you would have a type mismatch if you return a buffer;
+    # we are obligated to return a sympy expression instead.  However,
+    # we need to actually codegen the .item() call somehow.  We do this
+    # by registering a faux buffer for the DynamicScalar IR node, which is
+    # solely responsible for generating this .item().  The buffer is
+    # not used for anything (notice we discard it); at codegen time,
+    # the "buffer" just gets assigned None.
+    sym = V.graph.current_node.meta["val"].node.expr
+    buffer = ir.DynamicScalar(sym, data)
+    buffer.name = V.graph.register_buffer(buffer)
+    return sym
 
 
 def _full(fill_value, device, dtype, size):
