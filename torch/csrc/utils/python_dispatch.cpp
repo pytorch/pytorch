@@ -780,8 +780,8 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_get_singleton_int", [](int64_t data) {
-    return c10::SymInt(c10::SymNode(
-        c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
+    return c10::SymInt(
+        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {
