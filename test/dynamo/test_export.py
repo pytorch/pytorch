@@ -3599,8 +3599,8 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, l_x_, a, b, d, c_false_branch, b_false_branch, a_false_branch):
-    add = l_x_ + l_x_;  l_x_ = None
+def forward(self, child, a, b, d, c_false_branch, b_false_branch, a_false_branch):
+    add = child + child;  child = None
     cos = a.cos();  a = None
     add_1 = add + cos;  add = cos = None
     cos_1 = b.cos();  b = None
@@ -3613,8 +3613,8 @@ def forward(self, l_x_, a, b, d, c_false_branch, b_false_branch, a_false_branch)
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
-    mul = l_x_ * l_x_;  l_x_ = None
+def forward(self, child, d_true_branch, b_true_branch, a_true_branch, a, b, c):
+    mul = child * child;  child = None
     sin = a.sin();  a = None
     add = mul + sin;  mul = sin = None
     sin_1 = b.sin();  b = None

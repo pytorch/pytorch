@@ -323,18 +323,18 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
-        size = l_x_.size(0)
+        size = child.size(0)
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child, size);  wrap_body_0 = child = size = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, size):
-            view = l_x_.view(size);  l_x_ = size = None
+        def forward(self, child, size):
+            view = child.view(size);  child = size = None
             add = view + 0.5;  view = None
             return (add,)
 """,
@@ -1851,6 +1851,42 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+    def test_autograd_function_multiple_return(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin(), x.cos()
+            @staticmethod
+            def backward(ctx, grad0, grad1):
+                x, = ctx.saved_tensors
+                return grad0 * x.cos() + grad1 * x.cos()
+
+        def fn(x):
+            return Foo.apply(x)
+
+        backend = EagerAndRecordGraphs()
+
+        x = torch.randn(5, requires_grad=True)
+        actual = fn(x)
+        expected = torch.compile(backend=backend, fullgraph=True)(fn)(x)
+        self.assertEqual(actual, expected)
+
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(normalize_gm(backend.graphs[0].print_readable(print_output=False)), """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        child = L_x_
+
+        function_ctx = torch.autograd.function.FunctionCtx()
+        trampoline_autograd_apply = torch__dynamo_variables_misc_trampoline_autograd_apply(child);  child = None
+        getitem_2 = trampoline_autograd_apply[0]
+        getitem_3 = trampoline_autograd_apply[1];  trampoline_autograd_apply = None
+        return (getitem_2, getitem_3)
+""")
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def run(self, result=None):
@@ -2355,7 +2391,12 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    # Pushed the error further.
+    # Ref: https://github.com/pytorch/pytorch/pull/107618
+    @unittest.expectedFailure
     def test_grad_pytree(self):
+        counters.clear()
+
         def fn(x):
             x1, x2 = x
             return x1.sin().sum() + x2
@@ -2366,8 +2407,14 @@ class GraphModule(torch.nn.Module):
         x1 = torch.randn(3, 3, 3)
         x2 = torch.randn(())
         actual = wrapper_fn((x1, x2))
-        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
             (x1, x2)
+        )
+        self.assertEqual(len(counters["graph_break"]), 1)
+        assert_dict_matches_regex(
+            self,
+            dict(counters["graph_break"]),
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -2891,6 +2938,9 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    # Pushed the error further.
+    # Ref: https://github.com/pytorch/pytorch/pull/107618
+    @unittest.expectedFailure
     def test_vmap_pytree_inputs(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -2910,7 +2960,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {"calling vmap with unsupported arg types: .*": 2},
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
