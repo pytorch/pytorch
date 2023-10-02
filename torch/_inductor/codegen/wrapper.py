@@ -84,25 +84,31 @@ def convert_arg_type(python_type):
 
 
 def convert_return_type(python_type):
-    # TODO: only support Tensor as func return type for now
     # TODO: support alias
-    assert (
-        python_type == "Tensor"
-    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
-    return f"at::{python_type}"
+    python_to_cpp = {
+        "Tensor": "at::Tensor",
+        "List[Tensor]": "std::vector<at::Tensor>",
+    }
+
+    cpp_type = python_to_cpp.get(python_type, None)
+    assert cpp_type is not None, f"NYI return type: {python_type}"
+    return cpp_type
 
 
 def get_cpp_op_schema(kernel):
     # use x.real_type instead of x.type so that we get ScalarType instead of int
     arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
     arg_names = [x.name for x in kernel._schema.arguments]
-    # TODO: only support len(returns) == 1 for now.
-    returns = [repr(x.type) for x in kernel._schema.returns]
-    assert (
-        len(returns) == 1
-    ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
-    return_value = returns[0]
-    cpp_return_value = convert_return_type(return_value)
+    returns = [repr(x.real_type) for x in kernel._schema.returns]
+
+    num_retunrs = len(returns)
+    assert num_retunrs > 0, "must have at least one return value"
+
+    if num_retunrs == 1:
+        cpp_return_value = convert_return_type(returns[0])
+    elif num_retunrs > 1:
+        tuple_returns = ", ".join([convert_return_type(r) for r in returns])
+        cpp_return_value = f"std::tuple<{tuple_returns}>"
 
     cpp_arg_type = [
         f"{convert_arg_type(arg_type)} {arg_name}"
@@ -1437,7 +1443,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 output_handle_name = f"{name}_handle"
                 assert (
                     output.indices[0][1] == idx
-                ), f"expected {output.indices[1]=} == {idx=} for {output_name_base=}"
+                ), f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
                 self.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
                 output_raii_handles.append(
@@ -1670,10 +1676,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 ir.ComputedBuffer,
                 ir.ConcatKernel,
                 ir.ExternKernelOut,
+                ir.MultiOutput,
             )
 
             if isinstance(arg_type, torch.TensorType):
-                assert isinstance(arg, inductor_tensor_buffers)
+                assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
                 new_tensor_args.append(f"{arg.name}.get()")
             elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
                 # int or SymInt
@@ -1738,11 +1745,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
                 self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
                 new_tensor_args.append(f"{arg}.get()")
-            elif isinstance(return_type, torch.ListType) and isinstance(
-                return_type.getElementType(), torch.TensorType
-            ):
-                # TODO: handle tensor list return type
-                raise NotImplementedError("NYI support for return type: List[Tensor]")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
             elif isinstance(return_type, torch.ListType) and isinstance(
@@ -1750,19 +1752,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ):
                 raise NotImplementedError("NYI support for return type: List[SymInt]")
             else:
-                raise AssertionError(f"Unsupport return type found: {return_type}")
+                raise AssertionError(f"Unsupported return type found: {return_type}")
 
-        assert (
-            len(output_args) == 1
-        ), "Support for multiple returns is not implemented yet"
-        for output_arg, return_type in zip(output_args, return_types):
-            # TODO: check schema here
-            # assume it's a tensor now
+        # TODO: Only support tensor(s) returns for now, SymInt is not implemented yet
+        for return_type in return_types:
+            if isinstance(return_type, (torch.TensorType)):
+                pass
+            elif isinstance(return_type, torch.OptionalType):
+                assert isinstance(return_type.getElementType(), torch.TensorType)
+            elif isinstance(return_type, torch.ListType):
+                assert isinstance(return_type.getElementType(), torch.TensorType)
+            else:
+                raise NotImplementedError(
+                    f"return type {return_type} is not yet supported."
+                )
+
+        for output_arg in output_args:
             if output_arg is not None:
-                if isinstance(return_type, torch.OptionalType):
-                    fill_output_arg(output_arg, return_type.getElementType())
-                else:
-                    fill_output_arg(output_arg, return_type)
+                fill_output_arg(output_arg, torch.TensorType.get())
 
         return new_tensor_args, new_int_args
 

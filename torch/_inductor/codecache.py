@@ -688,7 +688,7 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
 
 
 def cpp_wrapper_flags() -> str:
@@ -908,6 +908,7 @@ def get_include_and_linking_paths(
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
         ipaths.append(build_paths.gcc_install_tools_include())
+        ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -1095,7 +1096,7 @@ class AotCodeCache:
                     log.debug("aot constant bin removal command: %s", cmd)
                     run_command_and_check(cmd)
 
-                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    body = re.sub(r"[\W]", "_", consts_path)
                     symbol_list = []
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
