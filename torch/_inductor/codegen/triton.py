@@ -1550,13 +1550,8 @@ class TritonKernel(Kernel):
             default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
-                ttype = triton_compute_type(src_dtype)
-                other = self.cse.generate(
-                    self.compute,
-                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {ttype})",
-                )
                 return self.cse.generate(
-                    self.compute, f"tl.where({cond}, {value}, {other})"
+                    self.compute, f"tl.where({cond}, {value}, {default})"
                 )
 
             if isinstance(value, tuple):

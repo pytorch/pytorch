@@ -184,32 +184,26 @@ static void allany_meta(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    OptionalIntArrayRef dims,
+    IntArrayRef dims,
     bool keepdim) {
   const auto& result = meta.maybe_get_output();
   check_result_is_bytebool(name, self, result);
   auto out_dtype = get_result_or_bytebool_dtype(self, result);
-  resize_reduction(meta, self, dims, keepdim, out_dtype, /*allow_empty_dims=*/true);
+  resize_reduction(meta, self, dims, keepdim, out_dtype);
 }
 
-TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   allany_meta(*this, "all", self, dim, keepdim);
-}
-
-TORCH_META_FUNC2(all, dims)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
-  allany_meta(*this, "all", self, dim, keepdim);
+  return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 TORCH_META_FUNC(all)(const Tensor& self) {
   allany_meta(*this, "all", self, {}, false);
 }
 
-TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   allany_meta(*this, "any", self, dim, keepdim);
-}
-
-TORCH_META_FUNC2(any, dims)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
-  allany_meta(*this, "any", self, dim, keepdim);
+  return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 TORCH_META_FUNC(any)(const Tensor& self) {
@@ -1503,7 +1497,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
-    OptionalIntArrayRef dims,
+    IntArrayRef dims,
     bool keepdim) {
   if (self.is_cuda()) {
     // As CUDA supports dynamic type casting, we use this overload of
@@ -1520,7 +1514,7 @@ template <int identity, typename Stub>
 inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
-    OptionalIntArrayRef dims,
+    IntArrayRef dims,
     bool keepdim,
     Stub& stub) {
   if (self.numel() == 0) {
@@ -1538,11 +1532,6 @@ TORCH_IMPL_FUNC(all_out)
   allany_impl<1>(self, result, dim, keepdim, and_stub);
 }
 
-TORCH_IMPL_FUNC(all_dims_out)
-(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
-  allany_impl<1>(self, result, dim, keepdim, and_stub);
-}
-
 TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<1>(self, result, {}, false, and_stub);
 }
@@ -1552,50 +1541,8 @@ TORCH_IMPL_FUNC(any_out)
   allany_impl<0>(self, result, dim, keepdim, or_stub);
 }
 
-TORCH_IMPL_FUNC(any_dims_out)
-(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
-  allany_impl<0>(self, result, dim, keepdim, or_stub);
-}
-
 TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<0>(self, result, {}, false, or_stub);
-}
-
-template <bool is_all>
-Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
-  // Default implementation in terms of all-reduce or single dim reduce
-  if (!dim) {
-    Tensor out;
-    if constexpr (is_all) {
-      out = self.all();
-    } else {
-      out = self.any();
-    }
-
-    if (keepdim) {
-      DimVector out_shape(self.dim(), 1);
-      return out.expand(out_shape);
-    }
-    return out;
-  }
-
-  Tensor out = self;
-  for (auto d : *dim) {
-    if constexpr (is_all) {
-      out = out.all(d, /*keepdim=*/true);
-    } else {
-      out = out.any(d, /*keepdim=*/true);
-    }
-  }
-  return keepdim ? out : out.squeeze(*dim);
-}
-
-Tensor all_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
-  return allany_dims_default<true>(self, dim, keepdim);
-}
-
-Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
-  return allany_dims_default<false>(self, dim, keepdim);
 }
 
 TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
