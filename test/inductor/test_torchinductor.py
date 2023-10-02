@@ -2830,6 +2830,16 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave_2(self):
+        def fn(x):
+            return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
+
+        self.common(
+            fn,
+            (torch.tensor([2, 4, 6]),),
+        )
+
     @config.patch(fallback_random=True)
     def test_randn_with_dtype_and_device(self):
         if self.device == "cuda":
@@ -4365,6 +4375,24 @@ class CommonTemplate:
 
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
+
+    def test_input_mutation5(self):
+        def fn(x):
+            tmp = x.ceil()
+            x.add_(10)
+            return tmp
+
+        opt_fn = torch._dynamo.optimize()(fn)
+
+        a = torch.zeros((), dtype=torch.int64, device=self.device)
+        a_expect = a.clone()
+        expect = fn(a_expect)
+
+        a_actual = a.clone()
+        actual = opt_fn(a_actual)
+
+        self.assertEqual(a_expect, a_actual)
+        self.assertEqual(expect, actual)
 
     def test_slice_mutation1(self):
         def fn(a):
