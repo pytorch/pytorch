@@ -927,6 +927,7 @@ class DistributedDataParallel(Module, Joinable):
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
         if any(hasattr(p, "_in_backward_optimizers") for p in self._module_parameters):
+            torch._C._log_api_usage_once("ddp.optimizer_in_backward")
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
