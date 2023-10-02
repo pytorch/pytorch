@@ -67,7 +67,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
                 self.assertEqual(model.bias, model_2.bias)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_fsdp_model_state_no_resharding(self):
         self._test_fsdp_model_state(process_group=None)
