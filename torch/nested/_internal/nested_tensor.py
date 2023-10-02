@@ -21,8 +21,21 @@ class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
     _size: Tuple[int, torch.SymInt, int]
-    # TODO: Write a note here about what how we are using Singleton ints for
-    # sizes and strides.
+    # NOTE [ Singleton ints for ragged sizes and strides ]
+    #
+    # Jagged layout tensors are tensors that represent a n-dim tensor with a
+    # ragged dimension, but are backed by an (n-1)-dim tensor underneath, e.g.,
+    # a jagged tensor with outer shape [B, x, D] is represented internally by a
+    # tensor with shape [sum(x), D] where we introduce what we call a singleton
+    # (or skolem) denoted as "x" here (but sometimes denoted with "*" to
+    # represent the ragged dimension, and sum(x) represents the dim of the inner
+    # tensor or equivalently the sum of all the sizes of the constituent
+    # tensors' varying lengths.
+    #
+    # We also use singleton ints to represent the strides of this tensor.
+    # For example, a jagged tensor with shape [B, x, D] can be strided in two
+    # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
+    #
     _ragged_size: torch.SymInt
 
     __torch_function__ = torch._C._disabled_torch_function_impl
