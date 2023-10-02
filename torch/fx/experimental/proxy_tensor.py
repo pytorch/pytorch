@@ -194,6 +194,18 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
                 wrap_with_proxy(ee, proxy[idx], get_constant(idx))
+        elif isinstance(e, dict):
+            assert constant is None
+
+            if isinstance(proxy, fx.Proxy):
+                set_meta(proxy, e)
+
+            # example use case: allreduce_ returns ([tensor], work)
+            for key, val in e.items():
+                wrap_with_proxy(val, proxy[key], None)
+        else:
+            # intentionally pass on primitives
+            pass
 
 
     def get_constant(idx):
