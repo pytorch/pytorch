@@ -12,7 +12,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
-from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
 
 from .. import codecache, config, ir
@@ -299,7 +299,6 @@ class WrapperCodeGen(CodeGen):
         self.stride = "stride()"
         self.last_seen_device_guard_index = None
         self.supports_intermediate_hooks = True
-        self.inf_and_nan_header = False
         self.expr_printer = pexpr
         # Not all the dynamic symbols will be used in the generated code. This
         # set contains those actually being defined by something like
@@ -1079,58 +1078,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
-    def write_inf_and_nan_header(self):
-        if self.inf_and_nan_header:
-            return
-
-        self.inf_and_nan_header = True
-        self.header.splice(
-            """
-            static inline bool check_has_inf(at::Tensor tensor, bool assertion) {
-              bool has_inf = false;
-
-              auto flattened = tensor.view({-1});
-              for (int64_t i = 0; i < flattened.numel(); i++) {
-                if(std::isinf(flattened[i].item<float>())) {
-                  has_inf = true;
-                  break;
-                }
-              }
-
-              if (assertion) {
-                assert(!has_inf);
-              }
-
-              return has_inf;
-            }
-
-            static inline bool check_has_nan(at::Tensor tensor, bool assertion) {
-              bool has_nan = false;
-
-              auto flattened = tensor.view({-1});
-              for (int64_t i = 0; i < flattened.numel(); i++) {
-                if(std::isnan(flattened[i].item<float>())) {
-                  has_nan = true;
-                  break;
-                }
-              }
-
-              if (assertion) {
-                assert(!has_nan);
-              }
-
-              return has_nan;
-            }
-
-            static inline bool check_inf_and_nan(at::Tensor tensor, bool assertion) {
-              bool has_inf = check_has_inf(tensor, assertion);
-              bool has_nan = check_has_nan(tensor, assertion);
-
-              return has_inf || has_nan;
-            }
-            """
-        )
-
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
@@ -1600,10 +1547,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def generate_inf_and_nan_checker(self, nodes):
-        self.write_inf_and_nan_header()
         for buf in nodes.get_names():
             # TODO: Add buf name directly into check_inf_and_nan.
-            self.writeline(f"check_inf_and_nan({buf}, true);")
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_check_inf_and_nan({buf}));"
+            )
 
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
@@ -1831,7 +1779,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
         for output_arg in output_args:
-            if output_arg is not None:
+            assert output_arg is not None, "Optional return types are not yet supported"
+            if isinstance(output_arg, (list, tuple)):
+                for out in output_arg:
+                    fill_output_arg(out, torch.TensorType.get())
+            else:
                 fill_output_arg(output_arg, torch.TensorType.get())
 
         return new_tensor_args, new_int_args
@@ -1901,10 +1853,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
         raw_args,  # contains both args and flatten kwargs
         outputs,
     ):
-        if isinstance(outputs, (list, tuple)):
-            output_args = [output.get_name() for output in outputs]
-        else:
-            output_args = [outputs.get_name()]
+        def extract_output_name(out):
+            assert out is not None, "None, i.e. optional output is not supported"
+            if isinstance(out, ir.MultiOutput):
+                return out.get_name()
+            elif isinstance(out, (list, tuple)):
+                return type(out)(extract_output_name(o) for o in out)
+            else:
+                raise AssertionError(f"Unexpected output: {type(out)}")
+
+        # output_args has the same pytree structure as outputs
+        output_args = extract_output_name(outputs)
+        if isinstance(output_args, str):
+            output_args = [output_args]
 
         (
             tensor_call_args,
@@ -2013,6 +1974,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 uint32_t grid_x;
                 uint32_t grid_y;
                 uint32_t grid_z;
+
+                bool is_non_zero() {
+                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
+                }
             };
 
             }  // anonymous namespace
@@ -2186,12 +2151,14 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             grid, (list, tuple)
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
-        grid_args = [
-            self.grid_expr_printer(V.graph.sizevars.simplify(item)) for item in grid
-        ]
+        grid = [V.graph.sizevars.simplify(item) for item in grid]
+        grid_has_unbacked_symbols = any(free_unbacked_symbols(item) for item in grid)
+        grid_args = [self.grid_expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
+        if grid_has_unbacked_symbols:
+            self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -2204,3 +2171,5 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 stream,
             )
         )
+        if grid_has_unbacked_symbols:
+            self.writeline("}")
