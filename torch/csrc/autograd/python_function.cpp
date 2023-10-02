@@ -98,7 +98,13 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
+      auto zeros_without_gil = [](const VariableInfo& variable,
+                                  at::OptionalDeviceGuard& device_guard) {
+        pybind11::gil_scoped_release gil;
+        return variable.zeros(device_guard);
+      };
+      input =
+          THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
     }
     if (!input)
       throw_python_error();
@@ -564,7 +570,7 @@ static void _get_tensors_to_save(
     for (const auto i : c10::irange(num_saved)) {
       PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
       if (obj == Py_None) {
-        tensors_to_save.push_back(c10::nullopt);
+        tensors_to_save.emplace_back(c10::nullopt);
         continue;
       } else if (THPVariable_Check(obj)) {
         const auto& tensor = THPVariable_Unpack(obj);
@@ -572,7 +578,7 @@ static void _get_tensors_to_save(
           to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
         }
         if (is_executable) {
-          tensors_to_save.push_back(tensor);
+          tensors_to_save.emplace_back(tensor);
         }
       } else {
         if (is_executable) {

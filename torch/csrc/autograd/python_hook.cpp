@@ -99,6 +99,7 @@ PyFunctionTensorPreHook::PyFunctionTensorPreHook(
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -127,6 +128,7 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPreHook::~PyFunctionPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -149,6 +151,7 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPostHook::~PyFunctionPostHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -171,7 +174,7 @@ auto PyFunctionPostHook::operator()(
 }
 
 void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -182,7 +185,7 @@ void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
 }
 
 void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -191,7 +194,7 @@ void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
 }
 
 void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -205,6 +208,7 @@ PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {

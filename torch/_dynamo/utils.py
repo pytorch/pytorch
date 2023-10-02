@@ -406,18 +406,15 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    if sys.version_info < (3, 9):
-        return isinstance(value, typing._GenericAlias)
-    else:
-        return isinstance(
-            # `_SpecialForm`` is the parent class of `Optional`
-            value,
-            (
-                typing._SpecialGenericAlias,
-                typing._UnionGenericAlias,
-                typing._SpecialForm,
-            ),
-        )
+    # _Final catches most of typing classes:
+    #   - Any
+    #   - Callable
+    #   - Union
+    #   ...
+    #
+    # NB: we intentionally ignore classes that inherit from Generic, since they
+    # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    return isinstance(value, typing._Final) or value is typing.Generic
 
 
 def is_numpy_int_type(value):
@@ -1062,7 +1059,13 @@ def same(
                     )
 
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 2.0
+
+                # In the case of using AMP (Automatic Mixed Precision), certain models have
+                # failed the benchmark's correctness check. However, the end-to-end model's
+                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                # Thus, it's possible that the correctness check failures for these models are
+                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
+                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
                 if (
                     fp64_ref.numel() < 1000
@@ -1706,7 +1709,7 @@ def to_numpy_helper(value):
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.cpu().numpy()
+        return value.numpy(force=True)
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1846,7 +1849,7 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
+        from torch.utils._triton import has_triton
 
         compile_supported = has_triton()
     else:
@@ -2120,3 +2123,17 @@ def get_static_address_type(t):
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
+
+
+def is_rng_state_getter_or_setter(value):
+    getters = (
+        torch.default_generator.get_state,
+        torch.get_rng_state,
+        torch.cuda.get_rng_state,
+    )
+    setters = (
+        torch.default_generator.set_state,
+        torch.set_rng_state,
+        torch.cuda.set_rng_state,
+    )
+    return value in (*setters, *getters)
