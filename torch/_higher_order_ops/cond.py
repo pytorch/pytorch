@@ -107,7 +107,7 @@ def cond(pred, true_fn, false_fn, operands):
 
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
-        """
+    """
 
     if torch._dynamo.is_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
