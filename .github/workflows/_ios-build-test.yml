@@ -264,9 +264,8 @@ jobs:
           path: ${{ runner.temp }}/${{ matrix.ios_arch }}/${{ matrix.ios_arch }}.zip
 
   upload-ios-artifacts:
-    # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
-    # and access AWS credentials
-    runs-on: macos-13-large
+    # NB: this job run on GitHub MacOS ephemeral runner so that it can access AWS credentials
+    runs-on: ubuntu-22.04
     needs: build
     # NB: Only upload release build, if we need it, we could also turn on nightly here
     environment: ${{ ((inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
@@ -343,8 +342,6 @@ jobs:
 
           for LIB in "${LIBRARIES[@]}"; do
             cp "${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${DEST_DIR}"/install/lib/"${LIB}"
-            # Print the info
-            lipo -i "${DEST_DIR}"/install/lib/"${LIB}"
           done
 
           BUILD_LITE_INTERPRETER=1
