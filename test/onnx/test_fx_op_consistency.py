@@ -57,11 +57,11 @@ TESTED_OPS: frozenset[str] = frozenset(
         "acosh",
         "add",
         "addmm",
-        # "all",    - onnxscript doesn't handle aten::all.dims
+        "all",
         "allclose",
         "amax",
         "amin",
-        # "any",    - onnxscript doesn't handle aten::any.dims
+        "any",
         "arange",
         "argmax",
         "argmin",

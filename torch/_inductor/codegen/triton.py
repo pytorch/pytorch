@@ -1382,8 +1382,14 @@ class TritonKernel(Kernel):
                 append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+
+            dtype = V.graph.get_dtype(name)
+            if dtype in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
+            if dtype == torch.bool:
+                # Workaround for https://github.com/openai/triton/issues/2151
+                # tl.load returns int8 when loading from pointer to int1
+                line += ".to(tl.int1)"
 
         if "tmp" in mask:
             # Masked loads must come after the mask is computed
@@ -1551,6 +1557,8 @@ class TritonKernel(Kernel):
 
             def _mask_value(value, default):
                 ttype = triton_compute_type(src_dtype)
+                # TODO: int1 seems to be broken on triton-rocm
+                ttype = ttype.replace("int1", "tl.int8")
                 other = self.cse.generate(
                     self.compute,
                     f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {ttype})",
