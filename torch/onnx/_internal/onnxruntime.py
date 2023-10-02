@@ -803,9 +803,9 @@ class OrtBackend:
             try:
                 import onnx.inliner
             except ImportError:
-                # onnx.inliner is not available in onnx <= 1.15
+                # onnx.inliner is not available in onnx < 1.15
                 warnings.warn(
-                    "Skipped inlining. onnx.inliner is not available in onnx <= 1.15"
+                    "Skipped inlining. onnx.inliner is not available in onnx < 1.15"
                 )
             else:
                 onnx_model = onnx.inliner.inline_local_functions(onnx_model)
