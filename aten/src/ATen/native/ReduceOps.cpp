@@ -1567,9 +1567,9 @@ Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool kee
   if (!dim) {
     Tensor out;
     if constexpr (is_all) {
-      return self.all();
+      out = self.all();
     } else {
-      return self.any();
+      out = self.any();
     }
 
     if (keepdim) {
