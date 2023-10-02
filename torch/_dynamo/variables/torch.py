@@ -24,7 +24,6 @@ from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
-    has_torch_function,
     is_rng_state_getter_or_setter,
     istype,
     product,
