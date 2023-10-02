@@ -1558,7 +1558,7 @@ class TritonKernel(Kernel):
             def _mask_value(value, default):
                 ttype = triton_compute_type(src_dtype)
                 # TODO: int1 seems to be broken on triton-rocm
-                ttype = ttype.replace("int1", "tl.int8")
+                ttype = ttype.replace("int1", "int8")
                 other = self.cse.generate(
                     self.compute,
                     f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {ttype})",
