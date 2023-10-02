@@ -20,11 +20,20 @@ namespace c10 {
 // a proxy to evaluate equality. We also constrain the range of values for this
 // as to enable inequality checks.
 //
+// We also support a positive integer scalar "coeff" that is used for computing
+// strides. For example given, a [B, j0, D] tensor, it can be strided in two
+// different ways: [D * j0, D, 1] and [j0, 1, sum(j0)]. The coeff is used to
+// differentiate the two cases.
+//
+// During tracing the strides of the outputs need to be a function of the size
+// and strides of the inputs so it is important that SingletonSymNode itself is
+// able to express this.
 class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val) : val_(val) {}
+  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff)
+      : val_(val), coeff_(coeff) {}
 
   bool bool_() override {
     return false;
@@ -67,7 +76,10 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   }
 
   std::string str() override {
-    return "j" + std::to_string(val_);
+    if (coeff_ == 1) {
+      return "j" + std::to_string(val_);
+    }
+    return std::to_string(coeff_) + "*j" + std::to_string(val_);
   }
 
   // NOTE [ Inequalities with SingletonInt ]
@@ -97,15 +109,23 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   // would mean that means that if we define the indeterminate j0 >= 3
   // the also indeterminate j0 < 3 will be evaluated to be True!
   //
+  // [ Coefficient are assumed positive ]
+  //
+  // For the purpose of computing inequalities, we consider the coefficient of
+  // the SingletonInt to be a positive integer.
+  //
+  // Thus, no modificaitons are needed to the logic since
+  // j0 >= k implies coeff * j0 >= k
+  //
   c10::SymNode eq(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = c.has_value() && val_ == *c;
+    bool ret = c.has_value() && val_ == *c && coeff_ == other->singleton_coeff();
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
   c10::SymNode ne(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = !c.has_value() || val_ != *c;
+    bool ret = !c.has_value() || val_ != *c || coeff_ != other->singleton_coeff();
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
@@ -113,7 +133,8 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     auto mb_si = other->singleton_int();
     if ((mb_si.has_value() && val_ == *mb_si)
         || (other->constant_int() && *other->constant_int() <= 2)) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(true));
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
+          coeff_ >= other->singleton_coeff()));
     }
     TORCH_CHECK(
         false,
@@ -153,7 +174,8 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::SymNode le(const c10::SymNode& other) override {
     auto mb_si = other->singleton_int();
     if (mb_si.has_value() && val_ == *mb_si) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(true));
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
+          coeff_ <= other->singleton_coeff()));
     } else if (other->constant_int()) {
       if (*other->constant_int() < 2) {
         return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
@@ -169,8 +191,22 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
         "' is indeterminate");
   }
 
+  c10::SymNode mul(const c10::SymNode& other) override {
+    if (auto mb_si = other->singleton_int()) {
+      TORCH_CHECK(false, "NYI");
+    }
+    c10::optional<int64_t> c = other->constant_int();
+    TORCH_CHECK(c.has_value());
+    return SymNode(
+        c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c));
+  }
+
   c10::optional<int64_t> singleton_int() override {
     return val_;
+  }
+
+  c10::optional<int64_t> singleton_coeff() override {
+    return coeff_;
   }
 
   bool is_symbolic() override {
@@ -211,6 +247,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
  private:
   int64_t val_;
+  int64_t coeff_;
 };
 
 } // namespace c10
