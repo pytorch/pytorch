@@ -295,16 +295,15 @@ jobs:
         run: |
           set -eux
 
-          for ARCH in "arm64"; do
-            TMP_DIR="${RUNNER_TEMP}/${ARCH}"
-            mkdir -p "${TMP_DIR}"
+          ARCH="arm64"
+          TMP_DIR="${RUNNER_TEMP}/${ARCH}"
+          mkdir -p "${TMP_DIR}"
 
-            cp "${ARCH}.zip" "${TMP_DIR}"
+          cp "${ARCH}.zip" "${TMP_DIR}"
 
-            pushd "${TMP_DIR}"
-            unzip -o "${ARCH}.zip"
-            popd
-          done
+          pushd "${TMP_DIR}"
+          unzip -o "${ARCH}.zip"
+          popd
 
       - name: Prepare the artifact
         env:
