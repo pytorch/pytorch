@@ -119,13 +119,15 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   //
   c10::SymNode eq(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = c.has_value() && val_ == *c && coeff_ == other->singleton_coeff();
+    bool ret =
+        c.has_value() && val_ == *c && coeff_ == other->singleton_coeff();
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
   c10::SymNode ne(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = !c.has_value() || val_ != *c || coeff_ != other->singleton_coeff();
+    bool ret =
+        !c.has_value() || val_ != *c || coeff_ != other->singleton_coeff();
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
