@@ -834,7 +834,7 @@ Example::
     >>> torch.all(a, dim=0)
     tensor([ True, False], dtype=torch.bool)
 """.format(
-        **multi_dim_common
+        **single_dim_common
     ),
 )
 
@@ -891,7 +891,7 @@ Example::
     >>> torch.any(a, 0)
     tensor([True, True])
 """.format(
-        **multi_dim_common
+        **single_dim_common
     ),
 )
 
