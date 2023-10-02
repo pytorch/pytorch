@@ -791,7 +791,7 @@ static bool is_int_list(
     // Make sure none of the later arguments are SymInt
     // NB: do NOT check that the later arguments are ints, as this is
     // BC-breaking for FX
-    for (int i = 1; i < len; i++) {
+    for (Py_ssize_t i = 1; i < len; i++) {
       if (torch::is_symint(
               py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
         if (failed_idx != nullptr) {
