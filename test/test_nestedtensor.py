@@ -2842,6 +2842,8 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
             torch.ops.aten.sym_numel.default,
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.sym_storage_offset.default,
         ):
             op(nt)
 
@@ -2849,17 +2851,15 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, 1)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
         for op in (
-            torch.ops.aten.sym_stride.default,
             torch.ops.aten.is_contiguous.default,
             torch.ops.aten.is_contiguous.memory_format,
-            torch.ops.aten.sym_storage_offset.default,
         ):
             error_msg = "NestedTensors do not support directly querying strides"
             with self.assertRaisesRegex(RuntimeError, error_msg):

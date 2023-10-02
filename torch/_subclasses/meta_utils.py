@@ -407,15 +407,11 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
 
-                    if not t.is_nested:
-                        # FIXME: nested tensors DO support strides, but the issue
-                        # is that we're introducing a symbol that does not get
-                        # tracked later and therefore does not have a source.
-                        (
-                            sizes,
-                            strides,
-                            storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                    (
+                        sizes,
+                        strides,
+                        storage_offset,
+                    ) = sym_sizes_strides_storage_offset(t, source)
 
                     def empty_create(inner_t, inner_src):
                         (
@@ -443,17 +439,21 @@ class MetaConverter:
                         extra_context = None
                         if t.is_nested:
                             # Avoid circular import
-                            from torch._dynamo.source import TensorProperty, TensorPropertySource
+                            from torch._dynamo.source import (
+                                TensorProperty,
+                                TensorPropertySource,
+                            )
 
                             sym_ragged_size = shape_env.create_symintnode(
                                 shape_env.create_symbol(
                                     t._size[1],
-                                    TensorPropertySource(source, TensorProperty.SIZE, 1),
+                                    TensorPropertySource(
+                                        source, TensorProperty.SIZE, 1
+                                    ),
                                 ),
                                 hint=t._size[1],
                             )
                             extra_context = (sym_ragged_size,)
-
 
                         r = transform_subclass(
                             t,
@@ -491,14 +491,11 @@ class MetaConverter:
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
-                    if (
-                        swr not in self.storage_memo
-                        and (
-                             r.is_nested
-                             or (
-                                 r.stride() == strides
-                                 and r.storage_offset() == storage_offset
-                             )
+                    if swr not in self.storage_memo and (
+                        r.is_nested
+                        or (
+                            r.stride() == strides
+                            and r.storage_offset() == storage_offset
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
