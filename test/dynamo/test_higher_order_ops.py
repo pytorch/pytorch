@@ -2391,12 +2391,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
-    # Pushed the error further.
-    # Ref: https://github.com/pytorch/pytorch/pull/107618
-    @unittest.expectedFailure
     def test_grad_pytree(self):
-        counters.clear()
-
         def fn(x):
             x1, x2 = x
             return x1.sin().sum() + x2
@@ -2407,14 +2402,8 @@ class GraphModule(torch.nn.Module):
         x1 = torch.randn(3, 3, 3)
         x2 = torch.randn(())
         actual = wrapper_fn((x1, x2))
-        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(
             (x1, x2)
-        )
-        self.assertEqual(len(counters["graph_break"]), 1)
-        assert_dict_matches_regex(
-            self,
-            dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 

@@ -289,43 +289,44 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return wrap(lambda x: x.add_(1.0), x)
 
-        def check_count_and_graph(
-            exp_frame_count, exp_op_count, exp_n_graph, exp_graph
+        def check_count(
+            exp_frame_count, exp_op_count, exp_n_graph
         ):
             self.assertEqual(cnt.frame_count, exp_frame_count)
             self.assertEqual(cnt.op_count, exp_op_count)
             self.assertEqual(len(backend.graphs), exp_n_graph)
-            actual = normalize_gm(
-                backend.graphs[exp_n_graph - 1].print_readable(print_output=False)
-            )
-            self.assertExpectedInline(actual, exp_graph)
+
+        def get_normalized_graph(i):
+            return normalize_gm(backend.graphs[i].print_readable(print_output=False))
 
         t = torch.randn([3, 4])
         t_clone = t.clone()
         t_clone2 = t.clone()
         f(t)
 
-        expected_graph = """\
+        check_count(1, 2, 1)
+        expected_graph = get_normalized_graph(0)
+        self.assertExpectedInline(expected_graph, """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child);  wrap_body_0 = child = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+        def forward(self, child):
+            add_ = child.add_(1.0);  child = None
             return (add_,)
-"""
-        check_count_and_graph(1, 2, 1, expected_graph)
+""")
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 4, 2, expected_graph)
+        check_count(2, 4, 2)
+        self.assertEqual(expected_graph, get_normalized_graph(1))
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -336,7 +337,8 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 6, 3, expected_graph)
+        check_count(3, 6, 3)
+        self.assertEqual(expected_graph, get_normalized_graph(2))
 
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
