@@ -68,7 +68,7 @@ def _gather_state_dict(
     Given a state_dict, this API gathers all the ShardedTensors or DTensors in the state_dict.
     """
     new_state_dict = {}
-    for key, tensor in state_dict.items():
+    for key, value in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             # ShardedTensor does not seem to record the original device type.
             # So if the tensor is moved to CPU, we won't know the original type.
