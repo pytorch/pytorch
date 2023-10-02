@@ -1313,7 +1313,7 @@ class CppKernel(Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy_symbol(f"i{n}") for n in range(len(self.ranges))]
+            self.itervars = [sympy_symbol(f"x{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],

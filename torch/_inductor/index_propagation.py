@@ -25,6 +25,8 @@ from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Unio
 
 import sympy
 
+from typing_extensions import TypeAlias
+
 import torch
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
@@ -144,7 +146,7 @@ class IndexPropVar:
         ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
-IndexPropResult = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
+IndexPropResult: TypeAlias = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
 
 
 class IndexPropagation:
