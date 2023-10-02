@@ -44,6 +44,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
@@ -59,7 +60,6 @@ class GuardOnDataDependentSymNode(RuntimeError):
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence
-from sympy.multipledispatch import dispatch
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -96,41 +96,6 @@ SYM_FUNCTION_MODE = None
 
 class ConstraintViolationError(RuntimeError):
     pass
-
-class _SingletonInt(sympy.AtomicExpr):
-    def __init__(self, val, factor):
-        self.val = val
-        self.factor = factor
-        super().__init__()
-
-    def _eval_Eq(self, other):
-        # TODO: support more cases
-        if isinstance(other, _SingletonInt) and other.val == self.val and self.factor == other.factor:
-            return sympy.true
-        return sympy.false
-
-    # This is necessary so that calling expr.free_symbols on exprs that contain
-    # this Singleton does not error
-    @property
-    def free_symbols(self):
-        return set()
-
-    def __mul__(self, other):
-        if isinstance(other, _SingletonInt):
-            return NotImplemented
-        return _SingletonInt(self.name, self.factor * other)
-
-@dispatch(_SingletonInt, sympy.Integer)
-def _eval_is_ge(a, b):
-    if b <= 2:
-        return sympy.true
-    return sympy.false
-
-@dispatch(_SingletonInt, _SingletonInt)
-def _eval_is_ge(a, b):  # noqa: F811
-    if a.val == b.val and a.factor >= b.factor:
-        return sympy.true
-    return sympy.false
 
 # SymDispatchMode gets invoked whenever an operation is processed on
 # a PySymInt.  When this occurs, you get called at __sym_dispatch__
@@ -240,10 +205,7 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
-        if is_symbolic(val):
-            return val.node.expr.free_symbols
-        else:
-            return set()
+        return val.node.expr.free_symbols
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
     elif isinstance(val, (int, float, bool)):
@@ -3013,7 +2975,7 @@ class ShapeEnv:
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
             else:
-                self.var_to_val[sympy_expr] = _SingletonInt(val.node.singleton_int(), val.node.factor())
+                self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), val.node.singleton_coeff())
 
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []

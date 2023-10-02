@@ -177,7 +177,7 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual c10::optional<int64_t> singleton_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> factor() {
+  virtual c10::optional<int64_t> singleton_coeff() {
     return c10::nullopt;
   }
   virtual c10::optional<int64_t> constant_int() {
