@@ -344,10 +344,6 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
       &ATEN_FN(op),\
       c10::guts::function_traits<decltype(ATEN_FN(op))>::parameter_types>::apply))
 
-#define UPSAMPLE_BATCH(op) \
-  EXISTING_BDIM2(op, vec); \
-  EXISTING_BDIM(op);
-
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM(im2col);
