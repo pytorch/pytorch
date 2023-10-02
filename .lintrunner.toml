@@ -16,6 +16,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/examples/**',
     'functorch/notebooks/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     # Tests from the NumPy test suite
@@ -195,19 +196,10 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/index_propagation.py',
     'torch/_inductor/ir.py',
     'torch/_inductor/scheduler.py',
-    'torch/_inductor/sizevars.py',
-    'torch/_inductor/pattern_matcher.py',
-    'torch/_inductor/codegen/triton_foreach.py',
-    'torch/_inductor/codegen/cpp.py',
-    'torch/_inductor/codegen/triton.py',
-    'torch/_inductor/fx_passes/split_cat.py',
-    'torch/_inductor/fx_passes/joint_graph.py',
-    'torch/_inductor/fx_passes/pad_mm.py',
-    'torch/_inductor/fx_passes/group_batch_fusion.py',
-    'torch/_inductor/fx_passes/pre_grad.py',
 ]
 command = [
     'python3',
@@ -396,6 +388,7 @@ exclude_patterns=[
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '**/*.png',
+    '**/*.gz',
 ]
 command = [
     'python3',
@@ -981,6 +974,7 @@ exclude_patterns = [
     '**/fb/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'test/_nvfuser/__init__.py',
@@ -1458,7 +1452,6 @@ exclude_patterns = [
     'test/quantization/jit/test_quantize_jit.py',
     'test/quantization/pt2e/test_graph_utils.py',
     'test/quantization/pt2e/test_quantize_pt2e.py',
-    'test/quantization/pt2e/test_quantize_pt2e_fx.py',
     'test/quantization/pt2e/test_x86inductor_quantizer.py',
     'test/scripts/cuda_memcheck_common.py',
     'test/scripts/run_cuda_memcheck.py',
@@ -2652,6 +2645,7 @@ exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
     'functorch/notebooks/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
