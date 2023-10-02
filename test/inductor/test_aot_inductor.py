@@ -185,7 +185,7 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 250112, device="cuda"),
             torch.randn(1, 512, device="cuda"),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(model, example_inputs)
 
     @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
     def test_inf(self):
