@@ -178,6 +178,10 @@ def round_dec(x, decimals=0):
 @register_decomposition([aten.bmm])
 @pw_cast_for_opmath
 def bmm(self, batch2):
+    if config.coordinate_descent_tuning:
+        if self.shape[1] == 1:
+            out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
+            return out
     if self.device.type == "cpu":
         if self.size(1) == 1 and batch2.size(-1) == 1:
             return torch.sum(
