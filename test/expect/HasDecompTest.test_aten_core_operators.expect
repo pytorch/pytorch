@@ -42,10 +42,6 @@ aten::addmv
 aten::addmv.out
 aten::addmv_
 aten::alias
-aten::all
-aten::all.all_out
-aten::all.dim
-aten::all.out
 aten::amax
 aten::amax.out
 aten::amin
@@ -220,8 +216,6 @@ aten::flip.out
 aten::floor
 aten::floor.out
 aten::floor_
-aten::floor_divide
-aten::floor_divide.out
 aten::floor_divide_.Tensor
 aten::fmax
 aten::fmax.out
@@ -234,8 +228,6 @@ aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
 aten::full
-aten::full.names
-aten::full.names_out
 aten::full.out
 aten::gcd
 aten::gcd.out
@@ -251,8 +243,6 @@ aten::gelu.out
 aten::geometric
 aten::geometric.out
 aten::geometric_
-aten::glu
-aten::glu.out
 aten::grid_sampler_2d
 aten::grid_sampler_2d.out
 aten::gt.Scalar
@@ -476,8 +466,6 @@ aten::sqrt_
 aten::squeeze
 aten::squeeze.dim
 aten::squeeze.dims
-aten::std.correction_out
-aten::std_mean.correction
 aten::sub.Scalar
 aten::sub.Scalar_out
 aten::sub.Tensor
@@ -498,14 +486,14 @@ aten::tril_indices
 aten::tril_indices.out
 aten::triu_indices
 aten::triu_indices.out
+aten::trunc
+aten::trunc.out
 aten::trunc_
 aten::unbind.int
 aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
-aten::unsafe_split_with_sizes
-aten::unsafe_split_with_sizes.out
 aten::unsqueeze
 aten::upsample_bicubic2d
 aten::upsample_nearest1d
