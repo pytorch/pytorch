@@ -52,18 +52,25 @@ class AOTInductorModelRunner:
             constraints=constraints,
         )
 
-        launcher = aot_inductor_launcher
         is_cpu = all(x.device.type == "cpu" for x in example_inputs)
-        if is_cpu:
-            launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+        if IS_FBCODE:
+            from .fb import test_aot_inductor_model_runner_pybind
 
-        optimized = torch.utils.cpp_extension.load_inline(
-            name="aot_inductor",
-            cpp_sources=[launcher],
-            functions=["run"],
-            extra_ldflags=[so_path],
-            with_cuda=True,  # TODO: change this to not is_cpu
-        ).run
+            optimized = test_aot_inductor_model_runner_pybind.Runner(
+                so_path, is_cpu
+            ).run
+        else:
+            launcher = aot_inductor_launcher
+            if is_cpu:
+                launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+
+            optimized = torch.utils.cpp_extension.load_inline(
+                name="aot_inductor",
+                cpp_sources=[launcher],
+                functions=["run"],
+                extra_ldflags=[so_path],
+                with_cuda=True,  # TODO: change this to not is_cpu
+            ).run
 
         return optimized, exported
 
@@ -144,7 +151,6 @@ def check_model_with_multiple_inputs(
     self.assertTrue(same(list_actual, list_expected))
 
 
-@unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
 class AOTInductorTestsTemplate:
     def test_simple(self):
         class Model(torch.nn.Module):
@@ -303,6 +309,7 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_seq(self):
         layernorm = torch.nn.LayerNorm(10)
         net = torch.nn.Sequential(
@@ -562,6 +569,7 @@ class AOTInductorTestsTemplate:
         )
 
     # scaled_dot_product_flash_attention
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_sdpa(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -577,6 +585,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -616,6 +625,39 @@ class AOTInductorTestsTemplate:
             {"add_runtime_assertions_for_inline_constraints": False}
         ):
             self.check_model(Repro(), example_inputs)
+
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2, "The test requires multiple devices"
+    )
+    def test_non_default_cuda_device(self):
+        class Model(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        weight = torch.randn(10, 10)
+        inputs = (torch.randn(10, 10), torch.randn(10, 10))
+        result_cpu = Model(weight)(*inputs)
+
+        with torch.cuda.device(0), torch.no_grad(), config.patch(
+            "aot_inductor.abi_compatible", self.abi_compatible
+        ):
+            result_cuda_0 = AOTInductorModelRunner.run(
+                Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
+            )
+
+        with torch.cuda.device(1), torch.no_grad(), config.patch(
+            "aot_inductor.abi_compatible", self.abi_compatible
+        ):
+            result_cuda_1 = AOTInductorModelRunner.run(
+                Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
+            )
+
+        self.assertTrue(same(result_cpu, result_cuda_0.cpu()))
+        self.assertTrue(same(result_cpu, result_cuda_1.cpu()))
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):

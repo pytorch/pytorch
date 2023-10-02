@@ -297,7 +297,7 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 
 static PyObject* call_keep_graph(PyObject* graph, bool keep_graph) {
   PyObject *dynamo_module, *compiled_autograd_module, *keep_graph_fn,
-      *keep_graph_args, *keep_graph_res;
+      *keep_graph_args;
 
   dynamo_module = PyImport_ImportModule("torch._dynamo");
   compiled_autograd_module =
@@ -305,6 +305,7 @@ static PyObject* call_keep_graph(PyObject* graph, bool keep_graph) {
   keep_graph_fn =
       PyObject_GetAttrString(compiled_autograd_module, "keep_graph");
 
+  PyObbject* keep_graph_res = nullptr;
   if (PyCallable_Check(keep_graph_fn)) {
     PyObject* py_keep_graph = keep_graph ? Py_True : Py_False;
     keep_graph_args = PyTuple_Pack(2, graph, py_keep_graph);
