@@ -451,7 +451,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             options = VariableTracker.propagate(self, args, kwargs.values())
             args_source = AttrSource(self.source, "args")
             partial_args = []
-            for i, arg in enumerate(self.value.args): 
+            for i, arg in enumerate(self.value.args):
                 args_item_source = GetItemSource(args_source, i)
                 arg_vt = VariableBuilder(tx, args_item_source)(arg)
                 print("Potential obj?", arg_vt)
@@ -460,19 +460,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             kwargs_source = AttrSource(self.source, "keywords")
             partial_kwargs = {}
-            for k, kwarg in enumerate(self.value.keywords.items()): 
+            for k, kwarg in enumerate(self.value.keywords.items()):
                 kwargs_item_source = GetItemSource(kwargs_source, k)
                 kwarg_vt = VariableBuilder(tx, kwargs_item_source)(kwarg)
                 print("Potential kw obj?", k, kwarg_vt)
                 partial_kwargs[k] = kwarg_vt
-            
+
             partial_kwargs.update(kwargs)
             breakpoint()
             # unimplemented(f"Special partial? {self.source} {self.value.func} {[type(t) for t in self.value.args]} {args} {kwargs}")
             return variables.UserFunctionVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
-            
+
         elif callable(self.value):
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
@@ -847,28 +847,3 @@ class AutogradNodeVariable(UserDefinedObjectVariable):
             result = outer_tuple_obj
             return result
         return super().var_getattr(tx, name)
-<<<<<<< HEAD
-=======
-
-
-class RemovableHandleVariable(UserDefinedObjectVariable):
-    def __init__(
-        self, value, last_seen_name=None, as_global=None, value_type=None, mutable_local=None, **kwargs
-    ):
-        super().__init__(value, value_type, **kwargs)
-        # associated later, see code symbolic_convert and On dynamo tensor_hooks
-        self.last_seen_name = last_seen_name
-        self.mutable_local = mutable_local
-        self.as_global = as_global
-
-    def reconstruct(self, codegen):
-        if self.as_global:
-            print("CODEGEN LOAD_GLOBAL", self.as_global)
-            return [codegen.create_load_global(self.as_global, False, add=True)]
-        if self.last_seen_name:
-            # It is an invariant that at this point, a STORE_FAST was executed for this name.
-            print("CODEGEN LOAST_FAST", self.last_seen_name)
-            return [create_instruction("LOAD_FAST", argval=self.last_seen_name)]
-            # return [codegen.create_load(self.last_seen_name)]
-        return super().reconstruct(codegen)
->>>>>>> 54affd918c8 (Wip)
