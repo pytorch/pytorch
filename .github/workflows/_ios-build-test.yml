@@ -194,6 +194,7 @@ jobs:
           cat /Users/runner/Library/Logs/scan/*.log
 
       - name: Prepare the build artifacts for upload
+        if: matrix.ios_platform == 'OS'
         shell: bash
         run: |
           set -eux
@@ -256,6 +257,7 @@ jobs:
           popd
 
       - uses: actions/upload-artifact@v3
+        if: matrix.ios_platform == 'OS'
         with:
           name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
           if-no-files-found: error
@@ -263,8 +265,8 @@ jobs:
 
   upload-ios-artifacts:
     # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
-    # to create the fat iOS binaries for both x86_64 and arm64
-    runs-on: macos-12
+    # and access AWS credentials
+    runs-on: macos-13-large
     needs: build
     # NB: Only upload release build, if we need it, we could also turn on nightly here
     environment: ${{ ((inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
@@ -288,17 +290,12 @@ jobs:
         with:
           name: pytorch-ios-build-artifacts-arm64
 
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: pytorch-ios-build-artifacts-x86_64
-
-      - name: Unzip arm64 and x86_64 artifacts
+      - name: Unzip artifacts
         shell: bash
         run: |
           set -eux
 
-          for ARCH in "arm64" "x86_64"; do
+          for ARCH in "arm64"; do
             TMP_DIR="${RUNNER_TEMP}/${ARCH}"
             mkdir -p "${TMP_DIR}"
 
@@ -323,7 +320,7 @@ jobs:
           # Prepare all the sub directories
           mkdir -p "${DEST_DIR}"/install/lib
 
-          # Copy header and share files, arm64 or x86_64 both work
+          # Copy header and share files
           cp -R install/include "${DEST_DIR}"/install
           cp -R install/share "${DEST_DIR}"/install
           # The last dash is important to copy only files under src
@@ -346,9 +343,7 @@ jobs:
           popd
 
           for LIB in "${LIBRARIES[@]}"; do
-            FROM_LIBS=("${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${RUNNER_TEMP}"/x86_64/install/lib/"${LIB}")
-            # Create a fat binary for both arm64 and x86_64
-            lipo -create "${FROM_LIBS[@]}" -o "${DEST_DIR}"/install/lib/"${LIB}"
+            cp "${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${DEST_DIR}"/install/lib/"${LIB}"
             # Print the info
             lipo -i "${DEST_DIR}"/install/lib/"${LIB}"
           done
