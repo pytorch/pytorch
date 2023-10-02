@@ -2387,6 +2387,10 @@ class MutationLayout(Layout):
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
+        # NOTE: We must realize users of `dst` before we realize `src`, since
+        # realization order determines scheduling order. Otherwise, src's
+        # mutation would be scheduled before the existing users of dst!
+        V.graph.mark_buffer_mutated(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -3755,7 +3759,7 @@ class DynamicScalar(ExternKernel):
         return False
 
     def __init__(self, sym, data):
-        super().__init__(None, NoneLayout(), [data])
+        super().__init__(None, NoneLayout(), [data])  # type: ignore[arg-type]
         self.sym = sym
 
     def get_unbacked_symbol_defs(self):
@@ -3795,26 +3799,47 @@ class FallbackKernel(ExternKernelAlloc):
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
-        self.outputs = []
+        self.outputs: Sequence[Any] = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
 
-        op_overload_packet = (
-            kernel._overloadpacket
-            if isinstance(kernel, torch._ops.OpOverload)
-            else kernel
-        )
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
+        assert isinstance(
+            kernel,
+            (
+                torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
+                torch._ops.HigherOrderOperator,
+            ),
+        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if (
-            getattr(torch.ops.aten, op_overload_packet.__name__, None)
-            is op_overload_packet
-        ):
-            self.kernel = (
-                f"at::{op_overload_packet.__name__}"
-                if V.graph.cpp_wrapper
-                else f"aten.{kernel.__name__}"
+        if kernel.__module__ == "torch._ops.aten":
+            op_base_name = (
+                kernel.__name__.split(".")[0]
+                if isinstance(kernel, torch._ops.OpOverload)
+                else kernel.__name__
             )
+            if V.graph.cpp_wrapper:
+                if (
+                    isinstance(kernel, torch._ops.OpOverload)
+                    and kernel._overloadname != "default"
+                ):
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    #
+                    # In theory, we should be able to do the following codegen for all aten fallback ops, but more
+                    # plumbing needs to be done in order to make that happen.
+                    # TODO: follow up on this
+                    self.kernel = f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    schema = kernel._schema
+                else:
+                    self.kernel = f"at::{op_base_name}"
+            else:
+                self.kernel = f"aten.{op_base_name}"
+
             if schema is not None:
                 self.args_default_value = [
                     {"type": x.real_type, "value": x.default_value}
@@ -3958,18 +3983,37 @@ class FallbackKernel(ExternKernelAlloc):
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
-        if isinstance(self.outputs, (list, tuple)):
-            output_arguments = [
-                export_schema.Argument.create(
+        def handle_single_output(return_type, output):
+            if isinstance(output, list):
+                # For single TensorList
+                assert isinstance(return_type, torch.ListType) and isinstance(
+                    return_type.getElementType(), torch.TensorType
+                )
+                return export_schema.Argument.create(
+                    as_tensors=[
+                        export_schema.TensorArgument(name=out.get_name())
+                        for out in output
+                    ]
+                )
+            else:
+                # for single Tensor
+                assert isinstance(return_type, torch.TensorType)
+                return export_schema.Argument.create(
                     as_tensor=export_schema.TensorArgument(name=output.get_name())
                 )
-                for output in self.outputs
-            ]
+
+        target = self.op_overload
+        returns = target._schema.returns
+        if len(returns) == 1:
+            return_type = returns[0].real_type
+            output_arguments = [handle_single_output(return_type, self.outputs)]
         else:
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            assert isinstance(self.outputs, tuple)
+            assert len(returns) == len(self.outputs)
             output_arguments = [
-                export_schema.Argument.create(
-                    as_tensor=export_schema.TensorArgument(name=self.outputs.get_name())
-                )
+                handle_single_output(return_schema.real_type, output)
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -4058,8 +4102,12 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        packed.outputs = generate_output(example_output, [])
-        return packed.outputs
+        outputs = generate_output(example_output, [])
+        if isinstance(outputs, (list, tuple)):
+            packed.outputs = outputs
+        else:
+            packed.outputs = [outputs]
+        return outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -4108,14 +4156,20 @@ class MultiOutput(ExternKernel):
         symbols_to_define = self.get_unbacked_symbol_defs()
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
-                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                )
                 symbols_to_define.remove(s)
         for i, s in enumerate(self.get_stride()):
             if s in symbols_to_define:
-                wrapper.writeline(f"{s} = {self.get_name()}.stride({i})")
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                )
                 symbols_to_define.remove(s)
         if (s := self.get_offset()) in symbols_to_define:
-            wrapper.writeline(f"{s} = {self.get_name()}.storage_offset()")
+            wrapper.writeline(
+                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+            )
             symbols_to_define.remove(s)
         assert (
             not symbols_to_define

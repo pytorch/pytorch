@@ -1,7 +1,9 @@
-from typing import Dict, List, Optional
+from __future__ import annotations
+
+from typing import Callable, Dict, List, Optional
 
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Callable, CUDATemplateBuffer, IRNode, Layout, TensorBox
+from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
@@ -270,7 +272,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[IRNode],
+        input_nodes: List[Layout | Buffer],
         layout: Layout,
         make_kernel_render: Callable[[str], str],
         bmreq: CUDABenchmarkRequest,
