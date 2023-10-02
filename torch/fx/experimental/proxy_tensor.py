@@ -200,7 +200,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             if isinstance(proxy, fx.Proxy):
                 set_meta(proxy, e)
 
-            # example use case: allreduce_ returns ([tensor], work)
+            # example use case: triton_kernel_wrapper takes arguments as kwargs
             for key, val in e.items():
                 wrap_with_proxy(val, proxy[key], None)
         else:
