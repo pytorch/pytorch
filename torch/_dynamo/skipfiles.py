@@ -160,6 +160,7 @@ FILENAME_INLINELIST = {
     _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
     _module_dir(torch) + "ao/quantization/pt2e/utils.py",
     _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
+    _module_dir(torch) + "_dynamo/_trace_wrapped_higher_order_op.py",
     _module_dir(torch) + "_export/constraints.py",
     _module_dir(torch) + "_higher_order_ops/cond.py",
     _module_dir(torch) + "_functorch/apis.py",
@@ -228,10 +229,6 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
-
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_dynamo/_trace_wrapped_higher_order_op.py",
-}
 
 SKIP_DIRS_RE = None
 

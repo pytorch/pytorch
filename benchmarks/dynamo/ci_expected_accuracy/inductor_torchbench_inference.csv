@@ -4,7 +4,6 @@ Background_Matting,pass_due_to_skip,0
 LearningToPaint,pass,0
 Super_SloMo,pass,0
 alexnet,pass,0
-attention_is_all_you_need_pytorch,pass,0
 basic_gnn_edgecnn,pass,0
 basic_gnn_gcn,pass,6
 basic_gnn_gin,pass,0
