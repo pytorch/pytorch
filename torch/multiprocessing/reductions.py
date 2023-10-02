@@ -118,20 +118,6 @@ def rebuild_tensor(cls, storage, metadata):
     return t
 
 
-def rebuild_tensor_nested(cls, storage, metadata):
-    offsets = rebuild_tensor(torch.Tensor, storage[0], metadata[0])
-    nested_size = rebuild_tensor(torch.Tensor, storage[1], metadata[1])
-    nested_stride = rebuild_tensor(torch.Tensor, storage[2], metadata[2])
-    _, _, _, storage_offset, size, stride, requires_grad = metadata
-    buffer = torch._utils._rebuild_tensor(storage[3], storage_offset, size, stride)
-    t = torch._nested_view_from_buffer(buffer, nested_size, nested_stride, offsets)
-    if cls == torch.nn.parameter.Parameter:
-        raise NotImplementedError(f"cls can't be {cls} for rebuild_tensor_nested")
-    else:
-        t.requires_grad = requires_grad
-    return t
-
-
 def rebuild_cuda_tensor(
     tensor_cls,
     tensor_size,
@@ -304,6 +290,13 @@ def reduce_tensor(tensor):
     # eliminated it so that we could just use tensor views to implement the same
     # thing.
     #
+
+    # TODO: Handle distinguishing between subclass and non-subclass versions of NT better
+    from torch.nested._internal.nested_tensor import NestedTensor
+
+    if tensor.is_nested and not isinstance(tensor, NestedTensor):
+        return reduce_nested_tensor(tensor)
+
     if storage._untyped_storage.device.type == "cuda":
         (
             device,
@@ -340,37 +333,56 @@ def reduce_tensor(tensor):
             ),
         )
 
-    def tensor_metadata(tensor):
-        metadata = (
-            tensor.storage_offset(),
-            tensor.size(),
-            tensor.stride(),
-            tensor.requires_grad,
-        )
-        return metadata
-
-    if tensor.is_nested:
-        assert tensor.is_contiguous()
-        metadata = (
-            tensor_metadata(tensor._nested_tensor_storage_offsets()),
-            tensor_metadata(tensor._nested_tensor_size()),
-            tensor_metadata(tensor._nested_tensor_strides()),
-            tensor.storage_offset(),
-            (tensor.numel(),),
-            (1,),
-            tensor.requires_grad,
-        )
-        storage = (
-            tensor._nested_tensor_storage_offsets().storage(),
-            tensor._nested_tensor_size().storage(),
-            tensor._nested_tensor_strides().storage(),
-            storage,
-        )
-
-        return (rebuild_tensor_nested, (type(tensor), storage, metadata))
-
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
-    return (rebuild_tensor, (type(tensor), storage, tensor_metadata(tensor)))
+    metadata = (
+        tensor.storage_offset(),
+        tensor.size(),
+        tensor.stride(),
+        tensor.requires_grad,
+    )
+    return (rebuild_tensor, (type(tensor), storage, metadata))
+
+
+def rebuild_nested_tensor(
+    rebuild_buffer_func,
+    rebuild_buffer_args,
+    rebuild_sizes_func,
+    rebuild_sizes_args,
+    rebuild_strides_func,
+    rebuild_strides_args,
+    rebuild_offsets_func,
+    rebuild_offsets_args,
+):
+    buffer = rebuild_buffer_func(*rebuild_buffer_args)
+    sizes = rebuild_sizes_func(*rebuild_sizes_args)
+    strides = rebuild_strides_func(*rebuild_strides_args)
+    offsets = rebuild_offsets_func(*rebuild_offsets_args)
+    return torch._nested_view_from_buffer(buffer, sizes, strides, offsets)
+
+
+def reduce_nested_tensor(nt):
+    rebuild_buffer_func, rebuild_buffer_args = reduce_tensor(nt.values().clone())
+    rebuild_sizes_func, rebuild_sizes_args = reduce_tensor(nt._nested_tensor_size())
+    rebuild_strides_func, rebuild_strides_args = reduce_tensor(
+        nt._nested_tensor_strides()
+    )
+    rebuild_offsets_func, rebuild_offsets_args = reduce_tensor(
+        nt._nested_tensor_storage_offsets()
+    )
+
+    return (
+        rebuild_nested_tensor,
+        (
+            rebuild_buffer_func,
+            rebuild_buffer_args,
+            rebuild_sizes_func,
+            rebuild_sizes_args,
+            rebuild_strides_func,
+            rebuild_strides_args,
+            rebuild_offsets_func,
+            rebuild_offsets_args,
+        ),
+    )
 
 
 def fd_id(fd):
