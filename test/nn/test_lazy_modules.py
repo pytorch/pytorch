@@ -454,6 +454,18 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
+    def _check_lazy_norm_with_dict_input(self, cls, lazy_cls, input_shape):
+        input = {"input": torch.ones(*input_shape)}
+
+        lazy_module = lazy_cls()
+        lazy_output = lazy_module(**input)
+
+        num_features = input_shape[1]
+        module = cls(num_features)
+        expected_output = module(**input)
+
+        self.assertEqual(lazy_output, expected_output)
+
     def test_lazy_batchnorm1d(self):
         self._check_lazy_norm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
         self._check_lazy_norm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
@@ -515,6 +527,11 @@ class TestLazyModules(TestCase):
     def test_lazy_instancenorm3d_state(self):
         self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
         self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
+
+    def test_lazy_batchnorm_with_dict_input(self):
+        self._check_lazy_norm_with_dict_input(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
+        self._check_lazy_norm_with_dict_input(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
+        self._check_lazy_norm_with_dict_input(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
 
     @suppress_warnings
     def test_materialize_dtype(self):

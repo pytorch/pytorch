@@ -30,7 +30,12 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
+from torch._dynamo.testing import (
+    CompileCounter,
+    expectedFailureDynamic,
+    rand_strided,
+    same,
+)
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -1186,7 +1191,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         before, after = opt_fn()
         self.assertTrue(same(before, after))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 3)  # rand, rand
+        self.assertEqual(cnt.op_count, 2)  # rand, rand
         try:
             graph, _ = torch._dynamo.export(fn)()
             # See https://github.com/pytorch/pytorch/pull/87490
@@ -3440,6 +3445,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), torch.sin(x))
+
+    # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
+    # due to bad empty list handling
+    def test_empty_list_contains_with_jump(self):
+        def fn(x, l):
+            if x in l:
+                return x.cos()
+            return x.sin()
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)(torch.randn([2, 2]), [])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_graph_break_on_jit_isinstance(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            if torch.jit.isinstance(x, List[str]):
+                return x * 2
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.rand(4)
+        self.assertTrue(same(fn(x), opt_fn(x)))
 
 
 if __name__ == "__main__":

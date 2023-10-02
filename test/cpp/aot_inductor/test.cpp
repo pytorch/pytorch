@@ -3,7 +3,8 @@
 #include <vector>
 
 #include <c10/cuda/CUDAStream.h>
-#include <torch/csrc/inductor/aot_inductor_interface.h>
+#include <torch/csrc/inductor/aoti_runtime/interface.h>
+#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -23,51 +24,69 @@ TEST(AotInductorTest, BasicTest) {
   Net net;
   net.to(torch::kCUDA);
 
+  // We should fix the weight over here.
+  // This should match exactly with the one in test.py
+  torch::Tensor weights =
+      at::arange(640, at::dtype(at::kFloat).device(at::kCUDA));
+  weights = at::reshape(weights, {10, 64});
+  torch::Tensor bias = at::zeros({10}, at::dtype(at::kFloat).device(at::kCUDA));
+
+  for (const auto& pair : net.named_parameters()) {
+    if (pair.key().find("weight") != std::string::npos) {
+      pair.value().copy_(weights);
+    } else if (pair.key().find("bias") != std::string::npos) {
+      pair.value().copy_(bias);
+    }
+  }
+
   torch::Tensor x =
       at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
   torch::Tensor y =
       at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
   torch::Tensor results_ref = net.forward(x, y);
-
-  // TODO: we need to provide an API to concatenate args and weights
-  std::vector<torch::Tensor> inputs;
-  for (const auto& pair : net.named_parameters()) {
-    inputs.push_back(pair.value());
-  }
-  inputs.push_back(x);
-  inputs.push_back(y);
+  std::vector<torch::Tensor> input_tensors;
+  input_tensors.push_back(x);
+  input_tensors.push_back(y);
 
   AOTInductorModelContainerHandle container_handle;
-  AOT_INDUCTOR_ERROR_CHECK(
-      AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
-  AOTInductorParamShape output_shape;
-  AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerGetMaxOutputShape(
-      container_handle, 0 /*output_idx*/, &output_shape));
+  AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
+      &container_handle,
+      1 /*num_models*/,
+      false /*is_cpu*/,
+      nullptr /*cubin_dir*/));
 
-  c10::IntArrayRef array_size(output_shape.shape_data, output_shape.ndim);
-  torch::Tensor output_tensor =
-      at::zeros(array_size, at::dtype(at::kFloat).device(at::kCUDA));
-  std::vector<torch::Tensor> outputs;
-  outputs.push_back(output_tensor);
+  auto input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
+
+  // For outputs, we only allocate a vector to hold returned tensor handles,
+  // not allocating the actual output tensor storage here
+  size_t num_outputs;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      AOTInductorModelContainerGetNumOutputs(container_handle, &num_outputs));
+  std::vector<AtenTensorHandle> output_handles(num_outputs);
 
   const auto& cuda_stream = at::cuda::getCurrentCUDAStream(0 /*device_index*/);
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  AOTInductorTensorHandle inputs_handle =
-      reinterpret_cast<AOTInductorTensorHandle>(inputs.data());
-  AOTInductorTensorHandle outputs_handle =
-      reinterpret_cast<AOTInductorTensorHandle>(outputs.data());
-  AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+
+  AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
+
+  AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,
-      inputs_handle,
-      inputs.size(),
-      outputs_handle,
-      outputs.size(),
-      stream_handle));
+      input_handles.data(),
+      input_tensors.size(),
+      output_handles.data(),
+      output_handles.size(),
+      stream_handle,
+      proxy_executor_handle));
+
+  auto outputs = torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+      output_handles.data(), output_handles.size());
 
   ASSERT_TRUE(torch::allclose(results_ref, outputs[0]));
-  AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      AOTInductorModelContainerDelete(container_handle));
 }
 
 } // namespace aot_inductor

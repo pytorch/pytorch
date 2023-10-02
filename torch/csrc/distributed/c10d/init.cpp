@@ -1333,6 +1333,10 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "collect_client_counters",
+          &::c10d::TCPStore::collectClientCounters,
+          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1341,7 +1345,11 @@ Example::
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
-          R"(Gets the port number on which the store listens for requests.)");
+          R"(Gets the port number on which the store listens for requests.)")
+      .def_property_readonly(
+          "libuvBackend",
+          &::c10d::TCPStore::isLibUvBackend,
+          R"(Returns True if it's using the libuv backend.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -1748,7 +1756,21 @@ Arguments:
           .def(
               "_has_hooks",
               &::c10d::ProcessGroup::hasHooks,
-              py::call_guard<py::gil_scoped_acquire>());
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_enable_collectives_timing",
+              &::c10d::ProcessGroup::enableCollectivesTiming,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Enable timing of collectives by all backends. This might incur in additional overhead.")
+          .def(
+              "_set_group_name",
+              &::c10d::ProcessGroup::setGroupName,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Sets the process group name. This is an internal C10D method, do not use.")
+          .def_property_readonly(
+              "group_name",
+              &::c10d::ProcessGroup::getGroupName,
+              "(Gets this process group name. It's cluster unique)");
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
