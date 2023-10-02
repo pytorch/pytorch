@@ -498,6 +498,10 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
+    def generate_inf_and_nan_checker(self, node):
+        # TODO: Add check for python too.
+        pass
+
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
@@ -1541,6 +1545,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def generate_inf_and_nan_checker(self, nodes):
+        for buf in nodes.get_names():
+            # TODO: Add buf name directly into check_inf_and_nan.
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_check_inf_and_nan({buf}));"
+            )
 
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
