@@ -173,8 +173,8 @@ blocklist = [
 
 overload_blocklist = [
     # Overloads which are more specific than another, so not needed
-    "all.dim",
-    "any.dim",
+    "all.dim",  # Subsumed by all.dims(Tensor self, int[1]? dim=None, keepdim=False)
+    "any.dim",  # Subsumed by any.dims(Tensor self, int[1]? dim=None, keepdim=False)
 ]
 
 binary_ops = (
