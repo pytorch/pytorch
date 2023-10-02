@@ -1,9 +1,13 @@
-#include <c10/core/impl/cow/context.h>
+#include <c10/core/impl/cow/COWDeleter.h>
 
-#include <c10/core/impl/cow/deleter.h>
+#include <c10/core/CPUAllocator.h>
+#include <c10/core/StorageImpl.h>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
+#include <cstddef>
+#include <memory>
 
 namespace c10::impl {
 namespace {
@@ -35,7 +39,7 @@ class ContextTest : public testing::Test {
 };
 
 TEST_F(ContextTest, Basic) {
-  auto& context = *new cow::Context(new_delete_tracker());
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
   context.increment_refcount();
@@ -45,7 +49,8 @@ TEST_F(ContextTest, Basic) {
     // is expected to give us a shared lock.
     auto result = context.decrement_refcount();
     ASSERT_THAT(
-        std::holds_alternative<cow::Context::NotLastReference>(result),
+        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
+            result),
         testing::IsTrue());
     ASSERT_THAT(delete_count(), testing::Eq(0));
   }
@@ -53,7 +58,7 @@ TEST_F(ContextTest, Basic) {
   {
     auto result = context.decrement_refcount();
     ASSERT_THAT(
-        std::holds_alternative<cow::Context::LastReference>(result),
+        std::holds_alternative<cow::COWDeleterContext::LastReference>(result),
         testing::IsTrue());
     // Result holds the DeleteTracker.
     ASSERT_THAT(delete_count(), testing::Eq(0));
@@ -63,12 +68,12 @@ TEST_F(ContextTest, Basic) {
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
-TEST_F(ContextTest, delete_context) {
+TEST_F(ContextTest, cow_deleter) {
   // This is effectively the same thing as decrement_refcount() above.
-  auto& context = *new cow::Context(new_delete_tracker());
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::delete_context(&context);
+  cow::cow_deleter(&context);
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
