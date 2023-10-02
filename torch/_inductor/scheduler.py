@@ -1392,7 +1392,12 @@ class Scheduler:
             log.debug("attempting fusion (%d/10): %d nodes", i + 1, old_len)
             self.fuse_nodes_once()
             new_len = len(self.nodes)
-            log.debug("fused (%d/10): %d nodes into %d nodes", i + 1, old_len, new_len)
+            log.debug(
+                "completed fusion round (%d/10): fused %d nodes into %d nodes",
+                i + 1,
+                old_len,
+                new_len,
+            )
             if new_len == old_len or new_len == 1:
                 log.debug("--------------------")
                 log.debug("fusion complete (%d iterations)", i + 1)
