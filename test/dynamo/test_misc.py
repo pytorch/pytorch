@@ -70,9 +70,12 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    IS_FBCODE,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing import make_tensor
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -7627,10 +7630,10 @@ ShapeEnv not equal: field values don't match:
 
             inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
 
-        torch.set_default_dtype(torch.float)
-        foo()
-        torch.set_default_dtype(torch.double)
-        foo()
+        with set_default_dtype(torch.float):
+            foo()
+        with set_default_dtype(torch.double):
+            foo()
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
