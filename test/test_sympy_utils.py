@@ -18,6 +18,9 @@ from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from torch.utils._sympy.reference import ReferenceAnalysis
 from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.singleton_int import SingletonInt
+from sympy.core.relational import is_ge, is_le
+
 
 
 UNARY_OPS = [
@@ -519,6 +522,74 @@ class TestSympySolve(TestCase):
         # i.e. the transformation is sound.
         r = solver.check()
         self.assertEqual(r, z3.unsat)
+
+class TestSingletonInt(TestCase):
+    def test_basic(self):
+        j1 = SingletonInt(1, 1)
+        j1_copy = SingletonInt(1, 1)
+        j2 = SingletonInt(2, 1)
+        j1x2 = SingletonInt(1, 2)
+
+        # eq
+        self.assertTrue(sympy.Eq(j1, j1))
+        self.assertTrue(sympy.Eq(j1, j1_copy))
+        self.assertFalse(sympy.Eq(j1, j2))
+        self.assertFalse(sympy.Eq(j1, j1x2))
+        self.assertFalse(sympy.Eq(j1, sympy.Integer(1)))
+        self.assertFalse(sympy.Eq(j1, sympy.Integer(3)))
+
+        # ne
+        self.assertFalse(sympy.Ne(j1, j1))
+        self.assertFalse(sympy.Ne(j1, j1_copy))
+        self.assertTrue(sympy.Ne(j1, j2))
+        self.assertTrue(sympy.Ne(j1, j1x2))
+        self.assertTrue(sympy.Ne(j1, sympy.Integer(1)))
+        self.assertTrue(sympy.Ne(j1, sympy.Integer(3)))
+
+        # ge
+        self.assertTrue(is_ge(j1, sympy.Integer(1)))
+        with self.assertRaisesRegex(ValueError, "indeterminate"):
+            is_ge(j1, sympy.Integer(3))
+        self.assertTrue(is_ge(j1, j1))
+        with self.assertRaisesRegex(ValueError, "indeterminate"):
+            is_ge(j2, j1)
+        self.assertTrue(sympy.Ge(j1x2, j1))
+        self.assertTrue(is_ge(j1x2, j1))
+
+        # le
+        self.assertTrue(is_le(sympy.Integer(1), j1))
+        with self.assertRaisesRegex(ValueError, "indeterminate"):
+            is_le(sympy.Integer(3), j1)
+        self.assertTrue(is_le(j1, j1))
+        with self.assertRaisesRegex(ValueError, "indeterminate"):
+            is_le(j1, j2)
+        self.assertTrue(sympy.Le(j1, j1x2))
+        self.assertTrue(is_le(j1, j1x2))
+
+        # gt
+        self.assertTrue(j2 > 0)
+        self.assertFalse(0 > j2)
+        with self.assertRaisesRegex(ValueError, "indeterminate"):
+            j2 > 2  # noqa: B015
+        self.assertFalse(j1 > j1)
+
+        # lt
+        self.assertTrue(0 < j2)
+        self.assertFalse(j2 < 0)
+        with self.assertRaisesRegex(ValueError, "indeterminate"):
+            2 < j2  # noqa: B015
+        self.assertFalse(j1 < j1)
+
+        # mul
+        self.assertEqual(j1 * 2, j1x2)
+        # Unfortunately, this doesn't not automatically simplify to 2*j1
+        # since sympy.Mul doesn't trigger __mul__ unlike the above.
+        self.assertIsInstance(sympy.Mul(j1, 2), sympy.core.mul.Mul)
+
+        with self.assertRaisesRegex(NotImplementedError, "NYI"):
+            j1 * j2
+
+        self.assertEqual(j1.free_symbols, set())
 
 
 instantiate_parametrized_tests(TestValueRanges)
