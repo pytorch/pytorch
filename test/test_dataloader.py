@@ -110,6 +110,11 @@ JOIN_TIMEOUT = 60.0  # seconds
 supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
 
 
+# Identity function; defined globally here for pickle purposes.
+def _identity(x):
+    return x
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -2264,6 +2269,19 @@ except RuntimeError as e:
             UserWarning,
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
+
+    def test_nested_tensor_multiprocessing(self):
+        dataset = [torch.nested.nested_tensor([torch.randn(5)]) for _ in range(100)]
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=4,
+            collate_fn=_identity,
+        )
+
+        for batch in loader:
+            self.assertTrue(batch[0].is_nested)
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
