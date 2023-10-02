@@ -7,8 +7,6 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
-from torch._dynamo.exc import CondOpArgsMismatchError
-from torch._dynamo.utils import disable_cache_limit
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
@@ -131,7 +129,7 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
-    with disable_cache_limit():
+    with torch._dynamo.utils.disable_cache_limit():
         return torch.compile(cond_op, backend="eager", fullgraph=True)(
             pred, true_fn, false_fn, operands
         )
@@ -187,7 +185,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
     flat_false_outs, _ = pytree.tree_flatten(false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
-        raise CondOpArgsMismatchError(
+        raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
             f"\n  {true_fn.__name__} returns {len(flat_true_outs)} item(s)"
             f"\n  {false_fn.__name__} returns {len(flat_false_outs)} item(s)"
@@ -197,7 +195,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
         if true_out.meta["tensor_meta"] != false_out.meta["tensor_meta"]:
-            raise CondOpArgsMismatchError(
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
@@ -280,7 +278,7 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         true_meta = _extract_tensor_metadata(true_out)
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:
-            raise CondOpArgsMismatchError(
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_meta}"
                 f"\n  {false_fn.__name__} returns {false_meta}"

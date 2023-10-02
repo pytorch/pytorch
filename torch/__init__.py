@@ -986,7 +986,8 @@ def is_warn_always_enabled() -> builtins.bool:
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):
+
+def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):  # noqa: F811
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
@@ -1010,7 +1011,7 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
 
     raise error_type(message_evaluated)
 
-def _check(cond, message=None):
+def _check(pred, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1025,7 +1026,7 @@ def _check(cond, message=None):
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)
+    _check_with(RuntimeError, pred, message)
 
 def _check_is_size(i, message=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
@@ -1041,7 +1042,7 @@ def _check_is_size(i, message=None):
     _check(i >= 0, message)
     torch.fx.experimental.symbolic_shapes._advise_is_size(i)
 
-def _check_index(cond, message=None):
+def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1058,7 +1059,7 @@ def _check_index(cond, message=None):
     """
     _check_with(IndexError, cond, message)
 
-def _check_value(cond, message=None):
+def _check_value(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1075,7 +1076,7 @@ def _check_value(cond, message=None):
     """
     _check_with(ValueError, cond, message)
 
-def _check_type(cond, message=None):
+def _check_type(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1092,7 +1093,7 @@ def _check_type(cond, message=None):
     """
     _check_with(TypeError, cond, message)
 
-def _check_not_implemented(cond, message=None):
+def _check_not_implemented(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1109,7 +1110,7 @@ def _check_not_implemented(cond, message=None):
     """
     _check_with(NotImplementedError, cond, message)
 
-def _check_tensor_all_with(error_type, cond, message=None):
+def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
     if not torch.is_tensor(cond):
         raise TypeError(f'cond must be a tensor, but got {type(cond)}')
 
@@ -1120,7 +1121,7 @@ def _check_tensor_all_with(error_type, cond, message=None):
     _check_with(error_type, cond._is_all_true().item(), message)
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
-def _check_tensor_all(cond, message=None):
+def _check_tensor_all(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1761,6 +1762,8 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
+from torch._higher_order_ops import cond
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -1868,8 +1871,6 @@ else:
             return importlib.import_module(f".{name}", __name__)
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
-
-from torch._higher_order_ops.cond import cond
 
 from . import _logging
 _logging._init_logs()
