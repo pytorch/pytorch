@@ -55,7 +55,7 @@ class PlacementStrategy:
     # we need a nested list to record the cost for each
     # operand of this operator, and for each operand of
     # this operator it might have multiple placement strategies
-    redistribute_cost: List[List[float]] = []
+    redistribute_cost: Optional[List[List[float]]] = None
 
     def pretty_print_placements(self, placements):
         return "".join([str(p) for p in placements])
@@ -148,7 +148,7 @@ class RuntimeSchemaInfo:
     # args/kwargs which would affect sharding propagation results. All args after this
     # index would be hashed to our sharding cache.
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
-    static_argnum: int = -1
+    static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
     static_kwargkey: Optional[List[str]] = None
     # TODO: make use of this field
@@ -199,20 +199,15 @@ class OpSchema:
         )
 
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
-        op_arg_type = self.op._schema.arguments[arg_idx].type
-        is_tensor = isinstance(op_arg_type, torch.TensorType)
+        arg = self.args_schema[arg_idx]
+        is_tensor = isinstance(arg, DTensorSpec)
         if is_tensor:
             return True
 
-        is_list_like = isinstance(op_arg_type, torch.ListType)
-        if not is_list_like:
+        if not isinstance(arg, list):
             return False
 
-        elem_type = op_arg_type.getElementType()
-        return isinstance(elem_type, torch.TensorType) or (
-            isinstance(elem_type, torch.OptionalType)
-            and isinstance(elem_type.getElementType(), torch.TensorType)
-        )
+        return all(isinstance(e, DTensorSpec) or e is None for e in arg)
 
     def return_type_tuple_tensors(self) -> bool:
         return_types = self.op._schema.returns

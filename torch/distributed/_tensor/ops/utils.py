@@ -4,7 +4,7 @@ import operator
 from typing import cast, Iterable, List, Sequence, Union
 
 import torch
-from torch.distributed._tensor._collective_utils import redistributed_cost
+from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.op_schema import OpStrategy
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
@@ -104,9 +104,11 @@ def is_tensor_partial(spec: DTensorSpec) -> bool:
     return any(p.is_partial() for p in spec.placements)
 
 
-def generate_redistribute_costs(src_strategy: OpStrategy, dst_spec: DTensorSpec) -> List[float]:
+def generate_redistribute_costs(
+    src_strategy: OpStrategy, dst_spec: DTensorSpec
+) -> List[float]:
     redistribute_costs: List[float] = []
     for strat in src_strategy.strategies:
-        redistribute_costs.append(redistribute_costs(
-            strat.output_spec, dst_spec
-        ))
+        redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
+
+    return redistribute_costs

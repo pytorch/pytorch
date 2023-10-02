@@ -120,7 +120,7 @@ class PlacementVariable(DistributedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable(None, **options)
+                return ConstantVariable.create(None, **options)
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
@@ -150,7 +150,7 @@ class DeviceMeshVariable(DistributedVariable):
 
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
-            return ConstantVariable(self.value.ndim)
+            return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
 
 
@@ -191,9 +191,9 @@ class ProcessGroupVariable(DistributedVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "rank":
-            return variables.ConstantVariable(self.value.rank())
+            return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
-            return variables.ConstantVariable(self.value.size())
+            return variables.ConstantVariable.create(self.value.size())
 
         return super().call_method(tx, name, args, kwargs)
 

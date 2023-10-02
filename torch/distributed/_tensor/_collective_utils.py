@@ -4,6 +4,7 @@ import math
 from typing import List, Optional
 
 import torch
+import torch.distributed._tensor.placement_types as placement_types
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed.distributed_c10d import (
     all_to_all,
@@ -161,7 +162,7 @@ def mesh_all_to_all(
     return work
 
 
-def spec_to_bytes(spec: "DTensorSpec") -> int:
+def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     dtype_to_bytes = {
         torch.bool: 1,
@@ -241,13 +242,16 @@ def reduce_scatter_cost(
     )
 
 
-def redistributed_cost(current_spec: "DTensorSpec", target_spec: "DTensorSpec") -> float:
+def redistribute_cost(
+    current_spec: "placement_types.DTensorSpec",
+    target_spec: "placement_types.DTensorSpec",
+) -> float:
     """
     This function returns the cost of redistribute from current to target DTensorSpec.
 
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
-       are quite trival (i.e. we only need to narrow)
+       are quite trival (i.e. we only need to narrow or simple division)
     2. Only consider redistribute cost on non-partial transformations, as for partial
        placement, the cost would be embedded when we generate the actual PlacementStrategy
        rather than a redistribute cost.
@@ -258,13 +262,16 @@ def redistributed_cost(current_spec: "DTensorSpec", target_spec: "DTensorSpec") 
         return float("inf")
 
     if current_spec.is_replicated():
+        # short-cut:
         # comm cost is 0 if current spec is already full replication
         return 0.0
 
     mesh = current_spec.mesh
     cost = 0.0
     comm_bytes = spec_to_bytes(current_spec) / current_spec.num_shards
-    # Two transformation that considered for redistribute cost: 1. allgather 2. alltoall
+    # Transformation that considered for redistribute cost:
+    # 1. allgather 2. alltoall
+    # 3. allreduce 4. reduce_scatter
     for i, (current, target) in enumerate(
         zip(current_spec.placements, target_spec.placements)
     ):
@@ -279,5 +286,13 @@ def redistributed_cost(current_spec: "DTensorSpec", target_spec: "DTensorSpec") 
             # should be alltoall comm, since we haven't implement it yet, add penalty
             # to favor allgather instead
             cost += allgather_cost(comm_bytes, current_spec.mesh, i) + 1.0
+        elif current.is_partial() and target.is_replicate():
+            # add up allreduce comm cost
+            cost += allreduce_cost(comm_bytes, current_spec.mesh, i)
+        elif current.is_partial() and target.is_shard():
+            # add up reduce_scatter comm cost
+            cost += reduce_scatter_cost(comm_bytes, current_spec.mesh, i)
+            # after reduce_scatter the comm bytes for further collectives halved.
+            comm_bytes /= mesh.size(i)
 
     return cost

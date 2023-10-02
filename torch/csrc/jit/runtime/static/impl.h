@@ -5,7 +5,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/FbcodeMaps.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/graph_node_list.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -21,8 +20,7 @@
 #include <folly/container/F14Set.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
@@ -912,7 +910,7 @@ class TORCH_API ProcessedNode {
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
-  // one. Maybe c10::variant is throwing it off?
+  // one. Maybe std::variant is throwing it off?
   ProcessedNode(ProcessedNode&&) = default;
 
   ProcessedNode(const ProcessedNode&) = delete;
@@ -1145,5 +1143,4 @@ class TORCH_API StaticRuntime {
   IValueArray values_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

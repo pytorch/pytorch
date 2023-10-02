@@ -53,7 +53,7 @@ static void _process_forward_mode_AD(
     const optional_variable_list& outputs,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    _jvp_fn_t jvp_user_function) {
+    const _jvp_fn_t& jvp_user_function) {
   // TODO handle multiple levels here
   uint64_t level = 0;
 
@@ -247,7 +247,7 @@ static void _process_forward_mode_AD(
   }
 }
 
-static at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
+static at::Tensor _view_as_self_with_no_grad(const at::Tensor& self) {
   // This is called below in _process_backward_mode_ad in two places:
   //
   // (1) An input has been returned, but it wasn't modified. Return it as a view
@@ -485,7 +485,7 @@ optional_variable_list _wrap_outputs(
 void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
-    std::string hook_name) {
+    const std::string& hook_name) {
   if (!original.options().type_equal(result.options())) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the type of value (";

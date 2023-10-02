@@ -270,6 +270,16 @@ class inference_mode(_DecoratorContextManager):
         return self.__class__(self.mode)
 
 
+def _enter_inference_mode(mode):
+    mode_context = torch._C._InferenceMode(mode)
+    mode_context.__enter__()
+    return mode_context
+
+
+def _exit_inference_mode(mode):
+    mode.__exit__(None, None, None)
+
+
 class set_multithreading_enabled(_DecoratorContextManager):
     r"""Context-manager that sets multithreaded backwards on or off.
 
