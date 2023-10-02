@@ -126,7 +126,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         func,
         args,
         expected_num_wrap_args,
-        expected_opcount=1,
+        expected_opcount=2,
         return_graph=False,
     ):
         # Given a `func` that has a single call to `wrap`,
@@ -143,6 +143,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, expected)
 
         self.assertEqual(cnt.frame_count, 1)
+        # wrap + getitem
+        # wrap always returns a tuple. In order to generate a proxy for each
+        # element, we need that many getitem calls.
         self.assertEqual(cnt.op_count, expected_opcount)
 
         self.assertEqual(len(backend.graphs), 1)
@@ -235,7 +238,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 1)
         self._test_wrap_simple(
-            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
+            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(2, 3)
         )
 
     def test_wrap_pytree_args_nested(self):
@@ -266,7 +269,8 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, l_y_, l_z_);  wrap_body_0 = l_x_ = l_y_ = l_z_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_, l_z_):
@@ -275,7 +279,7 @@ class GraphModule(torch.nn.Module):
             add = sin + cos;  sin = cos = None
             sin_1 = l_z_.sin();  l_z_ = None
             sub = add - sin_1;  add = sin_1 = None
-            return sub
+            return (sub,)
 """,
         )
 
@@ -290,7 +294,7 @@ class GraphModule(torch.nn.Module):
             f,
             (x, y),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(1, 2),
+            expected_opcount=ifdynstaticdefault(2, 3),
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:
@@ -303,13 +307,14 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             view = l_x_.view(3);  l_x_ = None
             add = view + 0.5;  view = None
-            return add
+            return (add,)
 """,
             )
         else:
@@ -324,13 +329,14 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, size):
             view = l_x_.view(size);  l_x_ = size = None
             add = view + 0.5;  view = None
-            return add
+            return (add,)
 """,
             )
 
@@ -395,14 +401,14 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, x + global_var)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
 
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertTrue(len(wrap_node.args), 3)
 
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 1)
+        self.assertEqual(op_count(body_function), 2)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
@@ -484,7 +490,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, x + y + x)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 1)
 
         # No changes to args of outer wrap
@@ -494,14 +500,14 @@ class GraphModule(torch.nn.Module):
 
         # z was lifted to arg of inner wrap
         body_function = getattr(gm, wrap_node.args[0].name)
-        # addition + wrap
-        self.assertEqual(op_count(body_function), 2)
+        # addition + wrap + getitem
+        self.assertEqual(op_count(body_function), 3)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
         # Innermost body function: z was also lifted to arg
         body_function = getattr(body_function, inner_wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 1)
+        self.assertEqual(op_count(body_function), 2)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
@@ -998,14 +1004,14 @@ class GraphModule(torch.nn.Module):
         counters.clear()
         opt = torch.compile(f, backend="eager", fullgraph=True)
         opt(x, y)
-        self.assertEqual(counters["stats"]["calls_captured"], 1)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
 
         # verify that we `don't` recompile
         opt(x, y)
-        self.assertEqual(counters["stats"]["calls_captured"], 1)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
 
         output = opt(x, y, 8)
-        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(counters["stats"]["calls_captured"], 4)
         self.assertEqual(output, 2 * x)
 
     def test_wrap_kwarg_default_else_branch(self):
@@ -1211,9 +1217,7 @@ class GraphModule(torch.nn.Module):
                     )
                     self.assertEqual(num_placeholders, 5)
 
-    def _check_simple_cond_graph(
-        self, fn, args, exp_graph, exp_true_graph, exp_false_graph
-    ):
+    def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
         out = torch.compile(fn, backend=cnt, fullgraph=True)(*args)
@@ -1229,9 +1233,7 @@ class GraphModule(torch.nn.Module):
         graph = gm.code.strip()
         true_graph = gm.cond_true_0.code.strip()
         false_graph = gm.cond_false_0.code.strip()
-        self.assertExpectedInline(graph, exp_graph)
-        self.assertExpectedInline(true_graph, exp_true_graph)
-        self.assertExpectedInline(false_graph, exp_false_graph)
+        return (graph, true_graph, false_graph)
 
     def test_cond_branches_no_arguments(self):
         def fn(x):
@@ -1243,30 +1245,35 @@ class GraphModule(torch.nn.Module):
 
             return control_flow.cond(x.sum() > 0, true_fn, false_fn, tuple())
 
-        exp_graph = """\
+        graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
+        if graphs is not None:
+            graph, true_graph, false_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     sum_1 = l_x_.sum()
     gt = sum_1 > 0;  sum_1 = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, l_x_]);  \
-gt = cond_true_0 = cond_false_0 = l_x_ = None
-    return (cond,)
-""".strip()
-        exp_true_graph = """\
+    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
+    return (cond,)""",
+            )
+            self.assertExpectedInline(
+                true_graph,
+                """\
 def forward(self, l_x_, l_x__false_branch):
     sin = torch.sin(l_x_);  l_x_ = None
-    return sin
-""".strip()
-        exp_false_graph = """\
+    return sin""",
+            )
+            self.assertExpectedInline(
+                false_graph,
+                """\
 def forward(self, l_x__true_branch, l_x_):
     cos = torch.cos(l_x_);  l_x_ = None
-    return cos
-""".strip()
-        self._check_simple_cond_graph(
-            fn, (torch.randn(4, 5),), exp_graph, exp_true_graph, exp_false_graph
-        )
+    return cos""",
+            )
 
     def test_cond_branches_no_arguments_no_closure(self):
         def fn(x):
@@ -1278,7 +1285,13 @@ def forward(self, l_x__true_branch, l_x_):
 
             return control_flow.cond(x.sum() > 0, true_fn, false_fn, tuple())
 
-        exp_graph = """\
+        self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
+        graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
+        if graphs is not None:
+            graph, true_graph, false_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     sum_1 = l_x_.sum();  l_x_ = None
@@ -1286,22 +1299,23 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
-    return (cond,)
-""".strip()
-        exp_true_graph = """\
+    return (cond,)""",
+            )
+            self.assertExpectedInline(
+                true_graph,
+                """\
 def forward(self):
     ones = torch.ones(3, 4)
-    return ones
-""".strip()
-        exp_false_graph = """\
+    return ones""",
+            )
+            self.assertExpectedInline(
+                false_graph,
+                """\
 def forward(self):
     ones = torch.ones(3, 4)
     sin = ones.sin();  ones = None
-    return sin
-""".strip()
-        self._check_simple_cond_graph(
-            fn, (torch.randn(4, 5),), exp_graph, exp_true_graph, exp_false_graph
-        )
+    return sin""",
+            )
 
     def test_cond_side_effect_in_one_branches(self):
         backend = EagerAndRecordGraphs()
@@ -1608,46 +1622,73 @@ def forward(self):
             {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
-    def test_fallback_on_nested_tuple_output(self):
-        counters.clear()
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        @torch.compile(backend=cnt)
+    def test_nested_tuple_output(self):
         def f(x):
             ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
             return a + b
 
         x = torch.randn(2, 3)
-        result = f(x)
 
-        self.assertEqual(result, x.sin() + x.cos())
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(len(backend.graphs), 1)
-        wrap_node = find_first_node(backend.graphs[0], wrap)
-        self.assertTrue(len(wrap_node.args), 1)
-        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 2)
-
-    def test_fallback_on_output_with_dict(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
         counters.clear()
-        cnt = CompileCounter()
+        graph = self._test_wrap_simple(f, (x,), 2, 4, return_graph=True)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
-        @torch.compile(backend=cnt)
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        a = wrap[0]
+        b = wrap[1];  wrap = None
+
+        add = a + b;  a = b = None
+        return (add,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            child = l_x_.sin()
+            child_1 = l_x_.cos();  l_x_ = None
+            return (child, child_1)
+""",
+        )
+
+    def test_output_with_dict(self):
         def f(x):
             return wrap(lambda x: [{"a": -x}], x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result, [{"a": -x}])
-        self.assertEqual(cnt.frame_count, 0)
-        assert_dict_matches_regex(
-            self,
-            dict(counters["graph_break"]),
-            {".*torch.* op returned non-Tensor dict call_function": 1},
+
+        counters.clear()
+        graph = self._test_wrap_simple(f, (x,), 2, 2, return_graph=True)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            child = -l_x_;  l_x_ = None
+            return (child,)
+""",
         )
 
     def test_access_module_attr(self):
@@ -1747,7 +1788,7 @@ def forward(self):
             return wrap(lambda x: x + y, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, (x,), 3, expected_opcount=2)
+        self._test_wrap_simple(f, (x,), 3, expected_opcount=3)
 
     def test_nested_wrap(self):
         class MockModule(torch.nn.Module):
@@ -1767,14 +1808,14 @@ def forward(self):
         def fn(x):
             return wrap(gn, x)
 
-        self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
+        self._test_wrap_simple(fn, (torch.randn(10, 10),), 4)
 
     def test_fn_with_kwargs_in_torch_ops(self):
         def fn(x):
             return wrap(lambda z: torch.cos(input=z), x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 2, expected_opcount=1)
+        self._test_wrap_simple(fn, (x,), 2)
 
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
@@ -1992,7 +2033,10 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2012,10 +2056,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_freevar_tensor(self):
         counters.clear()
@@ -2049,7 +2091,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2070,9 +2115,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_capture_tensor(self):
         counters.clear()
@@ -2147,7 +2191,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2168,9 +2215,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_has_aux(self):
         counters.clear()
@@ -2190,7 +2236,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2214,9 +2263,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
@@ -2235,7 +2283,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2260,9 +2311,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
@@ -2287,7 +2337,15 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual_const_var = normalize_gm(
+            wrapped_gm_const_var.print_readable(print_output=False)
+        )
+        actual_tuple_var = normalize_gm(
+            wrapped_gm_tuple_var.print_readable(print_output=False)
+        )
+        self.assertExpectedInline(
+            actual_const_var,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2315,15 +2373,40 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
-"""
-        actual_const_var = normalize_gm(
-            wrapped_gm_const_var.print_readable(print_output=False)
+""",
         )
-        actual_tuple_var = normalize_gm(
-            wrapped_gm_tuple_var.print_readable(print_output=False)
+        self.assertExpectedInline(
+            actual_tuple_var,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        getitem = call[0]
+        getitem_1 = getitem[0]
+        getitem_2 = getitem[1];  getitem = None
+        getitem_3 = call[1];  call = None
+        contiguous = getitem_1.contiguous();  getitem_1 = None
+        contiguous_1 = getitem_2.contiguous();  getitem_2 = None
+        return (contiguous, contiguous_1, getitem_3)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
+            sin = l_x_.sin()
+            add = sin + l_y_;  sin = l_y_ = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+            return (sum_1, cos)
+""",
         )
-        self.assertExpectedInline(actual_const_var, expected)
-        self.assertExpectedInline(actual_tuple_var, expected)
 
     def test_grad_over_grad(self):
         counters.clear()
@@ -2340,7 +2423,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2372,9 +2458,8 @@ class GraphModule(torch.nn.Module):
 
                 _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
                 return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_with_graph_break(self):
         counters.clear()
@@ -2458,7 +2543,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -2479,9 +2567,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return add
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_disable_capture(self):
         counters.clear()
@@ -2539,7 +2626,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2558,9 +2648,8 @@ class GraphModule(torch.nn.Module):
             sum_2 = select.sum(1);  select = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             return add
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_free_const(self):
         y = 3
@@ -2575,7 +2664,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2595,9 +2687,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + 3;  add = None
             return add_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_free_tensor(self):
         y = torch.randn(3, 3)
@@ -2612,7 +2703,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2633,9 +2727,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + l_y_;  add = l_y_ = None
             return add_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_two_inputs(self):
         def fn(x, y):
@@ -2651,7 +2744,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2673,9 +2769,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + select_1;  add = select_1 = None
             return add_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_two_inputs_tuple_in_dims(self):
         in_dims = (0, 1)
@@ -2693,7 +2788,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2715,9 +2813,8 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + select_1;  add = select_1 = None
             return add_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_over_vmap_two_inputs(self):
         def fn(x, y):
@@ -2731,7 +2828,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child = L_x_
@@ -2763,9 +2863,8 @@ class GraphModule(torch.nn.Module):
             def forward(self, select_2, select_3):
                 add = select_2 + select_3;  select_2 = select_3 = None
                 return add
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_over_vmap_captured(self):
         x = torch.ones(2, 3)
@@ -2780,7 +2879,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2809,9 +2911,8 @@ class GraphModule(torch.nn.Module):
             def forward(self, select_1, l_x_):
                 mul = l_x_ * select_1;  l_x_ = select_1 = None
                 return mul
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_multiple_outputs(self):
         x = torch.ones(2, 4, 3)
@@ -2825,7 +2926,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2845,9 +2949,8 @@ class GraphModule(torch.nn.Module):
             sum_1 = select.sum(0)
             sum_2 = select.sum(1);  select = None
             return (sum_1, sum_2)
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_multiple_outputs_diff_dims(self):
         x = torch.ones(2, 4, 3)
@@ -2861,7 +2964,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2881,9 +2987,8 @@ class GraphModule(torch.nn.Module):
             sum_1 = select.sum(0)
             sum_2 = select.sum(1);  select = None
             return (sum_1, sum_2)
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_multiple_outputs_out_dims_tuple(self):
         x = torch.ones(2, 4, 3)
@@ -2898,7 +3003,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2918,9 +3026,8 @@ class GraphModule(torch.nn.Module):
             sum_1 = select.sum(0)
             sum_2 = select.sum(1);  select = None
             return (sum_1, sum_2)
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_vmap_kwargs(self):
         counters.clear()
