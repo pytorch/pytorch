@@ -701,7 +701,6 @@
   structured: True
   dispatch:
     CPU, CUDA: all_dims_out
-    MPS: all_dims_out_mps
   cpp_no_default_args: ['dim']
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
