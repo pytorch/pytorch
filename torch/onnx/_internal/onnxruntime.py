@@ -799,7 +799,7 @@ class OrtBackend:
             )
 
             # Inline model before executing in ORT.
-            # This is a workaround for ORT's lack of performant support for local functions.
+            # Temporary solution to improve performance until runtimes adapt to function format.
             try:
                 import onnx.inliner
             except ImportError:
