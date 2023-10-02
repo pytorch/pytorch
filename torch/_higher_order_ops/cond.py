@@ -44,13 +44,13 @@ class UnsupportedAliasMutationException(RuntimeError):
 
 def cond(pred, true_fn, false_fn, operands):
     r"""
-    Conditionally applies ``true_fn`` or ``false_fn``.
+    Conditionally applies `true_fn` or `false_fn`.
 
-    ``cond`` is structured control flow operator. That is, it is like a Python if-statement,
-    but has limitations on ``true_fn``, ``false_fn``, and ``operands`` that enable it to be
+    `cond` is structured control flow operator. That is, it is like a Python if-statement,
+    but has limitations on `true_fn`, `false_fn`, and `operands` that enable it to be
     capturable using torch.compile and torch.export.
 
-    Assuming the constraints on ``cond``'s arguments are met, ``cond`` is equivalent to the following::
+    Assuming the constraints on `cond`'s arguments are met, `cond` is equivalent to the following::
 
         def cond(pred, true_branch, false_branch, operands):
             if pred:
@@ -58,29 +58,21 @@ def cond(pred, true_fn, false_fn, operands):
             else:
                 return false_branch(*operands)
 
-    .. warning::
-       cond is a prototype feature in PyTorch, included as a part of the torch.export release. The main limitations are that
-       it may not work in eager-mode PyTorch and you may encounter various failure modes while using it.
-       Please look forward to a more stable implementation in a future version of PyTorch.
-
-    Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
-
     Args:
-        - `pred (Union[bool, torch.Tensor])`: A boolean expression or a tensor with one element,
+        pred (Union[bool, torch.Tensor]): A boolean expression or a tensor with one element,
           indicating which branch function to apply.
 
-        - `true_fn (Callable)`: A callable function (a -> b) that is within the
+        true_fn (Callable): A callable function (a -> b) that is within the
           scope that is being traced.
 
-        - `false_fn (Callable)`: A callable function (a -> b) that is within the
-          scope that is being traced. The true branch and false branch must have
-          consistent input and outputs, meaning the inputs have to be the same, and
-          the outputs have to be the same type and shape.
+        false_fn (Callable): A callable function (a -> b) that is within the
+          scope that is being traced. The true branch and false branch must
+          have consistent input and outputs, meaning the inputs have to be
+          the same, and the outputs have to be the same type and shape.
 
-        - `operands (Tuple[torch.Tensor])`: A tuple of inputs to the true/false
-          branches.
+        operands (Tuple[torch.Tensor]): A tuple of inputs to the true/false functions.
 
-    Example:
+    Example::
 
         def true_fn(x: torch.Tensor):
             return x.cos()
@@ -102,12 +94,12 @@ def cond(pred, true_fn, false_fn, operands):
           - The function must return a tensor with the same metadata, e.g. shape,
             dtype, etc.
 
-          - The function cannot have in-place mutations on inputs or global variables. (Note: in-place tensor
-            operations such as `add_` for intermediate results are allowed in a branch)
+          - The function cannot have in-place mutations on inputs or global variables.
+            (Note: in-place tensor operations such as `add_` for intermediate results
+            are allowed in a branch)
 
     .. warning::
-
-    Temporal Limitations:
+        Temporal Limitations:
 
         - `cond` only supports **inference** right now. Autograd will be supported in the future.
 
@@ -115,7 +107,7 @@ def cond(pred, true_fn, false_fn, operands):
 
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
-    """
+        """
 
     if torch._dynamo.is_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
