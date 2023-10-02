@@ -2,9 +2,7 @@
 
 #include <torch/csrc/Export.h>
 
-#include <atomic>
-#include <functional>
-#include <iostream>
+#include <string>
 
 namespace torch {
 namespace jit {

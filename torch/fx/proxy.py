@@ -1,3 +1,4 @@
+import enum
 import dis
 import copy
 import sys
@@ -83,7 +84,7 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn", "original_aten", "recompute", "from_node"]
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node"]
 
 
 @compatibility(is_backward_compatible=True)
@@ -155,8 +156,8 @@ class TracerBase:
             # nodes as is the case with in-place foreach ops. During the
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
-            if current_meta.get("in_bwd", False):
-                new_seq_nr = current_meta["seq_nr"]
+            if current_meta.get("in_grad_fn", False):
+                new_seq_nr = current_meta["grad_fn_seq_nr"]
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
@@ -286,7 +287,7 @@ class TracerBase:
             kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
             return self.create_node("call_function", a.__class__, (), kwargs)
 
-        elif isinstance(a, base_types) or a is None or a is ...:
+        elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
 
