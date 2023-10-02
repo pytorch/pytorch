@@ -222,6 +222,7 @@ def _annotate_conv(
         ]:
             continue
         conv_node = n
+        partition = [conv_node]
 
         if filter_fn and not filter_fn(conv_node):
             continue
@@ -247,8 +248,8 @@ def _annotate_conv(
             output_qspec=get_output_act_qspec(quantization_config),
             _annotated=True,
         )
-        _mark_nodes_as_annotated([conv_node])
-        annotated_partitions.append([conv_node])
+        _mark_nodes_as_annotated(partition)
+        annotated_partitions.append(partition)
     return annotated_partitions
 
 
@@ -273,7 +274,7 @@ def _annotate_conv_relu(
         ]:
             continue
         conv_node = maybe_conv_node
-        parition = [relu_node, conv_node]
+        partition = [relu_node, conv_node]
 
         if filter_fn and any(not filter_fn(n) for n in partition):
             continue
