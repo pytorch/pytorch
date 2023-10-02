@@ -729,6 +729,29 @@ class TupleIteratorVariable(ListIteratorVariable):
     pass
 
 
+class RepeatIteratorVariable(VariableTracker):
+    def __init__(self, item, count=None, **kwargs):
+        super().__init__(**kwargs)
+        self.item = item
+        self.count = count
+    
+    def next_variables(self):
+        assert self.mutable_local
+        if self.count is None:
+            raise StopIteration()
+        return self.item.add_options(self), RepeatIteratorVariable(
+            self.item,
+            self.count - 1 if self.count is not None else None,
+            mutable_local=MutableLocal(),
+            recursively_contains=self.recursively_contains,
+            **VariableTracker.propagate([self]),
+        )
+
+    def as_python_constant(self):
+        from itertools import repeat
+        return iter(repeat(self.item.as_python_constant(), self.count))
+
+
 class SetVariable(VariableTracker):
     @dataclasses.dataclass
     class SetElement:
