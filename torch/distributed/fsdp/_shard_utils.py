@@ -69,7 +69,7 @@ def _gather_state_dict(
     """
     new_state_dict = {}
     for key, value in state_dict.items():
-        if isinstance(tensor, ShardedTensor):
+        if isinstance(value, ShardedTensor):
             # ShardedTensor does not seem to record the original device type.
             # So if the tensor is moved to CPU, we won't know the original type.
             # As a result, we have to rely on the user to tell us the correct one.
