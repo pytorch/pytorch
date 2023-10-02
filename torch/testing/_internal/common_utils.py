@@ -1954,10 +1954,10 @@ def check_if_enable(test: unittest.TestCase):
         # parametrized ones (TestSuite disables TestSuiteCPU)
         return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
 
-    if any(matches_test(x) for x in slow_tests_dict.keys()):
-        getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW:
-            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    # if any(matches_test(x) for x in slow_tests_dict.keys()):
+    #     getattr(test, test._testMethodName).__dict__['slow_test'] = True
+    #     if not TEST_WITH_SLOW:
+    #         raise unittest.SkipTest("test was automatically marked slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
     if not IS_SANDCASTLE:
         should_skip = False
