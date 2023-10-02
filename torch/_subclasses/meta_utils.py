@@ -440,7 +440,20 @@ class MetaConverter:
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
 
-                        extra_context = (source,) if t.is_nested else None
+                        extra_context = None
+                        if t.is_nested:
+                            # Avoid circular import
+                            from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+                            sym_ragged_size = shape_env.create_symintnode(
+                                shape_env.create_symbol(
+                                    t._size[1],
+                                    TensorPropertySource(source, TensorProperty.SIZE, 1),
+                                ),
+                                hint=t._size[1],
+                            )
+                            extra_context = (sym_ragged_size,)
+
 
                         r = transform_subclass(
                             t,
@@ -480,10 +493,12 @@ class MetaConverter:
                     swr = StorageWeakRef(s)
                     if (
                         swr not in self.storage_memo
-                        and r.is_nested
-                        or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                        and (
+                             r.is_nested
+                             or (
+                                 r.stride() == strides
+                                 and r.storage_offset() == storage_offset
+                             )
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo

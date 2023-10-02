@@ -1710,6 +1710,7 @@ def wrap_to_fake_tensor_and_record(
 
         dynamic_dims, constraint_dims = None, None
         if not e.is_nested:
+            # TODO: We should probably support this for nested tensors too
             dynamic_dims, constraint_dims = _automatic_dynamic(
                 e, tx, source.name(), static_shapes
             )

@@ -101,13 +101,11 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
 def new_nested_like(values, nt):
     # Construct a new nested tensor with the same metadata as nt given values
-    D = values.shape[1]
-    B = nt.offsets().shape[0] - 1
-    sym_size = (B, nt.ragged_size, D)
-    # Assume contiguous
-    sym_stride = (nt.ragged_size * D, D, 1)
-    kwargs = {"offsets": nt.offsets()}
-    return NestedTensor(values, sym_size=sym_size, sym_stride=sym_stride, **kwargs)
+    kwargs = {
+        "offsets": nt.offsets(),
+        "ragged_size": nt._ragged_size,
+    }
+    return NestedTensor(values, **kwargs)
 
 
 def jagged_unary_pointwise(func, *args, **kwargs):
