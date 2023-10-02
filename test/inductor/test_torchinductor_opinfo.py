@@ -239,7 +239,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "rand_like": {f16, f32, f64},
