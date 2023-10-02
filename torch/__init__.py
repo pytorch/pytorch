@@ -986,7 +986,6 @@ def is_warn_always_enabled() -> builtins.bool:
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-
 def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):  # noqa: F811
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
@@ -1026,7 +1025,7 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, pred, message)
+    _check_with(RuntimeError, cond, message)
 
 def _check_is_size(i, message=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
@@ -1763,7 +1762,6 @@ def compile(model: Optional[Callable] = None, *,
 from torch import export as export
 
 from torch._higher_order_ops import cond
-
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
