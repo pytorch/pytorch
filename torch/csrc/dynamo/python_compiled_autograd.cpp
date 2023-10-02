@@ -296,55 +296,25 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 }
 
 static PyObject* call_keep_graph(PyObject* graph, bool keep_graph) {
-  PyObject *dynamo_module, *compiled_autograd_module, *keep_graph_fn,
-      *keep_graph_args;
+  PyObject* py_keep_graph = keep_graph ? Py_True : Py_False;
+  Py_INCREF(py_keep_graph);
 
-  dynamo_module = PyImport_ImportModule("torch._dynamo");
-  compiled_autograd_module =
-      PyObject_GetAttrString(dynamo_module, "compiled_autograd");
-  keep_graph_fn =
-      PyObject_GetAttrString(compiled_autograd_module, "keep_graph");
-
-  PyObbject* keep_graph_res = nullptr;
-  if (PyCallable_Check(keep_graph_fn)) {
-    PyObject* py_keep_graph = keep_graph ? Py_True : Py_False;
-    keep_graph_args = PyTuple_Pack(2, graph, py_keep_graph);
-    keep_graph_res = PyObject_CallObject(keep_graph_fn, keep_graph_args);
-    Py_XDECREF(keep_graph_args);
+  if (PyObject_SetAttrString(graph, "keep_graph", py_keep_graph) == -1) {
+    Py_DECREF(py_keep_graph);
+    python_error err;
+    err.persist();
+    throw err;
   }
 
-  Py_XDECREF(keep_graph_fn);
-  Py_XDECREF(compiled_autograd_module);
-  Py_XDECREF(dynamo_module);
-
-  return keep_graph_res;
+  Py_DECREF(py_keep_graph);
+  return graph;
 }
 
 static bool call_should_keep_graph(PyObject* graph) {
-  PyObject *dynamo_module, *compiled_autograd_module, *keep_graph_fn,
-      *keep_graph_args, *keep_graph_res;
-
-  dynamo_module = PyImport_ImportModule("torch._dynamo");
-  compiled_autograd_module =
-      PyObject_GetAttrString(dynamo_module, "compiled_autograd");
-  keep_graph_fn =
-      PyObject_GetAttrString(compiled_autograd_module, "should_keep_graph");
-
-  bool result = false;
-  if (PyCallable_Check(keep_graph_fn)) {
-    keep_graph_args = PyTuple_Pack(1, graph);
-    keep_graph_res = PyObject_CallObject(keep_graph_fn, keep_graph_args);
-    if (keep_graph_res != nullptr) {
-      result = PyObject_IsTrue(keep_graph_res) != 0;
-      Py_XDECREF(keep_graph_res);
-    }
-    Py_XDECREF(keep_graph_args);
-  }
-
-  Py_XDECREF(keep_graph_fn);
-  Py_XDECREF(compiled_autograd_module);
-  Py_XDECREF(dynamo_module);
-
+  PyObject* py_keep_graph = PyObject_GetAttrString(graph, "keep_graph");
+  check(py_keep_graph);
+  bool result = PyObject_IsTrue(py_keep_graph) != 0;
+  Py_DECREF(py_keep_graph);
   return result;
 }
 
@@ -526,9 +496,9 @@ variable_list compiled_autograd(
       }
     }
 
-    auto graph = call_end_capture(py_compiler, state.outputs);
-    graph = call_keep_graph(graph, graph_task.keep_graph_);
-    cache->compiled_fn = check(graph);
+    PyObject* graph = check(call_end_capture(py_compiler, state.outputs));
+    cache->compiled_fn =
+        check(call_keep_graph(check(graph), graph_task.keep_graph_));
     cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
   } // End cache miss region

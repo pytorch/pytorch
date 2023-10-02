@@ -30,15 +30,6 @@ def maybe_clone(x):
     return x
 
 
-def keep_graph(graph, keep_graph):
-    graph.keep_graph = keep_graph
-    return graph
-
-
-def should_keep_graph(graph):
-    return graph.keep_graph
-
-
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
