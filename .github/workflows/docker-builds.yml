@@ -48,6 +48,7 @@ jobs:
           - docker-image-name: pytorch-linux-jammy-py3-clang12-asan
           - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
           - docker-image-name: pytorch-linux-focal-linter
+          - docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:

@@ -17,6 +17,14 @@ if torch.backends.cuda.is_built() and torch.cuda.is_available():
     def timer() -> float:
         torch.cuda.synchronize()
         return timeit.default_timer()
+elif torch._C._get_privateuse1_backend_name() != "privateuseone":
+    privateuse1_device_handler = getattr(torch, torch._C._get_privateuse1_backend_name(), None) \
+        if torch._C._get_privateuse1_backend_name() != "cpu" else None
+
+    def timer() -> float:
+        if privateuse1_device_handler:
+            privateuse1_device_handler.synchronize()
+        return timeit.default_timer()
 else:
     timer = timeit.default_timer
 

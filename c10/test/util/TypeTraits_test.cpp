@@ -3,6 +3,7 @@
 
 using namespace c10::guts;
 
+// NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
 
 namespace test_is_equality_comparable {
@@ -191,3 +192,4 @@ void func() {
       !is_stateless_lambda<Func*>::value, "A function pointer is not a lambda");
 }
 } // namespace test_lambda_is_stateless
+// NOLINTEND(modernize-unary-static-assert)
