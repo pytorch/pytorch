@@ -2003,14 +2003,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_manual_seed(self):
-        def fn(a, b):
-            x = a + b
-            torch.manual_seed(9000)
-            return x + 1
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
-
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod
@@ -2489,20 +2481,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
+        from torch._dynamo.utils import counters
+
         cnts = torch._dynamo.testing.CompileCounter()
+        counters.clear()
 
         def fn(x):
             attention_seed = int(torch.seed() % sys.maxsize)
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(100, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        # Python code is needed here, since torch.manual_seed graph-breaks.
+        # Refs: https://github.com/pytorch/pytorch/issues/107187
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
+        # Only the torch.seed call is turned into an FX graph.
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+        # Graph breaks at manual_seed.
+        self.assertEqual(len(counters["graph_break"]), 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2546,37 +2548,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res1 = opt_fn(4)
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
-
-    def test_has_torch_function(self):
-        class MyTensor:
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-
-                if func is torch.max:
-                    return torch.tensor(123)
-                return func(*args, **kwargs)
-
-        class LocalSubclass(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                return func(*args, **kwargs)
-
-        def fn(x):
-            return torch.overrides.has_torch_function_unary(x), torch.overrides.has_torch_function_variadic(x)
-
-        for test_class in [MyTensor, LocalSubclass]:
-            x = test_class()
-            ref0 = fn(x)
-            ref1 = fn(4)
-            opt_fn = torch._dynamo.optimize("eager")(fn)
-            res0 = opt_fn(x)
-            res1 = opt_fn(4)
-            self.assertTrue(same(ref0, res0))
-            self.assertTrue(same(ref1, res1))
 
     def test_tensor_data(self):
         def fn(x, y):

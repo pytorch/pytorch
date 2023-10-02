@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import pprint
 import re
 import unittest
 
@@ -1808,6 +1809,153 @@ def forward(self):
             loss.backward()
 
         self.assertTrue(activations.keys() == forward_handles.keys())
+
+    def _get_source_fn_stack(self, gm, node_names):
+        ret = {}
+        for mod in gm.modules():
+            for node in mod.graph.nodes:
+                if node.name in node_names:
+                    actual_stack = [
+                        name for name, _ in node.meta.get("source_fn_stack", [])
+                    ]
+                    ret[node.name] = actual_stack
+        return ret
+
+    def test_wrap_source_fn_stack(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule()
+
+        def gn(x):
+            return torch.cos(x) + wrap(mod, x)
+
+        def fn(x):
+            return wrap(gn, x)
+
+        backend = EagerAndRecordGraphs()
+        inp = torch.randn((4, 4))
+        torch.compile(fn, backend=backend, fullgraph=True)(inp)
+
+        gm = backend.graphs[0]
+        actual_stack = self._get_source_fn_stack(gm, {"cos", "add", "linear"})
+        self.assertExpectedInline(
+            pprint.pformat(actual_stack),
+            """\
+{'add': ['wrap', 'add'],
+ 'cos': ['wrap', 'cos'],
+ 'linear': ['wrap', 'wrap', 'linear']}""",
+        )
+
+    def test_cond_source_fn_stack(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def cond_f(pred, pred2, x, y):
+            def true_fn(pred2, x, y):
+                return x + y
+
+            def false_fn(pred2, x, y):
+                def true_fn2(x, y):
+                    return x.sin() - y.cos()
+
+                def false_fn2(x, y):
+                    return x.cos() - y.sin()
+
+                return control_flow.cond(pred2, true_fn2, false_fn2, [x, y])
+
+            return control_flow.cond(pred, true_fn, false_fn, [pred2, x, y])
+
+        pred = torch.tensor(True)
+        pred2 = torch.tensor(False)
+        xs = torch.randn(2, 3, 3)
+        y = torch.randn(3, 3)
+        cond_f(pred, pred2, xs, y)
+
+        gm = backend.graphs[0]
+        actual_stack = self._get_source_fn_stack(gm, {"cos", "add", "sin", "sub"})
+        self.assertExpectedInline(
+            pprint.pformat(actual_stack),
+            """\
+{'add': ['cond', 'add'],
+ 'cos': ['cond', 'cond', 'cos'],
+ 'sin': ['cond', 'cond', 'sin'],
+ 'sub': ['cond', 'cond', 'sub']}""",
+        )
+
+    def test_map_source_fn_stack(self):
+        backend = EagerAndRecordGraphs()
+
+        xs = torch.randn(2, 3, 3)
+        y = torch.randn(3)
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def map_f(xs, y):
+            def inner(x, y):
+                def inner2(x, y):
+                    return x + y
+
+                return control_flow.map(inner2, x, y) * y.cos()
+
+            return control_flow.map(inner, xs, y).sin()
+
+        result = map_f(xs, y)
+
+        gm = backend.graphs[0]
+        actual_stack = self._get_source_fn_stack(gm, {"cos", "add", "sin"})
+        self.assertExpectedInline(
+            pprint.pformat(actual_stack),
+            """{'add': ['map', 'map', 'add'], 'cos': ['map', 'cos'], 'sin': ['sin']}""",
+        )
+
+    def test_grad_source_fn_stack(self):
+        backend = EagerAndRecordGraphs()
+
+        def fn(x):
+            return x.sin().sum()
+
+        @torch.compile(backend=backend, fullgraph=False)
+        def wrapper_fn(x):
+            return torch.func.grad(torch.func.grad(fn))(x)
+
+        x = torch.randn(())
+
+        wrapper_fn(x)
+        gm = backend.graphs[0]
+        actual_stack = self._get_source_fn_stack(gm, {"sum_1", "sin"})
+        self.assertExpectedInline(
+            pprint.pformat(actual_stack),
+            """\
+{'sin': ['grad_impl', 'grad_impl', 'sin'],
+ 'sum_1': ['grad_impl', 'grad_impl', 'sum_1']}""",
+        )
+
+    def test_vmap_source_fn_stack(self):
+        backend = EagerAndRecordGraphs()
+
+        def inner_fn(x):
+            return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            return torch.func.vmap(lambda x: inner_fn(x.cos()))(x)
+
+        x = torch.randn(3, 3, 3, 3)
+        fn(x)
+        gm = backend.graphs[0]
+        actual_stack = self._get_source_fn_stack(gm, {"sum_1", "sum_2", "add"})
+        self.assertExpectedInline(
+            pprint.pformat(actual_stack),
+            """\
+{'add': ['vmap_impl', 'vmap_impl', 'add'],
+ 'sum_1': ['vmap_impl', 'vmap_impl', 'sum_1'],
+ 'sum_2': ['vmap_impl', 'vmap_impl', 'sum_2']}""",
+        )
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):

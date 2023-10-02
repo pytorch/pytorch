@@ -24,6 +24,7 @@ from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    has_torch_function,
     is_rng_state_getter_or_setter,
     istype,
     product,
@@ -359,12 +360,14 @@ class TorchVariable(VariableTracker):
             )
             assert len(args) == 1
             return CUDAStreamContextVariable.create(tx, args[0], **options)
-        elif self.value in (torch.overrides.has_torch_function_variadic, torch.overrides.has_torch_function_unary):
+        elif self.value in (
+            torch.overrides.has_torch_function_variadic,
+            torch.overrides.has_torch_function_unary,
+        ):
             assert not kwargs
-            def has_torch_function(a):
-                return isinstance(a, TensorWithTFOverrideVariable) or isinstance(a, UserDefinedObjectVariable) and hasattr(a.value, "__torch_function__")
-
-            return ConstantVariable.create(any(has_torch_function(a) for a in args), **options)
+            return ConstantVariable.create(
+                any(has_torch_function(a) for a in args), **options
+            )
         elif self.value is torch.cuda.streams.Stream:
             return wrap_fx_proxy_cls(
                 CUDAStreamVariable,
@@ -482,6 +485,9 @@ class TorchVariable(VariableTracker):
             # these setter or getter functions, producing an incorrect graph
             # when it comes to rng states.
             unimplemented(f"RNG state getter/setter function - {self.value}")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         elif (
             self.value == torch.numel
             and len(args) == 1
