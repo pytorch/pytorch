@@ -61,7 +61,7 @@ class NestedTensor(torch.Tensor):
 
         # In a later PR, we'll need to accept an additional size argument
         # to handle dynamic shapes.
-        ragged_dim = get_tensor_id(offsets)
+        ragged_dim = get_tensor_id(offsets, 1)
         D = values.shape[1]
         B = offsets.shape[0] - 1
         self._size = (B, ragged_dim, D)
