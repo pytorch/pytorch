@@ -222,7 +222,7 @@ class OptimizeForInferenceTemplate(TestCase):
             foo(mod, x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"
+            RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
         ):
             mod(x)
 

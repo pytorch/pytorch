@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
