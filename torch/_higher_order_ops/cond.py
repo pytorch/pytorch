@@ -28,7 +28,7 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
-@exposed_in(torch)
+@exposed_in('torch')
 def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies ``true_fn`` or ``false_fn``.

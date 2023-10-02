@@ -56,7 +56,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export', 'autocast',
+    'export', 'autocast', 'cond',
 ]
 
 ################################################################################
@@ -1011,7 +1011,7 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
 
     raise error_type(message_evaluated)
 
-def _check(pred, message=None):  # noqa: F811
+def _check(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
