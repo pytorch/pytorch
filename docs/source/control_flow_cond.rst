@@ -3,7 +3,7 @@
 Control Flow - Cond
 ====================
 
-`torch.cond`is a structured control flow operator. It can be used to specify if-else like control flow
+`torch.cond` is a structured control flow operator. It can be used to specify if-else like control flow
 and can logically be seen as implemented as follows.
 
 .. code-block:: python
@@ -20,7 +20,7 @@ and can logically be seen as implemented as follows.
             return false_fn(*operands)
 
 Its unique power lies in its aibilty of expressing **data-dependent control flow**: it lowers to a conditional
-operator (`torch.ops.higher_order.cond`), which preserves predicate, true function and false functions in it.
+operator (`torch.ops.higher_order.cond`), which preserves predicate, true function and false functions.
 This unlocks great flexibilty in writing and deploying models that change model architecture based on
 the **value** or **shape** of inputs or intermediates.
 
@@ -65,16 +65,6 @@ We can eagerly run the model and expect the results vary based on input shape:
     assert torch.equal(dyn_shape_mod(inp), false_fn(inp))
     assert torch.equal(dyn_shape_mod(inp2), true_fn(inp2))
 
-We can torch.compile the model with eager backend and get the expected results:
-
-.. code-block:: python
-
-    inp = torch.randn(3)
-    inp2 = torch.randn(5)
-    opt_dyn_mod = torch.compile(dyn_shape_mod, backend="eager")
-    assert torch.equal(opt_dyn_mod(inp), false_fn(inp))
-    assert torch.equal(opt_dyn_mod(inp2), true_fn(inp2))
-
 We can export the model for further transformations and deployment:
 
 .. code-block:: python
@@ -86,7 +76,7 @@ We can export the model for further transformations and deployment:
 
 This gives us an exported program as shown below:
 
-.. code-block:: python
+.. code-block::
 
     class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: f32[s0, 3]):
@@ -128,7 +118,7 @@ Here is another exmaple that showcases how to express a data-dependet control fl
 
 The exported program we get after export:
 
-.. code-block:: python
+.. code-block::
 
     class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: f32[s0, 3]):
