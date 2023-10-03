@@ -1418,8 +1418,14 @@ class TritonKernel(Kernel):
                 append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+
+            dtype = V.graph.get_dtype(name)
+            if dtype in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
+            if dtype == torch.bool:
+                # Workaround for https://github.com/openai/triton/issues/2151
+                # tl.load returns int8 when loading from pointer to int1
+                line += ".to(tl.int1)"
 
         if "tmp" in mask:
             # Masked loads must come after the mask is computed
@@ -2543,7 +2549,7 @@ class TritonScheduling(BaseScheduling):
                     node.mark_run()
 
         kernel_name = self.define_kernel(src_code, node_schedule)
-
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers
