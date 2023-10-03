@@ -348,15 +348,14 @@ def _multi_tensor_adamax(
         # Update the exponentially weighted infinity norm.
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
-        # for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-        #     torch.maximum(
-        #         exp_inf,
-        #         grad.abs().add_(eps),
-        #         out=exp_inf,
-        #     )
-        grouped_grads_abs = torch._foreach_abs(grouped_grads)
-        torch._foreach_add_(grouped_grads_abs, eps)
-        torch._foreach_maximum_(grouped_exp_infs, grouped_grads_abs)
+        # foreach_abs_ has no meta kernel, foreach_abs is extern and will obstruct fusion
+        # https://github.com/pytorch/pytorch/issues/110458
+
+        # torch._foreach_abs_(grouped_grads)
+        for grad in grouped_grads:
+            grad.abs_()
+        torch._foreach_add_(grouped_grads, eps)
+        torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
 

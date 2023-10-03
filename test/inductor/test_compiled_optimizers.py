@@ -171,8 +171,16 @@ class CompiledOptimizerTests(TestCase):
     )
 
     test_adamw = make_test(AdamW, lr=0.01)
-    # Need to an impl which does not use python scalars
+
     test_adamax = make_test(Adamax, kernel_count=2, lr=0.01)
+    test_adamax_weight_decay = make_test(
+        Adamax, kernel_count=2, lr=0.01, weight_decay=0.01
+    )
+    test_adamax_maximize = make_test(Adamax, kernel_count=2, lr=0.01, maximize=True)
+    test_adamax_weight_decay_and_maximize = make_test(
+        Adamax, kernel_count=2, lr=0.01, weight_decay=0.01, maximize=True
+    )
+
     test_nadam = make_test(NAdam, lr=0.01)
     test_nadam_weight_decay = make_test(NAdam, lr=0.01, weight_decay=0.01)
     test_nadam_momentum_decay = make_test(NAdam, lr=0.01, momentum_decay=6e-3)
