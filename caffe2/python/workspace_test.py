@@ -184,7 +184,7 @@ class TestWorkspace(unittest.TestCase):
             np.float16,
             np.float32,
             np.float64,
-            np.bool,
+            np.bool_,
             np.int8,
             np.int16,
             np.int32,
@@ -205,12 +205,12 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedBlobBool(self):
         """Special case for bool to ensure coverage of both true and false."""
-        data = np.zeros((2, 3, 4)).astype(np.bool)
+        data = np.zeros((2, 3, 4)).astype(np.bool_)
         data.flat[::2] = True
         self.assertEqual(workspace.FeedBlob("testblob_types", data), True)
         fetched_back = workspace.FetchBlob("testblob_types")
         self.assertEqual(fetched_back.shape, (2, 3, 4))
-        self.assertEqual(fetched_back.dtype, np.bool)
+        self.assertEqual(fetched_back.dtype, np.bool_)
         np.testing.assert_array_equal(fetched_back, data)
 
     def testGetBlobSizeBytes(self):
@@ -218,7 +218,7 @@ class TestWorkspace(unittest.TestCase):
             np.float16,
             np.float32,
             np.float64,
-            np.bool,
+            np.bool_,
             np.int8,
             np.int16,
             np.int32,
