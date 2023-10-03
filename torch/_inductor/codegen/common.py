@@ -12,6 +12,10 @@ import sympy
 
 import torch
 import torch.fx
+from torch.utils._sympy.printing import (
+    ExprPrinter as BaseExprPrinter,
+    PythonPrinter as BasePythonPrinter,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
@@ -246,13 +250,13 @@ class DataTypePropagation:
         DataTypePropagation.propagate_loopbody(node._body)
 
 
-class ExprPrinter(torch.utils._sympy.ExprPrinter):
+class ExprPrinter(BaseExprPrinter):
     @classmethod
     def is_variable(cls, var):
         return isinstance(var, CSEVariable)
 
 
-class PythonPrinter(torch.utils._sympy.PythonPrinter):
+class PythonPrinter(BasePythonPrinter):
     @classmethod
     def is_variable(cls, var):
         return isinstance(var, CSEVariable)
