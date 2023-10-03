@@ -351,9 +351,7 @@ def _multi_tensor_adamax(
         # foreach_abs_ has no meta kernel, foreach_abs is extern and will obstruct fusion
         # https://github.com/pytorch/pytorch/issues/110458
 
-        # torch._foreach_abs_(grouped_grads)
-        for grad in grouped_grads:
-            grad.abs_()
+        torch._foreach_abs_(grouped_grads)
         torch._foreach_add_(grouped_grads, eps)
         torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
 
