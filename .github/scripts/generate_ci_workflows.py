@@ -308,7 +308,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
             OperatingSystem.MACOS_ARM64
         ),
         cross_compile_arm64=False,
-        macos_runner = "macos-13-xl",
+        macos_runner = "macos-13-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
