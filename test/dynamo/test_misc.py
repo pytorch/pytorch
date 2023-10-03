@@ -60,6 +60,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
@@ -69,7 +70,11 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    IS_FBCODE,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -519,6 +524,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             guard_failure.reason,
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
         )
+
+    def test_builtin_abs(self):
+        def fn(x, y):
+            return abs(x) + abs(y)
+
+        sample = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+
+        for sample in [
+            (torch.randn(10, 10), torch.randn(10, 10)),
+            (-10, make_tensor(10, dtype=torch.int64, device="cpu")),
+            (-0.1, torch.randn(10)),
+        ]:
+            expect = fn(*sample)
+            actual = opt_fn(*sample)
+            self.assertEqual(expect, actual)
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -7609,10 +7630,10 @@ ShapeEnv not equal: field values don't match:
 
             inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
 
-        torch.set_default_dtype(torch.float)
-        foo()
-        torch.set_default_dtype(torch.double)
-        foo()
+        with set_default_dtype(torch.float):
+            foo()
+        with set_default_dtype(torch.double):
+            foo()
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
