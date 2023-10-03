@@ -24,7 +24,7 @@ def define_targets(rules):
         hdrs = ["MapAllocator.h"],
         linkstatic = True,
         local_defines = [
-            "C10_BUILD_MAIN_LIB"
+            "C10_BUILD_MAIN_LIB",
             "HAVE_MMAP=1",
             "HAVE_SHM_OPEN=1",
             "HAVE_SHM_UNLINK=1",
