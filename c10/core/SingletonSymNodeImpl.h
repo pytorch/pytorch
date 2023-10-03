@@ -92,22 +92,21 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   // allowing us to answer queries like j0 >= 1 (True), and j0 == 0 (False).
   // This is a useful default range for the raggedness pattern of a jagged
   // tensor (1) since sizes are non-negative, and (2) we need to get past 0/1
-  // specialization checks. It would be cool to have the ability to arbitrarily
-  // constrain the range of values as we do for unbacked symints.
+  // specialization checks.
   //
   // [ Indeterminate inequalities error out ]
   //
-  // Given the semantic defined above, certain relations like j0 < 3 and j0 == 3
-  // are thus indeterminable. In our impl today, evaluating such relations error
+  // Given the semantic defined above, certain relations like j0 < 3 are thus
+  // indeterminable. In our impl today, evaluating such relations error
   //
   // It may seem convenient to just define indeterminate relations to return
   // False, but the implementation we maintain in parallel using sympy does not
   // allow this.
   //
-  // sympy only allows overriding of Ge. The other relations (Lt, Gt, Le) are,
+  // Sympy only allows overriding of Ge. The other relations (Lt, Gt, Le) are,
   // by consequence, all derived from Ge e.g., Lt(a, b) := !Ge(a, b). This
-  // would mean that means that if we define the indeterminate j0 >= 3
-  // the also indeterminate j0 < 3 will be evaluated to be True!
+  // would mean that means that if we define the indeterminate j0 >= 3 to be
+  // False, the also indeterminate j0 < 3 will be evaluated to be True!
   //
   // [ Coefficient are assumed positive ]
   //
