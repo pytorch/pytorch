@@ -19,7 +19,8 @@ from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from torch.utils._sympy.reference import ReferenceAnalysis
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.singleton_int import SingletonInt
-from sympy.core.relational import is_ge, is_le
+from sympy.core.relational import is_ge, is_le, is_gt, is_lt
+import functools
 
 
 
@@ -525,60 +526,75 @@ class TestSympySolve(TestCase):
 
 class TestSingletonInt(TestCase):
     def test_basic(self):
-        j1 = SingletonInt(1, 1)
-        j1_copy = SingletonInt(1, 1)
-        j2 = SingletonInt(2, 1)
-        j1x2 = SingletonInt(1, 2)
+        j1 = SingletonInt(1, coeff=1)
+        j1_copy = SingletonInt(1, coeff=1)
+        j2 = SingletonInt(2, coeff=1)
+        j1x2 = SingletonInt(1, coeff=2)
 
-        # eq
-        self.assertTrue(sympy.Eq(j1, j1))
-        self.assertTrue(sympy.Eq(j1, j1_copy))
-        self.assertFalse(sympy.Eq(j1, j2))
-        self.assertFalse(sympy.Eq(j1, j1x2))
-        self.assertFalse(sympy.Eq(j1, sympy.Integer(1)))
-        self.assertFalse(sympy.Eq(j1, sympy.Integer(3)))
+        def test_eq(a, b, expected):
+            self.assertEqual(sympy.Eq(a, b), expected)
+            self.assertEqual(sympy.Ne(b, a), not expected)
 
-        # ne
-        self.assertFalse(sympy.Ne(j1, j1))
-        self.assertFalse(sympy.Ne(j1, j1_copy))
-        self.assertTrue(sympy.Ne(j1, j2))
-        self.assertTrue(sympy.Ne(j1, j1x2))
-        self.assertTrue(sympy.Ne(j1, sympy.Integer(1)))
-        self.assertTrue(sympy.Ne(j1, sympy.Integer(3)))
+        # eq, ne
+        test_eq(j1, j1, True)
+        test_eq(j1, j1_copy, True)
+        test_eq(j1, j2, False)
+        test_eq(j1, j1x2, False)
+        test_eq(j1, sympy.Integer(1), False)
+        test_eq(j1, sympy.Integer(3), False)
 
-        # ge
-        self.assertTrue(is_ge(j1, sympy.Integer(1)))
-        with self.assertRaisesRegex(ValueError, "indeterminate"):
-            is_ge(j1, sympy.Integer(3))
-        self.assertTrue(is_ge(j1, j1))
-        with self.assertRaisesRegex(ValueError, "indeterminate"):
-            is_ge(j2, j1)
-        self.assertTrue(sympy.Ge(j1x2, j1))
-        self.assertTrue(is_ge(j1x2, j1))
+        def test_ineq(a, b, expected, *, strict=True):
+            greater = (sympy.Gt, is_gt) if strict else (sympy.Ge, is_ge)
+            less = (sympy.Lt, is_lt) if strict else (sympy.Le, is_le)
 
-        # le
-        self.assertTrue(is_le(sympy.Integer(1), j1))
-        with self.assertRaisesRegex(ValueError, "indeterminate"):
-            is_le(sympy.Integer(3), j1)
-        self.assertTrue(is_le(j1, j1))
-        with self.assertRaisesRegex(ValueError, "indeterminate"):
-            is_le(j1, j2)
-        self.assertTrue(sympy.Le(j1, j1x2))
-        self.assertTrue(is_le(j1, j1x2))
+            if isinstance(expected, bool):
+                # expected is always True
+                for fn in greater:
+                    self.assertEqual(fn(a, b), expected)
+                    self.assertEqual(fn(b, a), not expected)
+                for fn in less:
+                    self.assertEqual(fn(b, a), expected)
+                    self.assertEqual(fn(a, b), not expected)
+            else:
+                for fn in greater:
+                    with self.assertRaisesRegex(ValueError, expected):
+                        fn(a, b)
+                for fn in less:
+                    with self.assertRaisesRegex(ValueError, expected):
+                        fn(b, a)
 
-        # gt
-        self.assertTrue(j2 > 0)
-        self.assertFalse(0 > j2)
-        with self.assertRaisesRegex(ValueError, "indeterminate"):
-            j2 > 2  # noqa: B015
-        self.assertFalse(j1 > j1)
+        # ge, le, gt, lt
+        for strict in (True, False):
+            test_non_strict_ineq = functools.partial(test_ineq, strict=strict)
+            test_non_strict_ineq(j1, sympy.Integer(0), True)
+            test_non_strict_ineq(j1, sympy.Integer(3), "indeterminate")
+            test_non_strict_ineq(j1, j2, "indeterminate")
+            test_non_strict_ineq(j1x2, j1, True)
 
-        # lt
-        self.assertTrue(0 < j2)
-        self.assertFalse(j2 < 0)
-        with self.assertRaisesRegex(ValueError, "indeterminate"):
-            2 < j2  # noqa: B015
-        self.assertFalse(j1 < j1)
+        # Special cases for ge, le, gt, lt:
+        for ge in (sympy.Ge, is_ge):
+            self.assertTrue(ge(j1, j1))
+            self.assertTrue(ge(j1, sympy.Integer(2)))
+            with self.assertRaisesRegex(ValueError, "indeterminate"):
+                ge(sympy.Integer(2), j1)
+        for le in (sympy.Le, is_le):
+            self.assertTrue(le(j1, j1))
+            self.assertTrue(le(sympy.Integer(2), j1))
+            with self.assertRaisesRegex(ValueError, "indeterminate"):
+                le(j1, sympy.Integer(2))
+
+        for gt in (sympy.Gt, is_gt):
+            self.assertFalse(gt(j1, j1))
+            self.assertFalse(gt(sympy.Integer(2), j1))
+            # it is only known to be that j1 >= 2, j1 > 2 is indeterminate
+            with self.assertRaisesRegex(ValueError, "indeterminate"):
+                gt(j1, sympy.Integer(2))
+
+        for lt in (sympy.Lt, is_lt):
+            self.assertFalse(lt(j1, j1))
+            self.assertFalse(lt(j1, sympy.Integer(2)))
+            with self.assertRaisesRegex(ValueError, "indeterminate"):
+                lt(sympy.Integer(2), j1)
 
         # mul
         self.assertEqual(j1 * 2, j1x2)
@@ -586,7 +602,7 @@ class TestSingletonInt(TestCase):
         # since sympy.Mul doesn't trigger __mul__ unlike the above.
         self.assertIsInstance(sympy.Mul(j1, 2), sympy.core.mul.Mul)
 
-        with self.assertRaisesRegex(NotImplementedError, "NYI"):
+        with self.assertRaisesRegex(ValueError, "cannot be multiplied"):
             j1 * j2
 
         self.assertEqual(j1.free_symbols, set())

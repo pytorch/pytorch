@@ -274,8 +274,8 @@ static int TensorGuards_init(
         per_tensor_dynamic_dims_sizes.empty()
         ? wrapIntegersInOptional(tensor.sym_sizes())
         : per_tensor_dynamic_dims_sizes[i];
-    std::vector<std::optional<c10::SymInt>> tensor_dims_stride = {};
-    tensor_dims_stride = per_tensor_dynamic_dims_strides.empty()
+    std::vector<std::optional<c10::SymInt>> tensor_dims_stride =
+        per_tensor_dynamic_dims_strides.empty()
         ? wrapIntegersInOptional(tensor.sym_strides())
         : per_tensor_dynamic_dims_strides[i];
 
