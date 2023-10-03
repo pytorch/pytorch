@@ -1823,6 +1823,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
           [work](at::ivalue::Future& /* unused */) {
             work->recordFunctionEndCallback_();
           },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
           /*uses_future=*/false);
     }
     work->future_->markCompleted(at::IValue(*work->outputs_));
@@ -2005,6 +2008,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         [work](at::ivalue::Future& /* unused */) {
           work->recordFunctionEndCallback_();
         },
+        // uses_future = false allows us to skip synchronization in
+        // ivalue::Future, but is only valid as long as the lambda doesn't use
+        // the "Future" argument.
         /*uses_future=*/false);
   }
 
