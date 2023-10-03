@@ -97,8 +97,7 @@ class _ReplicateState(_State):
     def forward_pre_hook(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
-        args, kwargs = self._ddp._pre_forward(*args, **kwargs)
-        return args, kwargs
+        return self._ddp._pre_forward(*args, **kwargs)
 
     def forward_post_hook(
         self,
