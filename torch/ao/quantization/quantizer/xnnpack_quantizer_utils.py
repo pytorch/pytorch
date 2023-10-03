@@ -739,7 +739,7 @@ def _annotate_mul(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     mul_partitions = get_source_partitions(
-        gm.graph, [operator.mul, torch.mul, operator.imul], filter_fn
+        gm.graph, ["mul", "mul_", operator.mul, torch.mul, operator.imul], filter_fn
     )
     mul_partitions = list(itertools.chain(*mul_partitions.values()))
     annotated_partitions = []
