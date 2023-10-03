@@ -1876,6 +1876,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
       "collectives.");
 
+  // Bump sequence number, updated in collective() as well
+  seq_++;
+
   const auto devices = getDeviceList(tensors);
   std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
@@ -2019,6 +2022,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         // ivalue::Future, but is only valid as long as the lambda doesn't use
         // the "Future" argument.
         /*uses_future=*/false);
+  }
+
+  // Enqueue P2P op so that it can be cancelled by NCCL watchdog
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+    workEnqueue(work);
   }
 
   return work;
