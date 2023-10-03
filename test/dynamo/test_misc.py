@@ -4463,27 +4463,32 @@ def fn():
         compiled_gm = make_fx(
             lambda x: symbool_fn_compiled(x), tracing_mode="symbolic"
         )(x)
-        compiled_gm_str = compiled_gm.print_readable(print_output=False)
+        compiled_gm_code = compiled_gm.code
         self.assertEqual(len(compiled_gm.shape_env.guards), 1)
+        compiled_gm_guard_exprs = " ".join(
+            [str(guard_expr) for guard_expr, _ in compiled_gm.shape_env.guards]
+        )
 
         not_compiled_gm = make_fx(
             lambda x: symbool_fn_not_compiled(x), tracing_mode="symbolic"
         )(x)
-        not_compiled_gm_str = not_compiled_gm.print_readable(print_output=False)
+        not_compiled_gm_code = not_compiled_gm.code
         self.assertEqual(len(not_compiled_gm.shape_env.guards), 1)
+        not_compiled_gm_guard_exprs = " ".join(
+            [str(guard_expr) for guard_expr, _ in not_compiled_gm.shape_env.guards]
+        )
+        self.assertEqual(compiled_gm_guard_exprs, not_compiled_gm_guard_exprs)
+        self.assertExpectedInline(compiled_gm_guard_exprs, """Eq(s0, 3)""")
 
         self.assertEqual(compiled_gm(x), not_compiled_gm(x))
         self.assertEqual(compiled_gm(x2), not_compiled_gm(x2))
-        self.assertEqual(compiled_gm_str, not_compiled_gm_str)
+        self.assertEqual(compiled_gm_code, not_compiled_gm_code)
         self.assertExpectedInline(
-            not_compiled_gm_str,
+            not_compiled_gm_code.strip(),
             """\
-class <lambda>(torch.nn.Module):
-    def forward(self, x_1: f32[3, s1]):
-        # No stacktrace found for following nodes
-        sin: f32[3, s1] = torch.ops.aten.sin.default(x_1);  x_1 = None
-        return sin
-        """,
+def forward(self, x_1):
+    sin = torch.ops.aten.sin.default(x_1);  x_1 = None
+    return sin""",
         )
 
     def test_not_dynamic_scope(self):
