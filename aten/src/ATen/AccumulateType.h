@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/Config.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
@@ -51,147 +52,94 @@
 
 namespace at {
 
-template <typename T, bool is_cuda>
+template <typename T, c10::DeviceType D>
+struct AccumulateTypeDevice {};
+
+template <typename T, bool>
 struct AccumulateType {};
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <>
-struct AccumulateType<half, true> {
-  using type = float;
+template <typename T>
+struct AccumulateType<T, false> {
+  using type = typename AccumulateTypeDevice<T, c10::DeviceType::CPU>::type;
 };
-#endif
-template <>
-struct AccumulateType<BFloat16, true> {
-  using type = float;
+
+template <typename T>
+struct AccumulateType<T, true> {
+  using type = typename AccumulateTypeDevice<T, c10::DeviceType::CUDA>::type;
 };
-template <>
-struct AccumulateType<Half, true> {
-  using type = float;
-};
-template <>
-struct AccumulateType<Float8_e5m2, true> {
-  using type = float;
-};
-template <>
-struct AccumulateType<Float8_e4m3fn, true> {
-  using type = float;
-};
-template <>
-struct AccumulateType<float, true> {
-  using type = float;
-};
-template <>
-struct AccumulateType<double, true> {
-  using type = double;
-};
-template <>
-struct AccumulateType<int8_t, true> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<uint8_t, true> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<char, true> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<int16_t, true> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<int32_t, true> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<int64_t, true> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<bool, true> {
-  using type = bool;
-};
-template <>
-struct AccumulateType<Half, false> {
-  using type = float;
-};
-template <>
-struct AccumulateType<BFloat16, false> {
-  using type = float;
-};
-template <>
-struct AccumulateType<Float8_e5m2, false> {
-  using type = float;
-};
-template <>
-struct AccumulateType<Float8_e4m3fn, false> {
-  using type = float;
-};
-template <>
-struct AccumulateType<c10::complex<Half>, false> {
-  using type = c10::complex<float>;
-};
-template <>
-struct AccumulateType<c10::complex<float>, false> {
-  using type = c10::complex<double>;
-};
-template <>
-struct AccumulateType<c10::complex<double>, false> {
-  using type = c10::complex<double>;
-};
-template <>
-struct AccumulateType<c10::complex<Half>, true> {
-  using type = c10::complex<float>;
-};
-template <>
-struct AccumulateType<c10::complex<float>, true> {
-  using type = c10::complex<float>;
-};
-template <>
-struct AccumulateType<c10::complex<double>, true> {
-  using type = c10::complex<double>;
-};
-template <>
-struct AccumulateType<float, false> {
-  using type = double;
-};
-template <>
-struct AccumulateType<double, false> {
-  using type = double;
-};
-template <>
-struct AccumulateType<int8_t, false> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<uint8_t, false> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<char, false> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<int16_t, false> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<int32_t, false> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<int64_t, false> {
-  using type = int64_t;
-};
-template <>
-struct AccumulateType<bool, false> {
-  using type = bool;
-};
+
+template <typename T, c10::DeviceType device>
+using acc_type_device = typename AccumulateTypeDevice<T, device>::type;
 
 template <typename T, bool is_cuda>
 using acc_type = typename AccumulateType<T, is_cuda>::type;
 
+#define ACC_TYPE(t, acc_t, device_type)         \
+  template <>                                   \
+  struct AccumulateTypeDevice<t, device_type> { \
+    using type = acc_t;                         \
+  };
+#define MPS_ACC_TYPE(t, acc_t) ACC_TYPE(t, acc_t, c10::DeviceType::MPS)
+#define CUDA_ACC_TYPE(t, acc_t) ACC_TYPE(t, acc_t, c10::DeviceType::CUDA)
+#define CPU_ACC_TYPE(t, acc_t) ACC_TYPE(t, acc_t, c10::DeviceType::CPU)
+
+MPS_ACC_TYPE(BFloat16, float);
+MPS_ACC_TYPE(Half, float);
+MPS_ACC_TYPE(Float8_e5m2, float);
+MPS_ACC_TYPE(Float8_e4m3fn, float);
+MPS_ACC_TYPE(float, float);
+MPS_ACC_TYPE(double, float);
+MPS_ACC_TYPE(int8_t, int64_t);
+MPS_ACC_TYPE(uint8_t, int64_t);
+MPS_ACC_TYPE(char, int64_t);
+MPS_ACC_TYPE(int16_t, int64_t);
+MPS_ACC_TYPE(int32_t, int64_t);
+MPS_ACC_TYPE(int64_t, int64_t);
+MPS_ACC_TYPE(bool, bool);
+MPS_ACC_TYPE(c10::complex<Half>, c10::complex<float>);
+MPS_ACC_TYPE(c10::complex<float>, c10::complex<float>);
+MPS_ACC_TYPE(c10::complex<double>, c10::complex<float>);
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+CUDA_ACC_TYPE(half, float);
+#endif
+CUDA_ACC_TYPE(BFloat16, float);
+CUDA_ACC_TYPE(Half, float);
+CUDA_ACC_TYPE(Float8_e5m2, float);
+CUDA_ACC_TYPE(Float8_e4m3fn, float);
+CUDA_ACC_TYPE(float, float);
+CUDA_ACC_TYPE(double, double);
+CUDA_ACC_TYPE(int8_t, int64_t);
+CUDA_ACC_TYPE(uint8_t, int64_t);
+CUDA_ACC_TYPE(char, int64_t);
+CUDA_ACC_TYPE(int16_t, int64_t);
+CUDA_ACC_TYPE(int32_t, int64_t);
+CUDA_ACC_TYPE(int64_t, int64_t);
+CUDA_ACC_TYPE(bool, bool);
+CUDA_ACC_TYPE(c10::complex<Half>, c10::complex<float>);
+CUDA_ACC_TYPE(c10::complex<float>, c10::complex<float>);
+CUDA_ACC_TYPE(c10::complex<double>, c10::complex<double>);
+
+CPU_ACC_TYPE(BFloat16, float);
+CPU_ACC_TYPE(Half, float);
+CPU_ACC_TYPE(Float8_e5m2, float);
+CPU_ACC_TYPE(Float8_e4m3fn, float);
+CPU_ACC_TYPE(float, double);
+CPU_ACC_TYPE(double, double);
+CPU_ACC_TYPE(int8_t, int64_t);
+CPU_ACC_TYPE(uint8_t, int64_t);
+CPU_ACC_TYPE(char, int64_t);
+CPU_ACC_TYPE(int16_t, int64_t);
+CPU_ACC_TYPE(int32_t, int64_t);
+CPU_ACC_TYPE(int64_t, int64_t);
+CPU_ACC_TYPE(bool, bool);
+CPU_ACC_TYPE(c10::complex<Half>, c10::complex<float>);
+CPU_ACC_TYPE(c10::complex<float>, c10::complex<double>);
+CPU_ACC_TYPE(c10::complex<double>, c10::complex<double>);
+
+TORCH_API c10::ScalarType toAccumulateType(
+    c10::ScalarType type,
+    c10::DeviceType device);
 TORCH_API c10::ScalarType toAccumulateType(c10::ScalarType type, bool is_cuda);
 
 } // namespace at
