@@ -11,8 +11,8 @@ import torch.fx
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..guards import make_dupe_guard, GuardBuilder
-from ..source import GetItemSource, AttrSource
+from ..guards import GuardBuilder, make_dupe_guard
+from ..source import AttrSource, GetItemSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
