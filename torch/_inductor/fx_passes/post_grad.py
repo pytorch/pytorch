@@ -97,7 +97,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
 
         log.info(
-            f"Print graph after recompile in post grad passes: {get_everpaste_url(str(gm.graph))}"
+            "Print graph after recompile in post grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
         )
 
 
