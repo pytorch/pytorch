@@ -3522,7 +3522,7 @@ def max_pool2d_with_indices_backward(
     grad_output.realize_hint()
     try:
         gO_stride = grad_output.get_stride()
-    except AttributeError:
+    except NotImplementedError:
         # some classes don't have `get_stride`
         # TODO will need a better way of determining if inputs are channels-last
         gO_stride = None
@@ -3542,7 +3542,7 @@ def max_pool2d_with_indices_backward(
     else:
         try:
             x_stride = x.get_stride()
-        except AttributeError:
+        except NotImplementedError:
             x_stride = None
 
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (

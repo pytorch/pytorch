@@ -678,7 +678,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.graph_inputs.items():
             assert isinstance(
                 value, (TensorBox, sympy.Expr)
-            ), "Unsupported inductor graph input type: " + str(type(value))
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
