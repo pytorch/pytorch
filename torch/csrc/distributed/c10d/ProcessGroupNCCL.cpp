@@ -1078,7 +1078,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     auto monitorLastStart = lastMonitorStart_.load();
     if (monitorLastStart != time_point()) {
       auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - monitorLastStart);
+          std::chrono::steady_clock::now() - monitorLastStart);
       // if the mon thread is running for this long, it's stuck
       // TODO this should probably be a lot smaller than the general timeout
       if (diff > options_->timeout) {
