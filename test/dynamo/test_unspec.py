@@ -304,6 +304,25 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symfloat_to_tensor(self):
+        def f1(v):
+            return torch.tensor([v.item()])
+
+        def f2(v):
+            return torch.tensor([[v.item()], [2.0]])
+
+        def f3(v):
+            return torch.tensor(v.item())
+
+        optimize = torch.compile(backend="aot_eager", fullgraph=True)
+
+        r = torch.randn(1)
+
+        self.assertEqual(f1(r), optimize(f1)(r))
+        self.assertEqual(f2(r), optimize(f2)(r))
+        self.assertEqual(f3(r), optimize(f3)(r))
+
     def test_sym_int_conversion(self):
         def f(x):
             y = x.size(0)
