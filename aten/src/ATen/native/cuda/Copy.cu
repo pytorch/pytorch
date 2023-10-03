@@ -34,6 +34,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType other_dtype = iter.dtype(1);
   if (dtype == kFloat8_e4m3fn) {
     switch (other_dtype) {
+#if !defined(USE_ROCM)
       case kFloat:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
              return Float8_e4m3fn(value);
@@ -49,12 +50,14 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
              return Float8_e4m3fn(value);
          });
          break;
+#endif /* !defined(USE_ROCM) */
       default:
         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
         break;
     }
   } else if (dtype == kFloat8_e5m2) {
     switch (other_dtype) {
+#if !defined(USE_ROCM)
       case kFloat:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
 #ifdef AT_USE_NV_CVT_INTRINSICS
@@ -85,6 +88,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
 #endif
          });
          break;
+#endif /* !defined(USE_ROCM) */
       default:
          gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2 x) { return x; });
          break;
