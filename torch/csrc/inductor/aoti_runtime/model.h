@@ -83,7 +83,7 @@ class RAIIAtenTensorHandle {
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
-std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
+inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     AtenTensorHandle* handles,
     size_t size) {
   std::vector<RAIIAtenTensorHandle> result;
