@@ -9,9 +9,13 @@ class SingletonInt(sympy.AtomicExpr):
     # situations with other more exotic Expr types.
     _op_priority = 99999
 
+    def __new__(cls, *args, coeff=None, **kwargs):
+        instance = super().__new__(cls, *args, **kwargs)
+        return instance
+
     # The semantics of this class should match that of SingletonSymNodeImpl in
     # c10/core/SingletonSymNodeImpl.h
-    def __init__(self, val, coeff):
+    def __init__(self, val, *, coeff=1):
         self._val = val
         self._coeff = coeff
         super().__init__()
@@ -35,13 +39,17 @@ class SingletonInt(sympy.AtomicExpr):
 
     def __mul__(self, other):
         if isinstance(other, SingletonInt):
-            raise NotImplementedError("NYI")
-        return SingletonInt(self._val, self._coeff * other)
+            raise ValueError(
+                "SingletonInt cannot be multiplied by another SingletonInt"
+            )
+        return SingletonInt(self._val, coeff=self._coeff * other)
 
     def __rmul__(self, other):
         if isinstance(other, SingletonInt):
-            raise NotImplementedError("NYI")
-        return SingletonInt(self._val, self._coeff * other)
+            raise ValueError(
+                "SingletonInt cannot be multiplied by another SingletonInt"
+            )
+        return SingletonInt(self._val, coeff=self._coeff * other)
 
     # Make sure we promptly raise an error instead of falling back to building
     # an expression tree. There are probably more ops, how can we be exhaustive?
