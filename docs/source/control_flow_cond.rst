@@ -4,7 +4,6 @@ Control Flow - Cond
 ====================
 
 .. warning::
-
     `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
     doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
     Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -35,6 +34,7 @@ Examples
 ~~~~~~~~
 
 Below is an example that uses cond to branch based on input shape:
+
 .. code-block:: python
 
     import torch
@@ -65,6 +65,7 @@ Below is an example that uses cond to branch based on input shape:
     dyn_shape_mod = DynamicShapeCondPredicate()
 
 We can eagerly run the model and expect the results vary based on input shape:
+
 .. code-block:: python
 
     inp = torch.randn(3)
