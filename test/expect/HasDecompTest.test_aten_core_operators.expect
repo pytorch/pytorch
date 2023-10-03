@@ -458,7 +458,6 @@ aten::special_zeta.other_scalar_out
 aten::special_zeta.out
 aten::special_zeta.self_scalar
 aten::special_zeta.self_scalar_out
-aten::split.Tensor
 aten::split_with_sizes
 aten::sqrt
 aten::sqrt.out
@@ -489,7 +488,6 @@ aten::triu_indices.out
 aten::trunc
 aten::trunc.out
 aten::trunc_
-aten::unbind.int
 aten::unfold
 aten::uniform
 aten::uniform.out
