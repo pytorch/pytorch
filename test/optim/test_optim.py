@@ -82,7 +82,7 @@ class TestOptim(TestCase):
 
         solution = torch.tensor([1, 1])
         with torch.no_grad():
-            initial_dist = torch.sum(torch.stack([param.dist(solution) for param in params]))
+            initial_dist = sum([param.dist(solution) for param in params])
 
         def get_grad(param, sparse_grad):
             grad = drosenbrock(param)
@@ -137,13 +137,13 @@ class TestOptim(TestCase):
 
         if not maximize:
             self.assertLessEqual(
-                torch.sum(torch.stack([param.dist(solution) for param in params])),
+                sum([param.dist(solution) for param in params]),
                 initial_dist
             )
         else:
             self.assertGreaterEqual(
-                torch.sum(torch.stack([rosenbrock(param) for param in params])),
-                torch.sum(torch.stack([rosenbrock(param_t) for param_t in params_t])),
+                sum([rosenbrock(param) for param in params]),
+                sum([rosenbrock(param_t) for param_t in params_t]),
             )
 
     def _test_basic_cases_template(
@@ -621,11 +621,13 @@ class TestOptim(TestCase):
     def test_sgd_sparse(self):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
-                lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach)
+                lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach),
+                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=0.0048, foreach=foreach),
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+                multi_tensor=foreach,
             )
 
     def test_sgd_complex(self):
