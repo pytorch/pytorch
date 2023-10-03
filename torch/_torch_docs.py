@@ -2642,7 +2642,7 @@ cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
 Solves a square linear system of equations with a positive semidefinite
 matrix :math:`A` to be inverted given its Cholesky factor matrix :math:`L`.
 
-Let :math:`A` a complex Hermitian or real symmetric positive-definite matrix,
+Let :math:`A` be a complex Hermitian or real symmetric positive-definite matrix,
 and :math:`L` its Cholesky factor such that:
 
 .. math::
@@ -2690,7 +2690,7 @@ Example::
             [ -4.3771,  10.4173]])
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.complex64)
-    >>> A = A @ A.mT.conj() + torch.eye(2) * 1e-3 # Batch of Hermitian matrices
+    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian matrices
     >>> L = torch.linalg.cholesky(A)
     >>> B = torch.randn(2, 1, dtype=torch.complex64)
     >>> X = torch.cholesky_solve(B, L)
@@ -2707,7 +2707,7 @@ cholesky_inverse(L, upper=False, *, out=None) -> Tensor
 Computes the inverse of a complex Hermitian or real symmetric
 positive-definite matrix using its Cholesky decomposition.
 
-Let :math:`A` a complex Hermitian or real symmetric positive-definite matrix,
+Let :math:`A` be a complex Hermitian or real symmetric positive-definite matrix,
 and :math:`L` its Cholesky factor such that:
 
 .. math::
@@ -2717,8 +2717,7 @@ and :math:`L` its Cholesky factor such that:
 where :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex,
 and the transpose when :math:`L` is real-valued.
 
-Computes the inverse matrix :math:`A^{-1}` using LAPACK routines ``dpotri`` and ``spotri``
-(and the corresponding MAGMA routines).
+Computes the inverse matrix :math:`A^{-1}`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :math:`A` is a batch of matrices
@@ -2749,7 +2748,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.complex64)
-    >>> A = A @ A.mT.conj() + torch.eye(2) * 1e-3 # Batch of Hermitian matrices
+    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian matrices
     >>> L = torch.linalg.cholesky(A)
     >>> torch.dist(torch.inverse(A), torch.cholesky_inverse(L))
     tensor(5.6358e-7)
