@@ -348,6 +348,10 @@ class ResolvedExportOptions(ExportOptions):
     """The diagnostics context for the export. Responsible for recording diagnostics,
     logging diagnostics, and generating the SARIF log."""
 
+    modularization: bool = True
+    """Whether to modularize the exported model. Exporting nn.Module forward calls as
+    ONNX local functions."""
+
     @_beartype.beartype
     def __init__(
         self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
@@ -365,6 +369,7 @@ class ResolvedExportOptions(ExportOptions):
             self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
             self.decomposition_table = options.decomposition_table
             self.diagnostic_context = options.diagnostic_context
+            self.modularization = options.modularization
         else:
             T = TypeVar("T")
 
@@ -936,60 +941,77 @@ class Exporter:
         ):
             self._assert_fake_tensor_mode()
 
+    def _export_fx_graph_module(
+        self,
+    ) -> Tuple[
+        torch.fx.GraphModule, Sequence[Union[int, float, bool, str, torch.Tensor, None]]
+    ]:
+        graph_module = self.options.fx_tracer.generate_fx(
+            self.options, self.model, self.model_args, self.model_kwargs
+        )
+
+        updated_model_args = self.options.fx_tracer.input_adapter.apply(
+            *self.model_args, **self.model_kwargs
+        )
+
+        # TODO: Design the passes API
+        graph_module = pre_export_passes(
+            self.options,
+            self.model,
+            graph_module,
+            updated_model_args,
+            self.options.modularization,
+        )
+
+        return graph_module, updated_model_args
+
+    def _export_onnx_from_graph_module(
+        self, graph_module: torch.fx.GraphModule
+    ) -> ExportOutput:
+        # TODO: Defer `import onnxscript` out of `import torch` path
+        # https://github.com/pytorch/pytorch/issues/103764
+        from torch.onnx._internal.fx import fx_onnx_interpreter
+
+        fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
+            diagnostic_context=self.options.diagnostic_context
+        )
+        onnxscript_graph = fx_interpreter.run(
+            fx_graph_module=graph_module,
+            onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
+            op_level_debug=self.options.op_level_debug,
+        )
+
+        # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
+        # Otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
+        # not valid.
+        # Concrete data is expected to be filled for those initializers later during `ExportOutput.save`.
+        if self.options.fake_context is not None:
+            initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
+            for (
+                initializer_name,
+                initializer,
+            ) in onnxscript_graph.initializers.items():
+                if not isinstance(initializer, torch._subclasses.FakeTensor):
+                    initializers_with_real_tensors[initializer_name] = initializer
+            onnxscript_graph.initializers = initializers_with_real_tensors
+
+        # Export TorchScript graph to ONNX ModelProto.
+        onnx_model = onnxscript_graph.to_model_proto(
+            self.options.onnx_registry.opset_version,
+        )
+
+        return torch.onnx.ExportOutput(
+            onnx_model,
+            self.options.fx_tracer.input_adapter,
+            self.options.fx_tracer.output_adapter,
+            self.options.diagnostic_context,
+            fake_context=self.options.fake_context,
+        )
+
     def export(self) -> ExportOutput:
         with self.options.diagnostic_context:
-            graph_module = self.options.fx_tracer.generate_fx(
-                self.options, self.model, self.model_args, self.model_kwargs
-            )
-
-            updated_model_args = self.options.fx_tracer.input_adapter.apply(
-                *self.model_args, **self.model_kwargs
-            )
-
-            # TODO: Design the passes API
-            graph_module = pre_export_passes(
-                self.options, self.model, graph_module, updated_model_args
-            )
-
-            # TODO: Defer `import onnxscript` out of `import torch` path
-            # https://github.com/pytorch/pytorch/issues/103764
-            from torch.onnx._internal.fx import fx_onnx_interpreter
-
-            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
-                diagnostic_context=self.options.diagnostic_context
-            )
-            onnxscript_graph = fx_interpreter.run(
-                fx_graph_module=graph_module,
-                onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
-                op_level_debug=self.options.op_level_debug,
-            )
-
-            # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
-            # Otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
-            # not valid.
-            # Concrete data is expected to be filled for those initializers later during `ExportOutput.save`.
-            if self.options.fake_context is not None:
-                initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
-                for (
-                    initializer_name,
-                    initializer,
-                ) in onnxscript_graph.initializers.items():
-                    if not isinstance(initializer, torch._subclasses.FakeTensor):
-                        initializers_with_real_tensors[initializer_name] = initializer
-                onnxscript_graph.initializers = initializers_with_real_tensors
-
-            # Export TorchScript graph to ONNX ModelProto.
-            onnx_model = onnxscript_graph.to_model_proto(
-                self.options.onnx_registry.opset_version,
-            )
-
-            return torch.onnx.ExportOutput(
-                onnx_model,
-                self.options.fx_tracer.input_adapter,
-                self.options.fx_tracer.output_adapter,
-                self.options.diagnostic_context,
-                fake_context=self.options.fake_context,
-            )
+            graph_module, _ = self._export_fx_graph_module()
+            return self._export_onnx_from_graph_module(graph_module)
 
     def _assert_fake_tensor_mode(self):
         """Asserts that the model and its input do not contain fake tensors."""
@@ -1215,6 +1237,7 @@ def pre_export_passes(
     original_model: Union[torch.nn.Module, Callable],
     fx_module: torch.fx.GraphModule,
     fx_module_args: Sequence[Any],
+    modularization: bool = True,
 ):
     # TODO: Import here to prevent circular dependency
     from torch.onnx._internal.fx import analysis, passes
@@ -1256,9 +1279,10 @@ def pre_export_passes(
             diagnostic_context, module, original_model
         ).run()
 
-    # This operation should be invoked as the last pre export pass.
-    # See [NOTE: Modularize pass ordering]
-    module = passes.Modularize(diagnostic_context, module).run()
+    if modularization:
+        # This operation should be invoked as the last pre export pass.
+        # See [NOTE: Modularize pass ordering]
+        module = passes.Modularize(diagnostic_context, module).run()
 
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
