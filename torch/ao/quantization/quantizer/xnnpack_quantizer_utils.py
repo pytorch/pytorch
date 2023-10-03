@@ -268,10 +268,15 @@ def _annotate_conv_relu(
             continue
         relu_node = n
         maybe_conv_node = n.args[0]
-        if not isinstance(maybe_conv_node, Node) or maybe_conv_node != "call_function" or maybe_conv_node.target not in [
-            torch.ops.aten.conv1d.default,
-            torch.ops.aten.conv2d.default,
-        ]:
+        if (
+            not isinstance(maybe_conv_node, Node)
+            or maybe_conv_node != "call_function"
+            or maybe_conv_node.target
+            not in [
+                torch.ops.aten.conv1d.default,
+                torch.ops.aten.conv2d.default,
+            ]
+        ):
             continue
         conv_node = maybe_conv_node
         partition = [relu_node, conv_node]
