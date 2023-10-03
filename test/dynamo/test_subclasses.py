@@ -308,16 +308,16 @@ class GraphModule(torch.nn.Module):
         expected_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child);  wrap_body_0 = child = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+        def forward(self, child):
+            add_ = child.add_(1.0);  child = None
             return (add_,)
 """
         check_count_and_graph(1, 2, 1, expected_graph)
