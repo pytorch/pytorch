@@ -359,18 +359,18 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
-        size = l_x_.size(0)
+        size = child.size(0)
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child, size);  wrap_body_0 = child = size = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, size):
-            view = l_x_.view(size);  l_x_ = size = None
+        def forward(self, child, size):
+            view = child.view(size);  child = size = None
             add = view + 0.5;  view = None
             return (add,)
 """,
