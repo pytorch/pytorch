@@ -720,7 +720,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
+        from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
         # TODO: Support `fn` with kwargs.
@@ -978,6 +978,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
             )
 
+        if not all(isinstance(a, TensorVariable) for a in batch_input_args):
+            unimplemented("NYI - torch.func.vmap: batched input args should be tensors")
+
         body_name = add_subgraph(
             tx,
             self.source,
@@ -1091,7 +1094,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             always_restore=always_restore,
             restore_side_effects=False,
             should_flatten_inputs=True,
-            should_flatten_outputs=True,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
