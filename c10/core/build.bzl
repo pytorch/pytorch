@@ -23,7 +23,12 @@ def define_targets(rules):
         srcs = ["MapAllocator.cpp"],
         hdrs = ["MapAllocator.h"],
         linkstatic = True,
-        local_defines = ["C10_BUILD_MAIN_LIB"],
+        local_defines = [
+            "C10_BUILD_MAIN_LIB"
+            "HAVE_MMAP=1",
+            "HAVE_SHM_OPEN=1",
+            "HAVE_SHM_UNLINK=1",
+        ],
         visibility = ["//visibility:public"],
         deps = [
             ":CPUAllocator",
@@ -74,24 +79,24 @@ def define_targets(rules):
             [
                 "*.cpp",
                 "impl/*.cpp",
+                "impl/cow/*.cpp",
             ],
             exclude = [
                 "CPUAllocator.cpp",
                 "MapAllocator.cpp",
                 "impl/alloc_cpu.cpp",
-                "impl/cow/*.cpp",
             ],
         ),
         hdrs = rules.glob(
             [
                 "*.h",
                 "impl/*.h",
+                "impl/cow/*.h",
             ],
             exclude = [
                 "CPUAllocator.h",
                 "MapAllocator.h",
                 "impl/alloc_cpu.h",
-                "impl/cow/*.h",
             ],
         ),
         linkstatic = True,
@@ -99,7 +104,6 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":ScalarType",
-            ":impl_cow_context",
             "//third_party/cpuinfo",
             "//c10/macros",
             "//c10/util:TypeCast",
@@ -109,23 +113,6 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
-    )
-
-    rules.cc_library(
-        name = "impl_cow_context",
-        srcs = [
-            "impl/cow/context.cpp",
-            "impl/cow/deleter.cpp",
-        ],
-        hdrs = [
-            "impl/cow/context.h",
-            "impl/cow/deleter.h",
-        ],
-        deps = [
-            "//c10/macros",
-            "//c10/util:base",
-        ],
-        visibility = ["//c10/test:__pkg__"],
     )
 
     rules.filegroup(

@@ -37,7 +37,11 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 
 import torch
 
-from torch._inductor import config, cuda_properties, exc
+from torch._dynamo.device_interface import (
+    get_interface_for_device,
+    get_registered_device_interfaces,
+)
+from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
 
@@ -684,7 +688,7 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
 
 
 def cpp_wrapper_flags() -> str:
@@ -722,7 +726,14 @@ def use_custom_generated_macros() -> str:
 def use_fb_internal_macros() -> str:
     if config.is_fbcode():
         openmp_lib = build_paths.openmp_lib()
-        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        preprocessor_flags = " ".join(
+            (
+                "-D C10_USE_GLOG",
+                "-D C10_USE_MINIMAL_GLOG",
+                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+            )
+        )
+        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
     else:
         return ""
 
@@ -904,6 +915,7 @@ def get_include_and_linking_paths(
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
         ipaths.append(build_paths.gcc_install_tools_include())
+        ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -1005,8 +1017,7 @@ class AotCodeCache:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> Callable[..., Any]:
-        # TODO: update cpp_compile_command for different platforms
-        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
@@ -1092,13 +1103,13 @@ class AotCodeCache:
                     log.debug("aot constant bin removal command: %s", cmd)
                     run_command_and_check(cmd)
 
-                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    body = re.sub(r"[\W]", "_", consts_path)
                     symbol_list = []
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
                     )
                     symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_size {consts_o}"
+                        f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
                     )
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
@@ -1672,8 +1683,17 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
-def _worker_compile(kernel_name: str, source_code: str, cc: int, device: int) -> None:
-    cuda_properties.set_compiler_worker_current_device(device)
+def caching_device_properties():
+    for _, device_interface in get_registered_device_interfaces():
+        if device_interface.is_available():
+            device_interface.Worker.get_device_properties()
+
+
+def _worker_compile(
+    kernel_name: str, source_code: str, cc: int, device: torch.device
+) -> None:
+    device_interface = get_interface_for_device(device.type)
+    device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
@@ -1713,6 +1733,27 @@ class TritonFuture:
         return kernel
 
 
+# If this process dies abnormally (e.g. segfault)
+# it will not shut down the workers. Instead
+# the workers will have their parent reassigned to the
+# init process. This launches a separate thread to
+# watch for the worker getting reassigned,
+# and cleans it up in this case.
+#
+# This function cannot be an inner function since otherwise mp_context="spawn" would
+# not work for ProcessPoolExecutor since inner functions cannot be pickled.
+def _async_compile_initializer(orig_ppid) -> None:
+    def run() -> None:
+        while True:
+            sleep(1)
+            if orig_ppid != os.getppid():
+                os.kill(os.getpid(), signal.SIGKILL)
+
+    global _watchdog_thread
+    _watchdog_thread = Thread(target=run, daemon=True)
+    _watchdog_thread.start()
+
+
 _watchdog_thread: Optional[Thread] = None
 
 
@@ -1731,32 +1772,15 @@ class AsyncCompile:
     def process_pool() -> ProcessPoolExecutor:
         # ensure properties have been calculated before processes
         # are forked
-        cuda_properties._properties()
+        caching_device_properties()
         assert config.compile_threads > 1
         orig_ppid = os.getpid()
 
-        # if this process dies abnormally (e.g. segfault)
-        # it will not shut down the workers. Instead
-        # the workers will have their parent reassigned to the
-        # init process. This launches a separate thread to
-        # watch for the worker getting reassigned,
-        # and cleans it up in this case.
-        def init() -> None:
-            def run() -> None:
-                while True:
-                    sleep(1)
-                    if orig_ppid != os.getppid():
-                        os.kill(os.getpid(), signal.SIGKILL)
-
-            global _watchdog_thread
-            _watchdog_thread = Thread(target=run, daemon=True)
-            _watchdog_thread.start()
-
-        # we rely on 'fork' because we cannot control whether users
-        # have an `if __name__ == '__main__'` in their main process.
-        fork_context = multiprocessing.get_context("fork")
+        ctx = multiprocessing.get_context(config.worker_start_method)
         pool = ProcessPoolExecutor(
-            config.compile_threads, mp_context=fork_context, initializer=init
+            config.compile_threads,
+            mp_context=ctx,
+            initializer=partial(_async_compile_initializer, orig_ppid),
         )
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
@@ -1808,14 +1832,14 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(
-        self, kernel_name: str, source_code: str
+        self, kernel_name: str, source_code: str, device: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
         if config.compile_threads > 1:
-            major, minor = torch.cuda.get_device_capability()
-            device = torch.cuda.current_device()
-            cc = major * 10 + minor
+            device_interface = get_interface_for_device(device)
+            device = torch.device(device, device_interface.current_device())
+            cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device
             )
