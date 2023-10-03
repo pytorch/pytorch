@@ -799,7 +799,8 @@ class OrtBackend:
             )
 
             # Inline model before executing in ORT.
-            # Temporary solution to improve performance until runtimes adapt to function format.
+            # TODO: Temporary solution to improve performance until runtimes adapt to function format.
+            # https://github.com/pytorch/pytorch/issues/110476
             try:
                 import onnx.inliner
             except ImportError:
