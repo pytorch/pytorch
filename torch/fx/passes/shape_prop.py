@@ -112,9 +112,9 @@ class ShapeProp(torch.fx.Interpreter):
     Args:
          module (GraphModule): The module to be executed
          fake_mode (FakeTensorMode): A fake mode for copying the gm
-
+         cache_result (bool): Flag to enable caching the result of each node
     """
-    def __init__(self, gm, fake_mode=None):
+    def __init__(self, gm, fake_mode=None, cache_result=False):
         super().__init__(gm)
         if fake_mode is None:
             fake_mode = detect_fake_mode()
@@ -136,6 +136,7 @@ class ShapeProp(torch.fx.Interpreter):
             self.fake_mode = None
 
         self.real_module = self.module
+        self.cache_result = cache_result
 
     def run_node(self, n : Node) -> Any:
         try:
@@ -171,6 +172,8 @@ class ShapeProp(torch.fx.Interpreter):
         meta = map_aggregate(result, extract_tensor_meta)
         if found_tensor:
             n.meta['tensor_meta'] = meta
+            if self.cache_result:
+                n.meta['result'] = result
 
         n.meta['type'] = type(result)
         return result

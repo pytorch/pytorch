@@ -1646,6 +1646,27 @@ class TestFX(JitTestCase):
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
 
+    def test_shape_prop_cache_result(self):
+        class CacheTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        test_mod = CacheTest()
+        traced = symbolic_trace(test_mod)
+        x = torch.randn((2,2))
+        output = shape_prop.ShapeProp(traced, cache_result=True).propagate(x)
+
+        for node in traced.graph.nodes:
+            if 'tensor_meta' in node.meta:
+                self.assertTrue('result' in node.meta)
+
+            if node.op == 'output':
+                self.assertEqual(output, node.meta['result'])
+
     def test_shape_prop_layout(self):
         class ConvTest(torch.nn.Module):
             def __init__(self):
