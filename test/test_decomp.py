@@ -239,6 +239,21 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
     }
     if (decomp.dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -428,6 +443,7 @@ core_backward_failures = {
     skip('logaddexp'),  # slow: fails with --timeout=360 secs
     skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.binary_cross_entropy_with_logits'),
+    skip('nn.functional.glu'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.hardshrink'),
     xfail('nn.functional.softshrink'),
     skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs

@@ -58,8 +58,6 @@ def _sharded_tensor_metadata(
 
 
 def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
-    # TODO: remove assert after 2D tests are added.
-    assert tensor.device_mesh.ndim == 1, "Only 1D DeviceMeshes can currently be handled."
     sizes, offsets = compute_local_shape_and_global_offset(
         tensor.shape, tensor.device_mesh, tensor.placements
     )
@@ -222,8 +220,6 @@ def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
 
 
 def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
-    # TODO: remove assert after 2D tests are added.
-    assert tensor.device_mesh.ndim == 1, "Only 1D DeviceMeshes can currently be handled."
     sizes, offsets = compute_local_shape_and_global_offset(
         tensor.shape, tensor.device_mesh, tensor.placements
     )
