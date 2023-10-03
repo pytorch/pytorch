@@ -2980,7 +2980,7 @@ class ShapeEnv:
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
             else:
-                self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), val.node.singleton_coeff())
+                self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), coeff=val.node.singleton_coeff())
 
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []

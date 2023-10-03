@@ -9,7 +9,7 @@ _tensor_id_counter = 0
 _tensor_id_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_id(tensor, coeff):
+def get_tensor_id(tensor, *, coeff=1):
     global _tensor_id_counter
     if tensor not in _tensor_id_registry:
         _tensor_id_registry[tensor] = _tensor_id_counter
@@ -84,7 +84,7 @@ class NestedTensor(torch.Tensor):
             # we perform operations on fake nested tensors.
             # Calling get_tensor_id won't work in those cases because we want
             # the existing symbolic ragged_size to be propagated.
-            ragged_size = get_tensor_id(offsets, 1)
+            ragged_size = get_tensor_id(offsets, coeff=1)
         D = values.shape[1]
         B = offsets.shape[0] - 1
         # TODO: generalize for generalized raggedness
