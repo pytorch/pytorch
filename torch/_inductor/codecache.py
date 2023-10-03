@@ -688,7 +688,7 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
 
 
 def cpp_wrapper_flags() -> str:
@@ -726,7 +726,14 @@ def use_custom_generated_macros() -> str:
 def use_fb_internal_macros() -> str:
     if config.is_fbcode():
         openmp_lib = build_paths.openmp_lib()
-        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        preprocessor_flags = " ".join(
+            (
+                "-D C10_USE_GLOG",
+                "-D C10_USE_MINIMAL_GLOG",
+                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+            )
+        )
+        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
     else:
         return ""
 
@@ -908,6 +915,7 @@ def get_include_and_linking_paths(
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
         ipaths.append(build_paths.gcc_install_tools_include())
+        ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
