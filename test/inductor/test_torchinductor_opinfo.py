@@ -211,7 +211,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -235,17 +234,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "cauchy": {f16},
     "cholesky": {f32, f64},
     "exponential": {f16},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.triplet_margin_loss": {f16},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "rand_like": {f16, f32, f64},
@@ -254,7 +247,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "uniform": {f16},
 }
 
 
@@ -262,7 +254,6 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
 
@@ -270,14 +261,7 @@ if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 if not TEST_MKL:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "fft.hfft2": {b8, i32, i64, f32, f64},
-            "fft.hfftn": {b8, i32, i64, f32, f64},
-            "fft.ihfft2": {b8, i32, i64, f32, f64},
-            "fft.ihfftn": {b8, i32, i64, f32, f64},
-        }
-    )
+    inductor_expected_failures_single_sample["cpu"].update({})
 
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
@@ -308,15 +292,13 @@ test_skips_or_fails = (
 )
 
 
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    torch.manual_seed(42)
+def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
+    wrapper_noop_set_seed
+)
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
@@ -359,6 +341,11 @@ inductor_override_kwargs = {
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {
+        "atol": 1e-4,
+        "rtol": 0.02,
+    },
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
