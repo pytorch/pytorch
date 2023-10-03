@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import pkg_resources
 
@@ -33,14 +33,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
-from torch.utils import cpp_extension
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.export_test_times import TEST_TIMES_FILE
-from tools.stats.upload_metrics import emit_metric
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
@@ -601,8 +600,13 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and not options.continue_through_error
     )
+    is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
+        "BUILD_ENVRIONMENT", ""
+    )
     timeout = (
-        THRESHOLD * 3
+        THRESHOLD * 6
+        if is_slow
+        else THRESHOLD * 3
         if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
@@ -644,9 +648,11 @@ def run_test_with_subprocess(test_module, test_directory, options):
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
         try:
+            from torch.utils import cpp_extension
+
             cpp_extension.verify_ninja_availability()
         except RuntimeError:
-            print(CPP_EXTENSIONS_ERROR)
+            print_to_stderr(CPP_EXTENSIONS_ERROR)
             return 1
 
     # Wipe the build folder, if it exists already
@@ -1409,7 +1415,9 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
-        print("::warning:: Failed to find test times file. Using round robin sharding.")
+        print_to_stderr(
+            "::warning:: Failed to find test times file. Using round robin sharding."
+        )
         return {}
 
     with open(path) as f:
@@ -1417,28 +1425,23 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     build_environment = os.environ.get("BUILD_ENVIRONMENT")
     test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(build_environment, {}):
-        print("Found test times from artifacts")
+        print_to_stderr("Found test times from artifacts")
         return test_times_file[build_environment][test_config]
     elif test_config in test_times_file["default"]:
-        print(
+        print_to_stderr(
             f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
             f" and {test_config} test config. Using default build env and {test_config} test config instead."
         )
         return test_times_file["default"][test_config]
     else:
-        print(
+        print_to_stderr(
             f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
             f" and {test_config} test config. Using default build env and default test config instead."
         )
         return test_times_file["default"]["default"]
 
 
-def do_sharding(
-    options,
-    selected_tests: List[str],
-    test_file_times: Dict[str, float],
-    sort_by_time: bool = True,
-) -> List[ShardedTest]:
+def get_sharding_opts(options) -> Tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
@@ -1447,6 +1450,17 @@ def do_sharding(
         assert (
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
+
+    return (which_shard, num_shards)
+
+
+def do_sharding(
+    options,
+    selected_tests: List[str],
+    test_file_times: Dict[str, float],
+    sort_by_time: bool = True,
+) -> List[ShardedTest]:
+    which_shard, num_shards = get_sharding_opts(options)
 
     # Do sharding
     shards = calculate_shards(
@@ -1600,7 +1614,7 @@ def check_pip_packages() -> None:
     installed_packages = [i.key for i in pkg_resources.working_set]
     for package in packages:
         if package not in installed_packages:
-            print(
+            print_to_stderr(
                 f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
             )
             sys.exit(1)
@@ -1610,6 +1624,11 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+
+    # Include sharding info in all metrics
+    which_shard, num_shards = get_sharding_opts(options)
+    add_global_metric("shard", which_shard)
+    add_global_metric("num_shards", num_shards)
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
@@ -1683,7 +1702,7 @@ def main():
     ]
 
     for test_batch in test_batches:
-        print(test_batch)
+        print_to_stderr(test_batch)
 
     if options.dry_run:
         return
@@ -1703,10 +1722,10 @@ def main():
         start_time = time.time()
         for test_batch in test_batches:
             elapsed_time = time.time() - start_time
-            print(
+            print_to_stderr(
                 f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
             )
-            print(
+            print_to_stderr(
                 f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
             )
             metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
@@ -1740,7 +1759,7 @@ def main():
                 test_stats = aggregated_heuristics.get_test_stats(test)
                 test_stats["num_total_tests"] = num_tests
 
-                print("Emiting td_test_failure_stats")
+                print_to_stderr("Emiting td_test_failure_stats")
                 emit_metric("td_test_failure_stats", test_stats)
 
     if len(all_failures):

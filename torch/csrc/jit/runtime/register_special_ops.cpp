@@ -2,7 +2,6 @@
 #include <torch/library.h>
 
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
@@ -19,8 +18,7 @@
 #include <regex>
 #include <sstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -464,5 +462,4 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
 });
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
