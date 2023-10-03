@@ -38,6 +38,8 @@ bin_ops_under_test = [
     torch._foreach_div,
     torch._foreach_maximum,
     torch._foreach_minimum,
+    torch._foreach_clamp_max,
+    torch._foreach_clamp_min,
     aten._foreach_copy,
 ]
 
