@@ -195,6 +195,11 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             for idx, ee in enumerate(e):
                 wrap_with_proxy(ee, proxy[idx], get_constant(idx))
         elif isinstance(e, dict):
+            # In theory we could support const-prop when proxy-tensor-tracing
+            # operators that returns dicts of tensors, but we have no use case
+            # for it today (since the only op we currently trace that can
+            # return a dict is triton_kernel_wrapper_functional/mutation,
+            # which does not participate in const-prop)
             assert constant is None
 
             if isinstance(proxy, fx.Proxy):
