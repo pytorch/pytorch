@@ -113,7 +113,7 @@ class AdamW(Optimizer):
                 # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
                 # This is because kernel launches are costly on CUDA and XLA.
                 state["step"] = (
-                    torch.zeros((), dtype=torch.float, device=p.device)
+                    p.new_zeros((), dtype=torch.float)
                     if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )

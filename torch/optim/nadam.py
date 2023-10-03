@@ -61,11 +61,11 @@ class NAdam(Optimizer):
                     # Deliberately host `step` and `mu_product` on CPU if capturable is False.
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
-                        torch.zeros((), dtype=torch.float, device=p.device)
+                        p.new_zeros((), dtype=torch.float)
                         if group['capturable'] else torch.tensor(0.)
                     )
                     state['mu_product'] = (
-                        torch.ones((), dtype=torch.float, device=p.device)
+                        p.new_ones((), dtype=torch.float)
                         if group['capturable'] else torch.tensor(1.)
                     )
                     # Exponential moving average of gradient values
