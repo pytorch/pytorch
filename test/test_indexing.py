@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
+from torch.testing._internal.common_dtype import integral_types_and
 
 
 class TestIndexing(TestCase):
@@ -1223,6 +1224,49 @@ class TestIndexing(TestCase):
             return x[0]
 
         self.assertRaisesRegex(IndexError, 'invalid index', runner)
+
+    @dtypes(*integral_types_and())
+    def test_unravel_index_errors_dtype(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, r'invalid index'):
+            torch.unravel_index(
+                torch.tensor(-1, device=device, dtype=dtype),
+                (2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, r'invalid index'):
+            torch.unravel_index(
+                torch.tensor(0, device=device, dtype=dtype),
+                (2, 0))
+
+        with self.assertRaisesRegex(RuntimeError, r'shape cannot have negative values'):
+            torch.unravel_index(
+                torch.tensor(0, device=device, dtype=dtype),
+                (2, -1))
+
+        with self.assertRaisesRegex(RuntimeError, r'invalid index'):
+            torch.unravel_index(
+                torch.tensor(list(range(1, 10)), device=device, dtype=dtype).prod(),
+                list(range(1, 10)))
+
+        with self.assertRaisesRegex(RuntimeError, r'invalid index'):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=dtype),
+                ())
+
+    def test_unravel_index_errors(self, device):
+        with self.assertRaisesRegex(RuntimeError, r'expected integer indices'):
+            torch.unravel_index(
+                torch.tensor(0.5, device=device),
+                (2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, r'expected integer indices'):
+            torch.unravel_index(
+                torch.tensor([], device=device),
+                (10, 3, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r'invalid index'):
+            torch.unravel_index(
+                torch.tensor(1, device=device, dtype=torch.int64),
+                (2 ** 32 - 1, 2 ** 31 + 1))
 
     @onlyCUDA
     def test_invalid_device(self, device):

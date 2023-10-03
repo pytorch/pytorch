@@ -191,6 +191,7 @@
 #include <ATen/ops/unsafe_split_with_sizes_native.h>
 #include <ATen/ops/unsqueeze_copy_native.h>
 #include <ATen/ops/unsqueeze_native.h>
+#include <ATen/ops/unravel_index_native.h>
 #include <ATen/ops/values_copy_native.h>
 #include <ATen/ops/view_as_complex.h>
 #include <ATen/ops/view_as_complex_copy_native.h>
@@ -1622,6 +1623,49 @@ Tensor alias_with_sizes_and_strides(
   }
   namedinference::propagate_names(self_, self);
   return self_;
+}
+
+Tensor _unravel_index(const Tensor& self, c10::IntArrayRef shape) {
+  TORCH_CHECK(
+      c10::isIntegralType(self.scalar_type(), /*includeBool=*/false),
+      "expected integer indices, but got", self.scalar_type());
+  Tensor shape_tensor = at::empty(
+    {static_cast<int64_t>(shape.size() + 1)},
+    TensorOptions().device(at::kCPU).dtype(at::kLong).memory_format(at::MemoryFormat::Contiguous));
+  shape_tensor[-1] = 1;
+  for (size_t i = 0; i < shape.size(); i++) {
+    shape_tensor[i] = shape[i];
+  }
+
+  TORCH_CHECK_TENSOR_ALL(
+    shape_tensor.ge(0),
+    "shape cannot have negative values");
+
+
+  int64_t shape_numel = shape_tensor.prod().item<int64_t>();
+
+  TORCH_CHECK_TENSOR_ALL(
+    self.ge(0),
+    "invalid index, must be between 0 and ", shape_numel - 1);
+
+  TORCH_CHECK_TENSOR_ALL(
+    self.lt(shape_numel),
+    "invalid index, must be between 0 and ", shape_numel - 1);
+
+
+  shape_tensor = shape_tensor.to(self.device(), self.scalar_type());
+
+  Tensor coefs = shape_tensor.slice(/*dim=*/0, /*start=*/1).flipud().cumprod(/*dim=*/0).flipud();
+  Tensor res = self.unsqueeze(-1).div(
+    coefs,
+    /*rounding_mode=*/"trunc") % shape_tensor.slice(/*dim=*/0, /*start=*/at::nullopt, /*end=*/shape.size());
+
+  return res;
+}
+
+std::vector<Tensor> unravel_index(const Tensor& self, IntArrayRef shape) {
+  Tensor unravelled_index_tensor = _unravel_index(self, shape);
+  return unravelled_index_tensor.unbind(-1);
 }
 
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
