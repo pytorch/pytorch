@@ -195,7 +195,7 @@ class ConstDictVariable(VariableTracker):
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
             return ConstantVariable.create(
-                ConstDictVariable.get_key(args[0]) in self.items, **options
+                ConstDictVariable.get_key(tx, args[0]) in self.items, **options
             )
         elif name == "__contains__":
             content = args[0]

@@ -546,7 +546,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and (
                 isinstance(self.value, torch.nn.Module)
                 or isinstance(
-                    self.value, torch.distributed.fsdp.flat_param.FlatParamHandle
+                    self.value, torch.distributed.fsdp._flat_param.FlatParamHandle
                 )
             )
         ):
@@ -640,7 +640,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if torch.distributed.is_available():
             if (
                 subobj.__class__.__name__
-                == "torch.distributed.fsdp.flat_param.FlatParamHandle"
+                == "torch.distributed.fsdp._flat_param.FlatParamHandle"
             ):
                 return UserDefinedObjectVariable(subobj, **options)
         return variables.GetAttrVariable(self, name, **options)
@@ -763,7 +763,7 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
 
         options = VariableTracker.propagate(self)
         if name == "register_hook":
-           # see On dynamo tensor_hooks
+           # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
 
@@ -771,39 +771,22 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
                 # This should not be onerous to support when needed.
                 unimplemented("NYI - lambda variables as hooks")
-            elif isinstance(fn_var.fn, functools.partial):
-                fn = fn_var.fn
-                name = fn_var.fn.func.__name__
+            while isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+                fn = fn_var.as_python_constant()
             else:
                 fn = fn_var.fn
-                name = fn_var.fn.__name__
-
-            handle = self.value.register_hook(fn)
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
-                handle,
-                last_seen_name=None,
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
-            src = tx.store_hook(name, fn)
             if not self.source:
-                from .builder import GraphArg
-
-                new_name = tx.store_handle("intermed_handle", handle)
-                handle_variable.as_global = new_name
-
-                hook_proxy = tx.output.root_tracer.create_graph_input(
-                    name, type(fn), source=src
-                )
-                grapharg = GraphArg(src, fn, False, None)
-                hook_proxy.node.meta['grapharg'] = grapharg
-                record_hook_proxy = tx.output.create_proxy(
-                    "call_function", record_hook_fn, (self.as_proxy(), hook_proxy), {}
-                )
-                # self.as_proxy().register_hook(hook_proxy)
+                # Intermediary
+                unimplemented("Intermediary tensors with registered hooks - NYI")
             else:
-                fn_var.source = src
+                assert (
+                    fn_var.source
+                ), "Unreachable - See unimplemented for lambdas above"
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
         return super().call_method(tx, name, args, kwargs)

@@ -761,34 +761,34 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient computation) to
         # finish before reduce-scattering the gradient
-        state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+        # state._post_backward_stream.wait_stream(state._device_handle.current_stream())
 
-        with state._device_handle.stream(state._post_backward_stream):
-            autograd_computed_grad = flat_param.grad.data
-            if (
-                not _low_precision_hook_enabled(state)
-                and flat_param.grad.dtype != handle._reduce_dtype
-                # If we are forcing full precision but communicating grads
-                # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
-                and not handle._force_full_precision
-            ):
+        # with state._device_handle.stream(state._post_backward_stream):
+        autograd_computed_grad = flat_param.grad.data
+        if (
+            not _low_precision_hook_enabled(state)
+            and flat_param.grad.dtype != handle._reduce_dtype
+            # If we are forcing full precision but communicating grads
+            # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
+            and not handle._force_full_precision
+        ):
 
-                with torch.no_grad():
-                    # flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
-                    curr_version = flat_param.grad._version
-                    flat_param.grad.set_(flat_param.grad.to(handle._reduce_dtype))
-                    torch._C._autograd._unsafe_set_version_counter(flat_param.grad, curr_version)
+            with torch.no_grad():
+                # flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
+                curr_version = flat_param.grad._version
+                flat_param.grad.set_(flat_param.grad.to(handle._reduce_dtype))
+                torch._C._autograd._unsafe_set_version_counter(flat_param.grad, curr_version)
 
-            if handle.uses_sharded_strategy:
-                _reduce_grad(state, handle)
-            else:
-                _reduce_grad_no_shard(state, handle)
-            # Since the unsharded gradient is produced in the computation
-            # stream and consumed in the post-backward stream, inform the
-            # caching allocator (before it goes out of scope)
-            # _no_dispatch_record_stream(
-            #     autograd_computed_grad, state._post_backward_stream
-            # )
+        if handle.uses_sharded_strategy:
+            _reduce_grad(state, handle)
+        else:
+            _reduce_grad_no_shard(state, handle)
+        # Since the unsharded gradient is produced in the computation
+        # stream and consumed in the post-backward stream, inform the
+        # caching allocator (before it goes out of scope)
+        # _no_dispatch_record_stream(
+        #     autograd_computed_grad, state._post_backward_stream
+        # )
 
 
 def _post_backward_reshard(
@@ -857,7 +857,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             group=state.process_group,
         )
         if uses_hybrid_sharded_strategy:
-            state._all_reduce_stream.wait_stream(state._post_backward_stream)
+            # state._all_reduce_stream.wait_stream(state._post_backward_stream)
             with state._device_handle.stream(state._all_reduce_stream):
                 # Since the new sharded gradient is produced in the post-
                 # backward stream and consumed in the all-reduce stream,

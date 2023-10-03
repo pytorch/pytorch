@@ -980,23 +980,23 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         with context:
             return super()._apply(*args, **kwargs)
 
-    def named_buffers(
-        self,
-        *args,
-        **kwargs,
-    ) -> Iterator[Tuple[str, torch.Tensor]]:
-        """
-        Overrides :meth:`named_buffers()` to intercept buffer names and
-        remove all occurrences of the FSDP-specific flattened buffer prefix
-        when inside the :meth:`summon_full_params` context manager.
-        """
-        should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
-        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
-            if should_clean_name:
-                # Remove any instances of the FSDP-specific prefix; there can
-                # be multiple in the case of nested FSDP modules
-                buffer_name = buffer_name.replace(FSDP_PREFIX, "")
-            yield (buffer_name, buffer)
+    # def named_buffers(
+    #     self,
+    #     *args,
+    #     **kwargs,
+    # ) -> Iterator[Tuple[str, torch.Tensor]]:
+    #     """
+    #     Overrides :meth:`named_buffers()` to intercept buffer names and
+    #     remove all occurrences of the FSDP-specific flattened buffer prefix
+    #     when inside the :meth:`summon_full_params` context manager.
+    #     """
+    #     should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
+    #     for buffer_name, buffer in super().named_buffers(*args, **kwargs):
+    #         if should_clean_name:
+    #             # Remove any instances of the FSDP-specific prefix; there can
+    #             # be multiple in the case of nested FSDP modules
+    #             buffer_name = buffer_name.replace(FSDP_PREFIX, "")
+    #         yield (buffer_name, buffer)
 
     def named_parameters(
         self,

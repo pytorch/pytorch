@@ -441,7 +441,7 @@ class NNModuleVariable(VariableTracker):
             return source
 
         named_embed = functools.partial(_named_embed, tx=tx, key=key, source_cls=NNModuleSource, source=self.source, options=options)
-        wrap_values = functools.partial(_wrap_values, tx=tx, key=key, source_cls=FSDPNNModuleSource, source=self.source, options=options)
+        wrap_values = functools.partial(_wrap_values, tx=tx, key=key, source_cls=NNModuleSource, source=self.source, options=options)
         get_kwargs = functools.partial(_get_kwargs, mod=module, name=name, args=args, kwargs=kwargs)
 
         if name == "named_children":
@@ -480,6 +480,9 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "buffers":
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
+        elif name == "_named_members":
+            print("NAMED MEMBERS??")
+            assert False
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -900,7 +903,7 @@ def _wrap_values(items, *, tx, key, source_cls, source, options):
 def _named_embed(name, obj, *, tx, key, source_cls, source, options):
     return variables.TupleVariable(
         [
-            variables.ConstantVariable(name, **options),
+            variables.ConstantVariable.create(name, **options),
             tx.output.register_attr_or_module(
                 obj,
                 key,
