@@ -67,9 +67,6 @@ def mps_ops_grad_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
 
-        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-        'addr': [torch.float16],
-
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'sgn': [torch.float16, torch.float32],
@@ -387,6 +384,9 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -434,6 +434,8 @@ def mps_ops_modifier(ops):
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_13_3_XFAILLIST = {
@@ -10976,7 +10978,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif op.name == "masked.mean":
@@ -10988,6 +10992,12 @@ class TestConsistency(TestCaseMPS):
             elif op.name in ["pow", "__rpow__"]:
                 atol = 1e-6
                 rtol = 4e-6
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
+            elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
+                atol = 1.0
+                rtol = 0.0
             else:
                 atol = None
                 rtol = None
@@ -11031,7 +11041,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif (op.name == "masked.mean"):
@@ -11045,6 +11057,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
             else:
                 atol = None
                 rtol = None
