@@ -7,7 +7,9 @@ from .optimizer import (
     _get_value,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _capturable_doc,
     _maximize_doc,
+    _stack_if_compiling,
     _foreach_doc
 )
 from typing import List, Optional
@@ -27,6 +29,7 @@ class Adamax(Optimizer):
         *,
         maximize: bool = False,
         differentiable: bool = False,
+        capturable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -47,6 +50,7 @@ class Adamax(Optimizer):
             foreach=foreach,
             maximize=maximize,
             differentiable=differentiable,
+            capturable=capturable,
         )
         super().__init__(params, defaults)
 
@@ -56,6 +60,7 @@ class Adamax(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
+            group.setdefault("capturable", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -77,7 +82,11 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = torch.tensor(0.0, device=p.device)
+                state["step"] = (
+                    torch.zeros((), dtype=torch.float, device=p.device)
+                    if group['capturable']
+                    else torch.tensor(0.)
+                )
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -116,6 +125,7 @@ class Adamax(Optimizer):
             foreach = group["foreach"]
             maximize = group["maximize"]
             differentiable = group["differentiable"]
+            capturable = group["capturable"]
 
             self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
@@ -133,6 +143,7 @@ class Adamax(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                capturable=capturable,
             )
 
         return loss
@@ -176,6 +187,7 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
+        {_capturable_doc}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -194,6 +206,7 @@ def adamax(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    capturable: bool = False,
     *,
     eps: float,
     beta1: float,
@@ -235,6 +248,7 @@ def adamax(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        capturable=capturable,
     )
 
 
@@ -252,6 +266,7 @@ def _single_tensor_adamax(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
 ):
 
     for i, param in enumerate(params):
@@ -307,6 +322,7 @@ def _multi_tensor_adamax(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -348,7 +364,11 @@ def _multi_tensor_adamax(
             )
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-        step_size = [(lr / bc) * -1 for bc in bias_corrections]
 
-        numerator = torch._foreach_mul(grouped_exp_avgs, step_size)
-        torch._foreach_addcdiv_(grouped_params, numerator, grouped_exp_infs)
+        if capturable:
+            step_size = [(lr / bc) * -1 for bc in bias_corrections]
+            numerator = torch._foreach_mul(grouped_exp_avgs, step_size)
+            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size)
+        else:
+            step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_corrections])
+            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size)
