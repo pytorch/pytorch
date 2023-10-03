@@ -11,8 +11,8 @@ import torch.fx
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..guards import make_dupe_guard
-from ..source import GetItemSource
+from ..guards import make_dupe_guard, GuardBuilder
+from ..source import GetItemSource, AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -379,6 +379,14 @@ class ListVariable(CommonListMethodsVariable):
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        if self.source:
+            options["guards"].add(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
+        return variables.ConstantVariable.create(hasattr([], name), **options)
 
 
 class DequeVariable(CommonListMethodsVariable):
