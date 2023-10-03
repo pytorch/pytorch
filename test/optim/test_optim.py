@@ -828,7 +828,7 @@ class TestOptim(TestCase):
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
 
-            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop", "Adamax"]:
+            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
                 # RMSprop uses avg and grads
