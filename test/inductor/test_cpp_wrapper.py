@@ -184,6 +184,12 @@ if RUN_CPU:
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_lstm_packed_change_input_sizes",
+            "cpu",
+            test_cpu_repro.CPUReproTests(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_profiler_mark_wrapper_call"),
@@ -322,7 +328,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
-        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":
