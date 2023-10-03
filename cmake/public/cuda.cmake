@@ -347,12 +347,7 @@ list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
 # disable some nvcc diagnostic that appears in boost, glog, glags, opencv, etc.
-foreach(diag cc_clobber_ignored
-             set_but_not_used field_without_dll_interface
-             base_class_has_different_dll_interface
-             dll_interface_conflict_none_assumed
-             dll_interface_conflict_dllexport_assumed
-             bad_friend_decl)
+foreach(diag cc_clobber_ignored)
   list(APPEND SUPPRESS_WARNING_FLAGS --diag_suppress=${diag})
 endforeach()
 string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
