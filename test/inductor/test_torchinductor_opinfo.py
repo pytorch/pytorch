@@ -398,7 +398,6 @@ def collection_decorator(fn):
 
 class TestInductorOpInfo(TestCase):
     def tearDown(self):
-        super().tearDown()
         torch._dynamo.reset()
 
     check_model = check_model
