@@ -94,13 +94,13 @@ from .distributed import (
 from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
+    TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
-    DequeVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -115,8 +115,10 @@ from .misc import (
     AutogradFunctionVariable,
     ComptimeVariable,
     GetAttrVariable,
+    GetSetDescriptorVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
@@ -258,20 +260,6 @@ class VariableBuilder:
             # dynamic_shapes
         }
 
-    @staticmethod
-    def list_type(value):
-        if is_namedtuple(value):
-            return functools.partial(NamedTupleVariable, tuple_cls=type(value))
-        # TODO(voz): Why do we have both this and `BaseListVariable`'s `cls_for`?
-        return {
-            tuple: TupleVariable,
-            list: ListVariable,
-            odict_values: ListVariable,
-            torch.nn.ParameterList: ListVariable,
-            torch.nn.ModuleList: ListVariable,
-            collections.deque: DequeVariable,
-        }[type(value)]
-
     def get_source(self):
         return self.source
 
@@ -367,6 +355,16 @@ class VariableBuilder:
         return result
 
     def _wrap(self, value):
+        # import here to avoid circular dependencies
+        from torch.utils._triton import has_triton
+
+        if has_triton():
+            from triton.runtime.jit import JITFunction
+        else:
+
+            class JITFunction:
+                pass
+
         make_guards = self.make_guards
 
         # Handle exact type() match
@@ -462,7 +460,7 @@ class VariableBuilder:
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
-            return ConstantVariable(
+            return ConstantVariable.create(
                 value=value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
@@ -684,6 +682,14 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
+        elif isinstance(value, types.GetSetDescriptorType):
+            return GetSetDescriptorVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
                 value,
@@ -768,6 +774,13 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
+        elif isinstance(value, JITFunction):
+            return TritonKernelVariable(
+                value,
+                None,  # No grid provided
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -825,7 +838,7 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
-        result = self.list_type(value)(
+        result = BaseListVariable.cls_for_instance(value)(
             output, mutable_local=MutableLocal(), guards=guards
         )
         if istype(value, list):
@@ -951,14 +964,14 @@ class VariableBuilder:
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
             ):
-                return ConstantVariable(
+                return ConstantVariable.create(
                     value=value,
                     guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                 )
             else:
                 return self.wrap_unspecialized_primitive(value)
         else:
-            return ConstantVariable(
+            return ConstantVariable.create(
                 value=value,
                 guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
             )
@@ -1163,7 +1176,7 @@ class VariableBuilder:
                     # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
-                    return ConstantVariable(
+                    return ConstantVariable.create(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
@@ -1198,7 +1211,7 @@ class VariableBuilder:
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
                     # for some reason it doesn't
-                    return ConstantVariable(
+                    return ConstantVariable.create(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
@@ -1452,7 +1465,7 @@ def wrap_fx_proxy_cls(
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
-        sizes = [ConstantVariable(x) for x in example_value]
+        sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list, set)):
         proxy.node.meta["example_value"] = example_value
@@ -1461,7 +1474,7 @@ def wrap_fx_proxy_cls(
             if val is None:
                 # nn.MultiheadAttention() can return None, see issue #175
                 unpacked.append(
-                    ConstantVariable(None, **options),
+                    ConstantVariable.create(None, **options),
                 )
             else:
                 unpacked.append(
@@ -1491,7 +1504,7 @@ def wrap_fx_proxy_cls(
             ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
-        return ConstantVariable(None, **options)
+        return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
@@ -1513,7 +1526,7 @@ def wrap_fx_proxy_cls(
         torch._export.constraints.constrain_as_value,
     ]:
         proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1771,9 +1784,11 @@ class SourcelessBuilder:
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
     def wrap_constant_literal(value):
         assert ConstantVariable.is_literal(value)
-        return ConstantVariable(value=value)
+        return ConstantVariable.create(value=value)
