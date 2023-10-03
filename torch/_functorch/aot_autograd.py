@@ -1930,6 +1930,7 @@ def aot_dispatch_base_graph(
     assert copy_count == copy_count2
 
     if aot_config.enable_log:
+        print("AOT GRAPH")
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
@@ -2995,7 +2996,8 @@ def create_runtime_wrapper(
                 len(runtime_metadata.mutated_inp_runtime_indices) == num_mutated_inps
             )
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices)
+        # num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices)
+        num_mutations_to_apply = 0
         if num_mutations_to_apply > 0:
             updated_inputs = all_outs[: num_mutations_to_apply]
             fw_outs = all_outs[num_mutations_to_apply :]
@@ -3049,7 +3051,8 @@ def create_runtime_wrapper(
 
         # Step 4: Manually regenerate any outputs that are aliased to inputs, instead of
         # compiling them.
-        if runtime_metadata.num_outputs_aliased > 0:
+        # if runtime_metadata.num_outputs_aliased > 0:
+        if False:
             # The compiled forward also returned intermediate bases. We don't want to return them to the user.
             if runtime_metadata.num_intermediate_bases > 0:
                 fw_outs_no_intermediate_bases = fw_outs[

@@ -1210,7 +1210,7 @@ class BuiltinVariable(VariableTracker):
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
         from .nn_module import FSDPManagedNNModuleVariable
-        
+
         from .distributed import PlacementVariable
 
         if isinstance(
@@ -1222,6 +1222,9 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(obj, variables.TensorVariable) and name_var.is_python_constant() and name_var.value == "zeroed_out":
+            obj.mutable_local = MutableLocal()
+            return val.add_options(self, obj, name_var)
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
@@ -1280,7 +1283,7 @@ class BuiltinVariable(VariableTracker):
                     tx.output.create_proxy(
                         "call_function", torch._C._autograd._unsafe_set_version_counter, (out.as_proxy(), 0), {}
                     )
-                        
+
                     # out = wrap_fx_proxy(
                     #     tx,
                     #     tx.output.create_proxy(
@@ -1308,7 +1311,7 @@ class BuiltinVariable(VariableTracker):
                     # torch._set_data(obj.as_proxy().node.meta['example_value'], val.as_proxy().node.meta['example_value'])
 
                     # tx.replace_all(obj, val)
-            
+
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(

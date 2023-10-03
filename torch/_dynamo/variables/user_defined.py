@@ -767,15 +767,15 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
                 if src:
                     tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
-                if not compiled_autograd.compiled_autograd_enabled:
+                # if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):
                     # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                     # python state.
                     # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
                     # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
-                    unimplemented(
-                        "Compilation of intermediate hooks requires compiled autograd"
-                    )
+                    # unimplemented(
+                    #     "Compilation of intermediate hooks requires compiled autograd"
+                    # )
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.

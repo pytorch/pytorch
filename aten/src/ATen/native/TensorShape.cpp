@@ -378,7 +378,7 @@ bool _same_storage(at::Tensor& a, at::Tensor const& b) {
 }
 
 bool _data_ptr_allocated(at::Tensor& a) {
-  return a.storage().data_ptr() > 1;
+  return a.storage().data_ptr() > 0;
 }
 
 bool _same_storage_size(at::Tensor&a, int64_t s) {
@@ -386,7 +386,7 @@ bool _same_storage_size(at::Tensor&a, int64_t s) {
 }
 
 bool _storage_size_allocated(at::Tensor&a) {
-  return a.storage().nbytes() > 1;
+  return a.storage().nbytes() > 0;
 }
 
 Tensor& resize_storage_cpu_(Tensor& result, int64_t s) {

@@ -1145,7 +1145,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return result
 
     def remove_unused_graphargs(self) -> None:
-        return None
         # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
@@ -1167,7 +1166,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
             # I'm not really sure why you need to delete these from the
             # node since the node is going to get removed
-            return None
             del node.meta["grapharg"]
             self.remove_node(node)
             self.real_value_cache.pop(node, None)

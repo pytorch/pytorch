@@ -475,10 +475,6 @@ class CodeGen:
             if user.op == 'output':
                 body.append('\n')
                 return
-            print("del", node)
-            if "resize" in repr(node):
-                body.append('\n')
-                return
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])

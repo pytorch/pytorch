@@ -68,7 +68,7 @@ def main(compiled):
 
     def compiler_fn(gm):
         print("Compiling autograd?")
-        return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=False)
+        return torch.compile(gm, backend="eager", fullgraph=True, dynamic=False)
 
     compile_bwd = True
     ctx = compiled_autograd.enable(compiler_fn) if compile_bwd else contextlib.nullcontext()
@@ -85,7 +85,7 @@ def main(compiled):
                 }
                 for name, param in params.items():
                     print(f"Pre compile. {name} {param.size()}")
-            model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
+            model = torch._dynamo.optimize("eager", nopython=True, dynamic=False)(model)
             res = run(model, optim)
     else:
         res = run(model, optim)

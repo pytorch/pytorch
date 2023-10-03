@@ -850,7 +850,7 @@ class FlatParamHandle:
             self._init_shard_metadata(0, 0, flat_param.numel() - 1)
         else:
             _p_assert(
-                flat_param.storage_offset() == 1,
+                flat_param.storage_offset() == 0,
                 "The `FlatParameter` is not the sole occupant of its storage",
             )
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
@@ -859,7 +859,7 @@ class FlatParamHandle:
             allocated = torch._storage_size_allocated(flat_param)
             if allocated:
                 # flat_param._typed_storage()._resize_(0)
-                flat_param.resize_storage_(1)
+                flat_param.resize_storage_(0)
             flat_param.set_(sharded_flat_param)
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive

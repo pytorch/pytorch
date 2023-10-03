@@ -290,7 +290,6 @@ class TracerBase:
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
         # return self.create_node("placeholder", a.__class__, (a,), {})
-        return None
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)

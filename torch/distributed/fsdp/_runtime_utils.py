@@ -638,9 +638,10 @@ def _pre_backward_hook(
 ) -> Any:
     # if gpu_id == 0:
     print("RUNNING PRE BWD HOOK. Handle?", handle is not None)
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
+    gpu_id = int(os.environ["LOCAL_RANK"])
+    if gpu_id == 0:
         # print(id(state), "Running pre backward!")
+        print("STATE?", state, module, handle, unused)
     """
     Prepares ``_handle`` 's ``FlatParameter`` s for gradient computation.
 
