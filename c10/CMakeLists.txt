@@ -44,6 +44,7 @@ file(GLOB C10_HEADERS
         util/*.h
         )
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+target_compile_options_if_supported(c10 "-Wdeprecated")
 if(HAVE_SOVERSION)
   set_target_properties(c10 PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -80,11 +81,11 @@ if(WERROR)
 endif()
 
 # ---[ Dependency of c10
-if(${USE_GFLAGS})
+if(C10_USE_GFLAGS)
    target_link_libraries(c10 PUBLIC gflags)
 endif()
 
-if(${USE_GLOG})
+if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)

@@ -83,13 +83,13 @@ class RAIIAtenTensorHandle {
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
-std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
+inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     AtenTensorHandle* handles,
     size_t size) {
   std::vector<RAIIAtenTensorHandle> result;
   result.reserve(size);
   for (size_t i = 0; i < size; i++) {
-    result.push_back(std::move(RAIIAtenTensorHandle(handles[i])));
+    result.emplace_back(handles[i]);
     handles[i] = nullptr;
   }
   return result;
@@ -222,6 +222,10 @@ class AOTInductorModelBase {
 
   std::vector<int64_t> output_shape(int64_t idx) const {
     return shape(outputs_info_, idx);
+  }
+
+  void update_constants_map(std::shared_ptr<ConstantMap>&& constants_map) {
+    constants_ = std::move(constants_map);
   }
 
   /// Returns true if the model is complete.
