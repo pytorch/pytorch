@@ -842,7 +842,6 @@ def define_buck_targets(
             ("aten/src", "ATen/native/cpu/**/*.h"),
             ("aten/src", "ATen/native/sparse/*.h"),
             ("aten/src", "ATen/native/nested/*.h"),
-            ("aten/src", "ATen/native/nested/cuda/*.h"),
             ("aten/src", "ATen/native/quantized/*.h"),
             ("aten/src", "ATen/native/quantized/cpu/*.h"),
             ("aten/src", "ATen/native/transformers/*.h"),
