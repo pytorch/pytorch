@@ -614,6 +614,7 @@ def _annotate_add_relu(
     annotated_partitions = []
     for fused_partition in fused_partitions:
         add_partition, relu_partition = fused_partition
+        annotated_partitions.append(add_partition.nodes + relu_partition.nodes)
         if len(relu_partition.output_nodes) > 1:
             raise ValueError("Relu partition has more than one output node")
         relu_node = relu_partition.output_nodes[0]
@@ -629,15 +630,10 @@ def _annotate_add_relu(
 
         input_qspec_map = {}
         input_act0 = add_node.args[0]
-        input_act1 = add_node.args[1]
-
-        # skip quantization if any of the input is not Node
-        if any(not isinstance(n, Node) for n in [input_act0, input_act1]):
-            continue
-
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
+        input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
             input_qspec_map[input_act1] = input_act_qspec
 
@@ -649,8 +645,6 @@ def _annotate_add_relu(
             output_qspec=output_act_qspec,
             _annotated=True,
         )
-        annotated_partitions.append(add_partition.nodes + relu_partition.nodes)
-
     return annotated_partitions
 
 
@@ -666,6 +660,7 @@ def _annotate_add(
     add_partitions = list(itertools.chain(*add_partitions.values()))
     annotated_partitions = []
     for add_partition in add_partitions:
+        annotated_partitions.append(add_partition.nodes)
         add_node = add_partition.output_nodes[0]
         if _is_annotated([add_node]):
             continue
@@ -675,14 +670,10 @@ def _annotate_add(
 
         input_qspec_map = {}
         input_act0 = add_node.args[0]
-        input_act1 = add_node.args[1]
-
-        # skip quantization if any of the input is not Node
-        if any(not isinstance(n, Node) for n in [input_act0, input_act1]):
-            continue
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
+        input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
             input_qspec_map[input_act1] = input_act_qspec
 
@@ -691,12 +682,9 @@ def _annotate_add(
             output_qspec=output_act_qspec,
             _annotated=True,
         )
-        annotated_partitions.append(add_partition.nodes)
-
     return annotated_partitions
 
 
-# TODO: merge with add_relu
 @register_annotator("mul_relu")
 def _annotate_mul_relu(
     gm: torch.fx.GraphModule,
@@ -709,6 +697,7 @@ def _annotate_mul_relu(
     annotated_partitions = []
     for fused_partition in fused_partitions:
         mul_partition, relu_partition = fused_partition
+        annotated_partitions.append(mul_partition.nodes + relu_partition.nodes)
         if len(relu_partition.output_nodes) > 1:
             raise ValueError("Relu partition has more than one output node")
         relu_node = relu_partition.output_nodes[0]
@@ -724,15 +713,10 @@ def _annotate_mul_relu(
 
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
-        input_act1 = mul_node.args[1]
-
-        # skip quantization if any of the input is not Node
-        if any(not isinstance(n, Node) for n in [input_act0, input_act1]):
-            continue
-
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
+        input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
             input_qspec_map[input_act1] = input_act_qspec
 
@@ -744,12 +728,9 @@ def _annotate_mul_relu(
             output_qspec=output_act_qspec,
             _annotated=True,
         )
-        annotated_partitions.append(mul_partition.nodes + relu_partition.nodes)
-
     return annotated_partitions
 
 
-# TODO: merge with add
 @register_annotator("mul")
 def _annotate_mul(
     gm: torch.fx.GraphModule,
@@ -762,6 +743,7 @@ def _annotate_mul(
     mul_partitions = list(itertools.chain(*mul_partitions.values()))
     annotated_partitions = []
     for mul_partition in mul_partitions:
+        annotated_partitions.append(mul_partition.nodes)
         mul_node = mul_partition.output_nodes[0]
         if _is_annotated([mul_node]):
             continue
@@ -771,15 +753,10 @@ def _annotate_mul(
 
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
-        input_act1 = mul_node.args[1]
-
-        # skip quantization if any of the input is not Node
-        if any(not isinstance(n, Node) for n in [input_act0, input_act1]):
-            continue
-
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
+        input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
             input_qspec_map[input_act1] = input_act_qspec
 
@@ -788,8 +765,6 @@ def _annotate_mul(
             output_qspec=output_act_qspec,
             _annotated=True,
         )
-        annotated_partitions.append(mul_partition.nodes)
-
     return annotated_partitions
 
 

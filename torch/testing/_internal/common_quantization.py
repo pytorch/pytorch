@@ -2619,11 +2619,3 @@ class TestHelperModules:
             permute_out = torch.permute(x, (0, 2, 3, 1))
             linear_out = self.linear(permute_out)
             return linear_out
-
-    class AddScalar(torch.nn.Module):
-        def forward(self, x):
-            return x + 3
-
-    class MulScalar(torch.nn.Module):
-        def forward(self, x):
-            return x * 3
