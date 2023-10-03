@@ -694,7 +694,7 @@ void generateForwardBackwardLink(
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>&
         tidSeq2activity) {
   const ExtraFields<EventType::TorchOp>& extra_fields =
-      c10::get<ExtraFields<EventType::TorchOp>>(profiler_result.extra_fields_);
+      std::get<ExtraFields<EventType::TorchOp>>(profiler_result.extra_fields_);
   if (extra_fields.forward_tid_ > 0) {
     // act is backward op.
     uint64_t key = getForwardThreadKey(
@@ -777,9 +777,9 @@ void generateForwardBackwardLinks(
       torch_events.end(),
       [](const result_activity_t& left, const result_activity_t& right) {
         auto left_end_time =
-            c10::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+            std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
                 .end_time_ns_;
-        auto right_end_time = c10::get<ExtraFields<EventType::TorchOp>>(
+        auto right_end_time = std::get<ExtraFields<EventType::TorchOp>>(
                                   right.first->extra_fields_)
                                   .end_time_ns_;
         return left_end_time < right_end_time;
@@ -1140,7 +1140,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     // events are already marked finished before the main tree building
     // algorithm. It's fine to ignore them; the root event of these subtrees
     // not a Kineto op and will be handled normally.
-    if (c10::holds_alternative<ExtraFields<EventType::Kineto>>(
+    if (std::holds_alternative<ExtraFields<EventType::Kineto>>(
             event->extra_fields_) &&
         event->finished_) {
       return;
