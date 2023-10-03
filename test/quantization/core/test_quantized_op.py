@@ -3062,7 +3062,7 @@ class TestQuantizedOps(TestCase):
                     mha_quantized = torch.ao.quantization.convert(mha_prepared)
 
                     for name, param in mha_quantized.named_parameters():
-                        self.assertTrue(not "in_proj_weight" in name)
+                        self.assertTrue("in_proj_weight" not in name)
 
                     qy = mha_quantized(*q_data)
 
