@@ -1036,7 +1036,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
-        "The callback must have signature void(Future&) or void()");
+        "The callback must have signature void(Future&)");
 #endif
 
     std::unique_lock<std::mutex> lock(mutex_);

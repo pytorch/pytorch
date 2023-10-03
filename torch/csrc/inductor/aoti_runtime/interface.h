@@ -136,6 +136,12 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* input_handles,
     AtenTensorHandle* output_handles);
 
+// Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
+// so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
+AOTIRuntimeError AOTInductorModelUpdateConstants(
+    AOTInductorModelHandle model_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
 // Delete an AOTInductorModel created by AOTInductorModelCreate.
 AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
 
