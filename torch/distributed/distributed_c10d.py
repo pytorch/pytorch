@@ -573,7 +573,7 @@ _default_pg_init_method = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
-def _get_pg_default_device(group: Optional[ProcessGroup] = None):
+def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device:
     """
     Returns the device to use with ``group`` for control flow usage (object collectives, barrier).
     There are selection rules:
