@@ -870,7 +870,10 @@ def propagate_annotation(model: torch.fx.GraphModule) -> None:
 
 def convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for n in model.graph.nodes:
-        if n.op != "call_function" or n.target not in [torch.ops.aten.add.Tensor, torch.ops.aten.mul.Tensor]:
+        if n.op != "call_function" or n.target not in [
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.mul.Tensor
+        ]:
             continue
         args = list(n.args)
         new_args = []
@@ -883,7 +886,9 @@ def convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModul
             tensor_constant_name = get_new_attr_name(model)
             model.register_buffer(tensor_constant_name, torch.tensor(float(args[i])))
             with model.graph.inserting_before(n):
-                get_attr_node = model.graph.create_node("get_attr", tensor_constant_name, (), {})
+                get_attr_node = model.graph.create_node(
+                    "get_attr", tensor_constant_name, (), {}
+                )
                 new_args.append(get_attr_node)
         n.args = tuple(new_args)
     model.recompile()
