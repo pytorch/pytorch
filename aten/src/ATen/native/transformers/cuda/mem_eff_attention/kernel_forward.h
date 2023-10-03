@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-#include <ATen/ATen.h>
 #include <curand_kernel.h>
 #include <cmath>
 #include <vector>
