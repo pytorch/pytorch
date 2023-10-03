@@ -89,7 +89,7 @@ inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
   std::vector<RAIIAtenTensorHandle> result;
   result.reserve(size);
   for (size_t i = 0; i < size; i++) {
-    result.push_back(std::move(RAIIAtenTensorHandle(handles[i])));
+    result.emplace_back(handles[i]);
     handles[i] = nullptr;
   }
   return result;
