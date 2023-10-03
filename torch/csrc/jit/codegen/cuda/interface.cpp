@@ -57,7 +57,9 @@ bool isEnabled() {
 
 bool setEnabled(bool is_enabled) {
   TORCH_WARN("torch::jit::fuser::cuda::setEnabled() is deprecated");
-  TORCH_INTERNAL_ASSERT(!is_enabled, "nvfuser support in torchscript is removed and cannot be enabled!");
+  TORCH_INTERNAL_ASSERT(
+      !is_enabled,
+      "nvfuser support in torchscript is removed and cannot be enabled!");
   return false;
 }
 
@@ -73,7 +75,9 @@ bool getSingletonFusion() {
 
 bool setSingletonFusion(bool value) {
   TORCH_WARN("torch::jit::fuser::cuda::setSingletonFusion() is deprecated");
-  TORCH_INTERNAL_ASSERT(!value, "nvfuser support in torchscript is removed and singleton fusion cannot be enabled!");
+  TORCH_INTERNAL_ASSERT(
+      !value,
+      "nvfuser support in torchscript is removed and singleton fusion cannot be enabled!");
   return false;
 }
 
@@ -84,7 +88,9 @@ bool getHorizontalFusion() {
 
 bool setHorizontalFusion(bool value) {
   TORCH_WARN("torch::jit::fuser::cuda::setHorizontalFusion() is deprecated");
-  TORCH_INTERNAL_ASSERT(!value, "nvfuser support in torchscript is removed and horizontal fusion cannot be enabled!");
+  TORCH_INTERNAL_ASSERT(
+      !value,
+      "nvfuser support in torchscript is removed and horizontal fusion cannot be enabled!");
   return false;
 }
 
@@ -134,7 +140,8 @@ bool canFuseNode(const Node* node) {
 }
 
 void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
-  TORCH_WARN("torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser() is deprecated");
+  TORCH_WARN(
+      "torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser() is deprecated");
   if (getFuserInterface()->fn_insert_profile_inodes) {
     getFuserInterface()->fn_insert_profile_inodes(pr);
   }
