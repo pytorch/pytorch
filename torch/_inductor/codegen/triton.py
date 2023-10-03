@@ -2282,7 +2282,7 @@ class TritonScheduling(BaseScheduling):
                         "cannot fuse (triton:3): is not TritonTemplateBuffer %s",
                         node1,
                     )
-                return
+                return is_triton_template
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -2342,7 +2342,6 @@ class TritonScheduling(BaseScheduling):
 
         assert node1.is_reduction() and not node2.is_reduction()
         # swap args to hit the case above
-
         return self.can_fuse_horizontal(node2, node1)
 
     can_fuse_vertical = can_fuse
