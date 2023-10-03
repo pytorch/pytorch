@@ -70,8 +70,7 @@ C10_DEFINE_int64(
     kDefaultBailoutDepth,
     "Number of re-specializations");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
@@ -448,7 +447,6 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     }
 
     // Run custom post-fusion passes
-    // e.g. NVFuser
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
@@ -776,5 +774,4 @@ void ProfilingGraphExecutorImpl::runFinalOptimizations(
   AddIfThenElseOp(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
