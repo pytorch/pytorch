@@ -3468,9 +3468,11 @@ class TestBinaryUfuncs(TestCase):
         _test_helper(a, b)
         _test_helper(a[:3], b[:3])
 
+
         # large value test for numerical stability
         a *= 10000
         b *= 10000
+
         _test_helper(a, b)
         _test_helper(a[:3], b[:3])
 
@@ -3486,6 +3488,7 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
+    @skipIfTorchDynamo     # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
