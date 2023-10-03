@@ -726,7 +726,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
+        from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
         # TODO: Support `fn` with kwargs.
@@ -818,6 +818,8 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
         def _from_args(idx):
+            if not isinstance(args[idx], TensorVariable):
+                unimplemented("NYI - torch.func.grad: differentiated arguments should be tensors")
             return args[idx].as_proxy().node.meta["example_value"].contiguous()
 
         def to_python_ints(argnums):
@@ -991,6 +993,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
             )
 
+        if not all(isinstance(a, TensorVariable) for a in batch_input_args):
+            unimplemented("NYI - torch.func.vmap: batched input args should be tensors")
+
         body_name = add_subgraph(
             tx,
             self.source,
@@ -1104,7 +1109,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             always_restore=always_restore,
             restore_side_effects=False,
             should_flatten_inputs=True,
-            should_flatten_outputs=True,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
