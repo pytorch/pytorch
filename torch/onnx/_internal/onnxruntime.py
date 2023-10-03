@@ -1,6 +1,7 @@
 import dataclasses
 import importlib
 import logging
+import warnings
 
 from typing import (
     Any,
@@ -796,6 +797,19 @@ class OrtBackend:
             onnx_model = exported.to_model_proto(
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
+
+            # Inline model before executing in ORT.
+            # TODO: Temporary solution to improve performance until runtimes adapt to function format.
+            # https://github.com/pytorch/pytorch/issues/110476
+            try:
+                import onnx.inliner
+            except ImportError:
+                # onnx.inliner is not available in onnx < 1.15
+                warnings.warn(
+                    "Skipped inlining. onnx.inliner is not available in onnx < 1.15"
+                )
+            else:
+                onnx_model = onnx.inliner.inline_local_functions(onnx_model)
 
             # Initialize a ORT session to execute this ONNX model.
             # Note that TorchDynamo assumes all inputs/outputs are on the
