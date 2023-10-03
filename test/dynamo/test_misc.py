@@ -4961,24 +4961,40 @@ def fn():
 
     def test_call_parent_non_class_methods_from_child(self):
         class A:
+            a = 4
+
             def add(self, x):
                 return x + 10
 
             def mul(self, x):
                 return x * 0.1
 
+            @staticmethod
+            def square(x):
+                return x * x
+
         class B(A):
+            coeff = 4
+
             def add(self, x):
                 return x + 20
 
+            @classmethod
+            def cube(cls, x):
+                return cls.coeff * x * x * x
+
             def mul(self, x):
-                return x * 0.2
+                return super().mul(x) * x * 0.2
 
         class C(B):
             def add(self, x):
-                y = A.add(self, x)
-                z = B.mul(self, y)
-                return z + 30
+                a = super().square(x)
+                b = super().cube(x)
+                c = A.add(self, x)
+                d = B.mul(self, x)
+                e = super(B, self).add(x)
+                f = super().a * x
+                return a + b + c + d + e + f
 
         x = torch.rand(4)
         fn = C().add
