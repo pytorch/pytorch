@@ -60,32 +60,39 @@ class TestOptim(TestCase):
         scheduler_constructors=None,
         sparse_only=False,
         maximize=False,
+        multi_tensor=False
     ):
         if scheduler_constructors is None:
             scheduler_constructors = []
         # For rosenbrock tests, it is mandated that the param is a tensor with 2 numbers
-        param_t = torch.tensor([1.5, 1.5])
+        if multi_tensor:
+            params_t = [torch.tensor([1.5, 1.5]), torch.tensor([1.5, 1.5], dtype=torch.float64)]
+        else:
+            params_t = [torch.tensor([1.5, 1.5])]
 
-        param = Parameter(param_t)
-        optimizer = constructor([param])
+        params = [Parameter(param_t) for param_t in params_t]
+        optimizer = constructor(params)
         schedulers = []
         for scheduler_constructor in scheduler_constructors:
             schedulers.append(scheduler_constructor(optimizer))
 
         if not sparse_only:
-            param_c = Parameter(param_t.clone())
-            optimizer_c = constructor([param_c])
+            params_c = [Parameter(param_t.clone()) for param_t in params_t]
+            optimizer_c = constructor(params_c)
 
         solution = torch.tensor([1, 1])
         with torch.no_grad():
-            initial_dist = param.dist(solution)
+            initial_dist = torch.sum(torch.stack([param.dist(solution) for param in params]))
 
-        def eval(param, sparse_grad, w):
+        def eval(params, sparse_grad, w):
             # Depending on w, provide only the x or y gradient
             optimizer.zero_grad()
-            loss = rosenbrock(param)
+            if multi_tensor:
+                loss = sum(rosenbrock(param) for param in params)
+            else:
+                loss = rosenbrock(params[0])
             loss.backward()
-            grad = drosenbrock(param)
+            grad = drosenbrock(params[0])
             # NB: We torture test the optimizer by returning an
             # uncoalesced sparse tensor
             if w:
@@ -99,28 +106,38 @@ class TestOptim(TestCase):
             x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
-                    param.grad = x
+                    params[0].grad = x
+                    if multi_tensor:
+                        params[1].grad = x.to(dtype=torch.float64)
                 else:
-                    param.grad = x.to_dense()
+                    params[0].grad = x.to_dense()
+                    if multi_tensor:
+                        params[1].grad = x.to(dtype=torch.float64).to_dense()
             return loss
 
         for i in range(2000):
             # Do cyclic coordinate descent
             w = i % 2
-            optimizer.step(functools.partial(eval, param, True, w))
+            optimizer.step(functools.partial(eval, params, True, w))
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
-                    scheduler.step(rosenbrock(param))
+                    scheduler.step(rosenbrock(params[0]))
                 else:
                     scheduler.step()
             if not sparse_only:
-                optimizer_c.step(functools.partial(eval, param_c, False, w))
-                self.assertEqual(param, param_c)
+                optimizer_c.step(functools.partial(eval, params_c, False, w))
+                self.assertEqual(params, params_c, atol=1e-6, rtol=1e-6)
 
         if not maximize:
-            self.assertLessEqual(param.dist(solution), initial_dist)
+            self.assertLessEqual(
+                torch.sum(torch.stack([param.dist(solution) for param in params])),
+                initial_dist
+            )
         else:
-            self.assertGreaterEqual(rosenbrock(param), rosenbrock(param_t))
+            self.assertGreaterEqual(
+                torch.sum(torch.stack([rosenbrock(param) for param in params])),
+                torch.sum(torch.stack([rosenbrock(param_t) for param_t in params_t])),
+            )
 
     def _test_basic_cases_template(
         self,
@@ -1430,7 +1447,8 @@ class TestOptim(TestCase):
     def test_adagrad_sparse(self):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
-                lambda params: optim.Adagrad(params, lr=1e-1, foreach=foreach)
+                lambda params: optim.Adagrad(params, lr=1e-1, foreach=foreach),
+                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.Adagrad(params, lr=0.1, foreach=foreach),
@@ -1438,6 +1456,7 @@ class TestOptim(TestCase):
                     lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
                     lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
                 ],
+                multi_tensor=foreach,
             )
 
     def test_adagrad_complex(self):
