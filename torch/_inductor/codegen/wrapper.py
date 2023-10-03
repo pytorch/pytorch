@@ -1587,18 +1587,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
         stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
         if config.aot_inductor.abi_compatible:
             device_type, device_id = device.split(",")
-            args = [
-                str(len(buffer.get_size())),
-                self.codegen_int_array_var(size, self.wrapper_call),
-                self.codegen_int_array_var(stride, self.wrapper_call),
-                dtype,
-                device_type,
-                "this->device_idx_" if V.graph.aot_mode else device_id,
-                f"&{name}_handle",
-            ]
+            if buffer.get_device().type == "cpu":
+                args = [
+                    str(len(buffer.get_size())),
+                    self.codegen_int_array_var(size, self.wrapper_call),
+                    self.codegen_int_array_var(stride, self.wrapper_call),
+                    dtype,
+                    f"&{name}_handle",
+                ]
+                func_name = "aoti_torch_empty_strided_cpu"
+            else:
+                args = [
+                    str(len(buffer.get_size())),
+                    self.codegen_int_array_var(size, self.wrapper_call),
+                    self.codegen_int_array_var(stride, self.wrapper_call),
+                    dtype,
+                    device_type,
+                    "this->device_idx_" if V.graph.aot_mode else device_id,
+                    f"&{name}_handle",
+                ]
+                func_name = "aoti_torch_empty_strided"
             self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
             self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK({func_name}({', '.join(args)}));"
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
         else:

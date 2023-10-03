@@ -140,6 +140,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     AtenTensorHandle* ret_new_tensor // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided_cpu(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    AtenTensorHandle* ret_new_tensor // returns new reference
+);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
     int64_t ndim,

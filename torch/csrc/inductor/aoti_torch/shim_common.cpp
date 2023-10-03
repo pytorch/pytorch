@@ -158,6 +158,21 @@ AOTITorchError aoti_torch_empty_strided(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided_cpu(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    at::Tensor* new_tensor = new at::Tensor(at::detail::empty_strided_cpu(sizes, strides, static_cast<c10::ScalarType>(dtype)));
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+  });
+}
+
+
 AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
     int64_t ndim,
