@@ -147,7 +147,7 @@ def is_traceable_wrapper_subclass(t):
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback, extra_context=None):
+def transform_subclass(t, callback):
     """
     Given a traceable, wrapper tensor subclass ``t`` that implements
     ``__torch_dispatch__`` and holds some inner tensors,
@@ -165,8 +165,6 @@ def transform_subclass(t, callback, extra_context=None):
     transformed_tensors_dict = {}
     for attr in attrs:
         transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
-    if extra_context is not None:
-        ctx = ctx + extra_context
     return type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
 
 def _correct_storage_aliasing(func, schema_info, args, outs):

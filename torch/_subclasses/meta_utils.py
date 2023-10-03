@@ -433,7 +433,6 @@ class MetaConverter:
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
 
-                        extra_context = None
                         if t.is_nested:
                             # Avoid circular import
                             from torch._dynamo.source import (
@@ -441,7 +440,23 @@ class MetaConverter:
                                 TensorPropertySource,
                             )
 
-                            sym_ragged_size = shape_env.create_symintnode(
+                            # For nested tensors, manually do transform_subclass
+                            # so we can insert some special processing on ctx
+                            attrs, ctx = t.__tensor_flatten__()
+                            transformed_tensors_dict = {}
+                            for attr in attrs:
+                                inner_t = getattr(t, attr)
+                                transformed_tensors_dict[attr] = callback(
+                                    lambda: empty_create(
+                                        inner_t, AttrSource(source, attr)
+                                    )
+                                )
+                            # We expect JaggedTensor to have a 'ragged_size' in
+                            # its context
+                            assert isinstance(ctx, dict) and "ragged_size" in ctx
+                            # Replace the eager ragged size with our freshly
+                            # allocated jagged size that has a source
+                            ctx["ragged_size"] = shape_env.create_symintnode(
                                 shape_env.create_symbol(
                                     t._size[1],
                                     TensorPropertySource(
@@ -450,18 +465,16 @@ class MetaConverter:
                                 ),
                                 hint=t._size[1],
                             )
-                            extra_context = (sym_ragged_size,)
-
-                        r = transform_subclass(
-                            t,
-                            lambda attr, inner_t: callback(
-                                lambda: empty_create(
-                                    inner_t,
-                                    AttrSource(source, attr),
-                                )
-                            ),
-                            extra_context=extra_context,
-                        )
+                        else:
+                            r = transform_subclass(
+                                t,
+                                lambda attr, inner_t: callback(
+                                    lambda: empty_create(
+                                        inner_t,
+                                        AttrSource(source, attr),
+                                    )
+                                ),
+                            )
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
