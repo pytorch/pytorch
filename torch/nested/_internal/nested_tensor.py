@@ -9,7 +9,7 @@ _tensor_id_counter = 0
 _tensor_id_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_id(tensor, coeff):
+def get_tensor_id(tensor, *, coeff=1):
     global _tensor_id_counter
     if tensor not in _tensor_id_registry:
         _tensor_id_registry[tensor] = _tensor_id_counter
@@ -61,7 +61,7 @@ class NestedTensor(torch.Tensor):
 
         # In a later PR, we'll need to accept an additional size argument
         # to handle dynamic shapes.
-        ragged_dim = get_tensor_id(offsets, 1)
+        ragged_dim = get_tensor_id(offsets, coeff=1)
         D = values.shape[1]
         B = offsets.shape[0] - 1
         self._size = (B, ragged_dim, D)
