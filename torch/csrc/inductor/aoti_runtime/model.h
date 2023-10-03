@@ -11,7 +11,7 @@
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
-#include <torch/csrc/inductor/aoti_runtime/cuda_utils.h>
+#include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
@@ -112,11 +112,15 @@ class AOTInductorModelBase {
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
-        cubin_dir_(cubin_dir) {
-    AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx_));
+        cubin_dir_(cubin_dir),
+        device_idx_(-1) {
+#ifdef USE_CUDA
+    AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+#endif // USE_CUDA
   }
 
   ~AOTInductorModelBase() {
+#ifdef USE_CUDA
     if (run_finished_) {
       auto code = cudaEventDestroy(*run_finished_);
       if (code != cudaSuccess) {
@@ -124,6 +128,7 @@ class AOTInductorModelBase {
                   << cudaGetErrorString(code) << std::endl;
       }
     }
+#endif // USE_CUDA
   }
 
   AOTInductorModelBase(AOTInductorModelBase&&) = delete;
@@ -139,17 +144,24 @@ class AOTInductorModelBase {
           output_handles, // array for writing output AtenTensorHandle; handles
                           // will be stolen by the caller; the array itself is
                           // borrowed
-      cudaStream_t stream,
+      DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
+#ifdef USE_CUDA
     if (!run_finished_) {
       cudaEvent_t run_finished;
-      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
+      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
 
     auto* model = static_cast<Model*>(this);
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
+    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+#else // !USE_CUDA
+    run_finished_ = false;
+    auto* model = static_cast<Model*>(this);
+    model->run_impl(input_handles, output_handles, stream, proxy_executor);
+    run_finished_ = true;
+#endif // USE_CUDA
   }
 
   size_t num_inputs() const {
@@ -230,6 +242,7 @@ class AOTInductorModelBase {
 
   /// Returns true if the model is complete.
   bool is_finished() {
+#ifdef USE_CUDA
     if (!run_finished_) {
       throw std::runtime_error{"Model CUDA event was not initialized"};
     }
@@ -244,15 +257,20 @@ class AOTInductorModelBase {
     throw std::runtime_error(
         std::string("The model did not finish successfully. Error: ") +
         cudaGetErrorString(cudaGetLastError()));
+#else // !USE_CUDA
+    return run_finished_;
+#endif // USE_CUDA
   }
 
   /// Synchronizes completion event.
   void wait_for_completion() {
+#ifdef USE_CUDA
     if (!run_finished_) {
-      throw std::runtime_error{"Model CUDA event was not initialized"};
+      throw std::runtime_error{"Model event was not initialized"};
     }
 
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
+    AOTI_RUNTIME_DEVICE_CHECK(cudaEventSynchronize(*run_finished_));
+#endif // USE_CUDA
   }
 
  protected:
@@ -374,7 +392,11 @@ class AOTInductorModelBase {
 
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
+#ifdef USE_CUDA
   std::optional<cudaEvent_t> run_finished_;
+#else // !USE_CUDA
+  bool run_finished_;
+#endif
 
   // Generated model uses this device index to create CUDA guards.
   int device_idx_;
@@ -423,7 +445,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
           output_handles, // array for writing output AtenTensorHandle; handles
                           // will be stolen by the caller; the array itself is
                           // borrowed
-      cudaStream_t stream,
+      DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 
   static std::unique_ptr<AOTInductorModel> Create(
@@ -433,6 +455,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   }
 };
 
+#ifdef USE_CUDA
 class AOTICudaStreamGuard {
  public:
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
@@ -449,6 +472,7 @@ class AOTICudaStreamGuard {
  private:
   std::unique_ptr<void, std::function<void(void*)>> guard_;
 };
+#endif // USE_CUDA
 
 } // namespace aot_inductor
 } // namespace torch

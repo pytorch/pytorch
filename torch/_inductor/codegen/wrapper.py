@@ -1131,7 +1131,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         output_handles, // array for writing output AtenTensorHandle; handles
                                         // will be stolen by the caller; the array itself is
                                         // borrowed
-                    cudaStream_t stream,
+                    DeviceStreamType stream,
                     AOTIProxyExecutorHandle proxy_executor
                 ) {
                 """
