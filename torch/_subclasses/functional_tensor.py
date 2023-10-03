@@ -171,13 +171,13 @@ class FunctionalTensor(torch.Tensor):
         return torch._from_functional_tensor(self.elem)
 
     def replace_(self, output) -> None:
-        torch._functionalize_replace(self.elem, output)  # type: ignore[attr-defined]
+        torch._functionalize_replace(self.elem, output)
 
     def commit_update(self) -> None:
-        torch._functionalize_commit_update(self.elem)  # type: ignore[attr-defined]
+        torch._functionalize_commit_update(self.elem)
 
     def sync(self) -> None:
-        torch._functionalize_sync(self.elem)  # type: ignore[attr-defined]
+        torch._functionalize_sync(self.elem)
 
 
 class FunctionalTensorMode(TorchDispatchMode):
@@ -457,13 +457,13 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
         )
 
     def replace(self, input_tensor, output_tensor) -> None:
-        torch._functionalize_replace(input_tensor, output_tensor)  # type: ignore[attr-defined]
+        torch._functionalize_replace(input_tensor, output_tensor)
 
     def commit_update(self, tensor) -> None:
-        torch._functionalize_commit_update(tensor)  # type: ignore[attr-defined]
+        torch._functionalize_commit_update(tensor)
 
     def sync(self, tensor) -> None:
-        torch._functionalize_sync(tensor)  # type: ignore[attr-defined]
+        torch._functionalize_sync(tensor)
 
 
 class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -496,10 +496,10 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
         return self.interpreter.lower()
 
     def replace(self, input_tensor, output_tensor) -> None:
-        torch._functionalize_replace(input_tensor, output_tensor)  # type: ignore[attr-defined]
+        torch._functionalize_replace(input_tensor, output_tensor)
 
     def commit_update(self, tensor) -> None:
-        torch._functionalize_commit_update(tensor)  # type: ignore[attr-defined]
+        torch._functionalize_commit_update(tensor)
 
     def sync(self, tensor) -> None:
-        torch._functionalize_sync(tensor)  # type: ignore[attr-defined]
+        torch._functionalize_sync(tensor)

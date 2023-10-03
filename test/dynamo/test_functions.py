@@ -1600,11 +1600,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_mutation = functools_triton_kernel_wrapper_functional(grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
-    getitem = triton_kernel_wrapper_mutation['in_ptr0']
-    getitem_1 = triton_kernel_wrapper_mutation['out_ptr']
-    getitem_2 = triton_kernel_wrapper_mutation['n_elements']
-    getitem_3 = triton_kernel_wrapper_mutation['BLOCK_SIZE'];  triton_kernel_wrapper_mutation = None
+    triton_kernel_wrapper_functional_proxy = functools_triton_kernel_wrapper_functional(grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
+    getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
+    getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
+    getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
+    getitem_3 = triton_kernel_wrapper_functional_proxy['BLOCK_SIZE'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
         )
 

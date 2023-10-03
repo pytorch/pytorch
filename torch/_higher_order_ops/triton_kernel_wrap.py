@@ -42,25 +42,31 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(mode, *, kernel, grid, kwarg
         return None
 
 
-def trace_triton_kernel_wrapper(proxy_mode, func_overload, *, kernel, grid, kwargs):
-    with disable_proxy_modes_tracing():
-        out = func_overload(kernel=kernel, grid=grid, kwargs=kwargs)
+def prepare_triton_kernel_for_graph_node(f, kernel):
+    # This is a hack to workaround how FX does not allow for functions
+    # in the graph
 
-    fn = functools.partial(func_overload, kernel=kernel)
+    fn = functools.partial(f, kernel=kernel)
     # FX graph needs __name__ and __module__ attributes
-    fn.__name__ = func_overload.__name__  # type:ignore[attr-defined]
+    fn.__name__ = f.__name__  # type:ignore[attr-defined]
     if not hasattr(fn, "__module__"):
         # Super hacky but on AMD __module__ is not set
         fn.__module__ = "itertools"
+    return fn
+
+
+def trace_triton_kernel_wrapper(proxy_mode, func_overload, *, kernel, grid, kwargs):
+    with disable_proxy_modes_tracing():
+        out = func_overload(kernel=kernel, grid=grid, kwargs=kwargs)
 
     node_args = {"grid": grid, "kwargs": kwargs}
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
-        fn,
+        prepare_triton_kernel_for_graph_node(func_overload, kernel),
         (),
         proxy_args,
-        name="triton_kernel_wrapper_mutation",
+        name=func_overload.__name__ + "_proxy",
     )
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -106,6 +112,10 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel, grid, kwargs):
 
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_functional_dense(*, kernel, grid, kwargs):
+    # TODO(oulgen): For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime
+    # (inductor should always optimize them away).
+    # Requires https://github.com/pytorch/pytorch/issues/109240
     kwargs = {
         key: (clone_preserve_strides(val) if isinstance(val, Tensor) else val)
         for key, val in kwargs.items()
@@ -116,6 +126,10 @@ def triton_kernel_wrapper_functional_dense(*, kernel, grid, kwargs):
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_functional_fake_tensor_mode(mode, *, kernel, grid, kwargs):
+    # TODO(oulgen): For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime
+    # (inductor should always optimize them away).
+    # Requires https://github.com/pytorch/pytorch/issues/109240
     with mode:
         return {
             key: (clone_preserve_strides(val) if isinstance(val, Tensor) else val)
@@ -156,6 +170,7 @@ triton_kernel_wrapper_mutation.fallthrough(DispatchKey.BackendSelect)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCUDA)
+triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCPU)
 
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
@@ -165,3 +180,4 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCPU)  # type: i
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
+triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)

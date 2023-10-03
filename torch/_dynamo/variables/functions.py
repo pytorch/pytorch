@@ -677,22 +677,18 @@ class TritonKernelVariable(VariableTracker):
             unimplemented(f"grid for the triton kernel is {type(grid)}")
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            prepare_triton_kernel_for_graph_node,
             triton_kernel_wrapper_mutation,
         )
-
-        fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
-        # FX graph needs __name__ and __module__ attributes
-        fn.__name__ = triton_kernel_wrapper_mutation.__name__
-        if not hasattr(fn, "__module__"):
-            # Super hacky but on AMD __module__ is not set
-            fn.__module__ = "itertools"
 
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
         tx.output.create_proxy(
             "call_function",
-            fn,
+            prepare_triton_kernel_for_graph_node(
+                triton_kernel_wrapper_mutation, self.kernel
+            ),
             (),
             {
                 "grid": grid,
