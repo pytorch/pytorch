@@ -22,6 +22,12 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 300
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -34,7 +40,7 @@ jobs:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 300
+    timeout-minutes: ${{ matrix.mem_leak_check && 600 || inputs.timeout-minutes }}
     steps:
       # Duplicated in win-build because this MUST go before a checkout
       - name: Enable git symlinks on Windows and disable fsmonitor daemon
