@@ -9608,9 +9608,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Tests that assume input tensor has a meaningful effect on output tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cuda',
-                            active_if=not TEST_WITH_TORCHINDUCTOR),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
 
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -9640,9 +9638,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Tests that assume input tensor has a meaningful effect on output tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cuda',
-                            active_if=not TEST_WITH_TORCHINDUCTOR),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
 
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -9671,9 +9667,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Tests that assume input tensor has a meaningful effect on output tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cuda',
-                            active_if=not TEST_WITH_TORCHINDUCTOR),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
 
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -9701,9 +9695,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Tests that assume input tensor has a meaningful effect on output tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cuda',
-                            active_if=not TEST_WITH_TORCHINDUCTOR),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
 
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
