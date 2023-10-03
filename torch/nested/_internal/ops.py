@@ -99,22 +99,23 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     return JAGGED_OPS_TABLE.get(func, None)
 
 
-def new_nested_like(values, nt):
+def extract_kwargs(arg):
     # Construct a new nested tensor with the same metadata as nt given values
     kwargs = {
-        "offsets": nt.offsets(),
-        "ragged_size": nt._size[nt._ragged_idx],
+        "offsets": arg.offsets(),
+        "ragged_size": arg._size[arg._ragged_idx],
     }
-    return NestedTensor(values, **kwargs)
-
+    return kwargs
 
 def jagged_unary_pointwise(func, *args, **kwargs):
-    return new_nested_like(func(args[0].values(), **kwargs), args[0])
+    return NestedTensor(func(args[0].values(), **kwargs), args[0], **extract_kwargs(args[0]))
 
 
 def jagged_binary_pointwise(func, *args, **kwargs):
     check_ragged_dim_same(func, args[0], "lhs", args[1], "rhs")
-    return new_nested_like(func(args[0].values(), args[1].values(), **kwargs), args[0])
+    return NestedTensor(
+        func(args[0].values(), args[1].values(), **kwargs), args[0], **extract_kwargs(args[0])
+    )
 
 
 @register_jagged_func(
@@ -174,7 +175,7 @@ def linear_default(func, *args, **kwargs):
     values = torch.mm(args[0].values(), args[1])
     if len(args) == 3:
         values += args[2]
-    return new_nested_like(values, args[0])
+    return NestedTensor(values, args[0], **extract_kwargs(args[0]))
 
 
 @register_jagged_func(
@@ -183,7 +184,7 @@ def linear_default(func, *args, **kwargs):
 )
 def linear_backward_default(func, *args, **kwargs):
     check_ragged_dim_same(func, args[0], "self", args[1], "grad_output")
-    ds = new_nested_like(torch.mm(args[1].values(), args[2].T), args[1])
+    ds = NestedTensor(torch.mm(args[1].values(), args[2].T), args[1], **extract_kwargs(args[1]))
     dw = torch.mm(args[0].values().T, args[1].values())
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
