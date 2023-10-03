@@ -267,7 +267,7 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
     if enable is None:
         yield
     elif enable:
-        # Assume everything is dynamic by deafult
+        # Assume everything is dynamic by default
         with config.patch(assume_static_by_default=False):
             yield
     else:
@@ -712,7 +712,7 @@ def explain(f, *extra_args, **extra_kwargs):
             nopython=False,
             guard_export_fn=guard_export_print,
         )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
@@ -1206,7 +1206,7 @@ def export(
                 export=True,
                 export_constraints=constraints,
             )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
             except ConstraintViolationError as e:
@@ -1256,7 +1256,7 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        # This check need to happend before aten_graph
+        # This check need to happened before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx
         if same_signature:
             check_signature_rewritable(graph)
