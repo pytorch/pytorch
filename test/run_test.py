@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack
 from datetime import datetime
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
 
@@ -589,12 +590,13 @@ def run_test(
         argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
-    log_fd, log_path = tempfile.mkstemp(
-        dir=REPO_ROOT / "test" / "test-reports",
-        prefix=f"{sanitize_file_name(str(test_module))}_",
-        suffix="_toprint.log",
-    )
-    os.close(log_fd)
+    if IS_CI:
+        log_fd, log_path = tempfile.mkstemp(
+            dir=REPO_ROOT / "test" / "test-reports",
+            prefix=f"{sanitize_file_name(str(test_module))}_",
+            suffix="_toprint.log",
+        )
+        os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
     should_file_rerun = (
@@ -611,12 +613,15 @@ def run_test(
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
-    with open(log_path, "w") as f:
+    with ExitStack() as stack:
+        output = None
+        if IS_CI:
+            output = stack.enter_context(open(log_path, "w"))
         ret_code, was_rerun = retry_shell(
             command,
             test_directory,
-            stdout=f,
-            stderr=f,
+            stdout=output,
+            stderr=output,
             env=env,
             timeout=timeout,
             retries=2 if should_file_rerun else 0,
@@ -631,7 +636,10 @@ def run_test(
         # comes up in the future.
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    handle_log_file(test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun)
+    if IS_CI:
+        handle_log_file(
+            test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
+        )
     return ret_code
 
 
