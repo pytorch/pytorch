@@ -113,25 +113,23 @@ class NestedTensor(torch.Tensor):
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
-        return ["_values", "_offsets"], (self.requires_grad, self._size[self._ragged_idx])
+        ctx = {
+            "requires_grad": self.requires_grad,
+            "ragged_size": self._size[self._ragged_idx],
+        }
+        return ["_values", "_offsets"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta):
         assert len(inner_tensors) == 2
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
-        (requires_grad, ragged_size, *extra_meta) = meta
-
-        if len(extra_meta) > 0:
-            # During fakification, the ragged_size is passed in as extra context
-            # because we need its symint version.
-            (ragged_size,) = extra_meta
 
         return NestedTensor(
             values,
             offsets=offsets,
-            ragged_size=ragged_size,
-            requires_grad=requires_grad,
+            ragged_size=meta["ragged_size"],
+            requires_grad=meta["requires_grad"],
         )
 
     @classmethod

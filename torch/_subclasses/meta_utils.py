@@ -465,6 +465,7 @@ class MetaConverter:
                                 ),
                                 hint=t._size[1],
                             )
+                            r = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
                         else:
                             r = transform_subclass(
                                 t,
