@@ -17,7 +17,7 @@ from torch.ao.quantization.utils import (
     QuantizerCls,
 )
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Callable, Dict, List, Type, Optional
 
 __all__ = [
@@ -77,7 +77,6 @@ class QuantizeHandler(ABC):
                             arg, self.modules, cache_for_no_tensor_check)):
                     self.num_tensor_args += 1
 
-    @abstractmethod
     def is_general_tensor_value_op(self) -> bool:
         """
         Returns True if the operator works for both floating point and
@@ -95,11 +94,9 @@ class QuantizeHandler(ABC):
         """
         return False
 
-    @abstractmethod
     def is_custom_module(self):
         return self.is_custom_module_
 
-    @abstractmethod
     def is_standalone_module(self):
         return self.is_standalone_module_
 
