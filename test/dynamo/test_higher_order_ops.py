@@ -146,7 +146,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         func,
         args_generator,
         expected_num_wrap_args,
-        expected_opcount=1,
+        expected_opcount=2,
         return_graph=False,
     ):
         # Given a `func` that has a single call to `wrap`,
@@ -267,7 +267,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f,
             default_args_generator((x,)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(1, 2),
+            expected_opcount=ifdynstaticdefault(2, 3),
         )
 
     def test_wrap_pytree_args_nested(self):
@@ -304,7 +304,8 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, l_y_, l_z_);  wrap_body_0 = l_x_ = l_y_ = l_z_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_, l_z_):
@@ -313,7 +314,7 @@ class GraphModule(torch.nn.Module):
             add = sin + cos;  sin = cos = None
             sin_1 = l_z_.sin();  l_z_ = None
             sub = add - sin_1;  add = sin_1 = None
-            return sub
+            return (sub,)
 """,
         )
 
@@ -328,7 +329,7 @@ class GraphModule(torch.nn.Module):
             f,
             default_args_generator((x, y)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(1, 2),
+            expected_opcount=ifdynstaticdefault(2, 3),
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:
@@ -341,13 +342,14 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             view = l_x_.view(3);  l_x_ = None
             add = view + 0.5;  view = None
-            return add
+            return (add,)
 """,
             )
         else:
@@ -362,13 +364,14 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, size):
             view = l_x_.view(size);  l_x_ = size = None
             add = view + 0.5;  view = None
-            return add
+            return (add,)
 """,
             )
 
@@ -443,14 +446,14 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, x + global_var)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
 
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertTrue(len(wrap_node.args), 3)
 
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 1)
+        self.assertEqual(op_count(body_function), 2)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
@@ -532,7 +535,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, x + y + x)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 1)
 
         # No changes to args of outer wrap
@@ -542,14 +545,14 @@ class GraphModule(torch.nn.Module):
 
         # z was lifted to arg of inner wrap
         body_function = getattr(gm, wrap_node.args[0].name)
-        # addition + wrap
-        self.assertEqual(op_count(body_function), 2)
+        # addition + wrap + getitem
+        self.assertEqual(op_count(body_function), 3)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
         # Innermost body function: z was also lifted to arg
         body_function = getattr(body_function, inner_wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 1)
+        self.assertEqual(op_count(body_function), 2)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
@@ -1048,14 +1051,14 @@ class GraphModule(torch.nn.Module):
         counters.clear()
         opt = torch.compile(f, backend="eager", fullgraph=True)
         opt(x, y)
-        self.assertEqual(counters["stats"]["calls_captured"], 1)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
 
         # verify that we `don't` recompile
         opt(x, y)
-        self.assertEqual(counters["stats"]["calls_captured"], 1)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
 
         output = opt(x, y, 8)
-        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(counters["stats"]["calls_captured"], 4)
         self.assertEqual(output, 2 * x)
 
     def test_wrap_kwarg_default_else_branch(self):
@@ -1666,46 +1669,77 @@ def forward(self):
             {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
-    def test_fallback_on_nested_tuple_output(self):
-        counters.clear()
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        @torch.compile(backend=cnt)
+    def test_nested_tuple_output(self):
         def f(x):
             ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
             return a + b
 
         x = torch.randn(2, 3)
-        result = f(x)
 
-        self.assertEqual(result, x.sin() + x.cos())
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(len(backend.graphs), 1)
-        wrap_node = find_first_node(backend.graphs[0], wrap)
-        self.assertTrue(len(wrap_node.args), 1)
-        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 2)
-
-    def test_fallback_on_output_with_dict(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
         counters.clear()
-        cnt = CompileCounter()
+        graph = self._test_wrap_simple(
+            f, default_args_generator((x,)), 2, 4, return_graph=True
+        )
+        self.assertEqual(len(counters["graph_break"]), 0)
 
-        @torch.compile(backend=cnt)
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        a = wrap[0]
+        b = wrap[1];  wrap = None
+
+        add = a + b;  a = b = None
+        return (add,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            child = l_x_.sin()
+            child_1 = l_x_.cos();  l_x_ = None
+            return (child, child_1)
+""",
+        )
+
+    def test_output_with_dict(self):
         def f(x):
             return wrap(lambda x: [{"a": -x}], x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result, [{"a": -x}])
-        self.assertEqual(cnt.frame_count, 0)
-        assert_dict_matches_regex(
-            self,
-            dict(counters["graph_break"]),
-            {".*torch.* op returned non-Tensor dict call_function": 1},
+
+        counters.clear()
+        graph = self._test_wrap_simple(
+            f, default_args_generator((x,)), 2, 2, return_graph=True
+        )
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            child = -l_x_;  l_x_ = None
+            return (child,)
+""",
         )
 
     def test_access_module_attr(self):
@@ -1805,7 +1839,7 @@ def forward(self):
             return wrap(lambda x: x + y, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 3, expected_opcount=2)
+        self._test_wrap_simple(f, default_args_generator((x,)), 3, expected_opcount=3)
 
     def test_nested_wrap(self):
         class MockModule(torch.nn.Module):
@@ -1825,16 +1859,14 @@ def forward(self):
         def fn(x):
             return wrap(gn, x)
 
-        self._test_wrap_simple(
-            fn, default_args_generator((torch.randn(10, 10),)), 4, expected_opcount=1
-        )
+        self._test_wrap_simple(fn, default_args_generator((torch.randn(10, 10),)), 4)
 
     def test_fn_with_kwargs_in_torch_ops(self):
         def fn(x):
             return wrap(lambda z: torch.cos(input=z), x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), 2, expected_opcount=1)
+        self._test_wrap_simple(fn, default_args_generator((x,)), 2)
 
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
