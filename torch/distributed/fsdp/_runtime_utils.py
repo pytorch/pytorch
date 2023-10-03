@@ -3,7 +3,7 @@ import logging
 from enum import auto, Enum
 from itertools import chain
 from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
-
+import os
 import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
@@ -705,12 +705,16 @@ def _pre_backward_hook(
 
 
 @no_type_check
-@torch.no_grad()
+# @torch.no_grad()
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
     *unused: Any,
 ):
+    gpu_id = int(os.environ["LOCAL_RANK"])
+    if gpu_id == 0:
+        print("UNUSED IS?", unused, "what")
+        print("POST BACKWARD ARGS?", len(unused))
     # import os
     # gpu_id = int(os.environ["LOCAL_RANK"])
     # if gpu_id == 0:
@@ -1454,8 +1458,9 @@ def _register_post_backward_hook(
     )
     acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     assert acc_grad is not None
+    hook = functools.partial(_post_backward_hook, state, handle)
     hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
+        hook
     )
     flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 

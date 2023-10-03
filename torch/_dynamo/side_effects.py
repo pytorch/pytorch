@@ -165,13 +165,11 @@ class SideEffects:
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
-        print("Storing", id(item.mutable_local), name, value)
         self.store_attr_mutations[item.mutable_local][name] = value
 
     def load_attr(self, item, name, deleted_ok=False):
         assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item.mutable_local][name]
-        print("Loading", id(item.mutable_local), name, result)
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
         return result

@@ -8,11 +8,13 @@ import random
 import threading
 import types
 from typing import Dict, List
+from torch._dynamo import compiled_autograd
 
 import torch._dynamo.config
 
 import torch.nn
 from torch._guards import TracingContext
+from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from .. import variables
 from ..allowed_functions import is_allowed
@@ -201,16 +203,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
         if self.value == functools.partial:
-            subargs = args[1:]
-            subargs_real_values = []
-            subkwargs = {}
-            for subarg in subargs:
-                subargs_real_values.append(subarg.value)
-            for k, v in kwargs.items():
-                subkwargs[k] = v.value
-
-            new_fn = functools.partial(args[0].fn, *subargs_real_values, **subkwargs)
-            return variables.functions.UserFunctionVariable(new_fn, **options)
+            if not args:
+                unimplemented("functools.partial malformed")
+            # The first arg, a callable (the ctor below will assert on types)
+            fn = args[0]
+            rest_args = args[1:]
+            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # args and keywords
+            return variables.functions.FunctoolsPartialVariable(
+                fn, args=rest_args, keywords=kwargs, **options)
         return super().call_function(tx, args, kwargs)
 
     def const_getattr(self, tx, name):
@@ -441,35 +442,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, partial_args, partial_kwargs
                 )
             return variables.TorchVariable(self.value.func, **options).call_function(
-                tx, partial_args, partial_kwargs
-            )
-        elif (
-            istype(self.value, functools.partial)
-        ):
-            from .builder import VariableBuilder
-
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            args_source = AttrSource(self.source, "args")
-            partial_args = []
-            for i, arg in enumerate(self.value.args):
-                args_item_source = GetItemSource(args_source, i)
-                arg_vt = VariableBuilder(tx, args_item_source)(arg)
-                print("Potential obj?", arg_vt)
-                partial_args.append(arg_vt)
-            partial_args.extend(args)
-
-            kwargs_source = AttrSource(self.source, "keywords")
-            partial_kwargs = {}
-            for k, kwarg in enumerate(self.value.keywords.items()):
-                kwargs_item_source = GetItemSource(kwargs_source, k)
-                kwarg_vt = VariableBuilder(tx, kwargs_item_source)(kwarg)
-                print("Potential kw obj?", k, kwarg_vt)
-                partial_kwargs[k] = kwarg_vt
-
-            partial_kwargs.update(kwargs)
-            breakpoint()
-            # unimplemented(f"Special partial? {self.source} {self.value.func} {[type(t) for t in self.value.args]} {args} {kwargs}")
-            return variables.UserFunctionVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
 
@@ -760,6 +732,7 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from .tensor import record_hook_fn
+        from .builder import wrap_fx_proxy
 
         options = VariableTracker.propagate(self)
         if name == "register_hook":
@@ -771,10 +744,11 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
                 # This should not be onerous to support when needed.
                 unimplemented("NYI - lambda variables as hooks")
-            while isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+            if isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
                 fn = fn_var.as_python_constant()
             else:
                 fn = fn_var.fn
+            print("FN VAR IS?", fn_var, fn)
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
@@ -782,11 +756,55 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
             )
             if not self.source:
                 # Intermediary
-                unimplemented("Intermediary tensors with registered hooks - NYI")
-            else:
-                assert (
-                    fn_var.source
-                ), "Unreachable - See unimplemented for lambdas above"
+                src = fn_var.source
+                if (
+                    not src
+                    and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
+                    and fn_var.func.source
+                ):
+                    src = fn_var.func.source
+
+                if src:
+                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+
+                if not compiled_autograd.compiled_autograd_enabled:
+                    # TODO(voz):
+                    # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
+                    # python state.
+                    # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
+                    # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
+                    unimplemented(
+                        "Compilation of intermediate hooks requires compiled autograd"
+                    )
+
+                # This wraps our user provided fn with a function that intercedes and
+                # uses our `invoke` higher order op to record a hook invocation in bwd graph.
+                fn = functools.partial(trace_wrapped, fn=fn)
+
+                def _register_hook_trampoline(tensor):
+                    tensor.register_hook(fn)
+                    return tensor
+
+                new_proxy = tx.output.create_proxy(
+                    "call_function",
+                    _register_hook_trampoline,
+                    (self.as_proxy(),),
+                    {},
+                )
+                new_self = AccumulateGradVariable(self.value, new_proxy, self.value_type, **options)
+                return tx.replace_all(self, new_self)
+                # return wrap_fx_proxy(
+                #     tx,
+                #     tx.output.create_proxy(
+                #         "call_function",
+                #         _register_hook_trampoline,
+                #         (self.as_proxy(),),
+                #         {},
+                #     ),
+                #     example_value=self.value,
+                #     **options,
+                # )
+
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
         return super().call_method(tx, name, args, kwargs)
@@ -815,6 +833,7 @@ class AutogradNodeVariable(UserDefinedObjectVariable):
             for i, outer_item in enumerate(attr):
                 inner_tuple_items = []
                 for j, inner_item in enumerate(outer_item):
+                    options["mutable_local"] = MutableLocal()
                     inner_tuple_items.append(
                         AccumulateGradVariable(
                             inner_item, self.proxy.next_functions[i][j], **options

@@ -740,10 +740,8 @@ class TensorVariable(VariableTracker):
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
                 fn = fn_var.as_python_constant()
-                name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
-                name = fn_var.fn.__name__
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
