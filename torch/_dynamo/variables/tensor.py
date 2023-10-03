@@ -690,11 +690,9 @@ class TensorVariable(VariableTracker):
                 ), "Unreachable - See unimplemented for lambdas above"
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
-        elif (
-            name == "requires_grad_"
-            and self.as_proxy().node.meta["example_value"].requires_grad
-            != (args[0].value if len(args) > 0 else True)
-        ):
+        elif name == "requires_grad_" and self.as_proxy().node.meta[
+            "example_value"
+        ].requires_grad != (args[0].value if len(args) > 0 else True):
             unimplemented("Tensor.requires_grad_")
 
         else:
