@@ -40,10 +40,10 @@ jobs:
   test:
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
-    timeout-minutes: ${{ inputs.timeout-minutes }}
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
+    timeout-minutes: ${{ matrix.mem_leak_check && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
       # [see note: pytorch repo ref]

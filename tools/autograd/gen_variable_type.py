@@ -166,6 +166,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # This function returns nested_tensor shape as a tensor that is non-differentiable
     "_nested_tensor_size",
     "_nested_tensor_strides",
+    "_nested_tensor_storage_offsets",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -1466,7 +1467,7 @@ def emit_body(
             ):
                 # See Note [nuanced return type of out-of-place foreach functions]
                 if type == VectorCType(BaseCType(tensorT)):
-                    assert is_output
+                    assert is_foreach and is_output
                 expr = f"make_saved_variable_list({name}, {str(is_foreach and is_output).lower()})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):

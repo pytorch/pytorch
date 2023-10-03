@@ -28,6 +28,7 @@ from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
+
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
@@ -5133,16 +5134,21 @@ else:
         # xc is a channels last tensor
         xc = input_generator_fn(device)
         # xc is not memory dense, but looks like channels last
-        if memory_format == torch.channels_last:
-            xc = xc[..., ::2, ::2]
-        else:
-            xc = xc[..., ::2, ::2, ::2]
+        # We don't preserve non-dense striding
+        if not TEST_WITH_TORCHINDUCTOR:
+            if memory_format == torch.channels_last:
+                xc = xc[..., ::2, ::2]
+            else:
+                xc = xc[..., ::2, ::2, ::2]
 
         clone = transformation_fn(xc, memory_format=torch.preserve_format)
+
+
         self.assertFalse(clone.is_contiguous())
         self.assertTrue(clone.is_contiguous(memory_format=memory_format))
-        self.assertFalse(xc.is_contiguous())
-        self.assertFalse(xc.is_contiguous(memory_format=memory_format))
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertFalse(xc.is_contiguous())
+            self.assertFalse(xc.is_contiguous(memory_format=memory_format))
         if compare_data:
             self.assertEqual(xc, clone.to(xc))
 
@@ -5165,12 +5171,14 @@ else:
         if compare_data:
             self.assertEqual(xc, clone.to(xc))
 
-        x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
-        for _ in range(10):
-            permutation = list(range(len(x.shape)))
-            random.shuffle(permutation)
-            x = x.permute(permutation)
-            self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
+        # TODO copy _like constructors to stride permutation instead of just layout
+        if not TEST_WITH_TORCHINDUCTOR:
+            x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
+            for i in range(10):
+                permutation = list(range(len(x.shape)))
+                random.shuffle(permutation)
+                x = x.permute(permutation)
+                self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
 
     def test_memory_format_to(self, device):
         def get_generator(memory_format, shape):
@@ -5223,7 +5231,6 @@ else:
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_factory_like_functions_preserve(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
