@@ -17,7 +17,7 @@ using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
 // NB: this is currently unused, but I've left it because in principle
 // it's useful
-static Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
+Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
   float l = lambda.toFloat();
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
@@ -51,7 +51,7 @@ static Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
   return input;
 }
 
-static Tensor hardshrink(const at::Tensor& input, const at::Scalar& lambda=0.5) {
+Tensor hardshrink(const at::Tensor& input, const at::Scalar& lambda=0.5) {
   float l = lambda.toFloat();
   MPSImage* X = imageFromTensor(input);
   IntArrayRef outputSize = input.sizes();

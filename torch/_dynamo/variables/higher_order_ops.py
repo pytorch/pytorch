@@ -180,6 +180,9 @@ def speculate_subgraph(
     checkpoint,
     description,
     *,
+    # source_target is the .value of HigherOrderOpVariable and is the
+    # target of the proxy that we created for the higherOrderOperator.
+    source_target=None,
     always_restore=False,
     enable_grad=False,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
@@ -206,7 +209,7 @@ def speculate_subgraph(
     varlist, _treespec = tree_flatten(tx, ListVariable(list(sub_args)))
 
     try:
-        with tx.output.new_subtracer() as tracer:
+        with tx.output.new_subtracer(source_target) as tracer:
             args = validate_args_and_maybe_create_graph_inputs(
                 varlist, tracer, tx, manually_set_subgraph_inputs
             )
@@ -289,9 +292,12 @@ def speculate_subgraph(
                 )
 
     except Unsupported as ex:
+        f_name = f"{type(f).__name__}"
+        if isinstance(f, UserFunctionVariable):
+            f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
-            f"to trace function `{f.get_name()}` into a single graph. This means "
+            f"to trace function `{f_name}` into a single graph. This means "
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
@@ -370,6 +376,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "trace_wrapped":
+            return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -479,6 +487,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 graph_checkpoint,
                 checkpoint,
                 "cond",
+                source_target=self.value,
             )
 
             if not isinstance(ret_val, TensorVariable):
@@ -631,6 +640,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx.output.graph,
             checkpoint,
             "torch.ops.higher_order.map",
+            source_target=self.value,
         )
 
         body_nn_modules = tx.copy_graphstate().output.nn_modules
@@ -766,6 +776,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             "torch.func.grad",
+            source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
         )
@@ -977,6 +988,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 graph_checkpoint,
                 checkpoint,
                 "torch.vmap",
+                source_target=self.value,
             )
 
         body_name = add_subgraph(
@@ -1087,6 +1099,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             graph_checkpoint,
             checkpoint,
             "the user-defined autograd.Function",
+            source_target=self.value,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
@@ -1157,6 +1170,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             description,
+            source_target=self.value,
             manually_set_subgraph_inputs=False,
             should_flatten_outputs=True,
         )
@@ -1308,3 +1322,18 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=None,
         )
+
+
+class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import TensorVariable
+
+        assert "fn" in kwargs
+        fn = kwargs["fn"]
+        assert len(args) == 1
+        grad = args[0]
+        assert isinstance(grad, TensorVariable)
+
+        return fn.call_function(tx, args, {})

@@ -44,7 +44,7 @@ void ThrowEnforceNotMet(
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
-  throw e;
+  throw std::move(e);
 }
 
 void ThrowEnforceNotMet(
