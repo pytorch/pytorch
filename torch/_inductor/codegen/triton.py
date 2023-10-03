@@ -2549,7 +2549,7 @@ class TritonScheduling(BaseScheduling):
                     node.mark_run()
 
         kernel_name = self.define_kernel(src_code, node_schedule)
-
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers
