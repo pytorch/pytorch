@@ -94,6 +94,10 @@ class TritonPrinter(PythonPrinter):
         b = self._print(sympy.Max(*expr.args[mid:]))
         return f"tl.math.max({a}, {b})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.abs({self._print(expr.args[0])})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint

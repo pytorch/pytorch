@@ -348,6 +348,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"abs({self._print(expr.args[0])})"
+
 
 class OpOverrides:
     def __init__(self, parent):
