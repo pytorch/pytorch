@@ -1,5 +1,7 @@
 import re
+from typing import Union
 
+import sympy
 from sympy.printing.printer import Printer
 
 
@@ -9,20 +11,26 @@ class ExprPrinter(Printer):
         # Variables shouldn't be surrounded in parens (for brevity)
         return False
 
-    def paren(self, string):
-        def all_in_parens(string):
-            if string[0] != "(" or len(string) < 2:
+    @staticmethod
+    def all_in_parens(string: str) -> bool:
+        if string[0] != "(" or len(string) < 2:
+            return False
+        count = 1
+        for i, char in enumerate(string[1:]):
+            if char == "(":
+                count += 1
+            elif char == ")":
+                count -= 1
+            if count == 0 and i != len(string) - 2:
                 return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
+        assert count == 0
+        return True
+
+    def paren(self, expr: Union[sympy.Expr, str]) -> str:
+        if isinstance(expr, sympy.Symbol):
+            return self._print(expr)
+
+        string = self._print(expr) if not isinstance(expr, str) else expr
 
         if (
             self.is_symbol(string)
@@ -32,7 +40,7 @@ class ExprPrinter(Printer):
         ):
             return string
         # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
+        if self.all_in_parens(string):
             return string
         return f"({string})"
 
@@ -48,52 +56,46 @@ class ExprPrinter(Printer):
             return self._helper_sqrt(base)  # type: ignore[attr-defined]
         elif exp == -0.5:
             return "1/" + self._helper_sqrt(base)  # type: ignore[attr-defined]
-        base = self._print(base)
+        base = self.paren(base)
         assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
-            return "*".join([self.paren(base)] * exp)
+            return "*".join([base] * exp)
         elif exp < 0:
-            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            return "1/" + self.paren("*".join([base] * abs(exp)))
         else:  # exp == 0
             return "1"
 
-    def _print_Unequality(self, expr):
-        return " != ".join(map(self.paren, map(self._print, expr.args)))
+    def _print_Relational(self, expr):
+        return f"{self.paren(expr.lhs)} {expr.rel_op} {self.paren(expr.rhs)}"
 
     def _print_Mul(self, expr):
-        return "*".join(map(self.paren, map(self._print, expr.args)))
+        return "*".join(map(self.paren, expr.args))
 
     def _print_Add(self, expr):
-        return " + ".join(map(self.paren, map(self._print, expr.args)))
+        return " + ".join(map(self.paren, expr.args))
 
     def _print_Mod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
+        return " % ".join(map(self.paren, expr.args))
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)  # type: ignore[attr-defined]
-
-    def _print_GreaterThan(self, expr):
-        # GreaterThan:          >=
-        # StrictlyGreaterThan:  >
-        # Go figure...
-        return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
+        x = self.paren(x)
+        div = self.paren(div)
+        mod = self.paren(mod)
         if div != "1":
             x = f"({x} // {div})"
         return f"{x} % {mod}"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
+        x = self.paren(x)
+        div = self.paren(div)
         return f"({x} // {div})"
 
     def _helper_sqrt(self, expr):

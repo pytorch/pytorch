@@ -42,6 +42,7 @@ from torch import (  # noqa: F401
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
+from torch.utils._sympy.printing import PythonPrinter
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame, CapturedTraceback
@@ -57,8 +58,6 @@ class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
 import sympy
-from sympy.printing.str import StrPrinter
-from sympy.printing.precedence import precedence
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -1655,7 +1654,7 @@ class RuntimeAssert:
     stack: str = field(repr=False)
 
 
-class ShapeGuardPrinter(StrPrinter):
+class ShapeGuardPrinter(PythonPrinter):
     def __init__(
         self,
         symbol_to_source,
@@ -1689,7 +1688,7 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
         super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
 
 
-class DynamicDimConstraintPrinter(StrPrinter):
+class DynamicDimConstraintPrinter(PythonPrinter):
     """
     Printer for dynamic dim constraints.
     - Instead of t.size()[d] it prints dynamic_dim(t, d)
@@ -1711,13 +1710,6 @@ class DynamicDimConstraintPrinter(StrPrinter):
         assert isinstance(expr, sympy.Symbol), str(type(expr))
 
         return self.print_source(self.symbol_to_source[expr][0])
-
-    def _print_Relational(self, expr):
-        return '{} {} {}'.format(
-            self.parenthesize(expr.lhs, precedence(expr)),
-            expr.rel_op,
-            self.parenthesize(expr.rhs, precedence(expr))
-        )
 
 
 class DimConstraints:
