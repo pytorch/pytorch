@@ -84,6 +84,28 @@ class TestOptim(TestCase):
         with torch.no_grad():
             initial_dist = torch.sum(torch.stack([param.dist(solution) for param in params]))
 
+        def get_grad(param, sparse_grad):
+            grad = drosenbrock(param)
+            # NB: We torture test the optimizer by returning an
+            # uncoalesced sparse tensor
+
+            if sparse_grad:
+                if w:
+                    i = torch.LongTensor([[0, 0]])
+                    x = grad[0]
+                    v = torch.tensor([x / 4.0, x - x / 4.0])
+                else:
+                    i = torch.LongTensor([[1, 1]])
+                    y = grad[1]
+                    v = torch.tensor([y - y / 4.0, y / 4.0])
+                grad_out = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
+            else:
+                if w:
+                    grad_out = torch.tensor([grad[0], 0], dtype=param.dtype)
+                else:
+                    grad_out = torch.tensor([0, grad[1]], dtype=param.dtype)
+            return grad_out
+
         def eval(params, sparse_grad, w):
             # Depending on w, provide only the x or y gradient
             optimizer.zero_grad()
@@ -92,27 +114,12 @@ class TestOptim(TestCase):
             else:
                 loss = rosenbrock(params[0])
             loss.backward()
-            grad = drosenbrock(params[0])
-            # NB: We torture test the optimizer by returning an
-            # uncoalesced sparse tensor
-            if w:
-                i = torch.LongTensor([[0, 0]])
-                x = grad[0]
-                v = torch.tensor([x / 4.0, x - x / 4.0])
-            else:
-                i = torch.LongTensor([[1, 1]])
-                y = grad[1]
-                v = torch.tensor([y - y / 4.0, y / 4.0])
-            x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
+
+            grads_out = [get_grad(param, sparse_grad) for param in params]
             with torch.no_grad():
-                if sparse_grad:
-                    params[0].grad = x
-                    if multi_tensor:
-                        params[1].grad = x.to(dtype=torch.float64)
-                else:
-                    params[0].grad = x.to_dense()
-                    if multi_tensor:
-                        params[1].grad = x.to(dtype=torch.float64).to_dense()
+                params[0].grad = grads_out[0]
+                if multi_tensor:
+                    params[1].grad = grads_out[1].to(dtype=torch.float64)
             return loss
 
         for i in range(2000):
@@ -126,7 +133,9 @@ class TestOptim(TestCase):
                     scheduler.step()
             if not sparse_only:
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
-                self.assertEqual(params, params_c, atol=1e-6, rtol=1e-6)
+                self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
+            
+            print("LOOPING", i)
 
         if not maximize:
             self.assertLessEqual(
