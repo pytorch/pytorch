@@ -9,15 +9,22 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
 
-import torch._numpy as np
-from torch._numpy.testing import assert_almost_equal, assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_almost_equal, assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_almost_equal, assert_equal
+
 
 skip = functools.partial(skipif, True)
 

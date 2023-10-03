@@ -5,28 +5,49 @@ import functools
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
-
-import torch._numpy as np
 from pytest import raises as assert_raises
-from torch._numpy import (
-    array,
-    atleast_1d,
-    atleast_2d,
-    atleast_3d,
-    AxisError,
-    concatenate,
-    hstack,
-    newaxis,
-    stack,
-    vstack,
-)
-from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        array,
+        atleast_1d,
+        atleast_2d,
+        atleast_3d,
+        AxisError,
+        concatenate,
+        hstack,
+        newaxis,
+        stack,
+        vstack,
+    )
+    from numpy.testing import assert_, assert_array_equal, assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        array,
+        atleast_1d,
+        atleast_2d,
+        atleast_3d,
+        AxisError,
+        concatenate,
+        hstack,
+        newaxis,
+        stack,
+        vstack,
+    )
+    from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+
 
 skip = functools.partial(skipif, True)
 

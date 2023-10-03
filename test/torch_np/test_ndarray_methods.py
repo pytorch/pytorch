@@ -1,26 +1,30 @@
 # Owner(s): ["module: dynamo"]
 
 import itertools
-from unittest import expectedFailure as xfail, skipIf as skip
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
-
-import torch._numpy as np
-
-# import numpy as np
 from pytest import raises as assert_raises
-from torch._numpy.testing import assert_equal
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_equal
+
 
 class TestIndexing(TestCase):
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attr, type of a[0, 0]")
     def test_indexing_simple(self):
         a = np.array([[1, 2, 3], [4, 5, 6]])
 
@@ -36,6 +40,7 @@ class TestIndexing(TestCase):
 
 
 class TestReshape(TestCase):
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_function(self):
         arr = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
@@ -44,6 +49,7 @@ class TestReshape(TestCase):
         arr = np.asarray(arr)
         assert np.transpose(arr, (1, 0)).tensor._base is arr.tensor
 
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_method(self):
         arr = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
         arr_shape = arr.shape
@@ -85,6 +91,7 @@ class TestReshape(TestCase):
 
 
 class TestTranspose(TestCase):
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_transpose_function(self):
         arr = [[1, 2], [3, 4], [5, 6]]
         tgt = [[1, 3, 5], [2, 4, 6]]
@@ -93,6 +100,7 @@ class TestTranspose(TestCase):
         arr = np.asarray(arr)
         assert np.transpose(arr, (1, 0)).tensor._base is arr.tensor
 
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_transpose_method(self):
         a = np.array([[1, 2], [3, 4]])
         assert_equal(a.transpose(), [[1, 3], [2, 4]])
@@ -105,6 +113,7 @@ class TestTranspose(TestCase):
 
 
 class TestRavel(TestCase):
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_ravel_function(self):
         a = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -113,6 +122,7 @@ class TestRavel(TestCase):
         arr = np.asarray(a)
         assert np.ravel(arr).tensor._base is arr.tensor
 
+    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_ravel_method(self):
         a = np.array([[0, 1], [2, 3]])
         assert_equal(a.ravel(), [0, 1, 2, 3])
@@ -272,7 +282,7 @@ class TestArgmaxArgminCommon(TestCase):
             with pytest.raises(ValueError):
                 method(arr.T, axis=axis, out=wrong_outarray, keepdims=True)
 
-    @skip(True, reason="XXX: need ndarray.chooses")
+    @skipif(True, reason="XXX: need ndarray.chooses")
     @parametrize("method", ["max", "min"])
     def test_all(self, method):
         # a = np.random.normal(0, 1, (4, 5, 6, 7, 8))

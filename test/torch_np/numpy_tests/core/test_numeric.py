@@ -9,17 +9,6 @@ import warnings
 
 import pytest
 
-import torch._numpy as np
-from torch._numpy.random import rand, randint, randn
-from torch._numpy.testing import (
-    assert_,
-    assert_allclose,
-    assert_almost_equal,
-    assert_array_almost_equal,
-    assert_array_equal,
-    assert_equal,
-    assert_warns,  # assert_array_max_ulp, HAS_REFCOUNT, IS_WASM
-)
 
 IS_WASM = False
 HAS_REFCOUNT = True
@@ -37,6 +26,34 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.random import rand, randint, randn
+    from numpy.testing import (
+        assert_,
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        assert_warns,  # assert_array_max_ulp, HAS_REFCOUNT, IS_WASM
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy.random import rand, randint, randn
+    from torch._numpy.testing import (
+        assert_,
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        assert_warns,  # assert_array_max_ulp, HAS_REFCOUNT, IS_WASM
+    )
+
 
 skip = functools.partial(skipif, True)
 

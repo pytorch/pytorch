@@ -12,19 +12,24 @@ from typing import Any
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
-
-import torch._numpy as np
 from pytest import raises as assert_raises
-from torch._numpy.testing import assert_, assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
 skip = functools.partial(skipif, True)
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_, assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_, assert_equal
 
 
 def assert_dtype_equal(a, b):
@@ -195,8 +200,8 @@ class TestPickling(TestCase):
     @parametrize(
         "DType",
         [
-            subtest(type(np.dtype(t)), name=f"{np.dtype(t).name}")
-            for t in np.typecodes["All"]
+            subtest(type(np.dtype(t)), name=f"{np.dtype(t).name}_{i}")
+            for i, t in enumerate(np.typecodes["All"])
         ]
         + [np.dtype],
     )

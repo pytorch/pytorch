@@ -30,11 +30,12 @@ from torch.testing._internal.common_utils import (
     run_tests,
     slowTest as slow,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
-
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import (
@@ -1825,9 +1826,9 @@ class TestMethods(TestCase):
     @parametrize(
         "a",
         [
-            subtest(np.array([0, 1, np.nan], dtype=np.float16), name='f16'),
-            subtest(np.array([0, 1, np.nan], dtype=np.float32), name='f32'),
-            subtest(np.array([0, 1, np.nan]), name='default_dtype')
+            subtest(np.array([0, 1, np.nan], dtype=np.float16), name="f16"),
+            subtest(np.array([0, 1, np.nan], dtype=np.float32), name="f32"),
+            subtest(np.array([0, 1, np.nan]), name="default_dtype"),
         ],
     )
     def test_searchsorted_floats(self, a):

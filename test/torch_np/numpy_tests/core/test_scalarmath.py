@@ -11,29 +11,42 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 # from numpy._utils import _pep440
 import pytest
+from pytest import raises as assert_raises
 
 # from hypothesis import given, settings
 # from hypothesis.strategies import sampled_from
 # from hypothesis.extra import numpy as hynp
 
-import torch._numpy as np
-from pytest import raises as assert_raises
-from torch._numpy.testing import (
-    _gen_alignment_data,
-    assert_,
-    assert_almost_equal,
-    assert_equal,
-    #    assert_array_equal, suppress_warnings, _gen_alignment_data,
-    #    assert_warns,
-)
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     slowTest as slow,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import (
+        _gen_alignment_data,
+        assert_,
+        assert_almost_equal,
+        assert_equal,
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import (
+        _gen_alignment_data,
+        assert_,
+        assert_almost_equal,
+        assert_equal,
+        #    assert_array_equal, suppress_warnings, _gen_alignment_data,
+        #    assert_warns,
+    )
+
 
 skip = functools.partial(skipif, True)
 

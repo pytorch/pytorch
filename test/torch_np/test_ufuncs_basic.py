@@ -18,8 +18,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -28,7 +28,6 @@ if TEST_WITH_TORCHDYNAMO:
 else:
     import torch._numpy as np
     from torch._numpy.testing import assert_equal
-
 
 
 parametrize_unary_ufuncs = parametrize("ufunc", [np.sin])

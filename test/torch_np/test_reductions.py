@@ -3,24 +3,37 @@
 from unittest import expectedFailure as xfail, SkipTest
 
 import pytest
-
-import torch._numpy as np
 from pytest import raises as assert_raises
-
-from torch._numpy import _util
-from torch._numpy.testing import (
-    assert_allclose,
-    assert_almost_equal,
-    assert_array_equal,
-    assert_equal,
-)
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    import numpy.core.numeric as _util  # for normalize_axis_tuple
+    from numpy.testing import (
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_equal,
+        assert_equal,
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy import _util
+    from torch._numpy.testing import (
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_equal,
+        assert_equal,
+    )
 
 
 class TestFlatnonzero(TestCase):

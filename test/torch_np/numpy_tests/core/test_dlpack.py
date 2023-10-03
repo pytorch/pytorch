@@ -9,16 +9,24 @@ import pytest
 
 import torch
 
-import torch._numpy as np
-from torch._numpy.testing import assert_array_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_array_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_array_equal
+
+
 skip = functools.partial(skipif, True)
+
 
 IS_PYPY = False
 

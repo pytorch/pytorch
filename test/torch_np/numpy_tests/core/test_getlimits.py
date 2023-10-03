@@ -10,11 +10,22 @@ import warnings
 
 from unittest import expectedFailure as xfail, skipIf
 
-import torch._numpy as np
 from pytest import raises as assert_raises
-from torch._numpy import double, finfo, half, iinfo, single
-from torch._numpy.testing import assert_, assert_equal
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import double, finfo, half, iinfo, single
+    from numpy.testing import assert_, assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy import double, finfo, half, iinfo, single
+    from torch._numpy.testing import assert_, assert_equal
+
 
 skip = functools.partial(skipIf, True)
 
@@ -125,6 +136,7 @@ class TestRepr(TestCase):
         expected = "iinfo(min=-32768, max=32767, dtype=int16)"
         assert_equal(repr(np.iinfo(np.int16)), expected)
 
+    @skipIf(TEST_WITH_TORCHDYNAMO, reason="repr differs")
     def test_finfo_repr(self):
         repr_f32 = repr(np.finfo(np.float32))
         assert "finfo(resolution=1e-06, min=-3.40282e+38," in repr_f32
