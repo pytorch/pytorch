@@ -65,7 +65,7 @@ sdk = nil
 arch = nil
 if options[:platform] == 'SIMULATOR'
     sdk = 'iphonesimulator'
-    arch = 'x86_64'
+    arch = 'arm64'
 elsif options[:platform] == 'OS'
     sdk = 'iphoneos'
     arch = 'arm64'

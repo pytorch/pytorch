@@ -4,7 +4,6 @@ BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
 alexnet,pass,8
-attention_is_all_you_need_pytorch,pass,8
 basic_gnn_edgecnn,pass,23
 basic_gnn_gcn,pass,14
 basic_gnn_gin,pass,8
@@ -40,7 +39,8 @@ resnext50_32x4d,pass,8
 shufflenet_v2_x1_0,pass,8
 soft_actor_critic,pass,7
 squeezenet1_1,pass,8
-stable_diffusion,pass,7
+stable_diffusion_text_encoder,pass,7
+stable_diffusion_unet,pass_due_to_skip,0
 timm_efficientnet,pass,8
 timm_regnet,pass,8
 timm_resnest,pass,8
