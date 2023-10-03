@@ -117,12 +117,3 @@ def _trace_wrapped_functionalized(ctx, *args, fn):
     wrapped_fn = ctx.functionalize(fn)
     with ctx.redispatch_to_next():
         return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=wrapped_fn))
-
-
-# TODO(voz): Make this automatic for keys, this is very ugly atm
-_trace_wrapped_op.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-_trace_wrapped_op.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-_trace_wrapped_op.fallthrough(DispatchKey.ADInplaceOrView)
-_trace_wrapped_op.fallthrough(DispatchKey.BackendSelect)
-_trace_wrapped_op.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-_trace_wrapped_op.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
