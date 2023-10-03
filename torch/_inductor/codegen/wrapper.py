@@ -12,7 +12,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
-from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
 
 from .. import codecache, config, ir
@@ -84,25 +84,31 @@ def convert_arg_type(python_type):
 
 
 def convert_return_type(python_type):
-    # TODO: only support Tensor as func return type for now
     # TODO: support alias
-    assert (
-        python_type == "Tensor"
-    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
-    return f"at::{python_type}"
+    python_to_cpp = {
+        "Tensor": "at::Tensor",
+        "List[Tensor]": "std::vector<at::Tensor>",
+    }
+
+    cpp_type = python_to_cpp.get(python_type, None)
+    assert cpp_type is not None, f"NYI return type: {python_type}"
+    return cpp_type
 
 
 def get_cpp_op_schema(kernel):
     # use x.real_type instead of x.type so that we get ScalarType instead of int
     arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
     arg_names = [x.name for x in kernel._schema.arguments]
-    # TODO: only support len(returns) == 1 for now.
-    returns = [repr(x.type) for x in kernel._schema.returns]
-    assert (
-        len(returns) == 1
-    ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
-    return_value = returns[0]
-    cpp_return_value = convert_return_type(return_value)
+    returns = [repr(x.real_type) for x in kernel._schema.returns]
+
+    num_retunrs = len(returns)
+    assert num_retunrs > 0, "must have at least one return value"
+
+    if num_retunrs == 1:
+        cpp_return_value = convert_return_type(returns[0])
+    elif num_retunrs > 1:
+        tuple_returns = ", ".join([convert_return_type(r) for r in returns])
+        cpp_return_value = f"std::tuple<{tuple_returns}>"
 
     cpp_arg_type = [
         f"{convert_arg_type(arg_type)} {arg_name}"
@@ -1437,7 +1443,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 output_handle_name = f"{name}_handle"
                 assert (
                     output.indices[0][1] == idx
-                ), f"expected {output.indices[1]=} == {idx=} for {output_name_base=}"
+                ), f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
                 self.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
                 output_raii_handles.append(
@@ -1670,10 +1676,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 ir.ComputedBuffer,
                 ir.ConcatKernel,
                 ir.ExternKernelOut,
+                ir.MultiOutput,
             )
 
             if isinstance(arg_type, torch.TensorType):
-                assert isinstance(arg, inductor_tensor_buffers)
+                assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
                 new_tensor_args.append(f"{arg.name}.get()")
             elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
                 # int or SymInt
@@ -1738,11 +1745,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
                 self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
                 new_tensor_args.append(f"{arg}.get()")
-            elif isinstance(return_type, torch.ListType) and isinstance(
-                return_type.getElementType(), torch.TensorType
-            ):
-                # TODO: handle tensor list return type
-                raise NotImplementedError("NYI support for return type: List[Tensor]")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
             elif isinstance(return_type, torch.ListType) and isinstance(
@@ -1750,19 +1752,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ):
                 raise NotImplementedError("NYI support for return type: List[SymInt]")
             else:
-                raise AssertionError(f"Unsupport return type found: {return_type}")
+                raise AssertionError(f"Unsupported return type found: {return_type}")
 
-        assert (
-            len(output_args) == 1
-        ), "Support for multiple returns is not implemented yet"
-        for output_arg, return_type in zip(output_args, return_types):
-            # TODO: check schema here
-            # assume it's a tensor now
-            if output_arg is not None:
-                if isinstance(return_type, torch.OptionalType):
-                    fill_output_arg(output_arg, return_type.getElementType())
-                else:
-                    fill_output_arg(output_arg, return_type)
+        # TODO: Only support tensor(s) returns for now, SymInt is not implemented yet
+        for return_type in return_types:
+            if isinstance(return_type, (torch.TensorType)):
+                pass
+            elif isinstance(return_type, torch.OptionalType):
+                assert isinstance(return_type.getElementType(), torch.TensorType)
+            elif isinstance(return_type, torch.ListType):
+                assert isinstance(return_type.getElementType(), torch.TensorType)
+            else:
+                raise NotImplementedError(
+                    f"return type {return_type} is not yet supported."
+                )
+
+        for output_arg in output_args:
+            assert output_arg is not None, "Optional return types are not yet supported"
+            if isinstance(output_arg, (list, tuple)):
+                for out in output_arg:
+                    fill_output_arg(out, torch.TensorType.get())
+            else:
+                fill_output_arg(output_arg, torch.TensorType.get())
 
         return new_tensor_args, new_int_args
 
@@ -1831,10 +1842,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
         raw_args,  # contains both args and flatten kwargs
         outputs,
     ):
-        if isinstance(outputs, (list, tuple)):
-            output_args = [output.get_name() for output in outputs]
-        else:
-            output_args = [outputs.get_name()]
+        def extract_output_name(out):
+            assert out is not None, "None, i.e. optional output is not supported"
+            if isinstance(out, ir.MultiOutput):
+                return out.get_name()
+            elif isinstance(out, (list, tuple)):
+                return type(out)(extract_output_name(o) for o in out)
+            else:
+                raise AssertionError(f"Unexpected output: {type(out)}")
+
+        # output_args has the same pytree structure as outputs
+        output_args = extract_output_name(outputs)
+        if isinstance(output_args, str):
+            output_args = [output_args]
 
         (
             tensor_call_args,
@@ -1943,6 +1963,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 uint32_t grid_x;
                 uint32_t grid_y;
                 uint32_t grid_z;
+
+                bool is_non_zero() {
+                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
+                }
             };
 
             }  // anonymous namespace
@@ -2116,12 +2140,14 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             grid, (list, tuple)
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
-        grid_args = [
-            self.grid_expr_printer(V.graph.sizevars.simplify(item)) for item in grid
-        ]
+        grid = [V.graph.sizevars.simplify(item) for item in grid]
+        grid_has_unbacked_symbols = any(free_unbacked_symbols(item) for item in grid)
+        grid_args = [self.grid_expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
+        if grid_has_unbacked_symbols:
+            self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -2134,3 +2160,5 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 stream,
             )
         )
+        if grid_has_unbacked_symbols:
+            self.writeline("}")
