@@ -133,7 +133,7 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
             2. Uploads the package
 2. update_s3_htmls
     1. every day 5am EST
-    2. https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/binary_update_htmls.yml
+    2. https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/job-specs/binary_update_htmls.yml
     3. See below for what these are for and why they're needed
     4. Three jobs that each examine the current contents of aws and the conda repo and update some html files in s3
 3. binarysmoketests
@@ -156,7 +156,7 @@ The jobs are in https://github.com/pytorch/pytorch/tree/main/.circleci/verbatim-
     * binary_macos_build.sh
     * binary_macos_test.sh
     * binary_macos_upload.sh
-* Update html jobs: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/binary_update_htmls.yml
+* Update html jobs: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/job-specs/binary_update_htmls.yml
     * These delegate from the pytorch/builder repo
     * https://github.com/pytorch/builder/blob/main/cron/update_s3_htmls.sh
     * https://github.com/pytorch/builder/blob/main/cron/upload_binary_sizes.sh
@@ -367,7 +367,7 @@ git rebase -i HEAD~2 # mark the first commit as 'edit'
 # Make the changes
 touch .circleci/verbatim-sources/nightly-binary-build-defaults.yml
 .circleci/regenerate.sh
-# Ammend the commit and recontinue
+# Amend the commit and recontinue
 git add .circleci
 git commit --amend
 git rebase --continue
