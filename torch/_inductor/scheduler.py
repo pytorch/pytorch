@@ -500,6 +500,8 @@ class BaseSchedulerNode:
         dtype = None
         if not self.node:
             assert self.snodes
+            if not self.snodes[0].node:
+                return 0
             layout = self.snodes[0].node.get_layout()
             dtype = self.snodes[0].node.get_dtype()
         else:
@@ -530,19 +532,23 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(input) for input in self.node.inputs
+                        ir_node_to_tensor(input, guard_shape=False)
+                        for input in self.node.inputs
                     ]
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
 
                     # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
-                    factor = 0.5
+                    factor = 1.0
                     counted_flops = flop_counter_mode.get_total_flops()
-                    return factor * counted_flops / gpu_flops
+
+                    # Return estimated runtime in nanoseconds
+                    return (factor * counted_flops / gpu_flops) * 1e9
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
         ):
+            # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
         # TODO(xmfan): add support for CollectiveKernel
@@ -944,6 +950,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
+            self.node = None
 
             self.node = None
             self.users = None
@@ -1822,6 +1829,18 @@ class Scheduler:
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            try:
+                log.debug(
+                    "Generating code for node %s with estimated runtime %f",
+                    node.get_name(),
+                    node.get_estimated_runtime(),
+                )
+            except Exception:
+                log.error(
+                    "Generating code for node %s with estimated runtime 0.0",
+                    node.get_name(),
+                )
+
             self.enter_context(node)
 
             if not isinstance(node, NopKernelSchedulerNode):
