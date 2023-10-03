@@ -106,5 +106,5 @@ if __name__ == "__main__":
     print("--------------------")
     # time.sleep(5)
     print("--------------------")
-    compiled = main(compiled=True)
+    compiled = main(compiled=False)
     print("COMPILED:", compiled)
