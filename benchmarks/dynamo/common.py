@@ -1446,9 +1446,11 @@ class OnnxModelFromTorchScript:
 class OnnxModelFromDynamo(OnnxModelFromTorchScript):
     """Dynamo and Fx based export. `torch.onnx.dynamo_export`."""
 
+    _EXPORTED_MODEL_FOLDER_NAME = "bench_dynamo_onnx_model"
+
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
         self.model_path = self._generate_onnx_model_path(
-            output_directory, "bench_dynamo_onnx_model"
+            output_directory, self._EXPORTED_MODEL_FOLDER_NAME
         )
         self._dynamic_shapes = dynamic_shapes
         self._export_output = self._export(model, example_inputs, self.model_path)
@@ -1472,6 +1474,29 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
 
     def format_pt_outputs(self, pt_outputs):
         return self._export_output.adapt_torch_outputs_to_onnx(pt_outputs)
+
+
+class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
+    """Dynamo and Fx based export, with AOT inline post export. `torch.onnx.dynamo_export`."""
+
+    _EXPORTED_MODEL_FOLDER_NAME = "bench_dynamo_onnx_aot_inline_model"
+
+    def _export(
+        self, model, example_inputs, output_path: str
+    ) -> torch.onnx.ExportOutput:
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
+        export_output = torch.onnx.dynamo_export(
+            model, *example_args, **example_kwargs, export_options=options
+        )
+        # Apply AOT inline post export.
+        # Requires onnx >= 1.15
+        import onnx
+        import onnx.inliner
+
+        model_proto = onnx.inliner.inline_local_functions(export_output.model_proto)
+        onnx.save_model(model_proto, output_path, save_as_external_data=True)
+        return export_output
 
 
 class _OnnxPatch:
@@ -3120,6 +3145,12 @@ def parse_args(args=None):
         help="Measure speedup with Dynamo ONNX, i.e. `torch.onnx.dynamo_export`",
     )
     group.add_argument(
+        "--dynamo-onnx-aot-inline",
+        "--dynamo_onnx_aot_inline",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX AOT Inline, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
@@ -3464,6 +3495,18 @@ def run(runner, args, original_dir=None):
         )
         experiment = functools.partial(speedup_experiment_onnx, OnnxModelFromDynamo)
         output_filename = "dynamo_onnx.csv"
+        current_onnx_compiler = "dynamo"
+    elif args.dynamo_onnx_aot_inline:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromDynamoAotInline,
+            dynamic_shapes=args.dynamic_shapes,
+        )
+        experiment = functools.partial(
+            speedup_experiment_onnx, OnnxModelFromDynamoAotInline
+        )
+        output_filename = "dynamo_onnx_aot_inline.csv"
         current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
