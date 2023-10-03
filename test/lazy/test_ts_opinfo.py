@@ -310,6 +310,16 @@ class TestLazyDynamicOps(TestCase):
         x2_eager = x2_lazy.cpu()
         self.assertEqual(tuple(x2_eager.size()), (3, 2))
 
+    def test_adaptiveavgpool3d_dynamic(self):
+        # Test that adaptive_avg_pool3d gives correct shapes with lazy backend
+        img_cpu = torch.zeros([2, 3, 4, 5, 6], device="cpu")
+        out_cpu = torch.nn.AdaptiveAvgPool3d(2).to(device="cpu")(img_cpu)
+
+        test_device = get_test_device()
+        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=test_device)
+        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(test_device)(img_lazy)
+
+        self.assertEqual(out_cpu.shape, out_lazy.shape)
 
 if __name__ == '__main__':
     run_tests()
