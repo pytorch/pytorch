@@ -1499,7 +1499,7 @@ def forward(self, arg0_1, arg1_1):
             return x * x.sin()
 
         def foo(x):
-            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
         inp = torch.randn([4, 3])
         gm, _ = torch._dynamo.export(foo)(inp)
 
@@ -1510,7 +1510,7 @@ def forward(self, arg0_1, arg1_1):
 
 
         checked_ops = {"add", "mul", "sin", "cos"}
-        checked_meta = ["source_fn", "stack_trace"]
+        checked_meta = ["source_fn_stack", "stack_trace"]
         all_source_fns = collect_meta_for_filtered_nodes(gm, checked_ops, checked_meta)
         new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
         self.assertEqual(all_source_fns, new_source_fns)
@@ -1527,15 +1527,9 @@ def forward(self, arg0_1, arg1_1):
         inp = torch.ones(3, 4)
         exp_out = inp.sin()
         iter_n = torch._dynamo.config.cache_size_limit + 1
-
-        # Need this because Dynamo checks lambda code ID not object itself.
-        def make_dummy_fn(op):
-            exec(f"temp = lambda x: x.{op}()")
-            return locals()["temp"]
-
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
-            self.assertEqual(foo(inp, make_dummy_fn("cos"), make_dummy_fn("sin")), exp_out)
+            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
         self.assertEqual(counters["stats"]["calls_captured"], iter_n)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
