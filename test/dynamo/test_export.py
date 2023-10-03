@@ -4130,6 +4130,44 @@ def forward(self, x):
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
 
+    def test_constant_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self, num_labels: int):
+                super().__init__()
+                self.config = None
+                self.num_labels = num_labels
+
+            def forward(self, x):
+                if self.config is None:
+                    if self.num_labels == 1:
+                        self.config = "add"
+                    else:
+                        self.config = "mul"
+
+                if self.config == "add":
+                    return x + x
+                else:
+                    return x * x
+
+        m = M(1)
+        gm = torch._dynamo.export(m, aten_graph=True)(
+            torch.zeros(1),
+        ).graph_module
+        print(gm)
+        op_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
+        self.assertTrue(m.config is None)
+        self.assertEqual(len(op_nodes), 1)
+        self.assertEqual(op_nodes[0].target, torch.ops.aten.add.Tensor)
+
+        m = M(2)
+        gm = torch._dynamo.export(m, aten_graph=True)(
+            torch.zeros(1),
+        ).graph_module
+        op_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
+        self.assertEqual(len(op_nodes), 1)
+        self.assertTrue(m.config is None)
+        self.assertEqual(op_nodes[0].target, torch.ops.aten.mul.Tensor)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

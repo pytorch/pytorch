@@ -1221,7 +1221,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable):
+        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
             # We don't allow side effects during export
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert (
@@ -2304,7 +2304,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__") and not (
             args is not None
             and len(args) > 0
-            and isinstance(args[0], variables.CustomizedDictVariable)
+            and isinstance(
+                args[0], (variables.CustomizedDictVariable, variables.NNModuleVariable)
+            )
         ):
             unimplemented(f"inline {code.co_name}")
 

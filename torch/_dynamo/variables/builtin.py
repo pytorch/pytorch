@@ -1238,6 +1238,10 @@ class BuiltinVariable(VariableTracker):
                         and mod_setattr is torch.nn.Module.__setattr__
                     ):
                         return getattr_var
+            elif name_var.is_python_constant() and isinstance(
+                val, variables.ConstantVariable
+            ):
+                return obj.call_method(tx, "__setattr__", [name_var, val], {})
 
             obj.convert_to_unspecialized(tx)
 
