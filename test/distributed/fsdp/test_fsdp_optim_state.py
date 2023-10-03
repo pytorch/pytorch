@@ -1909,7 +1909,6 @@ class TestFSDPOptimState(FSDPTest):
                         self.assertFalse(s.is_cuda)
                         self.assertFalse(isinstance(s, ShardedTensor))
 
-
     @skip_if_lt_x_gpu(2)
     def test_state_dict_with_none_tensor_state(self):
         def _run_test(use_orig_params):
