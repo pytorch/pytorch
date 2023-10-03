@@ -1872,7 +1872,7 @@ class TestFSDPOptimState(FSDPTest):
             ShardedOptimStateDictConfig(offload_to_cpu=False),
         ):
             osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
-            for fqn, state in osd["state"].items():
+            for state in osd["state"].values():
                 for s in state.values():
                     if s.dim() == 0:
                         continue
@@ -1893,7 +1893,7 @@ class TestFSDPOptimState(FSDPTest):
             if dist.get_rank() > 0:
                 self.assertEqual(osd, {})
             else:
-                for fqn, state in osd["state"].items():
+                for state in osd["state"].values():
                     for s in state.values():
                         if s.dim() == 0:
                             continue

@@ -1707,7 +1707,7 @@ def _convert_state_with_flat_params(
     optim_state_dict: Dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
-    cpu_offload: bool,
+    cpu_offload: bool = True,
 ) -> Dict[str, Any]:
     fsdp_osd_state: Dict[str, Any] = {}
     # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
