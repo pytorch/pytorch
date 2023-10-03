@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _capturable_doc,
                         _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 
@@ -21,6 +21,7 @@ class Adagrad(Optimizer):
         *,
         maximize: bool = False,
         differentiable: bool = False,
+        capturable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -44,21 +45,10 @@ class Adagrad(Optimizer):
             foreach=foreach,
             maximize=maximize,
             differentiable=differentiable,
+            capturable=capturable,
         )
         super().__init__(params, defaults)
 
-        for group in self.param_groups:
-            for p in group["params"]:
-                state = self.state[p]
-                state["step"] = torch.tensor(0.0, device=p.device)
-                init_value = (
-                    complex(initial_accumulator_value, initial_accumulator_value)
-                    if torch.is_complex(p)
-                    else initial_accumulator_value
-                )
-                state["sum"] = torch.full_like(
-                    p, init_value, memory_format=torch.preserve_format
-                )
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -84,6 +74,23 @@ class Adagrad(Optimizer):
     def _init_group(self, group, params_with_grad, grads, state_sums, state_steps):
         has_sparse_grad = False
         for p in group["params"]:
+            state = self.state[p]
+            if "step" not in state:
+                state["step"] = (
+                    torch.zeros((), dtype=torch.float, device=p.device)
+                    if group['capturable']
+                    else torch.tensor(0.)
+                )
+            if "sum" not in state:
+                initial_accumulator_value = group["initial_accumulator_value"]
+                init_value = (
+                    complex(initial_accumulator_value, initial_accumulator_value)
+                    if torch.is_complex(p)
+                    else initial_accumulator_value
+                )
+                state["sum"] = torch.full_like(
+                    p, init_value, memory_format=torch.preserve_format
+                )
             if p.grad is not None:
                 if p.grad.is_sparse:
                     has_sparse_grad = True
@@ -172,6 +179,7 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
+        {_capturable_doc}
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html

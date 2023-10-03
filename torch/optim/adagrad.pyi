@@ -9,4 +9,5 @@ class Adagrad(Optimizer):
         weight_decay: float = ...,
         initial_accumulator_value: float = ...,
         eps: float = ...,
+        capturable: bool = False,
     ) -> None: ...
