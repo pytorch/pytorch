@@ -1677,7 +1677,9 @@ def forward(self):
         x = torch.randn(2, 3)
 
         counters.clear()
-        graph = self._test_wrap_simple(f, (x,), 2, 4, return_graph=True)
+        graph = self._test_wrap_simple(
+            f, default_args_generator((x,)), 2, 4, return_graph=True
+        )
         self.assertEqual(len(counters["graph_break"]), 0)
 
         if check_dynamic_shape_capture():
@@ -1713,7 +1715,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
 
         counters.clear()
-        graph = self._test_wrap_simple(f, (x,), 2, 2, return_graph=True)
+        graph = self._test_wrap_simple(
+            f, default_args_generator((x,)), 2, 2, return_graph=True
+        )
         self.assertEqual(len(counters["graph_break"]), 0)
 
         if check_dynamic_shape_capture():
