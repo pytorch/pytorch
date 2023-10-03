@@ -1,5 +1,5 @@
 """
-torchrun --standalone --nproc_per_node=2 test_basic.py
+torchrun --standalone --nproc_per_node=2 fsdp.py
 """
 import os
 
@@ -100,11 +100,11 @@ if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    eager = main(compiled=False)
-    print("EAGER:", eager)
+    # eager = main(compiled=False)
+    # print("EAGER:", eager)
     # exit(0)
     print("--------------------")
-    time.sleep(5)
+    # time.sleep(5)
     print("--------------------")
     compiled = main(compiled=True)
     print("COMPILED:", compiled)
