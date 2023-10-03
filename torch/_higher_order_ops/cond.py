@@ -46,8 +46,14 @@ def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 
+    .. warning::
+
+        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
+        doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+        Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+
     `cond` is structured control flow operator. That is, it is like a Python if-statement,
-    but has limitations on `true_fn`, `false_fn`, and `operands` that enable it to be
+    but has restrictions on `true_fn`, `false_fn`, and `operands` that enable it to be
     capturable using torch.compile and torch.export.
 
     Assuming the constraints on `cond`'s arguments are met, `cond` is equivalent to the following::
