@@ -2137,3 +2137,13 @@ def is_rng_state_getter_or_setter(value):
         torch.cuda.set_rng_state,
     )
     return value in (*setters, *getters)
+
+
+def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables.tensor import TensorWithTFOverrideVariable
+
+    return isinstance(vt, TensorWithTFOverrideVariable) or (
+        isinstance(vt, UserDefinedObjectVariable)
+        and hasattr(vt.value, "__torch_function__")
+    )
