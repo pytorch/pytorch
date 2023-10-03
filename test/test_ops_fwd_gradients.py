@@ -4,13 +4,10 @@ from functools import partial
 import torch
 
 from torch.testing._internal.common_utils import (
-    TestGradients, run_tests, skipIfTorchInductor, IS_MACOS)
+    TestGradients, run_tests, skipIfTorchInductor, IS_MACOS, TestCase)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
-
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
 
 # TODO: mitigate flaky issue on macOS https://github.com/pytorch/pytorch/issues/66033
 # AFAIK, c10::ThreadPool looks correct in the way it uses condition_variable wait. The
@@ -73,4 +70,5 @@ class TestFwdGradients(TestGradients):
 instantiate_device_type_tests(TestFwdGradients, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()

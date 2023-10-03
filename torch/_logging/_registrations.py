@@ -46,6 +46,11 @@ register_artifact(
     "Print FX joint graph from AOTAutograd, prior to partitioning. Useful for debugging partitioning",
 )
 register_artifact(
+    "compiled_autograd",
+    "Prints various logs in compiled_autograd, including but not limited to the graphs. Useful for debugging compiled_autograd.",
+    visible=True,
+)
+register_artifact(
     "ddp_graphs",
     "Only relevant for compiling DDP. DDP splits into multiple graphs to trigger comms early. This will print each individual graph here.",
 )

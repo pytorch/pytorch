@@ -207,8 +207,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(positive);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
-  m.impl("repeat_interleave.self_int", native::repeat_interleave_symint);
-  OP_DECOMPOSE2(repeat_interleave, self_Tensor);
+  m.impl("repeat_interleave.self_int", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_int))>(native::repeat_interleave_symint));
+  m.impl("repeat_interleave.self_Tensor", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_Tensor))>(native::repeat_interleave_symint));
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
@@ -308,6 +308,17 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
   OP_DECOMPOSE(unfold_copy);
+  // Easy way to decompose upsample*.vec overloads instead of introducing *_symint methods
+  // if used OP_DECOMPOSE2.
+  m.impl("upsample_bilinear2d.vec", native::upsample_bilinear2d);
+  m.impl("upsample_bicubic2d.vec", native::upsample_bicubic2d);
+  m.impl("_upsample_bilinear2d_aa.vec", native::_upsample_bilinear2d_aa);
+  m.impl("_upsample_bicubic2d_aa.vec", native::_upsample_bicubic2d_aa);
+  m.impl("upsample_linear1d.vec", native::upsample_linear1d);
+  m.impl("upsample_nearest1d.vec", native::upsample_nearest1d);
+  m.impl("upsample_nearest2d.vec", native::upsample_nearest2d);
+  m.impl("upsample_nearest3d.vec", native::upsample_nearest3d);
+  m.impl("upsample_trilinear3d.vec", native::upsample_trilinear3d);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);

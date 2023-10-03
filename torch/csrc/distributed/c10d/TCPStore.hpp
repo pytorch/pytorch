@@ -131,6 +131,10 @@ class TORCH_API TCPStore : public Store {
   std::unordered_map<std::string, std::unordered_map<std::string, double>>
   collectClientCounters() const noexcept;
 
+  bool isLibUvBackend() const noexcept {
+    return usingLibUv_;
+  }
+
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
@@ -149,6 +153,7 @@ class TORCH_API TCPStore : public Store {
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
   std::unordered_map<std::string, detail::Counter> clientCounters_;
+  bool usingLibUv_ = false;
 };
 
 } // namespace c10d
