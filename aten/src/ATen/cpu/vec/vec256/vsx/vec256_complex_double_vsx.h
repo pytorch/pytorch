@@ -319,6 +319,9 @@ class Vectorized<ComplexDbl> {
     auto ln = (sum / sub).log(); // ln((i + z)/(i - z))
     return ln * vd_imag_half; // i/2*ln()
   }
+  Vectorized<ComplexDbl> atanh() const {
+    return map(std::atanh);
+  }
 
   Vectorized<ComplexDbl> sin() const {
     return map(std::sin);

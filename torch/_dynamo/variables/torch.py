@@ -81,6 +81,7 @@ constant_fold_functions = [
     torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
+    torch.promote_types,
     torch._C._get_privateuse1_backend_name,
 ]
 
@@ -222,6 +223,7 @@ class TorchVariable(VariableTracker):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            InferenceModeVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -328,6 +330,10 @@ class TorchVariable(VariableTracker):
             ).add_guards(GradModeVariable._guards_singleton)
         elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
             return DeterministicAlgorithmsVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.inference_mode:
+            return InferenceModeVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
         elif self.value is torch.are_deterministic_algorithms_enabled:
@@ -471,6 +477,9 @@ class TorchVariable(VariableTracker):
             # these setter or getter functions, producing an incorrect graph
             # when it comes to rng states.
             unimplemented(f"RNG state getter/setter function - {self.value}")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         elif (
             self.value == torch.numel
             and len(args) == 1
