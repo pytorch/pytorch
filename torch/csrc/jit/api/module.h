@@ -32,8 +32,7 @@
 // modules and their methods into flattened graphs which don't have any
 // function calls.
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -676,5 +675,4 @@ using Module = ::torch::jit::Module;
 using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 } // namespace script
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
