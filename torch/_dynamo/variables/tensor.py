@@ -693,7 +693,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "requires_grad_"
             and self.as_proxy().node.meta["example_value"].requires_grad
-            != args[0].value
+            != (args[0].value if len(args) > 0 else True)
         ):
             unimplemented("Tensor.requires_grad_")
 
