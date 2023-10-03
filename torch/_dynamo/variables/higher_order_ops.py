@@ -819,7 +819,9 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # NOTE: example_value should match `grad_output`.
         def _from_args(idx):
             if not isinstance(args[idx], TensorVariable):
-                unimplemented("NYI - torch.func.grad: differentiated arguments should be tensors")
+                unimplemented(
+                    "NYI - torch.func.grad: differentiated arguments should be tensors"
+                )
             return args[idx].as_proxy().node.meta["example_value"].contiguous()
 
         def to_python_ints(argnums):
