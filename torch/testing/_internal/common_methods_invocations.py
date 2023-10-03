@@ -7660,7 +7660,7 @@ def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwarg
     for mode, padding_mode, align_corners in itertools.product(modes, padding_modes, align_cornerss):
         yield SampleInput(
             _make_tensor((batch_size, num_channels, S, L)),
-            _make_tensor((batch_size, num_channels, M, 2)),
+            _make_tensor((batch_size, M + 3, M, 2)),
             mode,
             padding_mode,
             align_corners,
