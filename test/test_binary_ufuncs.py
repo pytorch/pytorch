@@ -3468,9 +3468,11 @@ class TestBinaryUfuncs(TestCase):
         _test_helper(a, b)
         _test_helper(a[:3], b[:3])
 
+
         # large value test for numerical stability
         a *= 10000
         b *= 10000
+
         _test_helper(a, b)
         _test_helper(a[:3], b[:3])
 
