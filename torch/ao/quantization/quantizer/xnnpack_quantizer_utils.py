@@ -868,11 +868,12 @@ def propagate_annotation(model: torch.fx.GraphModule) -> None:
             _annotated=True,
         )
 
+
 def convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for n in model.graph.nodes:
         if n.op != "call_function" or n.target not in [
             torch.ops.aten.add.Tensor,
-            torch.ops.aten.mul.Tensor
+            torch.ops.aten.mul.Tensor,
         ]:
             continue
         args = list(n.args)
