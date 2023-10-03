@@ -1,17 +1,9 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (
-    Optimizer,
-    _use_grad_for_differentiable,
-    _get_value,
-    _default_to_fused_or_foreach,
-    _differentiable_doc,
-    _capturable_doc,
-    _maximize_doc,
-    _stack_if_compiling,
-    _foreach_doc
-)
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
+                        _default_to_fused_or_foreach, _differentiable_doc, _maximize_doc, _foreach_doc,
+                        _capturable_doc)
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -67,7 +59,7 @@ class Adamax(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s["step"] = torch.tensor(float(s["step"]))
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         for p in group["params"]:
@@ -356,19 +348,22 @@ def _multi_tensor_adamax(
         # Update the exponentially weighted infinity norm.
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
-        for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-            torch.maximum(
-                exp_inf,
-                grad.abs().add_(eps),
-                out=exp_inf,
-            )
+        # for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
+        #     torch.maximum(
+        #         exp_inf,
+        #         grad.abs().add_(eps),
+        #         out=exp_inf,
+        #     )
+        grouped_grads_abs = torch._foreach_abs(grouped_grads)
+        torch._foreach_add_(grouped_grads_abs, eps)
+        torch._foreach_maximum_(grouped_exp_infs, grouped_grads_abs)
 
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
 
         if capturable:
             step_size = [(lr / bc) * -1 for bc in bias_corrections]
             numerator = torch._foreach_mul(grouped_exp_avgs, step_size)
-            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size)
+            torch._foreach_addcdiv_(grouped_params, numerator, grouped_exp_infs)
         else:
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_corrections])
             torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size)
