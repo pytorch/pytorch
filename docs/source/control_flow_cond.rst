@@ -3,12 +3,6 @@
 Control Flow - Cond
 ====================
 
-.. warning::
-    `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
-    doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
-    Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
-
-
 `torch.cond` is a structured control flow operator. It can be used to specify if-else like control flow
 and can logically be seen as implemented as follows.
 
@@ -29,6 +23,11 @@ Its unique power lies in its aibilty of expressing **data-dependent control flow
 operator (`torch.ops.higher_order.cond`), which preserves predicate, true function and false functions.
 This unlocks great flexibilty in writing and deploying models that change model architecture based on
 the **value** or **shape** of inputs or intermediate outputs of tensor operations.
+
+.. warning::
+    `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
+    doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+    Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
 Examples
 ~~~~~~~~
