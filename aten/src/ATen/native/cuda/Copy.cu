@@ -33,51 +33,61 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   ScalarType other_dtype = iter.dtype(1);
   if (dtype == kFloat8_e4m3fn) {
-    if (other_dtype == kFloat) {
-       gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-           return Float8_e4m3fn(value);
-       });
-    } else if (other_dtype == kHalf) {
-       gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
-           return Float8_e4m3fn(value);
-       });
-    } else if (other_dtype == kBFloat16) {
-       gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
-           return Float8_e4m3fn(value);
-       });
-    } else {
-      gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      default:
+        gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
+        break;
     }
   } else if (dtype == kFloat8_e5m2) {
-    if (other_dtype == kFloat) {
-       gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
 #ifdef AT_USE_NV_CVT_INTRINSICS
-           const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
-           return Float8_e5m2(x, Float8_e5m2::from_bits());
+             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
 #else
-           return Float8_e5m2(value);
+             return Float8_e5m2(value);
 #endif
-       });
-    } else if (other_dtype == kHalf) {
-       gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
 #ifdef AT_USE_NV_CVT_INTRINSICS
-           const auto x =  __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_NOSAT, __NV_E5M2);
-           return Float8_e5m2(x, Float8_e5m2::from_bits());
+             const auto x =  __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
 #else
-           return Float8_e5m2(value);
+             return Float8_e5m2(value);
 #endif
-       });
-    } else if (dtype == kFloat8_e5m2 && other_dtype == kBFloat16) {
-       gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
 #ifdef AT_USE_NV_CVT_INTRINSICS
-           const auto x =  __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_NOSAT, __NV_E5M2);
-           return Float8_e5m2(x, Float8_e5m2::from_bits());
+             const auto x =  __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
 #else
-           return Float8_e5m2(value);
+             return Float8_e5m2(value);
 #endif
-       });
-    } else {
-        gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2 x) { return x; });
+         });
+         break;
+      default:
+         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2 x) { return x; });
+         break;
     }
   } else {
     TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
