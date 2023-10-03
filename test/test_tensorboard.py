@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 
+
 TEST_TENSORBOARD = True
 try:
     import tensorboard.summary.writer.event_file_writer  # noqa: F401
@@ -52,6 +53,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     IS_WINDOWS,
     IS_MACOS,
+    skipIfTorchDynamo,
 )
 
 def tensor_N(shape, dtype=float):
@@ -802,9 +804,14 @@ class TestTensorBoardNumpy(BaseTestCase):
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
         res = make_np(np.float16(1.00000087))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = make_np(np.float128(1.00008 + 9))
-        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
         res = make_np(np.int64(100000000000))
+        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+
+    @skipIfTorchDynamo
+    @unittest.skipIf(IS_WINDOWS, "Skipping on windows, see https://github.com/pytorch/pytorch/pull/109349 ")
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
+    def test_scalar_f128(self):
+        res = make_np(np.float128(1.00008 + 9))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
     @skipIfNoCaffe2
