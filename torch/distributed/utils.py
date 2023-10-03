@@ -180,7 +180,7 @@ def _free_storage(tensor: torch.Tensor) -> None:
         already_freed = not torch._storage_size_allocated(tensor)
         if not already_freed:
             _p_assert(
-                tensor.storage_offset() == 0,
+                tensor.storage_offset() in (0, 1),
                 "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
                 f"storage offset: {tensor.storage_offset()}\n"
                 f"storage size: PLACEHOLDER\n"

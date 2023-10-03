@@ -705,7 +705,7 @@ def _pre_backward_hook(
 
 
 @no_type_check
-# @torch.no_grad()
+@torch.no_grad()
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
@@ -713,6 +713,8 @@ def _post_backward_hook(
 ):
     gpu_id = int(os.environ["LOCAL_RANK"])
     if gpu_id == 0:
+        print("STATE IS?", state)
+        print("handle IS?", handle)
         print("UNUSED IS?", unused, "what")
         print("POST BACKWARD ARGS?", len(unused))
     # import os

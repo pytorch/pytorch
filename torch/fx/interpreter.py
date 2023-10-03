@@ -264,6 +264,7 @@ class Interpreter:
         assert not isinstance(target, str)
 
         # Execute the function and return the result
+        print("TARGET", target)
         return target(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)

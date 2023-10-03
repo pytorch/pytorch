@@ -4179,6 +4179,11 @@ def scaled_dot_product_flash_attention(
     )
 
 
+# @register_decomposition(aten.resize_storage.default)
+# def resize_storage(self, new_size):
+#     print("RESIZING DECOMP", new_size)
+#     return self
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

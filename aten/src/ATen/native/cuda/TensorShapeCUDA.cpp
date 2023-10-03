@@ -30,6 +30,7 @@ Tensor& set_cuda_(Tensor& result) {
 }
 
 Tensor& resize_storage_cuda_(Tensor& result, int64_t s) {
+  c10::cuda::device_synchronize();
   std::cout << "resize_storage_cuda_" << std::endl;
   auto size_bytes = s * elementSize(result.scalar_type());
   std::cout << "size_bytes" << std::endl;
@@ -41,6 +42,7 @@ Tensor& resize_storage_cuda_(Tensor& result, int64_t s) {
   std::cout << "resize time" << std::endl;
   resize_bytes_cuda(storage.unsafeGetStorageImpl(), new_size_bytes);
   std::cout << "done resize" << std::endl;
+  c10::cuda::device_synchronize();
   return result;
 }
 

@@ -70,7 +70,7 @@ def main(compiled):
         print("Compiling autograd?")
         return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=False)
 
-    compile_bwd = False
+    compile_bwd = True
     ctx = compiled_autograd.enable(compiler_fn) if compile_bwd else contextlib.nullcontext()
 
     if compiled:
@@ -106,5 +106,5 @@ if __name__ == "__main__":
     print("--------------------")
     # time.sleep(5)
     print("--------------------")
-    compiled = main(compiled=False)
+    compiled = main(compiled=True)
     print("COMPILED:", compiled)

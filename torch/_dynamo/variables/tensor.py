@@ -1086,7 +1086,7 @@ class TypedStorageVariable(VariableTracker):
             # if gpu_id == 0:
                 # gm.graph.print_tabular()
                 # print("Resizing?", args[0].value)
-            self.value._resize_(args[0].value)
+            # self.value._resize_(args[0].value)
             # return ConstantVariable(None)
             # resize_proxy = self.proxy._resize_(args[0].value)
             # resize_proxy.node.meta['example_value'] = None
@@ -1098,27 +1098,30 @@ class TypedStorageVariable(VariableTracker):
             #         # **options,
             # )
             # return self.original
+            # self.value._resize_(args[0].value)
+            self.as_proxy()._resize_(args[0].value)
             # self.value().as_proxy()._resize_(args[0])
-            self.original.as_proxy()._typed_storage()._resize_(args[0].value)
-            with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
-                print("DYNAMO RESIZE")
-                new_t = wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_method",
-                        # torch.resize_storage_,
-                        "resize_storage_",
-                        *proxy_args_kwargs([self.original] + list(args), {}),
-                    ),
-                    allow_none=True,
-                    example_value=self.original.as_proxy().node.meta['example_value'],
-                    # **options,
-                )
-                tx.output.create_proxy(
-                    "call_function", torch._C._autograd._unsafe_set_version_counter, (new_t.as_proxy(), 0), {}
-                )
+            # self.original.as_proxy()._typed_storage()._resize_(args[0].value)
+            # with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
+            #     print("DYNAMO RESIZE")
+            #     new_t = wrap_fx_proxy(
+            #         tx,
+            #         tx.output.create_proxy(
+            #             "call_method",
+            #             # torch.resize_storage_,
+            #             "resize_storage_",
+            #             *proxy_args_kwargs([self.original] + list(args), {}),
+            #         ),
+            #         allow_none=True,
+            #         example_value=self.original.as_proxy().node.meta['example_value'],
+            #         # **options,
+            #     )
+            #     tx.output.create_proxy(
+            #         "call_function", torch._C._autograd._unsafe_set_version_counter, (new_t.as_proxy(), 0), {}
+            #     )
+            return self
             self.original.mutable_local = MutableLocal()
-            return tx.replace_all(self.original, new_t)
+            # return tx.replace_all(self.original, new_t)
             return new_t
             # return ConstantVariable(None)
         unimplemented(f"typed_storage method call {name} - NYI")
