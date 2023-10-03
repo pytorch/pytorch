@@ -416,10 +416,6 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
-    @patch(
-        "torch.testing._internal.common_methods_invocations.wrapper_set_seed",
-        wrapper_noop_set_seed,
-    )
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
