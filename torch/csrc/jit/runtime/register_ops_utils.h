@@ -33,8 +33,7 @@
 #include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 constexpr inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
@@ -877,5 +876,4 @@ struct OperatorGeneratorArgs {
           aten_op, op, op, op, bool),                                    \
       DEFINE_STR_CMP_OP(aten_op, op)
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
