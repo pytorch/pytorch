@@ -303,7 +303,8 @@ class GraphModule(torch.nn.Module):
         child_3 = L_z_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child, child_2, child_3);  wrap_body_0 = child = child_2 = child_3 = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child, child_2, child_3);  \
+wrap_body_0 = child = child_2 = child_3 = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
@@ -2055,9 +2056,10 @@ class GraphModule(torch.nn.Module):
             def forward(ctx, x):
                 ctx.save_for_backward(x)
                 return x.sin(), x.cos()
+
             @staticmethod
             def backward(ctx, grad0, grad1):
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 return grad0 * x.cos() + grad1 * x.cos()
 
         def fn(x):
@@ -2073,7 +2075,9 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        self.assertExpectedInline(normalize_gm(backend.graphs[0].print_readable(print_output=False)), """\
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         child = L_x_
@@ -2083,9 +2087,8 @@ class GraphModule(torch.nn.Module):
         getitem_2 = trampoline_autograd_apply[0]
         getitem_3 = trampoline_autograd_apply[1];  trampoline_autograd_apply = None
         return (getitem_2, getitem_3)
-""")
-
-
+""",
+        )
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
