@@ -565,11 +565,11 @@ class TestSingletonInt(TestCase):
 
         # ge, le, gt, lt
         for strict in (True, False):
-            test_non_strict_ineq = functools.partial(test_ineq, strict=strict)
-            test_non_strict_ineq(j1, sympy.Integer(0), True)
-            test_non_strict_ineq(j1, sympy.Integer(3), "indeterminate")
-            test_non_strict_ineq(j1, j2, "indeterminate")
-            test_non_strict_ineq(j1x2, j1, True)
+            _test_ineq = functools.partial(test_ineq, strict=strict)
+            _test_ineq(j1, sympy.Integer(0), True)
+            _test_ineq(j1, sympy.Integer(3), "indeterminate")
+            _test_ineq(j1, j2, "indeterminate")
+            _test_ineq(j1x2, j1, True)
 
         # Special cases for ge, le, gt, lt:
         for ge in (sympy.Ge, is_ge):
