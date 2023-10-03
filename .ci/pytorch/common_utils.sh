@@ -212,15 +212,6 @@ function test_torch_deploy(){
  popd
 }
 
-function install_timm() {
-  local commit
-  commit=$(get_pinned_commit timm)
-  pip_install pandas
-  pip_install scipy
-  pip_install z3-solver
-  pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
-}
-
 function checkout_install_torchbench() {
   local commit
   commit=$(get_pinned_commit torchbench)

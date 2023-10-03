@@ -92,11 +92,11 @@ void PythonEngine::thread_init(
   // runtime is finalizing
   if (!Py_IsInitialized()) {
     no_gil.disarm();
-    // TODO: call disarm rather than leak gil_scoped_acquired once
-    // PyThreadState_Clear can safely be called from finalize NOTE: deploy.cpp
-    // calls `PyInterpreterState_Delete` to destruct PyThreadState, so avoid
-    // use-after-free here.
-    gil.release();
+    // TODO: call disarm once PyThreadState_Clear can safely be called from
+    // finalize NOTE: deploy.cpp calls `PyInterpreterState_Delete` to destruct
+    // PyThreadState, so avoid use-after-free here.
+    auto ptr = gil.release();
+    operator delete(ptr);
   }
 #endif
 }
@@ -192,6 +192,7 @@ PyObject* THPEngine_run_backward(
           args,
           kwargs,
           "OObb|Obb",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,-warnings-as-errors)
           const_cast<char**>(accepted_kwargs),
           &tensors,
           &grad_tensors,
@@ -421,6 +422,7 @@ PyTypeObject THPEngineType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */

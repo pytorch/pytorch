@@ -11,7 +11,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
@@ -33,8 +32,7 @@
 // modules and their methods into flattened graphs which don't have any
 // function calls.
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -677,5 +675,4 @@ using Module = ::torch::jit::Module;
 using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 } // namespace script
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

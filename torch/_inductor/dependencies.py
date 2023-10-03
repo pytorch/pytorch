@@ -96,6 +96,9 @@ class StarDep(typing.NamedTuple):
 # Used for tracking mutation ordering
 # if A reads a buffer and B mutates it
 # B must be ordered after A
+#
+# It is weak because if it turns out A's read is never used, we can still
+# eliminate it
 class WeakDep(typing.NamedTuple):
     name: str
 
@@ -189,7 +192,7 @@ class ReadWrites:
         return itertools.chain(self.reads, self.writes)
 
 
-class _RecordLoadStoreInner(V.MockHandler):
+class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
         self._reads: Set[MemoryDep] = set()
@@ -287,7 +290,7 @@ class _OpCounter:
         return getattr(self.parent_handler, name)
 
 
-class RecordLoadStore(V.KernelFormatterHandler):
+class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         parent_handler = _RecordLoadStoreInner(
             var_ranges=var_ranges, normalize=normalize

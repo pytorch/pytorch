@@ -271,7 +271,8 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
+        f"    with torch.no_grad():"
+        f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
         ")\n"
     )
@@ -564,7 +565,7 @@ def repro_analyze(options, mod, load_args):
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)
+        pbar.update(1)  # type: ignore[has-type]
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
