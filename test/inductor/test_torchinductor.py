@@ -47,7 +47,9 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
+    with_tf32_off,
 )
+
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -2949,6 +2951,7 @@ class CommonTemplate:
         )
 
     # From yolov3
+    @with_tf32_off
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")

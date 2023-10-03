@@ -25,6 +25,10 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class FsdpOptimStateCheckpoint(DTensorTestBase):
+    @property
+    def backend(self):
+        return "cpu:gloo,cuda:nccl"
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
