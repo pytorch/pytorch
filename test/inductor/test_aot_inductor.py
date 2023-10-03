@@ -69,7 +69,7 @@ class AOTInductorModelRunner:
                 cpp_sources=[launcher],
                 functions=["run"],
                 extra_ldflags=[so_path],
-                with_cuda=True,  # TODO: change this to not is_cpu
+                with_cuda=not is_cpu,
             ).run
 
         return optimized, exported

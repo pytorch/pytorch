@@ -1176,7 +1176,9 @@ class Placeholder(enum.Enum):
 
 # A utility function for easier AOTInductor testing
 aot_inductor_launcher = """
+#ifdef USE_CUDA
     #include <c10/cuda/CUDAStream.h>
+#endif // USE_CUDA
     #include <torch/csrc/inductor/aoti_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
@@ -1219,10 +1221,14 @@ aot_inductor_launcher = """
                 &num_outputs));
         std::vector<AtenTensorHandle> output_handles(num_outputs);
 
+#ifdef USE_CUDA
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+#else // !USE_CUDA
+        AOTInductorStreamHandle stream_handle = nullptr;
+#endif
 
         AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
