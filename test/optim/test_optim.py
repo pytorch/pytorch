@@ -134,8 +134,6 @@ class TestOptim(TestCase):
             if not sparse_only:
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
                 self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
-            
-            print("LOOPING", i)
 
         if not maximize:
             self.assertLessEqual(
