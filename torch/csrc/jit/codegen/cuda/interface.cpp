@@ -100,7 +100,6 @@ std::atomic<bool>& getCudaFusionGuardMode() {
 }
 
 CudaFuserInterface* getFuserInterface() {
-  TORCH_WARN("torch::jit::fuser::cuda::getFuserInterface() is deprecated");
   static CudaFuserInterface fuser_interface_;
   return &fuser_interface_;
 }
