@@ -1484,9 +1484,10 @@ class Scheduler:
 
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug("\n%d possible fusions:", len(possible_fusions))
+            schedule_log.debug("\nfound %d possible fusions:", len(possible_fusions))
             for fusion in possible_fusions:
                 schedule_log.debug("%s", fusion)
+            schedule_log.debug("")
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
