@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 240
     strategy:
       matrix:
-        include:
+        include:y
           # nvidia specific images don't exist for arm64 so only build the runtime image
           - image_type: runtime
             platform: linux/arm64,linux/amd64
@@ -92,7 +92,11 @@ jobs:
           # To get QEMU binaries in our PATH
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
-          echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
+          if [[ ${CHANNEL} == "release" ]]; then
+            echo "PYTORCH_VERSION=2.1.0"
+          else
+            echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
+          fi
       - name: Setup release specific variables
         run: |
           {
