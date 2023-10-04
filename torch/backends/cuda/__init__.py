@@ -1,8 +1,6 @@
 import contextlib
-import sys
-from enum import IntEnum
 
-from typing import Union
+from typing import Union, Optional
 
 import torch
 
@@ -201,8 +199,7 @@ def preferred_linalg_library(
 
 # TODO how to do I get the same devex experience
 from torch._C import SDPBackend as SDPBackend
-
-
+from torch._C import _SDPAParams as SDPAParams
 
 def flash_sdp_enabled():
     r"""
@@ -257,6 +254,28 @@ def enable_math_sdp(enabled: bool):
     """
     torch._C._set_sdp_use_math(enabled)
 
+
+def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:
+    """ Returns whether the given params can be used with flash attention.
+
+    Args:
+        params: The parameters to test.
+        debug: Whether to print debug information as to why FlashAttention could not be run.
+            Defaults to False.
+    """
+    # TODO this is dumb but makes developing easier for now
+    return torch._C._can_use_flash_attention(params, debug)
+
+def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool:
+    """ Returns whether the given params can be used with efficient_attention.
+
+    Args:
+        params (SDPAParams): The parameters to test.
+        debug (bool, optional): Whether to print debug information as to why FlashAttention could not be run.
+            Defaults to False.
+    """
+    # TODO this is dumb but makes developing easier for now
+    return torch._C._can_use_mem_efficient_attention(params, debug)
 
 @contextlib.contextmanager
 def sdp_kernel(

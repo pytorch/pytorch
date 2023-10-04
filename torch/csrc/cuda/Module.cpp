@@ -889,7 +889,7 @@ static void registerSDPAUtilities(PyObject* module) {
                        py::object attn_mask,
                        double dropout,
                        bool is_causal) {
-        // Check if pyobj attn_mask is none if not cast
+        // TODO: (Other way ?)Check if pyobj attn_mask is none if not cast
         if (attn_mask.ptr() == Py_None) {
           return sdp::sdp_params{
               THPVariable_Unpack(query.ptr()),
@@ -936,18 +936,6 @@ static void registerSDPAUtilities(PyObject* module) {
         return sdp::can_use_mem_efficient_attention(params, debug);
       });
 }
-
-// PyObject* THPModule_can_use_flash_attention(PyObject* unused, sdp::sdp_params sdp_params, bool debug) {
-//   HANDLE_TH_ERRORS
-//   if (sdp::can_use_flash_attention(std::move(sdp_params), debug)) {
-//     Py_RETURN_TRUE;
-//   } else {
-//     Py_RETURN_FALSE;
-//   }
-//   END_HANDLE_TH_ERRORS
-// }
-
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
