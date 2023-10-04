@@ -57,7 +57,7 @@ class SuperVariable(VariableTracker):
         if self.objvar.source is not None:
             # Walk the mro tuple to find out the actual class where the
             # attribute resides.
-            search_mro = self.objvar.python_type().__mro__
+            search_mro = type_to_use.__mro__
             start_index = search_mro.index(search_type) + 1
             for index in range(start_index, len(search_mro)):
                 if hasattr(search_mro[index], name):
