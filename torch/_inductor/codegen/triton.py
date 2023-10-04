@@ -2257,8 +2257,8 @@ class TritonScheduling(BaseScheduling):
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
-                log.debug(
-                    "cannot fuse (triton:1): numel/rnumel mismatch (%d, %d), (%d, %d)",
+                schedule_log.debug(
+                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2268,8 +2268,8 @@ class TritonScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
-                log.debug(
-                    "cannot fuse (triton:2): numel/rnumel mismatch (%d, %d), (%d, %d)",
+                schedule_log.debug(
+                    "cannot fuse (triton:2): numel/rnumel mismatch (no reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2282,7 +2282,7 @@ class TritonScheduling(BaseScheduling):
                 # Fusion for CUDATemplates are not supported.
                 is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
                 if not is_triton_template:
-                    log.debug(
+                    schedule_log.debug(
                         "cannot fuse (triton:3): is not TritonTemplateBuffer %s",
                         node1,
                     )
@@ -2304,7 +2304,7 @@ class TritonScheduling(BaseScheduling):
                 elif len(tiling2) > 2:
                     cond = tiling2 == tiling3
                 if not cond:
-                    log.debug(
+                    schedule_log.debug(
                         "cannot fuse (triton:4): tiling mismatch (%s, %s, %s)",
                         tiling1,
                         tiling2,
@@ -2321,7 +2321,7 @@ class TritonScheduling(BaseScheduling):
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
                 ):
-                    log.debug(
+                    schedule_log.debug(
                         "cannot fuse (triton:5): nodes numel/rnumel incompatibility"
                     )
                     return False
@@ -2336,7 +2336,7 @@ class TritonScheduling(BaseScheduling):
                         (numel2, rnumel2, 1),
                     )
                     if not is_reduction_tiling_valid:
-                        log.debug(
+                        schedule_log.debug(
                             "cannot fuse (triton:6): invalid tiling for reduction"
                         )
                     return is_reduction_tiling_valid

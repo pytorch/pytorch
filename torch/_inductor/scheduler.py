@@ -32,6 +32,7 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def pformat(obj):
@@ -869,7 +870,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         if producer.is_foreach() and consumer.is_foreach():
             foreach_match = len(producer.snodes) == len(consumer.snodes)
             if not foreach_match:
-                log.debug("cannot fuse (foreach:1): foreach do not have same length")
+                schedule_log.debug(
+                    "cannot fuse (foreach:1): foreach do not have same length"
+                )
             return foreach_match and all(
                 producer.scheduler.can_fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
@@ -879,7 +882,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             if consumer_subnode is not None:
                 return consumer.scheduler.can_fuse(producer, consumer_subnode)
 
-            log.debug(
+            schedule_log.debug(
                 "cannot fuse (foreach:2): candidate producer is not dep of any foreach consumer"
             )
             return False
@@ -889,7 +892,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             if producer_subnode is not None:
                 return producer.scheduler.can_fuse(producer_subnode, consumer)
 
-            log.debug(
+            schedule_log.debug(
                 "cannot fuse (foreach:3): candidate consumer has no dep in any foreach producer"
             )
             return False
@@ -1395,19 +1398,19 @@ class Scheduler:
         """
         for i in range(10):
             old_len = len(self.nodes)
-            log.debug("--------------------")
-            log.debug("attempting fusion (%d/10): %d nodes", i + 1, old_len)
+            schedule_log.debug(
+                "===== attempting fusion (%d/10): %d nodes =====", i + 1, old_len
+            )
             self.fuse_nodes_once()
             new_len = len(self.nodes)
-            log.debug(
-                "completed fusion round (%d/10): fused %d nodes into %d nodes",
+            schedule_log.debug(
+                "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
                 i + 1,
                 old_len,
                 new_len,
             )
             if new_len == old_len or new_len == 1:
-                log.debug("--------------------")
-                log.debug("fusion complete (%d iterations)", i + 1)
+                schedule_log.debug("===== fusion complete (%d iterations) =====", i + 1)
                 break
 
     def fuse_nodes_once(self):
@@ -1480,10 +1483,10 @@ class Scheduler:
                 check_all_pairs(node_grouping)
 
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug("possible fusions:")
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug("%d possible fusions:", len(possible_fusions))
             for fusion in possible_fusions:
-                log.debug("%s", fusion)
+                schedule_log.debug("%s", fusion)
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
@@ -1520,7 +1523,9 @@ class Scheduler:
         combined_ancestors = (node1.ancestors | node2.ancestors) - combined_names
         cycle = any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
         if cycle:
-            log.debug("cannot fuse (cycle): will create cycle - %s %s", node1, node2)
+            schedule_log.debug(
+                "cannot fuse (cycle): will create cycle - %s %s", node1, node2
+            )
         return cycle
 
     def can_fusion_increase_peak_memory(
@@ -1562,20 +1567,20 @@ class Scheduler:
             isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node1.is_template()
         ):
-            log.debug("cannot fuse (1): node1 %s is extern or nop", node1)
+            schedule_log.debug("cannot fuse (1): node1 %s is extern or nop", node1)
             return False
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node2.is_template()
         ):
-            log.debug("cannot fuse (2): node2 %s is extern or nop", node2)
+            schedule_log.debug("cannot fuse (2): node2 %s is extern or nop", node2)
             return False
 
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         if node2.get_names() & node1.ancestors:
-            log.debug("cannot fuse (3): node1 must go before node2")
+            schedule_log.debug("cannot fuse (3): node1 must go before node2")
             return False
 
         if (
@@ -1595,24 +1600,24 @@ class Scheduler:
                 )
                 for node2_used_buf in node2._body.reads_name2expr.keys()
             ):
-                log.debug("cannot fuse (4): loop body")
+                schedule_log.debug("cannot fuse (4): loop body")
                 return False
 
         if node2.is_template():
-            log.debug("cannot fuse (5): templates can only fuse epilogues")
+            schedule_log.debug("cannot fuse (5): templates can only fuse epilogues")
             return False
         if node1.is_template() and (
             node2.has_aliasing_or_mutation()
             or node2.is_reduction()
             or not config.epilogue_fusion
         ):
-            log.debug("cannot fuse (6): template epilogue not satisfied")
+            schedule_log.debug("cannot fuse (6): template epilogue not satisfied")
             return False
 
         device = node1.get_device()
         device2 = node2.get_device()
         if device != device2:
-            log.debug(
+            schedule_log.debug(
                 "cannot fuse (7): device mismatch (node1: %s, node2: %s)",
                 device,
                 device2,
@@ -1624,7 +1629,7 @@ class Scheduler:
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
-            log.debug("cannot fuse (8): no shared data")
+            schedule_log.debug("cannot fuse (8): no shared data")
             return False  # heuristic not needed for correctness
 
         if (
@@ -1632,7 +1637,7 @@ class Scheduler:
             and not node2.is_foreach()
             and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
         ):
-            log.debug("cannot fuse (9): exceeds max fusion")
+            schedule_log.debug("cannot fuse (9): exceeds max fusion")
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.ancestors:
@@ -1642,7 +1647,7 @@ class Scheduler:
             return self.get_backend(device).can_fuse_vertical(node1, node2)
         else:  # nodes don't depend on each other, but may have common reads
             if self.can_fusion_increase_peak_memory(node1, node2):
-                log.debug("cannot fuse (11): will increase peak memory")
+                schedule_log.debug("cannot fuse (11): will increase peak memory")
                 return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -1680,7 +1685,7 @@ class Scheduler:
             # Examples here include:
             #   - MemoryDep("foo", x) != MemoryDep("foo", x + 1)
             #   - MemoryDep("foo", x) != StarDep("foo")
-            log.debug("cannot fuse (vert:1): memory deps did not match")
+            schedule_log.debug("cannot fuse (vert:1): memory deps did not match")
             return False
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].ancestors:
