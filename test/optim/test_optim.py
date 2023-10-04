@@ -624,10 +624,12 @@ class TestOptim(TestCase):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach),
+                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=0.0048, foreach=foreach),
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+                multi_tensor=foreach,
             )
 
     def test_sgd_complex(self):
