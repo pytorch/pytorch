@@ -279,8 +279,7 @@ class HigherOrderOperator(OperatorBase):
 
     def py_impl(self, k):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
-            self.non_fallthrough_keys.add(k)
-
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
         return super().py_impl(k)
 
     @property
