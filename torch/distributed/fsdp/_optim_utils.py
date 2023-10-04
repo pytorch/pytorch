@@ -1542,8 +1542,10 @@ def _allgather_orig_param_states(
                 # 1.) the rank does not own any part of the original parameter.
                 #     As a result, there is no corresponding optimizer state on
                 #     the rank as well.
-                # 2.) the parameter is frozen and no optimizer state for the
-                #     parameter.
+                # 2.) the parameter is frozen AND no optimizer state for the
+                #     parameter. If a parameter is frozen, there can still be
+                #     optimizer state if the parameter is not frozen in the
+                #     previous steps.
                 if buffers[param_idx] is not None:
                     local_buffers.append(cast(torch.Tensor, buffers[param_idx]))
                 param_idx += 1
