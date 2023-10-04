@@ -97,6 +97,7 @@ def _register_pytree_node(
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    __register_cxx_pytree_node: bool = True,
 ) -> None:
     """
     Args:
@@ -121,6 +122,9 @@ def _register_pytree_node(
             "Please use to_dumpable_context and from_dumpable_context instead."
         )
 
+    if typ in SUPPORTED_NODES:
+        raise ValueError(f"{typ} is already registered as pytree node.")
+
     node_def = NodeDef(
         typ,
         flatten_fn,
@@ -140,6 +144,19 @@ def _register_pytree_node(
     )
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
+
+    if __register_cxx_pytree_node:
+        from ._cxx_pytree import register_pytree_node
+
+        if register_pytree_node is not _register_pytree_node:
+            register_pytree_node(
+                typ,
+                flatten_fn,
+                unflatten_fn,
+                to_dumpable_context=to_dumpable_context,
+                from_dumpable_context=from_dumpable_context,
+                __register_python_pytree_node=False,
+            )
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -197,17 +214,38 @@ def _odict_unflatten(values: List[Any], context: Context) -> "OrderedDict[Any, A
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-_register_pytree_node(dict, _dict_flatten, _dict_unflatten)
-_register_pytree_node(list, _list_flatten, _list_unflatten)
-_register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
+_register_pytree_node(
+    dict,
+    _dict_flatten,
+    _dict_unflatten,
+    __register_cxx_pytree_node=False,
+)
+_register_pytree_node(
+    list,
+    _list_flatten,
+    _list_unflatten,
+    __register_cxx_pytree_node=False,
+)
+_register_pytree_node(
+    tuple,
+    _tuple_flatten,
+    _tuple_unflatten,
+    __register_cxx_pytree_node=False,
+)
 _register_pytree_node(
     namedtuple,
     _namedtuple_flatten,
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
+    __register_cxx_pytree_node=False,
 )
-_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
+_register_pytree_node(
+    OrderedDict,
+    _odict_flatten,
+    _odict_unflatten,
+    __register_cxx_pytree_node=False,
+)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
