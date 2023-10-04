@@ -78,11 +78,13 @@ CURRENT_NODE_KEY = "current_node"
 @lru_cache(None)
 def uninteresting_files():
     import torch._inductor.sizevars
+    import torch._library.abstract_impl
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
         torch,
         torch._inductor.sizevars,
+        torch._library.abstract_impl,
     ]
     return {inspect.getfile(m) for m in mods}
 
@@ -223,6 +225,11 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
         return r
     else:
         raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
+
+# Like free_symbols, but filtered to only report unbacked symbols
+def free_unbacked_symbols(x):
+    # NB: keep synced with is_unbacked_symint
+    return {s for s in free_symbols(x) if s.name.startswith("i")}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -876,6 +883,9 @@ class SymNode:
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
+    def abs(self) -> "SymNode":  # noqa: F811
+        return self._abs()  # type: ignore[attr-defined]
+
     def add(self, other) -> "SymNode":  # noqa: F811
         return self._add(other)  # type: ignore[attr-defined]
 
@@ -1171,6 +1181,7 @@ magic_methods = {
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
     'sym_sqrt': lambda a: sympy.sqrt(a),
+    'abs': lambda a: sympy.Abs(a),
 }
 
 sizes_strides_methods = {
@@ -1295,6 +1306,7 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
     return True
 
 unary_magic_methods = {
+    'abs',
     'sym_float',
     'ceil',
     'floor',
@@ -1332,6 +1344,7 @@ def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
 
 SYMPY_INTERP = {
+    'Abs': operator.abs,
     'Eq': operator.eq,
     'Ne': operator.ne,
     'Gt': operator.gt,
@@ -2897,14 +2910,18 @@ class ShapeEnv:
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
-        self.var_to_range[symbol] = self._default_unspecified_value_range()
+        vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
 
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symbol %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
+
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
+        # NB: keep synced with free_unbacked_symbols
         return str(symbol).startswith("i")
 
     @record_shapeenv_event()
@@ -3913,29 +3930,34 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
+    def _get_stack_summary(self):
+        fsummary = None
+        frame = inspect.currentframe()
+        try:
+            while frame is not None:
+                if frame.f_code.co_filename not in uninteresting_files():
+                    fsummary = traceback.FrameSummary(
+                        frame.f_code.co_filename,
+                        frame.f_lineno,
+                        frame.f_code.co_name,
+                    )
+                    break
+                frame = frame.f_back
+        finally:
+            del frame
+
+        # NB: this stack is truncated, but it's fine because the main
+        # stack_info will give you the rest of the info you need
+        maybe_user_loc = ""
+        user_tb = TracingContext.extract_stack()
+        if user_tb:
+            maybe_user_loc = " at " + format_frame(user_tb[-1])
+
+        return fsummary, user_tb, maybe_user_loc
+
     def _log_guard(self, prefix: str, g):
         if self.log.isEnabledFor(logging.INFO):
-            fsummary = None
-            frame = inspect.currentframe()
-            try:
-                while frame is not None:
-                    if frame.f_code.co_filename not in uninteresting_files():
-                        fsummary = traceback.FrameSummary(
-                            frame.f_code.co_filename,
-                            frame.f_lineno,
-                            frame.f_code.co_name,
-                        )
-                        break
-                    frame = frame.f_back
-            finally:
-                del frame
-
-            # NB: this stack is truncated, but it's fine because the main
-            # stack_info will give you the rest of the info you need
-            maybe_user_loc = ""
-            user_tb = TracingContext.extract_stack()
-            if user_tb:
-                maybe_user_loc = " at " + format_frame(user_tb[-1])
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
 
             is_debug = self.log.isEnabledFor(logging.DEBUG)
             maybe_extra_debug = ""
