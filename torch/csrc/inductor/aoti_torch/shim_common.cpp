@@ -301,6 +301,21 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
+// Function to check existence of inf and NaN
+AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
+    auto flattened = check_tensor->view({-1});
+
+    for (int64_t i = 0; i < flattened.numel(); i++) {
+      auto value = flattened[i].item<float>();
+      if (std::isinf(value) || std::isnan(value)) {
+        assert(false);
+      }
+    }
+  });
+}
+
 // ProxyExecutor
 AOTITorchError aoti_torch_proxy_executor_call_function(
     AOTIProxyExecutorHandle proxy_executor,
