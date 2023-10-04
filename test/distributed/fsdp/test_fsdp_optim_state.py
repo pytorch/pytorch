@@ -288,10 +288,12 @@ class NestedModel(torch.nn.Module):
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, no_grad: bool = False):
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
+        self.net1[0].weight.requires_grad = not no_grad
+        self.net1[0].bias.requires_grad = not no_grad
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
         self.net3 = nn.Linear(32, 64)
         self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
@@ -1525,7 +1527,9 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
-    def test_save_load_without_0th_param_state(self, state_dict_type: StateDictType):
+    def test_save_load_without_0th_param_state(
+        self, state_dict_type: StateDictType
+    ):
         """
         Tests saving and loading an optim state dict for Adam optimizer (i.e.
         any optimizer with a "step" key in its state) when the first parameter
@@ -1921,6 +1925,32 @@ class TestFSDPOptimState(FSDPTest):
             self.assertEqual(original_osd, new_osd)
 
         self.run_subtests({"use_orig_params": [False, True]}, _run_test)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fine_tuning(self):
+        model = TestDummyModel(no_grad=True).cuda()
+        fsdp_model = FSDP(deepcopy(model), use_orig_params=True)
+        fsdp_optim = torch.optim.Adam(
+            [p for p in fsdp_model.parameters() if p.requires_grad], lr=1e-2
+        )
+
+        batch = fsdp_model.get_input()
+        loss = fsdp_model(batch).sum()
+        loss.backward()
+        fsdp_optim.step()
+        orig_state_dict = deepcopy(fsdp_optim.state_dict())
+        FSDP.optim_state_dict_to_load(
+            fsdp_model,
+            fsdp_optim,
+            FSDP.optim_state_dict(fsdp_model, fsdp_optim),
+            load_directly=True,
+        )
+
+        self._check_same_state(
+            fsdp_optim.state_dict(),
+            orig_state_dict,
+            check_same_param_keys=True,
+        )
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
