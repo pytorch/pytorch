@@ -2639,11 +2639,11 @@ add_docstr(
     r"""
 cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
 
-Solves a square linear system of equations with a positive semidefinite
-matrix :math:`A` to be inverted given its Cholesky factor matrix :math:`L`.
+Computes the solution of a system of linear equations with complex Hermitian
+or real symmetric positive-definite lhs given its Cholesky decomposition.
 
 Let :math:`A` be a complex Hermitian or real symmetric positive-definite matrix,
-and :math:`L` its Cholesky factor such that:
+and :math:`L` its Cholesky decomposition such that:
 
 .. math::
 
@@ -2666,10 +2666,10 @@ Args:
     B (Tensor): right-hand side tensor of shape `(*, n, k)`
         where :math:`*` is zero or more batch dimensions
     L (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
-        consisting of lower or upper triangular Cholesky factors of
+        consisting of lower or upper triangular Cholesky decompositions of
         symmetric or Hermitian positive-definite matrices.
     upper (bool, optional): flag that indicates whether :math:`L` is lower triangular
-        or upper trianguler. Default: ``False``.
+        or upper triangular. Default: ``False``.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
@@ -2678,7 +2678,7 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> A = A @ A.T + torch.eye(3) * 1e-3 # Creates a symmetric positive-definite matrix
-    >>> L = torch.linalg.cholesky(A) # Extract cholesky factor
+    >>> L = torch.linalg.cholesky(A) # Extract Cholesky decomposition
     >>> B = torch.randn(3, 2)
     >>> torch.cholesky_solve(B, L)
     tensor([[ -8.1625,  19.6097],
@@ -2690,7 +2690,7 @@ Example::
             [ -4.3771,  10.4173]])
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.complex64)
-    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian matrices
+    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian positive-definite matrices
     >>> L = torch.linalg.cholesky(A)
     >>> B = torch.randn(2, 1, dtype=torch.complex64)
     >>> X = torch.cholesky_solve(B, L)
@@ -2705,10 +2705,10 @@ add_docstr(
 cholesky_inverse(L, upper=False, *, out=None) -> Tensor
 
 Computes the inverse of a complex Hermitian or real symmetric
-positive-definite matrix using its Cholesky decomposition.
+positive-definite matrix given its Cholesky decomposition.
 
 Let :math:`A` be a complex Hermitian or real symmetric positive-definite matrix,
-and :math:`L` its Cholesky factor such that:
+and :math:`L` its Cholesky decomposition such that:
 
 .. math::
 
@@ -2725,10 +2725,10 @@ then the output has the same batch dimensions.
 
 Args:
     L (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
-        consisting of lower or upper triangular Cholesky factors of
+        consisting of lower or upper triangular Cholesky decompositions of
         symmetric or Hermitian positive-definite matrices.
     upper (bool, optional): flag that indicates whether :math:`L` is lower triangular
-        or upper trianguler. Default: ``False``
+        or upper triangular. Default: ``False``
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
@@ -2737,7 +2737,7 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> A = A @ A.T + torch.eye(3) * 1e-3 # Creates a symmetric positive-definite matrix
-    >>> L = torch.linalg.cholesky(A) # Extract cholesky factor
+    >>> L = torch.linalg.cholesky(A) # Extract Cholesky decomposition
     >>> torch.cholesky_inverse(L)
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
@@ -2748,7 +2748,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.complex64)
-    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian matrices
+    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian positive-definite matrices
     >>> L = torch.linalg.cholesky(A)
     >>> torch.dist(torch.inverse(A), torch.cholesky_inverse(L))
     tensor(5.6358e-7)
