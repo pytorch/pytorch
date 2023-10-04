@@ -634,6 +634,7 @@ def _pre_backward_hook(
     state: _FSDPState,
     module: nn.Module,
     handle: FlatParamHandle,
+    grad,
     *unused: Any,
 ) -> Any:
     # if gpu_id == 0:
@@ -656,7 +657,7 @@ def _pre_backward_hook(
     if handle and hasattr(handle, "_ran_pre_backward_hook") and handle._ran_pre_backward_hook:
         if gpu_id == 0:
             print(id(state), "Not Running pre backward! Already Ran!")
-        return
+        return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
         # Queue the post-backward callback once for the root FSDP instance to
@@ -677,7 +678,7 @@ def _pre_backward_hook(
         # per-handle in the pre-backward hook, so we can return early here if
         # there are no handles.
         if not handle:
-            return
+            return grad
         handle._training_state = HandleTrainingState.BACKWARD_PRE
 
         if handle._needs_pre_backward_unshard:
@@ -707,7 +708,7 @@ def _pre_backward_hook(
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
-
+        return grad
 
 @no_type_check
 @torch.no_grad()

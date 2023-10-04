@@ -6,7 +6,7 @@ from torch._subclasses import FakeTensorMode
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-import torch.utils._pytree as pytree
+
 
 __all__ = ["trace_wrapped"]
 
@@ -59,21 +59,21 @@ def _assert_meta(grad, size, stride, dtype):
 def inner_trace(mode, *args, fn):
     import torch
 
-
-    # grad = args[0]
-    # assert isinstance(grad, torch.Tensor)
+    assert len(args) == 1
+    grad = args[0]
+    original_grad = grad
+    assert isinstance(grad, torch.Tensor)
 
     def self_invoke(*args):
         return _trace_wrapped_op(*args, fn=fn)
 
-    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
+    proxy_args = (mode.tracer.unwrap_proxy(grad),)
     out_proxy = mode.tracer.create_proxy(
         "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
     )
-    # grad = torch.zeros_like(args[0])
-    grads = pytree.tree_map(torch.zeros_like, args)
-    grads = track_tensor_tree(grads, out_proxy, constant=None, tracer=mode.tracer)
-    return grads[0]
+    grad = torch.zeros_like(grad)
+    grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
+
     # We have a little shortcut here, wherein we DO NOT yet run a meta func, and so
     # we take on an assumption that input and output meta matches. As such, we must introduce
     # a runtime assert

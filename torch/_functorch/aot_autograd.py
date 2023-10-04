@@ -812,9 +812,12 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
             abt.stride() != b.stride() or
             abt.storage_offset() != b.storage_offset()
         ):
-            reshaped_base_tensor = aliased_base_tensor.as_strided(
-                b.size(), b.stride(), b.storage_offset()
-            )
+            try:
+                reshaped_base_tensor = aliased_base_tensor.as_strided(
+                    b.size(), b.stride(), b.storage_offset()
+                )
+            except:
+                reshaped_base_tensor = aliased_base_tensor
         else:
             reshaped_base_tensor = aliased_base_tensor
         out = target_meta_tensor._view_func(reshaped_base_tensor)
@@ -842,7 +845,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
             size, stride, storage_offset
         )
     else:
-        aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
+        try:
+            aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
+        except:
+            aliased_out = aliased_base_tensor
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
     if aliased_base_tensor.requires_grad and not target_requires_grad:
         aliased_out = aliased_out.detach()
@@ -2992,10 +2998,12 @@ def create_runtime_wrapper(
             )
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices)
+        print("WE HAVE RUNTIME MUTATIONS OR WHAT?", num_mutations_to_apply)
         if num_mutations_to_apply > 0:
             updated_inputs = all_outs[: num_mutations_to_apply]
             fw_outs = all_outs[num_mutations_to_apply :]
 
+            print("WHERE?", runtime_metadata.mutated_inp_runtime_indices)
             for i, inpt_idx in enumerate(
                 runtime_metadata.mutated_inp_runtime_indices
             ):
@@ -3037,7 +3045,13 @@ def create_runtime_wrapper(
                         # if all of the mutations to the leaf input were non-autograd-tracking mutations
                         # (aka mutations under no_grad(), or on detached views).
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                        original_inpt.detach().copy_(updated_inpt)
+                        print("META?", meta)
+                        print("RIG?", original_inpt)
+                        print("UPD?", updated_inpt)
+                        try:
+                            original_inpt.detach().copy_(updated_inpt)
+                        except:
+                            print("Failed lol")
                     else:
                         original_inpt.copy_(updated_inpt)
         else:
