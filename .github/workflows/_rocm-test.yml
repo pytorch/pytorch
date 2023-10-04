@@ -32,9 +32,16 @@ on:
         default: 300
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+      tests-to-include:
+        required: false
+        type: string
+        default: ""
+        description: |
+          List of tests to include (empty string implies default list)
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
 
 jobs:
   test:
@@ -109,6 +116,13 @@ jobs:
           JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
+      - name: Modify list of tests
+        id: modify-test-list
+        if: ${{ github.event_name == 'pull_request')
+        run: |
+          set -x
+          if [[ -n $TESTS_TO_INCLUDE ]]; then sed -i 's!test/run_test.py !&--include $TESTS_TO_INCLUDE !g' ${GITHUB_WORKSPACE}/.ci/pytorch/test.sh; fi
 
       - name: Test
         id: test
