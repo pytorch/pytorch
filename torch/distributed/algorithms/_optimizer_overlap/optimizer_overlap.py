@@ -72,7 +72,11 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
         )
 
     # TODO: register_fsdp once FSDP supports communication hook.
-
+    def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
+        """Registers the overlapped optimizer with FSDP."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support overlapped FSDP."
+        )
 
 def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
     """
