@@ -158,6 +158,11 @@ at::Tensor _cslt_sparse_mm(
         output_type = CUDA_R_16F;
         mixed_dtype_mode = true;
     }
+    else if (input_type == CUDA_R_8I and out_dtype == at::ScalarType::Int)
+    {
+        output_type = CUDA_R_32I;
+        mixed_dtype_mode = true;
+    }
     else
     {
         TORCH_CHECK(false, "Setting out_dtype is only supported for int8 input and fp16 output.");
