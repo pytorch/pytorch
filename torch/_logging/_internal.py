@@ -167,6 +167,7 @@ def set_logs(
     schedule: bool = False,
     perf_hints: bool = False,
     onnx_diagnostics: bool = False,
+    fusion: bool = False,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
@@ -283,6 +284,9 @@ def set_logs(
         onnx_diagnostics (:class:`bool`):
             Whether to emit the ONNX exporter diagnostics in logging. Default: ``False``
 
+        fusion (:class:`bool`):
+            Whether to emit detailed Inductor fusion decisions. Default: ``False``
+
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -386,10 +390,11 @@ def set_logs(
         trace_source=trace_source,
         trace_call=trace_call,
         output_code=output_code,
-        schedule=schedule,
         perf_hints=perf_hints,
         onnx=onnx,
         onnx_diagnostics=onnx_diagnostics,
+        schedule=schedule,
+        fusion=fusion,
     )
 
 

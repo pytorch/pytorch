@@ -58,6 +58,7 @@ from .triton_utils import config_of, signature_of, signature_to_meta
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 class TritonPrinter(PythonPrinter):
@@ -2257,7 +2258,7 @@ class TritonScheduling(BaseScheduling):
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
-                schedule_log.debug(
+                fusion_log.debug(
                     "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
@@ -2268,7 +2269,7 @@ class TritonScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
-                schedule_log.debug(
+                fusion_log.debug(
                     "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
@@ -2282,7 +2283,7 @@ class TritonScheduling(BaseScheduling):
                 # Fusion for CUDATemplates are not supported.
                 is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
                 if not is_triton_template:
-                    schedule_log.debug(
+                    fusion_log.debug(
                         "cannot fuse (triton:3): is not TritonTemplateBuffer %s",
                         node1,
                     )
@@ -2304,7 +2305,7 @@ class TritonScheduling(BaseScheduling):
                 elif len(tiling2) > 2:
                     cond = tiling2 == tiling3
                 if not cond:
-                    schedule_log.debug(
+                    fusion_log.debug(
                         "cannot fuse (triton:4): tiling mismatch (%s, %s, %s)",
                         tiling1,
                         tiling2,
@@ -2321,7 +2322,7 @@ class TritonScheduling(BaseScheduling):
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
                 ):
-                    schedule_log.debug(
+                    fusion_log.debug(
                         "cannot fuse (triton:5): nodes numel/rnumel incompatibility"
                     )
                     return False
@@ -2336,7 +2337,7 @@ class TritonScheduling(BaseScheduling):
                         (numel2, rnumel2, 1),
                     )
                     if not is_reduction_tiling_valid:
-                        schedule_log.debug(
+                        fusion_log.debug(
                             "cannot fuse (triton:6): invalid tiling for reduction"
                         )
                     return is_reduction_tiling_valid

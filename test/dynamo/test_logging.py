@@ -90,7 +90,15 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 12)
+        self.assertLess(len(records), 5)
+
+    @requires_cuda()
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
@@ -567,6 +575,7 @@ exclusions = {
     "bytecode",
     "output_code",
     "schedule",
+    "fusion",
     "aot_graphs",
     "compiled_autograd",
     "recompiles",
