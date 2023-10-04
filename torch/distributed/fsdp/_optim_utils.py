@@ -1498,8 +1498,8 @@ def _allgather_orig_param_states(
 
             if is_padding or frozen:
                 # This memory range is a padding or the param is frozen and does
-                # not require gradient. For the latter case, we treat it as a
-                # padding as well.
+                # not require gradient. For the later case, we treat it as a
+                # padding and add empty values to the local_buffers.
 
                 padding_begin, padding_end = mem_offset, mem_offset + numel - 1
                 if padding_begin <= begin <= padding_end:
@@ -1528,11 +1528,16 @@ def _allgather_orig_param_states(
                     local_buffers.append(empty_func(padding_len))
 
             if not is_padding:
-                # This memory range is a parameter in FlatParameter. As for the
-                # optimizer state_dict, this memory range is a state.
+                # This memory range is a parameter in FlatParameter. So there
+                # should be an corresponding state in the optimizer unless the
+                #  parameter is frozen, which we treat it a padding above.
 
-                # We need to check if this rank owns the buffer. If this is None,
-                # the rank does not have any part of the corresponding parameter.
+                # We need to check if this rank owns the buffer. If this is None:
+                # 1.) the rank does not own any part of the original parameter.
+                #     As a result, there is no corresponding optimizer state on
+                #     the rank as well.
+                # 2.) the parameter is frozen and no optimizer state for the
+                #     parameter.
                 if buffers[param_idx] is not None:
                     local_buffers.append(cast(torch.Tensor, buffers[param_idx]))
                 param_idx += 1
