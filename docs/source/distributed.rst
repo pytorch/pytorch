@@ -842,7 +842,7 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
-Distributed has customs Exception types derived from `RuntimeError`:
+Distributed components raise custom Exception types derived from `RuntimeError`:
 
 - `torch.distributed.DistError`: This is the base type of all distributed exceptions.
 - `torch.distributed.DistBackendError`: This exception is thrown when a backend-specific error occurs. For example, if
@@ -856,9 +856,6 @@ Distributed has customs Exception types derived from `RuntimeError`:
 .. autoclass:: torch.distributed.DistBackendError
 .. autoclass:: torch.distributed.DistNetworkError
 .. autoclass:: torch.distributed.DistStoreError
-
-.. warning::
-    The DistBackendError exception type is an experimental feature is subject to change.
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.

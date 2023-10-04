@@ -80,9 +80,11 @@ class SuperVariable(VariableTracker):
             ):
                 tx.output.guards.update(options.get("guards", set()))
                 tx.output.side_effects.store_attr(
-                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                    objvar,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
-                return variables.ConstantVariable(None)
+                return variables.ConstantVariable.create(None)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
@@ -200,7 +202,7 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.ConstantVariable(None)
+        return variables.ConstantVariable.create(None)
 
 
 class ClosureVariable(UnknownVariable):
@@ -491,7 +493,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self._saved_tensors.append(arg)
-        return variables.ConstantVariable(None, **options)
+        return variables.ConstantVariable.create(None, **options)
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
@@ -632,30 +634,38 @@ class GetAttrVariable(VariableTracker):
             and isinstance(self.obj, InspectSignatureVariable)
             and self.name == "parameters"
         ):
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
         return super().call_method(tx, name, args, kwargs)
 
 
-class GetAttrFunctionVariable(VariableTracker):
-    def __init__(self, get_fn, name, **kwargs):
+class MethodWrapperVariable(VariableTracker):
+    def __init__(self, method_wrapper, **kwargs):
         super().__init__(**kwargs)
-        self.get_fn = get_fn
-        self.name = name
+        self.method_wrapper = method_wrapper
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        assert len(args) == 1 and len(kwargs) == 0
-        return args[0].var_getattr(tx, self.name)
+        if (
+            self.method_wrapper.__name__ == "__get__"
+            and isinstance(self.method_wrapper.__self__, types.GetSetDescriptorType)
+            and self.method_wrapper.__self__.__objclass__ is torch._C._TensorBase
+            and isinstance(args[0], variables.TensorVariable)
+        ):
+            assert len(args) == 1 and len(kwargs) == 0
+
+            return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
+
+        super().call_function(tx, args, kwargs)
 
     def is_python_constant(self):
         return True
 
     def as_python_constant(self):
-        return self.get_fn
+        return self.method_wrapper
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -664,7 +674,7 @@ class GetSetDescriptorVariable(VariableTracker):
         self.desc = desc
 
     def var_getattr(self, tx, name):
-        if name == "__get__":
+        if name == "__get__" and self.source:
             from .builder import VariableBuilder
 
             return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
@@ -690,9 +700,10 @@ class PythonModuleVariable(VariableTracker):
 
 
 class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, reason, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.reason = reason
 
     def python_type(self):
         return type(self.value)
@@ -875,7 +886,7 @@ class SkipFilesVariable(VariableTracker):
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
             unimplemented(
-                f"call_function {self.value.__qualname__} in skip_files {path}"
+                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
             )
 
 
@@ -892,7 +903,7 @@ class TypingVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__" and len(args) == 1:
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.value[args[0].as_python_constant()],
                 **VariableTracker.propagate(self, args),
             )

@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using namespace torch::jit::tensorexpr;
 
@@ -311,5 +310,4 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   return wrap;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

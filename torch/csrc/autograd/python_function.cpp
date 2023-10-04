@@ -68,7 +68,7 @@ namespace {
 void throw_python_error() {
   python_error err;
   err.persist();
-  throw err;
+  throw std::move(err);
 }
 
 } // namespace
@@ -98,7 +98,13 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
+      auto zeros_without_gil = [](const VariableInfo& variable,
+                                  at::OptionalDeviceGuard& device_guard) {
+        pybind11::gil_scoped_release gil;
+        return variable.zeros(device_guard);
+      };
+      input =
+          THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
     }
     if (!input)
       throw_python_error();
@@ -1551,6 +1557,7 @@ PyTypeObject THPFunctionType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */

@@ -21,7 +21,6 @@
 #include <functional>
 #include <cmath>
 #include <type_traits>
-#include <bitset>
 #include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
@@ -368,6 +367,9 @@ public:
   }
   Vectorized<T> atan() const {
     return map(std::atan);
+  }
+  Vectorized<T> atanh() const {
+    return map(std::atanh);
   }
   Vectorized<T> atan2(const Vectorized<T> &exp) const {
     Vectorized<T> ret;
