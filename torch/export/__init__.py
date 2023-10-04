@@ -1,7 +1,9 @@
+import builtins
 import copy
 import dataclasses
 import io
 import pathlib
+import sys
 import typing
 from enum import auto, Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
@@ -30,6 +32,7 @@ __all__ = [
     "ArgumentKind",
     "ArgumentSpec",
     "Constraint",
+    "Dim",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "ExportedProgram",
@@ -37,6 +40,7 @@ __all__ = [
     "ModuleCallSignature",
     "constrain_as_size",
     "constrain_as_value",
+    "dims",
     "dynamic_dim",
     "export",
     "load",
@@ -83,12 +87,18 @@ class _ConstraintFactory(type):
             f"Please use torch.export.dynamic_dim() to create one"
         )
 
-    def _create(cls, w_tensor, t_id, dim, constraint_range, shared=None):
-        return super().__call__(w_tensor, t_id, dim, constraint_range, shared)
+    def _create(
+        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+    ):
+        return super().__call__(
+            w_tensor, t_id, dim, constraint_range, shared, debug_name
+        )
 
 
-def _create_constraint(w_tensor, t_id, dim, constraint_range, shared=None):
-    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared)
+def _create_constraint(
+    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+):
+    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared, debug_name)
 
 
 @dataclasses.dataclass
@@ -108,6 +118,7 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
+    debug_name: Optional[str] = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         from torch.utils._sympy.value_ranges import ValueRanges
@@ -117,7 +128,12 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             warn_only=False,
         )
         return _create_constraint(
-            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            self.shared,
+            self.debug_name,
         )
 
     def __ge__(self, lower):
@@ -177,12 +193,18 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
         )
+        if self.debug_name is None:
+            debug_name = other.debug_name
+        else:
+            assert other.debug_name is None or self.debug_name == other.debug_name
+            debug_name = self.debug_name
         return _create_constraint(
             self.w_tensor,
             self.t_id,
             self.dim,
             constraint_range,
             shared=_ConstraintTarget(other.w_tensor, other.t_id, other.dim),
+            debug_name=debug_name,
         )
 
 
@@ -348,6 +370,9 @@ def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = No
 
 def dynamic_dim(t: torch.Tensor, index: int):
     """
+    .. warning::
+        (This feature is DEPRECATED. See :func:`Dim` instead.)
+
     :func:`dynamic_dim` constructs a :class:`Constraint` object that describes the dynamism of
     a dimension ``index`` of tensor ``t``. :class:`Constraint` objects should be passed to
     ``constraints`` argument of :func:`export`.
@@ -417,12 +442,49 @@ def dynamic_dim(t: torch.Tensor, index: int):
     return dynamic_dim(t, index)
 
 
+class _Dim(type):
+    """
+    Metaclass for :func:`Dim` types.
+    """
+
+    pass
+
+
+def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
+    It can be used to describe multiple possible values of a dynamic tensor dimension.
+    Note that different dynamic dimensions of the same tensor, or of different tensors,
+    can be described by the same type.
+
+    Args:
+        name (str): Human-readable name for debugging.
+        min (Optional[int]): Minimum possible value of given symbol (inclusive)
+        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+
+    Returns:
+        A type that can be used in dynamic shape specifications for tensors.
+    """
+    _min = 2 if min is None else builtins.max(min, 2)
+    _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
+    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    return _Dim(name, (int,), {"min": _min, "max": _max})
+
+
+def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    Util to create multiple :func:`Dim` types.
+    """
+    return tuple(Dim(name, min=min, max=max) for name in names)
+
+
 def export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
@@ -444,36 +506,27 @@ def export(
     The output :class:`ExportedProgram` is considered valid only when these
     assumptions hold true.
 
-    There are 2 types of assumptions made during tracing
-
-    - Shapes (not values) of input tensors.
-    - Ranges (lower and upper bound) of values extracted from intermediate tensors via ``.item()`` or direct indexing.
-
-
-    All assumptions must be validated at graph capture time for :func:`export`
+    Tracing makes assumptions on the shapes (not values) of input tensors.
+    Such assumptions must be validated at graph capture time for :func:`export`
     to succeed. Specifically:
 
     - Assumptions on static shapes of input tensors are automatically validated without additional effort.
-    - Assumptions on dynamic shape of input tensors require explicit `Input Constraint`
-      constructed with :func:`dynamic_dim` APIs
-    - Assumptions on range of intermediate values require explicit `Inline Constraint`,
-      constructed use :func:`constrain_as_size` and :func:`constraint_as_value` APIs.
+    - Assumptions on dynamic shape of input tensors require explicit specification
+      by using the :func:`Dim` API to construct dynamic dimensions and by associating
+      them with example inputs through the ``dynamic_shapes`` argument.
 
     If any assumption can not be validated, a fatal error will be raised. When that happens,
-    the error message will include suggested code needed to construct necessary
-    constraints to validate the assumptions, for example :func:`export` would suggest
-    following code for input constraints::
+    the error message will include suggested fixes to the specification that are needed
+    to validate the assumptions. For example :func:`export` might suggest the
+    following fix to the definition of a dynamic dimension ``dim0_x``, say appearing in the
+    shape associated with input ``x``, that was previously defined as ``Dim("dim0_x")``::
 
-        def specify_constraints(x):
-            return [
-                # x:
-                dynamic_dim(x, 0) <= 5,
-            ]
+        dim = Dim("dim0_x", max=5)
 
-    This example means the program requires the dim 0 of input ``x`` to be less
-    than or equal to 5 to be valid. You can inspect the constraints needed and
-    then copy this exact function into your code to generated needed
-    constraints to be passed into ``constraints`` argument.
+    This example means the generated code requires dimension 0 of input ``x`` to be less
+    than or equal to 5 to be valid. You can inspect the suggested fixes to dynamic dimension
+    definitions and then copy them verbatim into your code without needing to change the
+    ``dynamic_shapes`` argument to your :func:`export` call.
 
     Args:
         f: The callable to trace.
@@ -482,13 +535,23 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
-        constraints: An optional list of constraints on the dynamic arguments
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
          that specify their possible range of shapes. By default, shapes of
          input torch.Tensors are assumed to be static. If an input torch.Tensor
          is expected to have dynamic shapes, please use :func:`dynamic_dim`
          to define :class:`Constraint` objects that specify the dynamics and the possible
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
+
+        dynamic_shapes: Should be a dict from argument names of ``f`` to their dynamic shape specifications,
+         as follows. The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -504,9 +567,12 @@ def export(
 
     """
 
-    from torch._export import export
+    from torch._export import export, export__RC__
 
-    return export(f, args, kwargs, constraints)
+    if constraints is not None:
+        return export(f, args, kwargs, constraints)
+    else:
+        return export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
 
 
 def save(
@@ -547,7 +613,7 @@ def save(
             def forward(self, x):
                 return x + 10
 
-        ep = torch.export.export(MyModule(), torch.randn(5))
+        ep = torch.export.export(MyModule(), (torch.randn(5),))
 
         # Save to file
         torch.export.save(ep, 'exported_program.pt2')
@@ -557,7 +623,7 @@ def save(
         torch.export.save(ep, buffer)
 
         # Save with extra files
-        extra_files = {'foo.txt': b'bar'}
+        extra_files = {'foo.txt': b'bar'.decode('utf-8')}
         torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
 
     """
@@ -615,7 +681,7 @@ def load(
         extra_files = {'foo.txt': ''}  # values will be replaced with data
         ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
         print(extra_files['foo.txt'])
-
+        print(ep(torch.randn(5)))
     """
     from torch._export import load
 

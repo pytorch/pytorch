@@ -290,8 +290,15 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
   ~ClosingTHPObjectPtr() {
+    if (PyErr_Occurred()) {
+      // do nothing, do not attempt to close
+      return;
+    }
     static PyObject* method_name = PyUnicode_InternFromString("close");
-    check(PyObject_CallMethodNoArgs(get(), method_name));
+    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+      PyErr_WriteUnraisable(get());
+      PyErr_Clear();
+    }
   }
 };
 

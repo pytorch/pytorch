@@ -24,6 +24,7 @@ def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
 from ._utils import _import_dotted_name, classproperty
+from ._utils import _functionalize_sync as _sync
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 
@@ -289,6 +290,14 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def __hash__(self) -> builtins.int:
+        ret = self.node.singleton_int()
+        if ret is not None:
+            return hash(ret)
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-singleton SymInt")
+
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -381,8 +390,17 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __eq__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.bool_())
+        else:
+            raise TypeError("unhashable type: SymBool")
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.
@@ -471,6 +489,9 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
+    elif name == 'TensorBase':
+        # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
+        delattr(sys.modules[__name__], name)
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -1482,6 +1503,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+import torch._library
 
 # quantization depends on torch.fx
 # Import quantization
@@ -1823,28 +1845,29 @@ if TYPE_CHECKING:
     from torch import _inductor as _inductor
     from torch import onnx as onnx
 
-_lazy_modules = {
-    "_dynamo",
-    "_inductor",
-    "_export",
-    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-    "onnx",
-}
+else:
+    _lazy_modules = {
+        "_dynamo",
+        "_inductor",
+        "_export",
+        # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+        "onnx",
+    }
 
-def __getattr__(name):
-    # Deprecated attrs
-    replacement = _deprecated_attrs.get(name)
-    if replacement is not None:
-        import warnings
-        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
-        return replacement()
+    def __getattr__(name):
+        # Deprecated attrs
+        replacement = _deprecated_attrs.get(name)
+        if replacement is not None:
+            import warnings
+            warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+            return replacement()
 
-    # Lazy modules
-    if name in _lazy_modules:
-        import importlib
-        return importlib.import_module(f".{name}", __name__)
+        # Lazy modules
+        if name in _lazy_modules:
+            import importlib
+            return importlib.import_module(f".{name}", __name__)
 
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 from . import _logging
 _logging._init_logs()

@@ -30,13 +30,13 @@ enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
 static CuDNNMode get_cudnn_mode_for_rnn(
     detail::RNNOptionsBase::rnn_options_base_mode_t mode) {
-  if (c10::get_if<enumtype::kRNN_RELU>(&mode)) {
+  if (std::holds_alternative<enumtype::kRNN_RELU>(mode)) {
     return CuDNNMode::RNN_RELU;
-  } else if (c10::get_if<enumtype::kRNN_TANH>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kRNN_TANH>(mode)) {
     return CuDNNMode::RNN_TANH;
-  } else if (c10::get_if<enumtype::kLSTM>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kLSTM>(mode)) {
     return CuDNNMode::LSTM;
-  } else if (c10::get_if<enumtype::kGRU>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kGRU>(mode)) {
     return CuDNNMode::GRU;
   } else {
     TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(mode));
@@ -94,19 +94,19 @@ void RNNImplBase<Derived>::reset() {
 
   if (options_base.proj_size() > 0) {
     TORCH_CHECK(
-        c10::get_if<enumtype::kLSTM>(&options_base.mode()),
+        std::get_if<enumtype::kLSTM>(&options_base.mode()),
         "proj_size argument is only supported for LSTM, not RNN or GRU");
   }
 
   int64_t gate_size = 0;
-  if (c10::get_if<enumtype::kLSTM>(&options_base.mode())) {
+  if (std::holds_alternative<enumtype::kLSTM>(options_base.mode())) {
     gate_size = 4 * options_base.hidden_size();
-  } else if (c10::get_if<enumtype::kGRU>(&options_base.mode())) {
+  } else if (std::holds_alternative<enumtype::kGRU>(options_base.mode())) {
     gate_size = 3 * options_base.hidden_size();
     // NOLINTNEXTLINE(bugprone-branch-clone)
-  } else if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
+  } else if (std::holds_alternative<enumtype::kRNN_TANH>(options_base.mode())) {
     gate_size = options_base.hidden_size();
-  } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
+  } else if (std::holds_alternative<enumtype::kRNN_RELU>(options_base.mode())) {
     gate_size = options_base.hidden_size();
   } else {
     TORCH_CHECK(
@@ -405,9 +405,9 @@ template class RNNImplBase<RNNImpl>;
 
 static detail::RNNOptionsBase::rnn_options_base_mode_t
 compute_rnn_options_base_mode(RNNOptions::nonlinearity_t nonlinearity) {
-  if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
+  if (std::holds_alternative<enumtype::kTanh>(nonlinearity)) {
     return torch::kRNN_TANH;
-  } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
+  } else if (std::holds_alternative<enumtype::kReLU>(nonlinearity)) {
     return torch::kRNN_RELU;
   } else {
     TORCH_CHECK(
@@ -453,7 +453,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
 
   std::tuple<Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
-    if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
+    if (std::holds_alternative<enumtype::kRNN_TANH>(options_base.mode())) {
       result = torch::rnn_tanh(
           input,
           hx,
@@ -464,7 +464,8 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           this->is_training(),
           options_base.bidirectional(),
           options_base.batch_first());
-    } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
+    } else if (std::holds_alternative<enumtype::kRNN_RELU>(
+                   options_base.mode())) {
       result = torch::rnn_relu(
           input,
           hx,
@@ -482,7 +483,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           torch::enumtype::get_enum_name(options_base.mode()));
     }
   } else {
-    if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
+    if (std::holds_alternative<enumtype::kRNN_TANH>(options_base.mode())) {
       result = torch::rnn_tanh(
           input,
           batch_sizes,
@@ -493,7 +494,8 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional());
-    } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
+    } else if (std::holds_alternative<enumtype::kRNN_RELU>(
+                   options_base.mode())) {
       result = torch::rnn_relu(
           input,
           batch_sizes,
@@ -920,10 +922,10 @@ Tensor RNNCellImpl::forward(const Tensor& input, Tensor hx) {
     r_hx = is_batched ? hx : hx.unsqueeze(0);
   }
 
-  if (c10::get_if<enumtype::kTanh>(&options.nonlinearity())) {
+  if (std::holds_alternative<enumtype::kTanh>(options.nonlinearity())) {
     ret = torch::rnn_tanh_cell(
         r_input, r_hx, weight_ih, weight_hh, bias_ih, bias_hh);
-  } else if (c10::get_if<enumtype::kReLU>(&options.nonlinearity())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.nonlinearity())) {
     ret = torch::rnn_relu_cell(
         r_input, r_hx, weight_ih, weight_hh, bias_ih, bias_hh);
   } else {

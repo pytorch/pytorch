@@ -1,4 +1,5 @@
 import functools
+import inspect
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional, Tuple
@@ -533,12 +534,23 @@ class Function(_SingleLevelFunction):
 
     @classmethod
     def apply(cls, *args, **kwargs):
+        def bind_default_args(func, *args, **kwargs):
+            signature = inspect.signature(func)
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            return bound_args.args
+
+        is_setup_ctx_defined = cls.setup_context != _SingleLevelFunction.setup_context
+        if is_setup_ctx_defined:
+            args = bind_default_args(cls.forward, *args, **kwargs)
+
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
             return super().apply(*args, **kwargs)  # type: ignore[misc]
 
-        if cls.setup_context == _SingleLevelFunction.setup_context:
+        if not is_setup_ctx_defined:
             raise RuntimeError(
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
