@@ -4037,8 +4037,12 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, int):
                 return output
+            elif isinstance(output, torch.SymInt):
+                return output.node.expr
             else:
-                assert output is None, "FallbackKernel output type is not supported"
+                assert (
+                    output is None
+                ), f"FallbackKernel output type {type(output)} is not supported"
                 return None
 
         outputs = generate_output(example_output, [])
