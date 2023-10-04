@@ -76,19 +76,6 @@ OutputType = Enum(
     )
 )
 
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        dict(zip(c, x))
-    ),
-)
-
 def partial_asdict(obj: Any) -> Any:
     if dataclasses.is_dataclass(obj):
         return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
