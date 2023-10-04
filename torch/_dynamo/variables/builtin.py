@@ -10,7 +10,7 @@ from typing import Dict, List
 import torch
 from torch import sym_float, sym_int
 
-from .. import config, variables
+from .. import config, polyfill, variables
 from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
@@ -20,7 +20,6 @@ from ..exc import (
     UserErrorType,
 )
 from ..guards import GuardBuilder
-from ..polyfill import all_polyfill
 from ..replay_record import DummyModule
 from ..source import (
     AttrSource,
@@ -56,7 +55,6 @@ from .lists import (
 )
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
-
 
 log = logging.getLogger(__name__)
 
@@ -1515,16 +1513,9 @@ class BuiltinVariable(VariableTracker):
     call_is_ = _comparison
     call_is_not = _comparison
 
-    def call_all(self, tx, it):
-        if isinstance(it, ListIteratorVariable):
-            try:
-                # Constant fold
-                return ConstantVariable.create(all(it.as_python_constant()))
-            except NotImplementedError:
-                return SymNodeVariable.create(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function", all_polyfill, *proxy_args_kwargs([it], {})
-                    ),
-                    sym_num=None,
-                )
+    def call_all(self, tx, *args, **kwargs):
+        from .builder import SourcelessBuilder
+
+        return tx.inline_user_function_return(
+            SourcelessBuilder()(tx, polyfill.all), args, kwargs
+        )

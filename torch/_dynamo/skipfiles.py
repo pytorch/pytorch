@@ -35,7 +35,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 
-from . import comptime, config, external_utils
+from . import comptime, config, external_utils, polyfill
 
 """
 A note on skipfiles:
@@ -114,6 +114,7 @@ FILENAME_ALLOWLIST = {
     # These are dynamo files!
     external_utils.__file__,
     comptime.__file__,  # Want to inline these helpers
+    polyfill.__file__,
 }
 
 if torch.distributed.is_available():
