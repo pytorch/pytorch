@@ -2036,15 +2036,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.prefix.writeline("\n")
         return super().generate()
 
-    def generate_load_kernel(self, name, params):
-        mangled_name = params.get("mangled_name", None)
-        assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
-        assert os.path.exists(
-            cubin_path
-        ), f"cubin file should already exist at this moment: {cubin_path}"
-
-        shared_mem = params.get("shared_mem", 0)
+    @functools.lru_cache(None)
+    def generate_load_kernel_once(
+        self, name: str, mangled_name: str, cubin_path: str, shared_mem: int
+    ):
         self.writeline(f"if ({name} == nullptr) {{")
         if V.graph.aot_mode:
             runtime_cubin_path_var = f"var_{next(self.arg_var_id)}"
@@ -2129,6 +2124,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self, name, call_args, grid=None, device_index=None, cuda=True, triton=True
     ):
         if not cuda:
+            # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton
             )
@@ -2137,8 +2133,15 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         assert (
             params is not None
         ), f"cuda kernel parameters for {name} should already exist at this moment"
+        mangled_name = params.get("mangled_name", None)
+        assert mangled_name is not None, "missing mangled_name"
+        cubin_path = params.get("cubin_path", None)
+        assert os.path.exists(
+            cubin_path
+        ), f"cubin file should already exist at this moment: {cubin_path}"
+        shared_mem = params.get("shared_mem", 0)
 
-        self.generate_load_kernel(name, params)
+        self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
