@@ -2197,7 +2197,7 @@ def forward(self, x):
         with self.assertRaisesRegex(
             AssertionError,
             "graph-captured input #1, of type .*Tensor.*, "
-            "is not among original args of types: .*Tensors",
+            "is not among original inputs of types: .*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
@@ -2208,7 +2208,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #1 is .*Tensors.*, "
+            "original output #1 is .*Tensors.*, "
             "but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
@@ -2219,7 +2219,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #1 is None, but only the following types are supported",
+            "original output #1 is None, but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
@@ -2231,7 +2231,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #2 is 5, but only the following types are supported",
+            "original output #2 is 5, but only the following types are supported",
         ):
             torch.export.export(foo, (torch.tensor(3),))
 
@@ -2241,7 +2241,7 @@ def forward(self, x):
         # new behavior
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #2 is 5, but only the following types are supported",
+            "original output #2 is 5, but only the following types are supported",
         ):
             torch.export.export(bar, (torch.tensor(3), 5))
 
@@ -2250,7 +2250,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #2 is 4, but only the following types are supported",
+            "original output #2 is 4, but only the following types are supported",
         ):
             torch.export.export(qux, (torch.tensor(3), 5))
 

@@ -888,44 +888,44 @@ def rewrite_signature(
 
     supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool)
 
-    def is_supported_type(arg):
-        return isinstance(arg, supported_types)
+    def is_supported_type(val):
+        return isinstance(val, supported_types)
 
     def produce_matching(sources, candidates):
         source_types = " or ".join(
             [
                 desc
                 + " of types: ("
-                + ", ".join([str(type(arg)) for arg in args])
+                + ", ".join([str(type(val)) for val in vals])
                 + ")"
-                for desc, args in sources.items()
+                for desc, vals in sources.items()
             ]
         )
-        source_args = [arg for args in sources.values() for arg in args]
+        source_vals = [val for vals in sources.values() for val in vals]
         matched_elements_positions = []
-        dict_of_source_args = dict()
-        for i, arg in enumerate(source_args):
-            dict_of_source_args[id(arg)] = i
+        dict_of_source_vals = {}
+        for i, val in enumerate(source_vals):
+            dict_of_source_vals[id(val)] = i
 
-        for candidate_desc, candidate_args in candidates.items():
-            for i, arg in enumerate(candidate_args):
-                if is_supported_type(arg):
-                    if id(arg) in dict_of_source_args:
-                        matched_elements_positions.append(dict_of_source_args[id(arg)])
+        for candidate_desc, candidate_vals in candidates.items():
+            for i, val in enumerate(candidate_vals):
+                if is_supported_type(val):
+                    if id(val) in dict_of_source_vals:
+                        matched_elements_positions.append(dict_of_source_vals[id(val)])
                     else:
                         raise AssertionError(
-                            f"{candidate_desc} #{i+1}, of type {type(arg)}, is not among {source_types}"
+                            f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
                         )
                 else:
                     raise AssertionError(
-                        f"{candidate_desc} #{i+1} is {arg}, but only "
+                        f"{candidate_desc} #{i+1} is {val}, but only "
                         f"the following types are supported: {supported_types}"
                     )
 
         return matched_elements_positions
 
     matched_input_elements_positions = produce_matching(
-        sources={"original args": flat_args},
+        sources={"original inputs": flat_args},
         candidates={"graph-captured input": graph_captured_input},
     )
 
@@ -935,9 +935,9 @@ def rewrite_signature(
     matched_output_elements_positions = produce_matching(
         sources={
             "graph-captured outputs": list(graph_captured_output),
-            "original args": flat_args,
+            "original inputs": flat_args,
         },
-        candidates={"traced result": flat_results_traced},
+        candidates={"original output": flat_results_traced},
     )
 
     new_graph = FlattenInputOutputSignature(
