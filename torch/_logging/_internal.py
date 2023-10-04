@@ -390,10 +390,10 @@ def set_logs(
         trace_source=trace_source,
         trace_call=trace_call,
         output_code=output_code,
+        schedule=schedule,
         perf_hints=perf_hints,
         onnx=onnx,
         onnx_diagnostics=onnx_diagnostics,
-        schedule=schedule,
         fusion=fusion,
     )
 
