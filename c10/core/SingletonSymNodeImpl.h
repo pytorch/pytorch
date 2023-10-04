@@ -102,7 +102,6 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::SymNode gt(const c10::SymNode& other) override;
   c10::SymNode lt(const c10::SymNode& other) override;
   c10::SymNode le(const c10::SymNode& other) override;
-  c10::SymNode mul(const c10::SymNode& other) override;
 
   c10::optional<int64_t> singleton_int() override {
     return val_;
@@ -119,6 +118,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
   DEFINE_BINARY_NOT_SUPPORTED(add)
   DEFINE_BINARY_NOT_SUPPORTED(sub)
+  DEFINE_BINARY_NOT_SUPPORTED(mul)
   DEFINE_BINARY_NOT_SUPPORTED(truediv)
   DEFINE_BINARY_NOT_SUPPORTED(pow)
   DEFINE_BINARY_NOT_SUPPORTED(floordiv)
