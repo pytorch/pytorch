@@ -770,6 +770,13 @@ class BuiltinVariable(VariableTracker):
     call_min = _call_min_max
     call_max = _call_min_max
 
+    def call_abs(self, tx, arg: "VariableTracker"):
+        # Call arg.__abs__()
+        abs_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__abs__")], {}
+        )
+        return abs_method.call_function(tx, [], {})
+
     def call_range(self, tx, *args):
         if self.unspec_python_args(*args) or self.constant_args(*args):
             args, _ = specialize_args_kwargs(tx, args, {})
