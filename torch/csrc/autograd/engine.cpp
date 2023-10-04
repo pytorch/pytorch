@@ -946,7 +946,6 @@ static variable_list call_function(
   } else {
     outputs = fn(std::move(inputs));
   }
-  std::cout << "before validate outputs: " << fn.name() << std::endl;
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
     ss << "Function " << fn.name() << " returned an " << msg;
