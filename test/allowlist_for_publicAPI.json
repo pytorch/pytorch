@@ -623,6 +623,7 @@
     "threshold_"
   ],
   "torch.nn.init": [
+    "Generator",
     "Tensor"
   ],
   "torch.nn.intrinsic.modules": [
