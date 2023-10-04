@@ -496,9 +496,8 @@ def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
     out_size[0] //= group_size
     return input.new_empty(out_size)
 
-def _all_reduce_coalesced_meta(self, reduceOp, tag, rankset, group_size):
+def _all_reduce_coalesced_meta(self, *args):
     return [torch.empty_like(t) for t in self]
-
 
 def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_size):
     def mk_out_tensor(input):
@@ -508,6 +507,28 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
         return out_tensor
 
     return [mk_out_tensor(t) for t in inputs]
+
+def _all_gather_into_tensor_native_meta(input, tag):
+    group_size = torch._C._distributed_c10d._resolve_pg_for_native_c10d_functional(
+        tag
+    ).size()
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+def _all_gather_into_tensor_coalesced_native_meta(inputs, tag):
+    return [_all_gather_into_tensor_native_meta(input, tag) for input in inputs]
+
+def _reduce_scatter_tensor_native_meta(input, tag):
+    group_size = torch._C._distributed_c10d._resolve_pg_for_native_c10d_functional(
+        tag
+    ).size()
+    shape = list(input.size())
+    shape[0] //= group_size
+    return input.new_empty(shape)
+
+def _reduce_scatter_tensor_coalesced_native_meta(inputs, tag):
+    return [_reduce_scatter_tensor_native_meta(input, tag) for input in inputs]
 
 
 def _register_ops():
@@ -538,6 +559,15 @@ if not torch._running_with_deploy():
     c10_lib = torch.library.Library("c10d_functional", "DEF")
     c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
+
+    _c10_lib_impl = torch.library.Library("_c10d_functional", "IMPL")
+    _c10_lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+    _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    _c10_lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
+    _c10_lib_impl.impl("all_gather_into_tensor_coalesced", _all_gather_into_tensor_coalesced_native_meta, "Meta")
+    _c10_lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+    _c10_lib_impl.impl("reduce_scatter_tensor_coalesced", _reduce_scatter_tensor_coalesced_native_meta, "Meta")
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
 

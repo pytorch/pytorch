@@ -171,4 +171,10 @@ void ProcessGroup::enableCollectivesTiming() {
   }
 }
 
+void ProcessGroup::release_resources() {
+  store_.reset();
+  deviceTypeToBackend_.clear();
+  backendTypeToBackend_.clear();
+}
+
 } // namespace c10d
