@@ -1255,9 +1255,7 @@ class TestExport(TestCase):
             torch._dynamo.exc.UserError,
             "Cannot provide constraints for already exported program.",
         ):
-            _ = torch.export.export(
-                exported, (inp,), dynamic_shapes={"args": [{0: dim0_x}]}
-            )
+            _ = torch.export.export(exported, (inp,), dynamic_shapes={"x": {0: dim0_x}})
         # Reexported program should still work for dynamic shapes.
         reexported = torch.export.export(exported, (inp,))
         self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
