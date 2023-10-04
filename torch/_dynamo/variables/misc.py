@@ -50,8 +50,12 @@ class SuperVariable(VariableTracker):
         # a `type` or subclass of `type`, then the original object represents
         # the user defined type.
         type_to_use = self.objvar.python_type()
+        type_to_use_source = (
+            TypeSource(self.objvar.source) if self.objvar.source else None
+        )
         if issubclass(type_to_use, type):
             type_to_use = self.objvar.value
+            type_to_use_source = self.objvar.source
 
         source = None
         if self.objvar.source is not None:
@@ -63,9 +67,7 @@ class SuperVariable(VariableTracker):
                 if hasattr(search_mro[index], name):
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     source = AttrSource(
-                        GetItemSource(
-                            AttrSource(TypeSource(self.objvar.source), "__mro__"), index
-                        ),
+                        GetItemSource(AttrSource(type_to_use_source, "__mro__"), index),
                         name,
                     )
                     break
