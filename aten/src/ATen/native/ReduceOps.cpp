@@ -28,9 +28,10 @@
 #include <ATen/ops/_is_any_true_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/_sparse_csr_sum.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_native.h>
-#include <ATen/ops/_sparse_csr_sum.h>
+#include <ATen/ops/_to_copy.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -85,6 +86,7 @@
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/narrow.h>
 #include <ATen/ops/native_norm.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/norm_meta.h>
 #include <ATen/ops/norm_native.h>
@@ -1579,6 +1581,16 @@ Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool kee
     return out;
   }
 
+  if (dim->size() == 0) {
+    if (self.scalar_type() == kByte) {
+      // Convert to a 1 or 0 mask
+      auto out = at::empty_like(self);
+      return at::ne_outf(self, 0, out);
+    } else {
+      return at::_to_copy(self, kBool);
+    }
+  }
+
   Tensor out = self;
   for (auto d : *dim) {
     if constexpr (is_all) {
@@ -1600,6 +1612,7 @@ Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdi
 
 Tensor& all_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
   auto tmp = self.all(dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
@@ -1607,6 +1620,7 @@ Tensor& all_dims_out_default(
 
 Tensor& any_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
   auto tmp = self.any(dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
