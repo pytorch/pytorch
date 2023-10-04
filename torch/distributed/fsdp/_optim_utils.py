@@ -1609,7 +1609,12 @@ def _gather_all_orig_param_state(
             fsdp_param_info, gathered_state_info, input_states, shard_state, to_save
         )
     if to_save:
-        assert set(output_states.keys()) == set(fsdp_param_info.param_indices.keys())
+        keys1 = output_states.keys()
+        keys2 = fsdp_param_info.param_indices.keys()
+        assert set(keys1) == set(keys2) , (
+            f"The FSDPParamInfo has the param keys {sorted(keys1)} while "
+            f"the output_states has the param keys {sorted(keys2)}."
+        )
         return output_states
     else:
         return {}
@@ -1662,11 +1667,16 @@ def _convert_state_with_orig_params(
                         fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     # Instead of gathering the state of each parameter individually, we perform
-    # the gathering  all at once to speed up the process.
+    # the gathering all at once to speed up the process.
     for _all_states in all_states.values():
         fqn = next(iter(_all_states.keys()))
         fsdp_param_info = fqn_to_fsdp_param_info[fqn]
-        assert set(fsdp_param_info.param_indices.keys()) == set(_all_states.keys())
+        keys1 = fsdp_param_info.param_indices.keys()
+        keys2 = _all_states.keys()
+        assert set(keys1) == set(keys2), (
+            f"The FSDPParamInfo has the param keys {sorted(keys1)} while "
+            f"the optimizer has the param keys {sorted(keys2)}."
+        )
         fsdp_osd_state.update(
             _gather_all_orig_param_state(
                 fsdp_param_info,
