@@ -12,6 +12,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
+from ..guards import make_dupe_guard
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
@@ -106,18 +107,7 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "keys":
             assert not (args or kwargs)
-            return SetVariable(
-                items=[
-                    ConstDictVariable._key_to_var(
-                        tx,
-                        k,
-                        **options,
-                    )
-                    for k in val.keys()
-                ],
-                mutable_local=MutableLocal(),
-                **options,
-            )
+            return SetVariable(set(val.keys()), mutable_local=MutableLocal())
 
         elif name == "values":
             assert not (args or kwargs)
