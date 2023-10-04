@@ -61,6 +61,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
@@ -70,7 +71,13 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -520,6 +527,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             guard_failure.reason,
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
         )
+
+    def test_builtin_abs(self):
+        def fn(x, y):
+            return abs(x) + abs(y)
+
+        sample = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+
+        for sample in [
+            (torch.randn(10, 10), torch.randn(10, 10)),
+            (-10, make_tensor(10, dtype=torch.int64, device="cpu")),
+            (-0.1, torch.randn(10)),
+        ]:
+            expect = fn(*sample)
+            actual = opt_fn(*sample)
+            self.assertEqual(expect, actual)
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -4442,54 +4465,54 @@ def fn():
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
 
-    def test_make_fx_compiled_fn_symbolic_mode(self):
+    @parametrize("x", [torch.ones(2, 3), torch.ones(3, 4)])
+    def test_make_fx_compiled_fn_symbolic_mode(self, x):
+        tracing_mode = "symbolic"
+
         def fn(pred, x):
             if pred:
                 return x.sin()
             else:
                 return x.cos()
 
+        def compare_shape(x):
+            return x.shape[0] == 3
+
         def symbool_fn_compiled(x):
-            sym_bool = x.shape[0] == 3
+            sym_bool = compare_shape(x)
             return torch.compile(backend="eager", fullgraph=True)(fn)(sym_bool, x)
 
         def symbool_fn_not_compiled(x):
-            pred = x.shape[0] == 3
+            pred = compare_shape(x)
             return fn(pred, x)
 
-        x = torch.ones(3, 4)
-        x2 = torch.ones(4, 3)
+        def _get_guard_exprs(gm):
+            return " ".join([str(guard_expr) for guard_expr, _ in gm.shape_env.guards])
 
-        compiled_gm = make_fx(
-            lambda x: symbool_fn_compiled(x), tracing_mode="symbolic"
-        )(x)
-        compiled_gm_code = compiled_gm.code
-        self.assertEqual(len(compiled_gm.shape_env.guards), 1)
-        compiled_gm_guard_exprs = " ".join(
-            [str(guard_expr) for guard_expr, _ in compiled_gm.shape_env.guards]
-        )
+        # We'll check normal function once and compiled function twice.
+        fns = [symbool_fn_not_compiled, symbool_fn_compiled, symbool_fn_compiled]
 
-        not_compiled_gm = make_fx(
-            lambda x: symbool_fn_not_compiled(x), tracing_mode="symbolic"
-        )(x)
-        not_compiled_gm_code = not_compiled_gm.code
-        self.assertEqual(len(not_compiled_gm.shape_env.guards), 1)
-        not_compiled_gm_guard_exprs = " ".join(
-            [str(guard_expr) for guard_expr, _ in not_compiled_gm.shape_env.guards]
-        )
-        self.assertEqual(compiled_gm_guard_exprs, not_compiled_gm_guard_exprs)
-        self.assertExpectedInline(compiled_gm_guard_exprs, """Eq(s0, 3)""")
+        gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in fns]
 
-        self.assertEqual(compiled_gm(x), not_compiled_gm(x))
-        self.assertEqual(compiled_gm(x2), not_compiled_gm(x2))
-        self.assertEqual(compiled_gm_code, not_compiled_gm_code)
-        self.assertExpectedInline(
-            not_compiled_gm_code.strip(),
-            """\
+        for gm in gms:
+            if compare_shape(x):
+                self.assertExpectedInline(
+                    gm.code.strip(),
+                    """\
 def forward(self, x_1):
     sin = torch.ops.aten.sin.default(x_1);  x_1 = None
     return sin""",
-        )
+                )
+                self.assertExpectedInline(_get_guard_exprs(gm), """Eq(s0, 3)""")
+            else:
+                self.assertExpectedInline(
+                    gm.code.strip(),
+                    """\
+def forward(self, x_1):
+    cos = torch.ops.aten.cos.default(x_1);  x_1 = None
+    return cos""",
+                )
+                self.assertExpectedInline(_get_guard_exprs(gm), """Ne(s0, 3)""")
 
     def test_not_dynamic_scope(self):
         def f(y):
@@ -6150,37 +6173,41 @@ def forward(self, x_1):
         finally:
             torch.set_grad_enabled(prior)
 
-    def test_determinstic_algorithms_mutated(self):
+    def test_deterministic_algorithms_mutated(self):
         prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         value = None
+        warn_only = None
         cnt = CompileCounter()
 
         @torch._dynamo.allow_in_graph
         def check_state():
             nonlocal value
+            nonlocal warn_only
             value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
-            torch.use_deterministic_algorithms(False)
+            torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
+        def run_fn():
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            fn(torch.randn(10))
+            assert value is True
+            assert warn_only is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+            assert torch.is_deterministic_algorithms_warn_only_enabled() is False
+
         try:
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
-            value = None
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
             assert cnt.frame_count == 1
         finally:
-            torch.use_deterministic_algorithms(prior)
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
@@ -7659,10 +7686,10 @@ ShapeEnv not equal: field values don't match:
 
             inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
 
-        torch.set_default_dtype(torch.float)
-        foo()
-        torch.set_default_dtype(torch.double)
-        foo()
+        with set_default_dtype(torch.float):
+            foo()
+        with set_default_dtype(torch.double):
+            foo()
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
@@ -7680,6 +7707,9 @@ ShapeEnv not equal: field values don't match:
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
+
+
+instantiate_parametrized_tests(MiscTests)
 
 
 class TestTracer(JitTestCase):
