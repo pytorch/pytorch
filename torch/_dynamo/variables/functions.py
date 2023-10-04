@@ -643,7 +643,7 @@ class FunctoolsPartialVariable(VariableTracker):
 
             return functools.partial(
                 self.func.fn,
-                *[arg.as_python_constant for arg in self.args],
+                *[arg.as_python_constant() for arg in self.args],
                 **{k: get_val(v) for k, v in self.keywords.items()},
             )
 
