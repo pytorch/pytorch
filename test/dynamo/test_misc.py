@@ -5000,11 +5000,13 @@ def fn():
         self.assertTrue(same(ref, res))
         self.assertEqual(cnt.frame_count, 1)
 
-        # Check recomputation
+        # Check recompilation
         A.a = 5
         ref = fn(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        # Ensure that super guard checks are working as expected
+        res = opt_fn(x)
         self.assertEqual(cnt.frame_count, 2)
 
     def test_builder_for_class_with_metaclass(self):
