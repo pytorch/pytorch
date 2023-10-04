@@ -557,22 +557,6 @@ class Vectorized<ComplexFlt> {
     return map(at::native::sgn_impl);
   }
 
-  Vectorized<ComplexFlt> operator<(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> operator<=(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> operator>(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> operator>=(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   DEFINE_MEMBER_OP(operator==, ComplexFlt, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, ComplexFlt, vec_cmpne)
 

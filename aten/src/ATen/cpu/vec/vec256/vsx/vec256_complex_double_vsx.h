@@ -478,19 +478,6 @@ class Vectorized<ComplexDbl> {
     return map(at::native::sgn_impl);
   }
 
-  Vectorized<ComplexDbl> operator<(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> operator<=(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> operator>(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> operator>=(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexDbl> eq(const Vectorized<ComplexDbl>& other) const {
     auto eq = (*this == other);  // compares real and imag individually
     // If both real numbers and imag numbers are equal, then the complex numbers are equal
