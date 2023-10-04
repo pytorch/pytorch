@@ -214,6 +214,12 @@ def convert_num_with_suffix(number, suffix):
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
+def convert_to_percent_str(num, denom):
+    if denom == 0:
+        return "0%"
+    return f"{num / denom * 100:.2f}"
+
+
 class FlopCounterMode(TorchDispatchMode):
     """
     ``FlopCounterMode`` is a context manager that counts the number of
@@ -361,13 +367,13 @@ class FlopCounterMode(TorchDispatchMode):
             values.append([
                 padding + mod_name,
                 convert_num_with_suffix(total_flops, global_suffix),
-                f"{total_flops / global_flops * 100:.2f}%"
+                convert_to_percent_str(total_flops, global_flops)
             ])
             for k, v in self.flop_counts[mod_name].items():
                 values.append([
                     padding + " - " + str(k),
                     convert_num_with_suffix(v, global_suffix),
-                    f"{v / global_flops * 100:.2f}%"
+                    convert_to_percent_str(v, global_flops)
                 ])
             return values
 
