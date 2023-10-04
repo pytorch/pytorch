@@ -93,7 +93,7 @@ jobs:
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
           if [[ ${CHANNEL} == "release" ]]; then
-            echo "PYTORCH_VERSION=2.1.0"
+            echo "PYTORCH_VERSION=2.1.0" >> "${GITHUB_ENV}"
           else
             echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
           fi
