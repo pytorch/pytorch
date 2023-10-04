@@ -2305,7 +2305,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             args is not None
             and len(args) > 0
             and isinstance(
-                args[0], (variables.CustomizedDictVariable, variables.NNModuleVariable)
+                args[0],
+                (
+                    variables.CustomizedDictVariable,
+                    variables.NNModuleVariable,
+                    variables.dicts.HFPretrainedConfigVariable,
+                ),
             )
         ):
             unimplemented(f"inline {code.co_name}")

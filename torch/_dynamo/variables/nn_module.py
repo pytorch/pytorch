@@ -87,12 +87,14 @@ class NNModuleVariable(VariableTracker):
         constant_attribute_tracker_EXPORT_ONLY=None,
         **kwargs,
     ):
-        if constant_attribute_tracker_EXPORT_ONLY is None:
-            constant_attribute_tracker_EXPORT_ONLY = {}
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
-        self.constant_attribute_tracker_EXPORT_ONLY = {}
+        self.constant_attribute_tracker_EXPORT_ONLY = (
+            constant_attribute_tracker_EXPORT_ONLY
+            if constant_attribute_tracker_EXPORT_ONLY is not None
+            else {}
+        )
         assert self.source
 
     def python_type(self):
@@ -675,7 +677,7 @@ class NNModuleVariable(VariableTracker):
                 self.constant_attribute_tracker_EXPORT_ONLY[args[0].value] = args[
                     1
                 ].value
-                return variables.UnknownVariable(**options)
+                return variables.ConstantVariable(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 

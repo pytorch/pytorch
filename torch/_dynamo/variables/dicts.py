@@ -573,13 +573,27 @@ class HFPretrainedConfigVariable(VariableTracker):
     def is_matching_object(cls, obj):
         return cls.is_matching_cls(type(obj))
 
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, constant_attributes_tracker_EXPORT_ONLY=None, **kwargs):
         super().__init__(**kwargs)
         self.obj = obj
+        self.constant_attributes_tracker_EXPORT_ONLY = (
+            constant_attributes_tracker_EXPORT_ONLY
+            if constant_attribute_tracker_EXPORT_ONLY is not None
+            else {}
+        )
+
         assert self.is_matching_cls(type(obj))
+
+    def python_type(self):
+        return type(self.obj)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
+
+        if tx.export and name in self.constant_attributes_tracker_EXPORT_ONLY:
+            return ConstantVariable.create(
+                self.constant_attributes_tracker_EXPORT_ONLY[name]
+            )
 
         return ConstantVariable.create(getattr(self.obj, name))
 
@@ -587,3 +601,22 @@ class HFPretrainedConfigVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
             self
         )
+
+    def var_setattr(self, tx, name, val):
+        assert name.is_python_constant() and val.is_python_constant()
+        if tx.export:
+            self.constant_attributes_tracker_EXPORT_ONLY[name.value] = val.value
+            return variables.ConstantVariable(None)
+        else:
+            source = (
+                None
+                if self.source is None
+                else AttrSource(self.source, name.as_python_constant())
+            )
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(
+                    self.obj.__setattr__.__func__, source=source
+                ),
+                [self] + [name, val],
+                {},
+            )
