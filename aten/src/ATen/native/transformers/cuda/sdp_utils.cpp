@@ -19,6 +19,7 @@
 #include <cmath>
 #include <functional>
 #include <iostream>
+#include "c10/macros/Export.h"
 
 /**
 * Note [SDPA Runtime Dispatch]
@@ -229,7 +230,9 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   return true;
 }
 
-bool use_flash_attention(sdp_params params, bool debug) {
+} // namespace
+
+TORCH_API bool can_use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN(!debug, "Torch was not compiled with flash attention.");
   return false;
@@ -266,7 +269,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
   }
 }
 
-bool use_mem_efficient_attention(sdp_params params, bool debug) {
+TORCH_API bool can_use_mem_efficient_attention(sdp_params params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
   TORCH_WARN(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
@@ -300,7 +303,6 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
   }
   return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
 }
-} // namespace
 
 SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // This function defines the priority order of the different sdp backends
@@ -321,12 +323,12 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
   for (auto& backend : ordering) {
     switch (backend) {
       case SDPBackend::flash_attention:
-        if (use_flash_attention(kernel_params, print_debug)) {
+        if (sdp::can_use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;
         }
         break;
       case SDPBackend::efficient_attention:
-        if (use_mem_efficient_attention(kernel_params, print_debug)) {
+        if (sdp::can_use_mem_efficient_attention(kernel_params, print_debug)) {
           return SDPBackend::efficient_attention;
         }
         break;
@@ -348,9 +350,9 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
 
   print_debug = true;
   TORCH_WARN("Memory efficient kernel not used because:");
-  use_mem_efficient_attention(kernel_params, print_debug);
+  sdp::can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
-  use_flash_attention(kernel_params, print_debug);
+  sdp::can_use_flash_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
   return SDPBackend::error;
 }
