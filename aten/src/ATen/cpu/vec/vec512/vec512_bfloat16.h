@@ -543,6 +543,26 @@ public:
     return cvt_from_fp32<T>(o1, o2);
   }
 
+  Vectorized<T> polygamma(const Vectorized<T> &n) const {
+    __m512 lo, hi;
+    __m512 nlo, nhi;
+    cvt_to_fp32<T>(values, lo, hi);
+    cvt_to_fp32<T>(n.values, nlo, nhi);
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
+    _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+    __at_align__ float tmpn1[size() / 2], tmpn2[size() / 2];
+    _mm512_storeu_ps(reinterpret_cast<float*>(tmpn1), nlo);
+    _mm512_storeu_ps(reinterpret_cast<float*>(tmpn2), nhi);
+    for (int64_t i = 0; i < size() / 2; ++i) {
+      tmp1[i] = calc_polygamma(tmp1[i], tmpn1[i]);
+      tmp2[i] = calc_polygamma(tmp2[i], tmpn2[i]);
+    }
+    auto o1 = _mm512_loadu_ps(tmp1);
+    auto o2 = _mm512_loadu_ps(tmp2);
+    return cvt_from_fp32<T>(o1, o2);
+  }
+
   Vectorized<T> igammac(const Vectorized<T> &x) const {
     __m512 lo, hi;
     __m512 xlo, xhi;

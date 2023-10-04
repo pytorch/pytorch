@@ -1149,6 +1149,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_trigamma);
   }
 
+  Vectorized<T> polygamma(const Vectorized<T>& n) const {
+    return mapOrdinary(calc_polygamma, n);
+  }
+
   Vectorized<T> igammac(const Vectorized<T>& x) const {
     return mapOrdinary(calc_igammac, x);
   }

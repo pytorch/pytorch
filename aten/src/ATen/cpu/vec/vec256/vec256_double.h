@@ -185,6 +185,16 @@ public:
   Vectorized<double> trigamma() const {
     return map(calc_trigamma);
   }
+  Vectorized<double> polygamma(const Vectorized<double> &n) const {
+    __at_align__ double tmp[size()];
+    __at_align__ double tmp_n[size()];
+    store(tmp);
+    n.store(tmp_n);
+    for (const auto i : c10::irange(size())) {
+        tmp[i] = calc_polygamma(tmp[i], tmp_n[i]);
+    }
+    return loadu(tmp);
+  }
   Vectorized<double> igamma(const Vectorized<double> &x) const {
     __at_align__ double tmp[size()];
     __at_align__ double tmp_x[size()];

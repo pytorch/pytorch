@@ -290,6 +290,16 @@ public:
   Vectorized<float> trigamma() const {
     return map(calc_trigamma);
   }
+  Vectorized<float> polygamma(const Vectorized<float> &n) const {
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_n[size()];
+    store(tmp);
+    n.store(tmp_n);
+    for (const auto i : c10::irange(size())) {
+      tmp[i] = calc_polygamma(tmp[i], tmp_n[i]);
+    }
+    return loadu(tmp);
+  }
   Vectorized<float> igammac(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];

@@ -440,8 +440,13 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
     trigamma_kernel(iter);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "polygamma", [&]() {
-      cpu_kernel(
-          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); },
+          [=](Vectorized<scalar_t> a) {
+            Vectorized<scalar_t> n;
+            return a.polygamma(n);
+          });
     });
   }
 }
@@ -850,12 +855,12 @@ ALSO_REGISTER_AVX512_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
 
 // Might enable AVX512 dispatch after enabling explicit vectorization for them
 REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
 REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
-REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
 REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
 REGISTER_DISPATCH(special_log_ndtr_stub, &CPU_CAPABILITY::log_ndtr_kernel);

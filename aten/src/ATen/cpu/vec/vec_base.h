@@ -480,6 +480,13 @@ public:
   Vectorized<T> trigamma() const {
     return map(calc_trigamma);
   }
+  Vectorized<T> polygamma(const Vectorized<T> &n) const {
+    Vectorized<T> ret;
+    for (const auto i : c10::irange(size())) {
+      ret[i] = calc_polygamma(values[i], n[i]);
+    }
+    return ret;
+  }
   Vectorized<T> igammac(const Vectorized<T> &x) const {
     Vectorized<T> ret;
     for (const auto i : c10::irange(size())) {

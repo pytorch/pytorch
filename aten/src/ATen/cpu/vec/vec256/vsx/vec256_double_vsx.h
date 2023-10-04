@@ -354,6 +354,10 @@ class Vectorized<double> {
     return map(calc_trigamma);
   }
 
+  Vectorized<double> polygamma(const Vectorized<double>& n) const {
+    return mapbi(calc_polygamma, n);
+  }
+
   Vectorized<double> igamma(const Vectorized<double>& x) const {
     return mapbi(calc_igamma, x);
   }
