@@ -670,6 +670,25 @@ class AOTInductorTestsTemplate:
         ):
             self.check_model(Repro(), example_inputs)
 
+    def test_dynamic_cat(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x1, x2):
+                return torch.cat([x1, x2], dim=0)
+
+        a = torch.randn(2, 4, device=self.device)
+        b = torch.randn(3, 4, device=self.device)
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 10,
+            torch._export.dynamic_dim(b, 0) >= 1,
+            torch._export.dynamic_dim(b, 0) <= 20,
+        ]
+        example_inputs = (a, b)
+        self.check_model(Model(), example_inputs, constraints=constraints)
+
     @unittest.skipIf(
         torch.cuda.device_count() < 2, "The test requires multiple devices"
     )
@@ -719,6 +738,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,

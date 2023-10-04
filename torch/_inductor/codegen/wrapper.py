@@ -299,11 +299,6 @@ class WrapperCodeGen(CodeGen):
         self.last_seen_device_guard_index = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
-        # Not all the dynamic symbols will be used in the generated code. This
-        # set contains those actually being defined by something like
-        # "{self.declare_shape} s0 = ...". It ensures that we are not going to
-        # emit queries for undefined symbols.
-        self.defined_symbols = set()
 
         self.write_header()
         self.write_prefix()
@@ -602,7 +597,6 @@ class WrapperCodeGen(CodeGen):
         for name, shape in graph_inputs_expr:
             shape = V.graph.sizevars.simplify(shape)
             if shape in needed:
-                self.defined_symbols.add(shape)
                 needed.remove(shape)
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
@@ -611,7 +605,6 @@ class WrapperCodeGen(CodeGen):
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)
                 if shape in needed:
-                    self.defined_symbols.add(shape)
                     needed.remove(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
@@ -622,7 +615,6 @@ class WrapperCodeGen(CodeGen):
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)
                 if shape in needed:
-                    self.defined_symbols.add(shape)
                     needed.remove(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
@@ -1098,26 +1090,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         info_kind: str,
         idx: int,
         name: str,
-        dtype: str,
-        sizes: List[sympy.Expr],
     ):
         self.prefix.writeline(f"""{info_kind}[{idx}].name = "{name}";""")
-        self.prefix.writeline(f"""{info_kind}[{idx}].dtype = "{dtype}";""")
-        self.prefix.writeline(f"{info_kind}[{idx}].shape.reserve({len(sizes)});")
-        for size in sizes:
-            if isinstance(size, sympy.Integer):
-                self.prefix.writeline(
-                    f"{info_kind}[{idx}].shape.push_back(make_static_dim({size}));"
-                )
-            else:
-                size = V.graph.sizevars.simplify(size)
-                # FIXME: handle non-Symbol cases later.
-                assert isinstance(
-                    size, sympy.Symbol
-                ), f"expected {size=} to be a Symbol"
-                self.prefix.writeline(
-                    f"{info_kind}[{idx}].shape.push_back({size.name});"
-                )
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
@@ -1210,16 +1184,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             if V.graph.aot_mode:
                 self.prefix.writeline("inputs.clear();")
-                dynamic_symbols = [
-                    s
-                    for s in V.graph.sizevars.free_symbols()
-                    if s in self.defined_symbols
-                ]
-                for dim in dynamic_symbols:
-                    self.prefix.writeline(
-                        f'auto dim_{dim} = find_dynamic_dim("{dim}");'
-                    )
-                    self.prefix.writeline(f"dim_{dim}->set_value({dim});")
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.aot_inductor.abi_compatible:
@@ -1244,14 +1208,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         // Generated code example
         AOTInductorModel::AOTInductorModel()
             : AOTInductorModelBase(4, 1) {
-        auto s0 = make_dynamic_dim("s0", 2048);
         inputs_info_[0].name = "input0";
-        inputs_info_[0].shape.reserve(2);
-        inputs_info_[0].shape.push_back(make_static_dim(10));
-        inputs_info_[0].shape.push_back(make_static_dim(64));
-        inputs_info_[1].shape.reserve(2);
-        inputs_info_[1].shape.push_back(s0);
-        inputs_info_[1].shape.push_back(make_static_dim(64));
+        inputs_info_[0].dtype = "torch.float16";
         ...
         constants_info_[0].name = "L__self___weight";
         constants_info_[0].dtype = at::kFloat;
@@ -1261,23 +1219,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         constants_info_[0].stride = {32, 1};
         ...
         outputs_info_[0].name = "output0";
-        outputs_info_[0].shape.reserve(2);
-        outputs_info_[0].shape.push_back(s0);
-        outputs_info_[0].shape.push_back(make_static_dim(10));
+        outputs_info_[0].dtype = "torch.float16";
         }
         """
-
-        def codegen_dynamic_dims():
-            dynamic_symbols = V.graph.sizevars.free_symbols()
-            for dim in dynamic_symbols:
-                var_to_range = V.graph.sizevars.shape_env.var_to_range
-                dim_range = var_to_range.get(dim, None)
-                assert (
-                    dim_range is not None
-                ), f"Could not find dim_range for {dim=} from {var_to_range=}"
-                self.prefix.writeline(
-                    f'auto {dim.name} = make_dynamic_dim("{dim.name}", {dim_range.lower}, {dim_range.upper});'
-                )
 
         num_inputs = len(V.graph.graph_inputs)
         num_outputs = len(V.graph.graph_outputs)
@@ -1290,14 +1234,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
         with self.prefix.indent():
-            codegen_dynamic_dims()
             for idx, (name, inp) in enumerate(V.graph.graph_inputs.items()):
                 assert not isinstance(
                     inp, sympy.Expr
                 ), f"input {name=} cannot be symbolic"
-                sizes = inp.get_size()
-                dtype = V.graph.graph_inputs[name].get_dtype()
-                self.write_input_output_info("inputs_info_", idx, name, dtype, sizes)
+                self.write_input_output_info("inputs_info_", idx, name)
 
             for idx, (name, tensor) in enumerate(V.graph.constants.items()):
                 assert isinstance(tensor, torch.Tensor)
@@ -1326,10 +1267,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 assert not isinstance(
                     output, sympy.Expr
                 ), f"output {name=} cannot be symbolic"
-                sizes = output.get_size()
                 name = f"output{idx}"
-                dtype = output.get_dtype()
-                self.write_input_output_info("outputs_info_", idx, name, dtype, sizes)
+                self.write_input_output_info("outputs_info_", idx, name)
 
         self.prefix.writeline("}")
 
