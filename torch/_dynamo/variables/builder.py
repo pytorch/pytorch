@@ -1184,7 +1184,7 @@ class VariableBuilder:
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
-                    # Note - this esentially means that if this name gets reused as a tensor,
+                    # Note - this essentially means that if this name gets reused as a tensor,
                     # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
                     # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
                     # sure that is necessary for now.

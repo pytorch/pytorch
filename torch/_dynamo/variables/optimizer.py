@@ -53,7 +53,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        """This is an optimization to avoid tracing the very slow intialization of the optimizer"""
+        """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
