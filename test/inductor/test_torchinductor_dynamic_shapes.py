@@ -345,6 +345,28 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
 
+    def test_abs(self, device):
+        def fn(x, y):
+            y0, y1 = y.shape
+            # Slicing checks abs in wrapper code,
+            # multiplication tests abs in kernel code
+            return x[: abs(y0 - y1)] * abs(y0 - y1)
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+
+        # y0 > y1 -> y0 - y1 is positive
+        b = torch.randn(16, 2, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+        # y0 < y1 -> y0 - y1 is negative
+        b = torch.randn(2, 16, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
