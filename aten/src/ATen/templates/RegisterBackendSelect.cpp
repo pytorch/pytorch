@@ -37,7 +37,7 @@ at::Tensor _pin_memory(const Tensor& self, c10::optional<at::Device> device) {
   TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
   DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
   if (self.is_nested()) {
-    auto nested_key_set = c10::DispatchKeySet(
+    constexpr auto nested_key_set = c10::DispatchKeySet(
         {c10::DispatchKey::NestedTensor, c10::DispatchKey::AutogradNestedTensor});
     _dk = _dk.add(self.key_set() & nested_key_set);
   }
