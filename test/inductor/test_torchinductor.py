@@ -47,7 +47,9 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
+    with_tf32_off,
 )
+
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -2949,6 +2951,7 @@ class CommonTemplate:
         )
 
     # From yolov3
+    @with_tf32_off
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -4837,6 +4840,20 @@ class CommonTemplate:
             fn_channels_last,
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
         )
+
+    def test_like_channels_last(self):
+        def foo():
+            randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
+            xc = randn.contiguous(memory_format=torch.channels_last)
+            clone = torch.zeros_like(xc, memory_format=torch.preserve_format)
+            rand_like = torch.rand_like(randn)
+            return (xc, clone, rand_like)
+
+        out = foo()
+        out_comp = torch.compile()(foo)()
+
+        for t, t_comp in zip(out, out_comp):
+            self.assertEqual(t.stride(), t_comp.stride())
 
     def test_as_strided_scatter(self):
         def fn(a, b):
