@@ -744,8 +744,6 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor,
-    int64_t,
-    int64_t,
     at::Tensor,
     at::Tensor,
     at::Tensor>
@@ -780,6 +778,7 @@ _scaled_dot_product_flash_attention_cpu(
       query.options().dtype(accumulate_dtype));
   at::Tensor cum_seq_q = at::empty({}, at::kLong);
   at::Tensor cum_seq_k = at::empty({}, at::kLong);
+  // NB: This doesn't actually do anything
   int64_t max_q = 0;
   int64_t max_k = 0;
   at::Tensor philox_seed = at::empty({}, at::kLong);
@@ -794,7 +793,7 @@ _scaled_dot_product_flash_attention_cpu(
   logsumexp = logsumexp.transpose(1, 2);
 
   return std::make_tuple(std::move(output), std::move(logsumexp),
-      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
+      std::move(cum_seq_q), std::move(cum_seq_k),
       std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
 }
 
