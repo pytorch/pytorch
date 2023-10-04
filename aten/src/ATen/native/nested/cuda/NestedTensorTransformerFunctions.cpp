@@ -220,8 +220,6 @@ std::tuple<
     Tensor,
     Tensor,
     Tensor,
-    int64_t,
-    int64_t,
     Tensor,
     Tensor,
     Tensor>
@@ -271,8 +269,6 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
       logsumexp,
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
-      max_seqlen_batch_q,
-      max_seqlen_batch_kv,
       philox_seed,
       philox_offset,
       debug_attn_mask);
