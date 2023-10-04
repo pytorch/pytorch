@@ -2121,10 +2121,6 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
         )
 
-    # TODO: decompose integer path
-    if input.dtype in [torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64]:
-        return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
-
     # Optimisation (we should also do this in the kernel implementation)
     if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
         stride = tuple(i // o for i, o in zip(shape[-2:], output_size))
@@ -4192,9 +4188,9 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
+@register_decomposition([aten.baddbmm])
 @out_wrapper()
 @pw_cast_for_opmath
-@register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
