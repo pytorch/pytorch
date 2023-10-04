@@ -472,6 +472,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_generated_custom_object(x):
+        return type(x)
+    
+    @make_test
     def test_get_calculate_correct_fan(x):
         fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
         return x + fan_in
