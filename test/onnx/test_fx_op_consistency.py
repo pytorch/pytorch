@@ -164,9 +164,9 @@ COMPLEX_TESTED_OPS = frozenset(
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
-# use **xfail_onnxscript_forward_compatibility** and **skip_torchlib_forward_compatibility** instead of xfail or skip
+# use **xfail_torchlib_forward_compatibility** and **skip_torchlib_forward_compatibility** instead of xfail or skip
 # to make the signal apparent for maintainers.
-def xfail_onnxscript_forward_compatibility(
+def xfail_torchlib_forward_compatibility(
     op_name: str,
     variant_name: str = "",
     *,
@@ -177,6 +177,10 @@ def xfail_onnxscript_forward_compatibility(
     matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
 ):
+    """Prefer using this (xfail) over skip when possible.
+
+    Only skip when the test is not failing consistently.
+    """
     return xfail(
         op_name,
         variant_name=variant_name,
@@ -199,6 +203,10 @@ def skip_torchlib_forward_compatibility(
     matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
 ):
+    """Prefer using xfail_torchlib_forward_compatibility over this (skip) when possible.
+
+    Only skip when the test is not failing consistently.
+    """
     return skip(
         op_name,
         variant_name=variant_name,
