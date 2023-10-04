@@ -78,36 +78,37 @@ def custom_op(
             you may provide us the schema string.
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import numpy as np
         >>> from torch import Tensor
         >>>
         >>> # Step 1: define the CustomOp.
         >>> # We need to provide the decorator a "prototype function"
         >>> # (a function with Python ellipses as the body).
-        >>> @custom_op("mylibrary::numpy_sinh")
-        >>> def numpy_sinh(x: Tensor) -> Tensor:
+        >>> @custom_op("my_library::numpy_sin")
+        >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     ...
         >>>
-        >>> # numpy_sinh is now an instance of class CustomOp
-        >>> print(type(numpy_sinh))
+        >>> # numpy_sin is now an instance of class CustomOp
+        >>> print(type(numpy_sin))
         >>>
         >>> # Step 2: Register an implementation for various PyTorch subsystems
         >>>
         >>> # Register an implementation for CPU tensors
-        >>> @numpy_sinh.impl('cpu')
-        >>> def numpy_sinh_impl_cpu(x):
-        >>>     return torch.from_numpy(np.sinh(x.numpy()))
+        >>> @numpy_sin.impl('cpu')
+        >>> def numpy_sin_impl_cpu(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Register an implementation for CUDA tensors
-        >>> @numpy_sinh.impl('cuda')
-        >>> def numpy_sinh_impl_cuda(x):
-        >>>     return torch.from_numpy(np.sinh(x.cpu().numpy())).to(x.device)
+        >>> @numpy_sin.impl('cuda')
+        >>> def numpy_sin_impl_cuda(x):
+        >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
         >>>
         >>> x = torch.randn(3)
-        >>> numpy_sinh(x)  # calls numpy_sinh_impl_cpu
+        >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
         >>>
         >>> x_cuda = x.cuda()
-        >>> numpy_sinh(x)  # calls numpy_sinh_impl_cuda
+        >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
 
     """
 
@@ -275,28 +276,29 @@ class CustomOp:
             device_types (str or Iterable[str]): the device type(s) to register the function for.
 
         Examples::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> import numpy as np
             >>> from torch import Tensor
             >>>
-            >>> @custom_op("mylibrary::numpy_cosh")
-            >>> def numpy_cosh(x: Tensor) -> Tensor:
+            >>> @custom_op("my_library::numpy_cos")
+            >>> def numpy_cos(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> # Register an implementation for CPU Tensors
-            >>> @numpy_cosh.impl('cpu')
-            >>> def numpy_cosh_impl_cpu(x):
-            >>>     return torch.from_numpy(np.cosh(x.numpy()))
+            >>> @numpy_cos.impl('cpu')
+            >>> def numpy_cos_impl_cpu(x):
+            >>>     return torch.from_numpy(np.cos(x.numpy()))
             >>>
             >>> # Register an implementation for CUDA Tensors
-            >>> @numpy_cosh.impl('cuda')
-            >>> def numpy_cosh_impl_cuda(x):
-            >>>     return torch.from_numpy(np.cosh(x.cpu().numpy())).to(x.device)
+            >>> @numpy_cos.impl('cuda')
+            >>> def numpy_cos_impl_cuda(x):
+            >>>     return torch.from_numpy(np.cos(x.cpu().numpy())).to(x.device)
             >>>
             >>> x = torch.randn(3)
-            >>> numpy_cosh(x)  # calls numpy_cosh_impl_cpu
+            >>> numpy_cos(x)  # calls numpy_cos_impl_cpu
             >>>
             >>> x_cuda = x.cuda()
-            >>> numpy_cosh(x)  # calls numpy_cosh_impl_cuda
+            >>> numpy_cos(x)  # calls numpy_cos_impl_cuda
 
         """
         if isinstance(device_types, str):
@@ -362,7 +364,7 @@ class CustomOp:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @custom_op('mylibrary::custom_linear')
+            >>> @custom_op('my_library::custom_linear')
             >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     ...
             >>>
@@ -378,7 +380,7 @@ class CustomOp:
             >>>     return (x @ weight.t()) + bias
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @custom_op('mylibrary::custom_nonzero')
+            >>> @custom_op('my_library::custom_nonzero')
             >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
