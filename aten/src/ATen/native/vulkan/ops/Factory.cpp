@@ -26,7 +26,7 @@ Tensor _empty_affine_quantized(
   });
 }
 
-static Tensor empty_memory_format(
+Tensor empty_memory_format(
     const IntArrayRef sizes,
     const c10::optional<ScalarType> dtype,
     const c10::optional<c10::Layout> layout,
@@ -42,7 +42,7 @@ static Tensor empty_memory_format(
   });
 }
 
-static Tensor empty_strided(
+Tensor empty_strided(
     const IntArrayRef sizes,
     const IntArrayRef /* strides */,
     const optional<ScalarType> dtype,

@@ -292,6 +292,7 @@ def reduce_tensor(tensor):
     #
 
     # TODO: Handle distinguishing between subclass and non-subclass versions of NT better
+    # https://github.com/pytorch/pytorch/issues/110543
     from torch.nested._internal.nested_tensor import NestedTensor
 
     if tensor.is_nested and not isinstance(tensor, NestedTensor):
@@ -361,7 +362,7 @@ def rebuild_nested_tensor(
 
 
 def reduce_nested_tensor(nt):
-    rebuild_buffer_func, rebuild_buffer_args = reduce_tensor(nt.values().clone())
+    rebuild_buffer_func, rebuild_buffer_args = reduce_tensor(nt.values())
     rebuild_sizes_func, rebuild_sizes_args = reduce_tensor(nt._nested_tensor_size())
     rebuild_strides_func, rebuild_strides_args = reduce_tensor(
         nt._nested_tensor_strides()
