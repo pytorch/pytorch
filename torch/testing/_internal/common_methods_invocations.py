@@ -31,7 +31,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, TEST_WITH_TORCHINDUCTOR, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW
 )
@@ -12154,11 +12154,7 @@ op_db: List[OpInfo] = [
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
-           error_inputs_func=error_inputs_aminmax_amax_amin,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view', device_type='cuda',
-                            active_if=TEST_WITH_TORCHINDUCTOR),
-           )),
+           error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
