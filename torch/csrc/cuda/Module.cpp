@@ -873,6 +873,34 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
+namespace c10 {
+  namespace cuda {
+    bool setMultiDeviceAllocator(bool active);
+  }
+}
+
+// XXX: hard coded to match allocator
+static size_t multiStride() {
+  size_t segment_size = 1024*1024*32;
+  cudaDeviceProp prop{};
+  C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+  size_t size = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+  return ((size + segment_size - 1) / segment_size)*segment_size;
+}
+
+at::Tensor reveal_multiple_devices(const at::Tensor& t, const at::Device& device) {
+  int device_count;
+  C10_CUDA_CHECK(cudaGetDeviceCount(&device_count));
+  std::vector<int64_t> sizes;
+  sizes.push_back(device_count);
+  std::vector<int64_t> strides;
+  strides.push_back(multiStride() / t.dtype().itemsize());
+  auto s = t.sizes();
+  sizes.insert(sizes.end(), s.begin(), s.end());
+  auto st = t.strides();
+  strides.insert(strides.end(), st.begin(), st.end());
+  return at::from_blob((void*)t.storage().data(), sizes, strides, t.storage_offset(), nullptr,  t.options().device(device), device);
+}
 
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
@@ -903,7 +931,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
       "_cuda_record_memory_history_legacy",
       static_cast<void (*)(bool, bool, int64_t, bool, bool)>(
           torch::cuda::_record_memory_history));
-
+  m.def("set_multi_device_allocator", c10::cuda::setMultiDeviceAllocator);
+  m.def("_reveal_multiple_devices", reveal_multiple_devices);
   m.def(
       "_cuda_record_memory_history",
       static_cast<void (*)(

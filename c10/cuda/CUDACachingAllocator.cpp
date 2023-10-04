@@ -43,6 +43,14 @@ namespace c10 {
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace cuda {
+
+static bool use_multi_device_alloc = false;
+C10_CUDA_API bool setMultiDeviceAllocator(bool active) {
+  bool prev = use_multi_device_alloc;
+  use_multi_device_alloc = active;
+  return prev;
+}
+
 namespace CUDACachingAllocator {
 namespace Native {
 
@@ -363,7 +371,22 @@ Instead these mapping have to be done manually. The allocator now has an
 */
 
 struct ExpandableSegment {
-  ExpandableSegment(
+  virtual SegmentRange map(SegmentRange range) = 0;
+  virtual SegmentRange unmap(SegmentRange range) = 0;
+  virtual char* ptr() const = 0;
+  virtual size_t size() const = 0;
+  virtual void addPeer(int device) = 0;
+  virtual ~ExpandableSegment() {}
+  static size_t addressSpaceToReserve(int device, size_t segment_size) {
+    cudaDeviceProp prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    size_t size = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+    return ((size + segment_size - 1) / segment_size)*segment_size;
+  }
+};
+
+struct ExpandableSegmentOneDevice : public ExpandableSegment {
+  ExpandableSegmentOneDevice(
       int device,
       cudaStream_t stream,
       size_t size,
@@ -373,15 +396,31 @@ struct ExpandableSegment {
         max_handles_(0),
         // 2MB for small pool, 20MB for large pool
         segment_size_(size),
-        peers_(std::move(peers)) {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
+        peers_(std::move(peers)),
+        own_ptr_(true) {
     // we allocate enough address space for 1 1/8 the total memory on the GPU.
     // This allows for some cases where we have to unmap pages earlier in the
     // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
+    size_t address_space_size = addressSpaceToReserve(device_, segment_size_);
+    max_handles_ = address_space_size / segment_size_;
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
-        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+        &ptr_, address_space_size, 0ULL, 0, 0ULL));
+  }
+  ExpandableSegmentOneDevice(
+      int device,
+      cudaStream_t stream,
+      CUdeviceptr virtual_memory,
+      size_t virtual_memory_size,
+      size_t segment_size,
+      std::vector<int> peers)
+      : device_(device),
+        stream_(stream),
+        ptr_(virtual_memory),
+        max_handles_(virtual_memory_size / segment_size),
+        // 2MB for small pool, 20MB for large pool
+        segment_size_(segment_size),
+        peers_(std::move(peers)),
+        own_ptr_(false) {
   }
   // begin must be aligned to segment_size_.
   // returns the actual range mapped, which may be
@@ -429,7 +468,9 @@ struct ExpandableSegment {
 
     setAccess(device_, begin, end);
     for (auto p : peers_) {
-      setAccess(p, begin, end);
+      if (p != device_) {
+        setAccess(p, begin, end);
+      }
     }
     return rangeFromHandles(begin, end);
   }
@@ -460,11 +501,13 @@ struct ExpandableSegment {
         [&](size_t begin, size_t end) { setAccess(device, begin, end); });
   }
 
-  ~ExpandableSegment() {
+  ~ExpandableSegmentOneDevice() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
-        ptr_, segment_size_ * max_handles_));
+    if (own_ptr_) {
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
+          ptr_, segment_size_ * max_handles_));
+    }
   }
 
  private:
@@ -535,7 +578,72 @@ struct ExpandableSegment {
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<int> peers_;
+  bool own_ptr_;
 };
+
+struct ExpandableSegmentMultiDevice : public ExpandableSegment {
+  ExpandableSegmentMultiDevice() {
+    size_t segment_size = 1024*1024*32;
+    std::cout << "MULTISEGMENT\n";
+    int n_devices;
+    C10_CUDA_CHECK(cudaGetDeviceCount(&n_devices));
+    address_space_one_gpu_ = addressSpaceToReserve(0, segment_size);
+    std::vector<int> peers;
+    for (auto i : c10::irange(n_devices)) {
+      peers.push_back(i);
+    }
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
+        &ptr_, address_space_one_gpu_ * n_devices, 0ULL, 0, 0ULL));
+    for (auto i : c10::irange(n_devices)) {
+      device_segments_.emplace_back(new ExpandableSegmentOneDevice(
+        i, 0, ptr_ + i*address_space_one_gpu_, address_space_one_gpu_, segment_size, peers));
+    }
+  }
+  virtual SegmentRange map(SegmentRange range) {
+    auto result = device_segments_[0]->map(range);
+    if (!result.size) {
+      return result;
+    }
+    for (auto i : c10::irange(1, device_segments_.size())) {
+      range.ptr += address_space_one_gpu_;
+      auto r = device_segments_[i]->map(range);
+      if (r.size == 0) {
+        // OOM on one device...
+        for (auto j : c10::irange(0, i)) {
+          device_segments_[i]->unmap(SegmentRange(result.ptr + j*address_space_one_gpu_, result.size));
+        }
+        return SegmentRange(result.ptr, 0);
+      }
+    }
+    return result;
+  }
+  virtual SegmentRange unmap(SegmentRange range) {
+    auto result = device_segments_[0]->unmap(range);
+    for (auto i : c10::irange(1, device_segments_.size())) {
+      range.ptr += address_space_one_gpu_;
+      auto r = device_segments_[i]->unmap(range);
+      AT_ASSERT(r.size == result.size && r.ptr == result.ptr + i*address_space_one_gpu_);
+    }
+    return result;
+  }
+  virtual char* ptr() const {
+    return (char*) ptr_;
+  }
+  virtual size_t size() const {
+    return address_space_one_gpu_;
+  }
+  // all peers already added
+  void addPeer(int device) {}
+  ~ExpandableSegmentMultiDevice() {
+    device_segments_.clear();
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(ptr_, device_segments_.size() * address_space_one_gpu_));
+  }
+private:
+  CUdeviceptr ptr_;
+  size_t address_space_one_gpu_;
+  std::vector<std::unique_ptr<ExpandableSegment>> device_segments_;
+};
+
 #else
 struct ExpandableSegment {
   ExpandableSegment(
@@ -853,7 +961,7 @@ class CachingAllocatorConfig {
   CachingAllocatorConfig()
       : m_max_split_size(std::numeric_limits<size_t>::max()),
         m_garbage_collection_threshold(0),
-        m_expandable_segments(false),
+        m_expandable_segments(true),
         m_release_lock_on_cudamalloc(false) {
     m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
   }
@@ -2265,8 +2373,14 @@ class DeviceCachingAllocator {
       }
     }
     auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
-    expandable_segments_.emplace_back(new ExpandableSegment(
-        device, stream, segment_size, devices_with_peer_access_));
+    int device_count;
+    C10_CUDA_CHECK(cudaGetDeviceCount(&device_count));
+    if (device == device_count) {
+     expandable_segments_.emplace_back(new ExpandableSegmentMultiDevice());
+    } else {
+      expandable_segments_.emplace_back(new ExpandableSegmentOneDevice(
+          device, stream, segment_size, devices_with_peer_access_));
+    }
 
     ExpandableSegment* es = expandable_segments_.back();
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
@@ -3153,6 +3267,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void init(int device_count) override {
+    device_count += 1; // last one is used for multi-device allocator;
     const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
       device_allocator.resize(device_count);
@@ -3173,6 +3288,9 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
+    if (use_multi_device_alloc) {
+      device = device_allocator.size() - 1;
+    }
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;

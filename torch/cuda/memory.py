@@ -920,3 +920,11 @@ def _get_current_allocator() -> _CUDAAllocator:
         See :ref:`cuda-memory-management` for details on creating and using a custom allocator
     """
     return _CUDAAllocator(torch._C._cuda_getAllocator())
+
+@contextlib.contextmanager
+def _multi_device_allocator():
+    try:
+        prev = torch._C.set_multi_device_allocator(True)
+        yield
+    finally:
+        torch._C.set_multi_device_allocator(prev)

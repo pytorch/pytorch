@@ -13,7 +13,7 @@
       if (get_error_str_err != CUDA_SUCCESS) {                             \
         AT_ERROR("CUDA driver error: unknown error");                      \
       } else {                                                             \
-        AT_ERROR("CUDA driver error: ", err_str);                          \
+        AT_ERROR(__FILE__, __LINE__, "CUDA driver error: ", err_str);                          \
       }                                                                    \
     }                                                                      \
   } while (0)
