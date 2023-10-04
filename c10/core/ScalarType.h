@@ -63,7 +63,7 @@ namespace c10 {
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
 // doesn't work for all the conversions you need...
-#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(_) \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -78,8 +78,6 @@ namespace c10 {
   _(at::BFloat16, BFloat16)                                        \
   _(at::Float8_e5m2, Float8_e5m2)                                  \
   _(at::Float8_e4m3fn, Float8_e4m3fn)                              \
-  _(at::Float8_e5m2fnuz, Float8_e5m2fnuz)                          \
-  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz)
 
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
   _(uint8_t, Byte)                             \
