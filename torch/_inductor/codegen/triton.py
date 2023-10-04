@@ -2269,7 +2269,7 @@ class TritonScheduling(BaseScheduling):
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 schedule_log.debug(
-                    "cannot fuse (triton:2): numel/rnumel mismatch (no reduce) (%d, %d), (%d, %d)",
+                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
                     rnumel1,
