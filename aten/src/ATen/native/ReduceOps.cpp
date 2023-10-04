@@ -1598,6 +1598,20 @@ Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdi
   return allany_dims_default<false>(self, dim, keepdim);
 }
 
+Tensor& all_dims_out_default(
+    const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  auto tmp = self.all(dim, keepdim);
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
+}
+
+Tensor& any_dims_out_default(
+    const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  auto tmp = self.any(dim, keepdim);
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
+}
+
 TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
   auto iter =
       meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
