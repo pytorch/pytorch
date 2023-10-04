@@ -1684,7 +1684,7 @@ def _convert_state_with_orig_params(
                         fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     # Instead of gathering the state of each parameter individually, we perform
-    # the gathering all at once to speed up the process.
+    # the gathering  all at once to speed up the process.
     for _all_states in all_states.values():
         fqn = next(iter(_all_states.keys()))
         fsdp_param_info = fqn_to_fsdp_param_info[fqn]
