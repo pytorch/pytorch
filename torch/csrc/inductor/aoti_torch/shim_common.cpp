@@ -167,11 +167,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided_cpu(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
-    at::Tensor* new_tensor = new at::Tensor(at::detail::empty_strided_cpu(sizes, strides, static_cast<c10::ScalarType>(dtype)));
+    at::Tensor* new_tensor = new at::Tensor(at::detail::empty_strided_cpu(
+        sizes, strides, static_cast<c10::ScalarType>(dtype)));
     *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
-
 
 AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,

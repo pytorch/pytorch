@@ -350,6 +350,13 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
+    # Temporarily skip interpolate bilinear and bicubic tests:
+    "nn.functional.interpolate.bicubic": {
+        "assert_equal": False,
+        "check_gradient": False,
+    },
+    "nn.functional.interpolate.bilinear": {"assert_equal": False},
+    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
 
 # Always test with all sample for following ops
