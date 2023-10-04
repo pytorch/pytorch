@@ -737,14 +737,15 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-        so_path, _ = torch._export.aot_compile(Model(), example_inputs)
-        with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
-            src_code = cpp.read()
-            FileCheck().check_count(
-                "if (triton_poi_fused_sin_0 == nullptr) {",
-                1,
-                exactly=True,
-            ).run(src_code)
+        if self.device == "cuda":
+            so_path, _ = torch._export.aot_compile(Model(), example_inputs)
+            with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+                src_code = cpp.read()
+                FileCheck().check_count(
+                    "if (triton_poi_fused_sin_0 == nullptr) {",
+                    1,
+                    exactly=True,
+                ).run(src_code)
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):
