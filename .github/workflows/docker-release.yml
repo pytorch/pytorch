@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 240
     strategy:
       matrix:
-        include:y
+        include:
           # nvidia specific images don't exist for arm64 so only build the runtime image
           - image_type: runtime
             platform: linux/arm64,linux/amd64
