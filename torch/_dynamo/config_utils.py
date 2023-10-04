@@ -123,7 +123,7 @@ class ConfigModule(ModuleType):
         As a decorator:
 
             @config.patch("name", val)
-            @config.patch(name1=val1, name2=val2):
+            @config.patch(name1=val1, name2=val2)
             @config.patch({"name1": val1, "name2", val2})
             def foo(...):
                 ...

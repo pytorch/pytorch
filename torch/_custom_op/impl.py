@@ -94,12 +94,12 @@ def custom_op(
         >>> # Step 2: Register an implementation for various PyTorch subsystems
         >>>
         >>> # Register an implementation for CPU tensors
-        >>> @numpy_sin.impl('cpu'):
+        >>> @numpy_sin.impl('cpu')
         >>> def numpy_sin_impl_cpu(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Register an implementation for CUDA tensors
-        >>> @numpy_sin.impl('cuda'):
+        >>> @numpy_sin.impl('cuda')
         >>> def numpy_sin_impl_cuda(x):
         >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
         >>>
@@ -283,12 +283,12 @@ class CustomOp:
             >>>     ...
             >>>
             >>> # Register an implementation for CPU Tensors
-            >>> @numpy_sin.impl('cpu'):
+            >>> @numpy_sin.impl('cpu')
             >>> def numpy_sin_impl_cpu(x):
             >>>     return torch.from_numpy(np.sin(x.numpy()))
             >>>
             >>> # Register an implementation for CUDA Tensors
-            >>> @numpy_sin.impl('cuda'):
+            >>> @numpy_sin.impl('cuda')
             >>> def numpy_sin_impl_cuda(x):
             >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
             >>>
@@ -366,7 +366,7 @@ class CustomOp:
             >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor):
             >>>     ...
             >>>
-            >>> @custom_linear.impl_abstract():
+            >>> @custom_linear.impl_abstract()
             >>> def custom_linear_abstract(x, weight):
             >>>     assert x.dim() == 2
             >>>     assert weight.dim() == 2
@@ -382,7 +382,7 @@ class CustomOp:
             >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
-            >>> @custom_nonzero.impl_abstract():
+            >>> @custom_nonzero.impl_abstract()
             >>> def custom_nonzero_abstract(x):
             >>>     # Number of nonzero-elements is data-dependent.
             >>>     # Since we cannot peek at the data in an abstract impl,
