@@ -1229,8 +1229,6 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            if isinstance(obj, FSDPManagedNNModuleVariable):
-                print("Setting on FSDPModule", name_var, val)
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             if isinstance(obj, variables.TensorVariable):
                 from .builder import (

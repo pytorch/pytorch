@@ -89,5 +89,5 @@ if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    res = main(compiled_fwd=False, compiled_bwd=True)
+    res = main(compiled_fwd=True, compiled_bwd=False)
     print("res:", res)

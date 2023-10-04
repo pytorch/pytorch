@@ -101,7 +101,6 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
-        _typed_storage=None,
         storage_offset=None,
         **kwargs,
     ):
@@ -261,10 +260,6 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
-        if name == "_typed_storage":
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: TypedStorageVariable(self.as_proxy()._typed_storage(), self.as_proxy().node.meta['example_value']._typed_storage(), self)
-            ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -1044,24 +1039,3 @@ class TensorSubclassVariable(VariableTracker):
             )
 
         return super().call_function(tx, args, kwargs)
-
-
-class TypedStorageVariable(VariableTracker):
-    def __init__(self, proxy, value, original, **kwargs):
-        self.proxy = proxy
-        self.proxy.node.meta['example_value'] = value
-        self.value = value
-        self.original = original
-        super().__init__(**kwargs)
-
-    def as_proxy(self):
-        return self.proxy
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        unimplemented(f"typed_storage method call {name} - NYI")
