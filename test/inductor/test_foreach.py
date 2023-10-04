@@ -40,7 +40,12 @@ bin_ops_under_test = [
     aten._foreach_copy,
 ]
 
-un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg, torch._foreach_sign]
+un_ops_under_test = [
+    torch._foreach_reciprocal,
+    torch._foreach_neg,
+    torch._foreach_abs,
+    torch._foreach_sign,
+]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__

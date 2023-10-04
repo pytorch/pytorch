@@ -789,10 +789,6 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode:
-        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
-        cuda = True
-
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -819,17 +815,18 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
-                # This is a special treatment for Meta internal cuda-12 where all libs
-                # are in lib/cuda-12 and lib/cuda-12/stubs
-                for i, path in enumerate(lpaths):
-                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
-                        f"{path}/libcudart_static.a"
-                    ):
-                        for root, dirs, files in os.walk(path):
-                            if "libcudart_static.a" in files:
-                                lpaths[i] = os.path.join(path, root)
-                                lpaths.append(os.path.join(lpaths[i], "stubs"))
-                                break
+                if cuda:
+                    # This is a special treatment for Meta internal cuda-12 where all libs
+                    # are in lib/cuda-12 and lib/cuda-12/stubs
+                    for i, path in enumerate(lpaths):
+                        if path.startswith(
+                            os.environ["CUDA_HOME"]
+                        ) and not os.path.exists(f"{path}/libcudart_static.a"):
+                            for root, dirs, files in os.walk(path):
+                                if "libcudart_static.a" in files:
+                                    lpaths[i] = os.path.join(path, root)
+                                    lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                    break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -861,6 +858,8 @@ def get_include_and_linking_paths(
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.dirname(cpp_prefix_path())]
         lpaths = []
         if sys.platform == "darwin":
             # only Apple builtin compilers (Apple Clang++) require openmp
@@ -921,7 +920,7 @@ def get_include_and_linking_paths(
         ipaths.append("include")
 
     static_link_libs = []
-    if aot_mode and config.is_fbcode():
+    if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
         static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
