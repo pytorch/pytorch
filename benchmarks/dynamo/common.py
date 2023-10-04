@@ -1185,6 +1185,20 @@ class AOTInductorModelCache:
         )
 
 
+def export(model, example_inputs):
+    example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+    example_outputs = model(*example_args, **example_kwargs)
+    _register_dataclass_output_as_pytree(example_outputs)
+
+    ep = torch.export.export(model, example_args, example_kwargs)
+
+    def opt_export(_, example_inputs):
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        return ep(*example_args, **example_kwargs)
+
+    return opt_export
+
+
 def export_aot_inductor(model, example_inputs):
     module, exported = AOTInductorModelCache.load(model, example_inputs)
 
@@ -2280,33 +2294,14 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                if self.args.export:
-                    # TB and TIMM use list example_inputs
-                    # HF use dict example_inputs
-                    example_args, example_kwargs = _normalize_bench_inputs(
-                        example_inputs
-                    )
-
-                    # Register the output dataclass to pytree
-                    example_outputs = model_copy(*example_args, **example_kwargs)
-                    _register_dataclass_output_as_pytree(example_outputs)
-
+                if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast():
                         optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_args, example_kwargs
+                            model_copy, example_inputs
                         )
-                        new_result = optimized_model_iter_fn(
-                            *example_args, **example_kwargs
-                        )
-                if self.args.export_aot_inductor:
-                    # apply export on module directly
-                    # no need for n iterations
-                    # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast():
-                        optimized_model_iter_fn = optimize_ctx()
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
@@ -2499,7 +2494,7 @@ class BenchmarkRunner:
 
             if self.args.export_aot_inductor:
                 t_0 = time.perf_counter()
-                optimized_model_iter_fn = optimize_ctx()
+                optimized_model_iter_fn = optimize_ctx
                 t_1 = time.perf_counter()
                 aot_compilation_time = t_1 - t_0
             else:
@@ -2597,9 +2592,6 @@ class BenchmarkRunner:
         print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
-
-        if self.args.export_aot_inductor:
-            optimize_ctx = functools.partial(optimize_ctx, model, example_inputs)
 
         if self.args.accuracy:
             status = self.check_accuracy(
@@ -3435,7 +3427,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.export:
-        optimize_ctx = torch._export.export
+        optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
