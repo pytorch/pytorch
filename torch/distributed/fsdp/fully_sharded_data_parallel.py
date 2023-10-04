@@ -99,7 +99,7 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from .wrap import ModuleWrapPolicy, CustomPolicy
+from .wrap import CustomPolicy, ModuleWrapPolicy
 
 
 __all__ = [
@@ -411,7 +411,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy, CustomPolicy]] = None,
+        auto_wrap_policy: Optional[
+            Union[Callable, ModuleWrapPolicy, CustomPolicy]
+        ] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
