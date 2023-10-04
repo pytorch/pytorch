@@ -228,6 +228,7 @@ class ExportedProgram:
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
+        dialect: Optional[str] = None,
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,
@@ -253,6 +254,7 @@ class ExportedProgram:
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
+        self._dialect = dialect or "ATEN"
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -333,6 +335,10 @@ class ExportedProgram:
     def example_inputs(self):
         return self._example_inputs
 
+    @property
+    def dialect(self):
+        return self._dialect
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
         from torch._export import combine_args_kwargs
@@ -340,10 +346,12 @@ class ExportedProgram:
         if self.call_spec.in_spec is not None:
             try:
                 user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
+                args = fx_pytree.tree_flatten_spec(
+                    user_args, self.call_spec.in_spec, exact_structural_match=True
+                )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise error.InternalError(
+                raise TypeError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -358,12 +366,11 @@ class ExportedProgram:
         )
         self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
-        with torch.no_grad():
-            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
-            # See: torch/_functorch/aot_autograd.py#L1034
-            res = torch.fx.Interpreter(self.graph_module).run(
-                *ordered_params, *ordered_buffers, *args, enable_io_processing=False
-            )
+        # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+        # See: torch/_functorch/aot_autograd.py#L1034
+        res = torch.fx.Interpreter(self.graph_module).run(
+            *ordered_params, *ordered_buffers, *args, enable_io_processing=False
+        )
 
         if self.call_spec.out_spec is not None:
             mutation = self.graph_signature.buffers_to_mutate
@@ -415,42 +422,151 @@ class ExportedProgram:
 
         return unlift_exported_program_lifted_states(self)
 
-    def _transform(self, *passes: PassType) -> "ExportedProgram":
+    def run_decompositions(
+        self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
+    ) -> "ExportedProgram":
+        """
+        Run a set of decompositions on the exported program and returns a new
+        exported program. By default we will run the Core ATen decompositions to
+        get the Core ATen IR.
+
+        For now, we do not decompose joint graphs.
+        """
+        from torch._decomp import core_aten_decompositions
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            RangeConstraint,
+            _AddRuntimeAssertionsForInlineConstraintsPass,
+            InputDim,
+        )
+        from torch._export.passes.lift_constant_tensor_pass import (
+            lift_constant_tensor_pass,
+        )
+        from torch._export.passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
+        from torch._functorch.aot_autograd import aot_export_module
+
+        def _get_placeholders(gm):
+            placeholders = []
+            for node in gm.graph.nodes:
+                if node.op != "placeholder":
+                    break
+                placeholders.append(node)
+            return placeholders
+
+        decomp_table = decomp_table or core_aten_decompositions()
+
+        old_placeholders = _get_placeholders(self.graph_module)
+        fake_args = [node.meta["val"] for node in old_placeholders]
+
+        gm, graph_signature = aot_export_module(
+            self.graph_module, fake_args, decompositions=decomp_table, trace_joint=False
         )
 
+        # Update the signatures with the new placeholder names in case they
+        # changed when calling aot_export
+        new_placeholders = _get_placeholders(gm)
+        assert len(new_placeholders) == len(old_placeholders)
+        old_new_placeholder_map = {
+            old_node.name: new_node.name
+            for old_node, new_node in zip(old_placeholders, new_placeholders)
+        }
+        old_outputs = list(self.graph.nodes)[-1].args[0]
+        new_outputs = list(gm.graph.nodes)[-1].args[0]
+        assert len(new_outputs) == len(old_outputs)
+        old_new_output_map = {
+            old_node.name: new_node.name
+            for old_node, new_node in zip(old_outputs, new_outputs)
+        }
+
+        new_backward_signature = (
+            ExportBackwardSignature(
+                copy.deepcopy(
+                    self.graph_signature.backward_signature.gradients_to_parameters
+                ),
+                {
+                    old_new_placeholder_map[inp]: param
+                    for inp, param in self.graph_signature.backward_signature.gradients_to_parameters
+                },
+                copy.deepcopy(self.graph_signature.backward_signature.loss_output),
+            )
+            if self.graph_signature.backward_signature is not None
+            else None
+        )
+
+        new_graph_signature = ExportGraphSignature(
+            copy.deepcopy(self.graph_signature.parameters),
+            copy.deepcopy(self.graph_signature.buffers),
+            [old_new_placeholder_map[inp] for inp in self.graph_signature.user_inputs],
+            [old_new_output_map[out] for out in self.graph_signature.user_outputs],
+            {
+                old_new_placeholder_map[inp]: param
+                for inp, param in self.graph_signature.inputs_to_parameters.items()
+            },
+            {
+                old_new_placeholder_map[inp]: buffer
+                for inp, buffer in self.graph_signature.inputs_to_buffers.items()
+            },
+            copy.deepcopy(self.graph_signature.buffers_to_mutate),
+            new_backward_signature,
+            copy.deepcopy(self.graph_signature.assertion_dep_token),
+        )
+
+        # NOTE: aot_export adds symint metadata for placeholders with int
+        # values; since these become specialized, we replace such metadata with
+        # the original values.
+        # Also, set the param/buffer metadata back to the placeholders.
+        for old_node, new_node in zip(old_placeholders, new_placeholders):
+            if not isinstance(old_node.meta["val"], torch.Tensor):
+                new_node.meta["val"] = old_node.meta["val"]
+
+            if (
+                new_node.target in new_graph_signature.inputs_to_parameters
+                or new_node.target in new_graph_signature.inputs_to_buffers
+            ):
+                for k, v in old_node.meta.items():
+                    new_node.meta[k] = v
+
+        # TODO unfortunately preserving graph-level metadata is not
+        # working well with aot_export. So we manually copy it.
+        # (The node-level meta is addressed above.)
+        gm.meta.update(self.graph_module.meta)
+
+        new_range_constraints = _get_updated_range_constraints(gm)
+
+        new_equality_constraints = [
+            (
+                InputDim(old_new_placeholder_map[inp_dim1.input_name], inp_dim1.dim),
+                InputDim(old_new_placeholder_map[inp_dim2.input_name], inp_dim2.dim),
+            )
+            for inp_dim1, inp_dim2 in self.equality_constraints
+        ]
+
+        exported_program = ExportedProgram(
+            gm,
+            gm.graph,
+            new_graph_signature,
+            copy.deepcopy(self.call_spec),
+            self.state_dict,
+            new_range_constraints,
+            new_equality_constraints,
+            copy.deepcopy(self.module_call_graph),
+            self.example_inputs,
+            self.dialect,
+        )
+
+        if len(new_range_constraints) > 0 or len(new_equality_constraints) > 0:
+            exported_program = exported_program._transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(
+                    new_range_constraints, new_equality_constraints
+                )
+            )
+        exported_program = lift_constant_tensor_pass(exported_program)
+
+        return exported_program._transform(_ReplaceSymSizeOpPass())
+
+    def _transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
-
-        def _get_updated_range_constraints(
-            gm: torch.fx.GraphModule,
-        ) -> Dict[sympy.Symbol, RangeConstraint]:
-            def get_shape_env(gm):
-                vals = [
-                    node.meta["val"]
-                    for node in gm.graph.nodes
-                    if node.meta.get("val", None) is not None
-                ]
-                from torch._guards import detect_fake_mode
-
-                fake_mode = detect_fake_mode(vals)
-                if fake_mode is not None:
-                    return fake_mode.shape_env
-                for v in vals:
-                    if isinstance(v, torch.SymInt):
-                        return v.node.shape_env
-
-            shape_env = get_shape_env(gm)
-            if shape_env is None:
-                return {}
-            range_constraints = {
-                k: RangeConstraint(v.lower, v.upper)
-                for k, v in shape_env.var_to_range.items()
-            }
-            return range_constraints
 
         def _get_updated_graph_signature(
             old_signature: ExportGraphSignature,
@@ -518,6 +634,7 @@ class ExportedProgram:
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
+            self.dialect,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -545,11 +662,43 @@ class ExportedProgram:
         _assertion_graph(*args)
 
     def _validate(self):
-        # TODO(zhxchen17) check for get_attr
-        # TODO(zhxchen17) check for funcitonal ops
+        from torch._export.verifier import Verifier, verify_exported_program_signature
+
+        verify_exported_program_signature(self)
+
+        verifier = Verifier()
         for gm in self.graph_module.modules():
             if not isinstance(gm, torch.fx.GraphModule):
                 continue
-            for node in gm.graph.nodes:
-                if node.op == "call_function":
-                    assert node.target != torch.ops.higher_order._export_tracepoint
+            verifier.check_valid(self.graph_module)
+
+
+def _get_updated_range_constraints(
+    gm: torch.fx.GraphModule,
+) -> Dict[sympy.Symbol, Any]:
+    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+        RangeConstraint,
+    )
+
+    def get_shape_env(gm):
+        vals = [
+            node.meta["val"]
+            for node in gm.graph.nodes
+            if node.meta.get("val", None) is not None
+        ]
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(vals)
+        if fake_mode is not None:
+            return fake_mode.shape_env
+        for v in vals:
+            if isinstance(v, torch.SymInt):
+                return v.node.shape_env
+
+    shape_env = get_shape_env(gm)
+    if shape_env is None:
+        return {}
+    range_constraints = {
+        k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
+    }
+    return range_constraints

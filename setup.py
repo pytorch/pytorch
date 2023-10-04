@@ -1175,6 +1175,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
+        "optree": ["optree>=0.9.1"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
     # Triton is only available on Linux atm
@@ -1292,7 +1293,9 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
-        "include/torch/csrc/inductor/aot_runtime/*.h",
+        "include/torch/csrc/inductor/aoti_runtime/*.h",
+        "include/torch/csrc/inductor/aoti_torch/*.h",
+        "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1336,7 +1339,7 @@ def main():
         "include/THH/generic/*.h",
         "include/sleef.h",
         "_inductor/codegen/*.h",
-        "_inductor/codegen/aot_runtime/*.cpp",
+        "_inductor/codegen/aoti_runtime/*.cpp",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
