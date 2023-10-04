@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import operator
+import sys
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
@@ -19,10 +20,28 @@ import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic
 from torch._dynamo.utils import same
+
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+from torch.utils._triton import has_triton
+
+HAS_TRITON = has_triton()
+
+requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+if HAS_TRITON:
+    import triton
+    from triton import language as tl
+
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -453,6 +472,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_promote_types(x):
+        if x.dtype == torch.promote_types(torch.int32, torch.float32):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_get_calculate_correct_fan(x):
         fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
         return x + fan_in
@@ -797,6 +823,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_contains(a, b):
+        vals = set(["a", "b", "c"])
+        if "a" in vals:
+            x = a + b
+        else:
+            x = a - b
+        if "d" in vals:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
         output += (a + b, a - b)
@@ -1133,6 +1172,147 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = np.random.randn(2, 2)
         return x - x
 
+    @make_test
+    def test_partials_torch_op_kwarg(x):
+        par_mul = functools.partial(torch.mul, other=torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_torch_op_arg(x):
+        par_mul = functools.partial(torch.mul, torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_arg(x):
+        par_mul = functools.partial(udf_mul, torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_kwarg(x):
+        par_mul = functools.partial(udf_mul, y=torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_kwarg_module(x, y):
+        par_mod = functools.partial(udf_module, mod=SmallNN())
+        return par_mod(x=x, y=y)
+
+    @make_test
+    def test_partials_udf_kwarg_method(x, y):
+        par_mod = functools.partial(udf_module, mod=SmallNN().forward)
+        return par_mod(x=x, y=y)
+
+    @make_test
+    def test_partials_lambda(x):
+        multiply = lambda x, y: x * y
+        triple = functools.partial(multiply, y=3)
+        return triple(x)
+
+    def test_partials_as_input_partials_lambda(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        multiply = lambda x, y: x * y
+        lambda0 = functools.partial(multiply, y=3)
+        lambda1 = functools.partial(multiply, y=2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, torch.randn(2, 2)
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_partials_as_input_partials_mod(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(SmallNN(), y=torch.randn(2, 2))
+        lambda1 = functools.partial(SmallNN(), y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, x
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+        eager_result = fn(lambda0, lambda1, x)
+        self.assertEqual(eager_result, dynamo_result)
+
+    def test_partials_as_input_UDF(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
+        lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, x
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+        eager_result = fn(lambda0, lambda1, x)
+        self.assertEqual(eager_result, dynamo_result)
+
+    def test_partials_recompilation(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
+        lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        dynamo_result = fn(lambda0, lambda1, x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        fn(lambda1, lambda0, x)
+        self.assertEqual(
+            cnts.frame_count, 1
+        )  # No recompile! Tensor and udf_mul guarded
+
+        lambda2 = functools.partial(udf_mul, y=torch.randn(3, 3))
+        x = torch.randn(3, 3)
+        fn(lambda2, lambda2, x)
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Tensor size changed
+
+        multiply = lambda x, y: x * y
+        lambda3 = functools.partial(multiply, y=torch.randn(3, 3))
+        x = torch.randn(3, 3)
+        fn(lambda3, lambda3, x)
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! func id changed
+
+        def fn2(f0, f1, args):
+            return f0(*args) * f1(*args)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        x = torch.randn(2, 2)
+        fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        dynamo_result = fn2(lambda0, lambda1, [x])
+        self.assertEqual(cnts.frame_count, 1)  # start over
+
+        lambda4 = functools.partial(multiply, y=3, x=torch.randn(3, 3))
+        fn2(lambda4, lambda4, [])
+
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Different kwarg keys
+
+        lambda5 = functools.partial(multiply, 1)
+        x = torch.randn(3, 3)
+        fn2(lambda5, lambda5, [x])
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! Different arg keys
+
+        lambda6 = lambda x: x + x
+        fn2(lambda6, lambda6, [x])
+        self.assertEqual(
+            cnts.frame_count, 4
+        )  # Recompile! input is no longer a functools partial
+
     def test_manual_seed(self):
         @torch.compile
         def foo():
@@ -1141,6 +1321,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
+
+
+def udf_mul(x, y):
+    return x * y
+
+
+class SmallNN(torch.nn.Module):
+    def forward(self, x, y):
+        combined = torch.cat((x, y), dim=1)
+        out = torch.nn.ReLU()(combined)
+        out = torch.nn.ReLU()(out)
+        return out
+
+
+def udf_module(mod, x, y):
+    return mod(x, y)
 
 
 def global_func_with_default_tensor_args(
@@ -1273,6 +1469,148 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    @requires_cuda()
+    @requires_triton()
+    def test_triton_kernel_with_kernel_param(self):
+        @triton.jit
+        def test_kernel(kernel):
+            pass
+
+        @torch.compile(backend="eager")
+        def f(x):
+            grid = (x.numel(),)
+            test_kernel[grid](kernel=x)
+
+        t1 = torch.rand(5, device="cuda")
+        f(t1)
+        # No need to assert anything, the goal is to make sure dynamo does
+        # not crash
+
+    @requires_cuda()
+    @requires_triton()
+    def test_triton_kernel_higher_order_func(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+
+        torch_add = t1 + t2
+
+        # Test higher order function with mutation
+        output = torch.zeros_like(t1)
+        n_elements = output.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+        triton_kernel_wrapper_mutation(
+            kernel=add_kernel,
+            grid=grid,
+            kwargs={
+                "in_ptr0": t1,
+                "in_ptr1": t2,
+                "out_ptr": output,
+                "n_elements": n_elements,
+                "BLOCK_SIZE": 16,
+            },
+        )
+        self.assertEqual(output, torch_add)
+        # Make sure it is modified
+        self.assertNotEqual(output, torch.zeros_like(t1))
+
+        # Test higher order function without mutation
+        output = torch.zeros_like(t1)
+        out_dict = triton_kernel_wrapper_functional(
+            kernel=add_kernel,
+            grid=grid,
+            kwargs={
+                "in_ptr0": t1,
+                "in_ptr1": t2,
+                "out_ptr": output,
+                "n_elements": n_elements,
+                "BLOCK_SIZE": 16,
+            },
+        )
+        self.assertEqual(out_dict["out_ptr"], torch_add)
+        # Make sure it is NOT modified
+        self.assertEqual(output, torch.zeros_like(t1))
+
+    @requires_cuda()
+    @requires_triton()
+    def test_triton_kernel_by_hand(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def call_triton_add(
+            x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+
+            def grid_fn(meta):
+                return (triton.cdiv(num, meta["BLOCK_SIZE"]),)
+
+            if grid_type == 0:
+                grid = (x.numel(),)
+            elif grid_type == 1:
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            else:
+                grid = grid_fn
+
+            if positional:
+                add_kernel[grid](x, y, output, n_elements, 16)
+            else:
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
+            return output
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+
+        torch_add = t1 + t2
+
+        # No Dynamo -- Make sure triton kernel works
+        self.assertEqual(call_triton_add(t1, t2, 1), torch_add)
+        # No Dynamo -- Make sure triton kernel works (with positional BLOCK_SIZE)
+        self.assertEqual(call_triton_add(t1, t2, 1, True), torch_add)
+
+        # With Dynamo
+        compiled_func = torch.compile(call_triton_add, backend="eager", fullgraph=True)
+        # With simple kernel
+        self.assertEqual(compiled_func(t1, t2, 0), torch_add)
+        # With lambda kernel
+        self.assertEqual(compiled_func(t1, t2, 1), torch_add)
+        # With lambda kernel (with positional BLOCK_SIZE)
+        self.assertEqual(compiled_func(t1, t2, 1, 1, True), torch_add)
+        # With user defined function kernel
+        self.assertEqual(compiled_func(t1, t2, 2, 200), torch_add)
 
     def test_dataclass_factory(self):
         @dataclass

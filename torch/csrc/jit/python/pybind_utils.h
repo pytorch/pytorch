@@ -21,7 +21,6 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
@@ -54,8 +53,7 @@
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ResolutionCallback = std::function<py::object(std::string)>;
 
@@ -1112,5 +1110,4 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     bool is_overload,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

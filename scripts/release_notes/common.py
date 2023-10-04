@@ -222,6 +222,10 @@ def run_query(query):
         )
 
 
+_ERRORS = []
+_MAX_ERROR_LEN = 20
+
+
 def github_data(pr_number):
     query = (
         """
@@ -253,7 +257,15 @@ def github_data(pr_number):
     )
     query = run_query(query)
     if query.get("errors"):
-        raise Exception(query["errors"])
+        global _ERRORS
+        _ERRORS.append(query.get("errors"))
+        if len(_ERRORS) < _MAX_ERROR_LEN:
+            return [], "None", ()
+        else:
+            raise Exception(
+                f"Got {_MAX_ERROR_LEN} errors: {_ERRORS}, please check if"
+                " there is something wrong"
+            )
     edges = query["data"]["repository"]["pullRequest"]["labels"]["edges"]
     labels = [edge["node"]["name"] for edge in edges]
     author = query["data"]["repository"]["pullRequest"]["author"]["login"]

@@ -1,13 +1,11 @@
 #include <ATen/autocast_mode.h>
 
-#include <iostream>
 #include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
 
-namespace at {
-namespace autocast {
+namespace at::autocast {
 
 bool is_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
@@ -161,9 +159,6 @@ at::ScalarType get_autocast_privateuseone_dtype() {
 }
 
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
-  TORCH_CHECK(
-      dtype == at::kBFloat16,
-      "Currently, AutocastCPU only support Bfloat16 as the autocast_cpu_dtype");
   autocast_cpu_dtype = dtype;
 }
 
@@ -522,5 +517,4 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 }
 
 } // namespace
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast

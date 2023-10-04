@@ -76,12 +76,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  pytorch-linux-focal-py3-clang7-android-ndk-r19c-build:
-    name: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
+  pytorch-linux-focal-py3-clang9-android-ndk-r19c-build:
+    name: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
-      build-environment: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -176,7 +176,6 @@ jobs:
         ]}
 
   linux-focal-rocm5_6-py3_8-build:
-    if: github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')
     name: linux-focal-rocm5.6-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
