@@ -71,7 +71,9 @@ decomps_to_exclude = [
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
-    aten.glu,  # has lowering in inductor
+    aten.glu,  # inductor lowers this directly
+    aten.split.Tensor,  # inductor lowers this directly
+    aten.unbind,  # inductor lowers this directly
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)

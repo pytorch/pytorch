@@ -93,10 +93,14 @@ def tabulate(rows, headers):
         )
 
 
-def dynamo_profiled(func):
+CPROFILE_ENABLED = False
+
+
+def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
-        global timer_counter
+        global timer_counter, CPROFILE_ENABLED
+        CPROFILE_ENABLED = True
         datafn = (
             func.__name__ + f"{next(timer_counter)}.profile"
         )  # Name the data file sensibly
@@ -178,8 +182,13 @@ def print_time_report():
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+
+
 def dynamo_timed(original_function=None, phase_name=None):
     def dynamo_timed_inner(func):
+        if CPROFILE_ENABLED:
+            return func
+
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
@@ -2137,3 +2146,13 @@ def is_rng_state_getter_or_setter(value):
         torch.cuda.set_rng_state,
     )
     return value in (*setters, *getters)
+
+
+def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables.tensor import TensorWithTFOverrideVariable
+
+    return isinstance(vt, TensorWithTFOverrideVariable) or (
+        isinstance(vt, UserDefinedObjectVariable)
+        and hasattr(vt.value, "__torch_function__")
+    )

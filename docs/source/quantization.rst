@@ -555,7 +555,8 @@ API Example::
   # lower to target backend
 
 
-Please follow these tutorials to get started on PyTorch 2 Export Quantization
+Please follow these tutorials to get started on PyTorch 2 Export Quantization:
+
 - `PyTorch 2 Export Post Training Quantization <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq.html>`_
 - `PyTorch 2 Export Quantization Aware Training <https://pytorch.org/tutorials/prototype/pt2e_quant_qat.html>`_
 - `How to Write a Quantizer for PyTorch 2 Export Quantization <https://pytorch.org/tutorials/prototype/pt2e_quantizer.html>`_
