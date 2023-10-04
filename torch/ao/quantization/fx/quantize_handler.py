@@ -39,7 +39,7 @@ def _default_root_node_getter(node_pattern):
     return node_pattern
 
 # Base Pattern Handler
-class QuantizeHandler(ABC): # noqa: B024
+class QuantizeHandler(ABC):  # noqa: B024
     """ Base handler class for the quantizer patterns
     """
     def __init__(
