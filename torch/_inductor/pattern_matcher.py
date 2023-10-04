@@ -321,7 +321,7 @@ class _TargetExpr(PatternExpr):
         return f"{self.__class__.__name__}({self.fns_repr()})"
 
     def has_multiple_users(self) -> bool:
-        return self.users is MULTIPLE or self.users > 1
+        return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         raise NotImplementedError()
@@ -393,7 +393,7 @@ class _TargetArgsExpr(_TargetExpr):
             *(pp.pretty_print(x) for x in self.args),
             *[f"{k}={pp.pretty_print(v)}" for k, v in self.kwargs.items()],
         ]
-        if self.users is MULTIPLE:
+        if isinstance(self.users, Multiple):
             args.append("_users=MULTIPLE")
         elif self.users > 1:
             args.append(f"_users={self.users}")
@@ -426,7 +426,9 @@ class _TargetArgsExpr(_TargetExpr):
                     return child_match
                 m.extend(child_match)
             elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
-                return FailedMatch("constant_args: {} {!r}!={pattern!r}", node, child_node)
+                return FailedMatch(
+                    "constant_args: {} {!r}!={pattern!r}", node, child_node
+                )
         m.nodes.append(node)
         m.targets[self] = node.target
         return m
