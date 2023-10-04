@@ -162,6 +162,12 @@ COMPLEX_TESTED_OPS = frozenset(
     ]
 )
 
+# NOTE: For ATen signature modifications that will break ONNX export,
+# use **xfail_onnxscript** and **skip_onnxscript** instead of xfail or skip
+# to make the signal apparent for maintainers.
+xfail_onnxscript = xfail
+skip_onnxscript = skip
+
 # fmt: off
 # Turn off black formatting to keep the list compact
 
