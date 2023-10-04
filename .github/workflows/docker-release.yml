@@ -36,7 +36,7 @@ env:
   DOCKER_REGISTRY: ghcr.io
   NO_BUILD_SUFFIX: true
   USE_BUILDX: 1
-  WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+  WITH_PUSH: ${{ inputs.channel == 'release' }}
 
 jobs:
   build:
