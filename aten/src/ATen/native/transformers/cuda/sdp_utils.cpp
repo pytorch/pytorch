@@ -19,7 +19,7 @@
 #include <cmath>
 #include <functional>
 #include <iostream>
-#include "c10/macros/Export.h"
+#include <c10/macros/Export.h>
 
 /**
 * Note [SDPA Runtime Dispatch]
