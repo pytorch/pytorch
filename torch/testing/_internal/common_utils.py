@@ -1549,14 +1549,8 @@ def skipIfTBB(message="This test makes TBB sad"):
 
 
 def slowTest(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not TEST_WITH_SLOW:
-            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-        else:
-            fn(*args, **kwargs)
-    wrapper.__dict__['slow_test'] = True
-    return wrapper
+    fn.slow_test = True
+    return fn
 
 
 def slowTestIf(condition):
@@ -2010,9 +2004,12 @@ def check_if_enable(test: unittest.TestCase):
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
 
-    if TEST_SKIP_FAST:
-        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+    if hasattr(test, test._testMethodName):
+        is_slow_test = getattr(test, test._testMethodName).__dict__.get('slow_test', False)
+        if TEST_SKIP_FAST and not is_slow_test:
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+        if not TEST_WITH_SLOW and is_slow_test:
+            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
