@@ -121,7 +121,7 @@ void cpu_adaptive_max_pool_channels_last(
     int64_t size = channels;
     int64_t len = size - (size % Vec::size());
     // temp buffer holding index with integer_t
-    std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
+    auto index_buffer = std::make_unique<integer_t []>(len);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t ih0 = start_index(oh, output_height, input_height);
@@ -235,9 +235,9 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
     int64_t size = channels;
     int64_t len = size - (size % bVec::size());
     // temp buffer holding index with integer_t
-    std::unique_ptr<int32_t []> index_buffer(new int32_t[len]);
+    auto index_buffer = std::make_unique<int32_t []>(len);
     // temp buffer holding max value with float
-    std::unique_ptr<float []> max_arr(new float[size]);
+    auto max_arr = std::make_unique<float []>(size);
     float* max = max_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {

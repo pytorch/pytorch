@@ -6,7 +6,7 @@ from ._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._TensorBase, method), docstr)
+    add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
 common_args = parse_kwargs(

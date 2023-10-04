@@ -17,7 +17,7 @@ from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
-from torch._inductor.utils import has_triton
+from torch.utils._triton import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.nn.parallel import DistributedDataParallel as DDP

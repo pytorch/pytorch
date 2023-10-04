@@ -55,6 +55,18 @@ RESULTS_RE: Pattern[str] = re.compile(
     """
 )
 
+# torch/_dynamo/variables/tensor.py:363: error: INTERNAL ERROR
+INTERNAL_ERROR_RE: Pattern[str] = re.compile(
+    r"""(?mx)
+    ^
+    (?P<file>.*?):
+    (?P<line>\d+):
+    \s(?P<severity>\S+?):?
+    \s(?P<message>INTERNAL\sERROR.*)
+    $
+    """
+)
+
 
 def run_command(
     args: List[str],
@@ -131,7 +143,8 @@ def check_files(
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
-    return [
+    stderr = str(proc.stderr, "utf-8").strip()
+    rc = [
         LintMessage(
             path=match["file"],
             name=match["code"],
@@ -146,7 +159,21 @@ def check_files(
             replacement=None,
         )
         for match in RESULTS_RE.finditer(stdout)
+    ] + [
+        LintMessage(
+            path=match["file"],
+            name="INTERNAL ERROR",
+            description=match["message"],
+            line=int(match["line"]),
+            char=None,
+            code=code,
+            severity=severities.get(match["severity"], LintSeverity.ERROR),
+            original=None,
+            replacement=None,
+        )
+        for match in INTERNAL_ERROR_RE.finditer(stderr)
     ]
+    return rc
 
 
 def main() -> None:

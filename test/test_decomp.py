@@ -443,6 +443,7 @@ core_backward_failures = {
     skip('logaddexp'),  # slow: fails with --timeout=360 secs
     skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.binary_cross_entropy_with_logits'),
+    skip('nn.functional.glu'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.hardshrink'),
     xfail('nn.functional.softshrink'),
     skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs

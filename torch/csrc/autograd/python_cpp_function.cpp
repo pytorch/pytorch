@@ -216,6 +216,7 @@ PyTypeObject* _initFunctionPyTypeObject(
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
   type.tp_basicsize = sizeof(THPCppFunction);

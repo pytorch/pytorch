@@ -1,3 +1,4 @@
 # iOS simulator requirements
 coremltools==5.0b5
 protobuf==3.20.2
+optree==0.9.1

@@ -188,9 +188,9 @@ def scaled_dot_product_attention(
         const_neg_inf = g.op("Constant", value_t=torch.tensor([-float("inf")]))
         attn_mask = g.op("Where", attn_mask, const_zero, const_neg_inf)
         mul_qk_add = g.op("Add", mul_qk, attn_mask)
-    elif (
-        _type_utils.JitScalarType.from_value(attn_mask)
-        == _type_utils.JitScalarType.FLOAT
+    elif _type_utils.JitScalarType.from_value(attn_mask) in (
+        _type_utils.JitScalarType.FLOAT,
+        _type_utils.JitScalarType.HALF,
     ):
         mul_qk_add = g.op("Add", mul_qk, attn_mask)
     else:

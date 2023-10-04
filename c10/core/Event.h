@@ -50,11 +50,8 @@ struct Event final {
   Event& operator=(const Event&) = delete;
 
   // Move constructor and move assignment operator
-  Event(Event&& other) noexcept : impl_{std::move(other.impl_)} {}
-  Event& operator=(Event&& other) noexcept {
-    impl_.swap(std::move(other.impl_));
-    return *this;
-  }
+  Event(Event&&) noexcept = default;
+  Event& operator=(Event&&) noexcept = default;
 
   // Destructor
   ~Event() = default;

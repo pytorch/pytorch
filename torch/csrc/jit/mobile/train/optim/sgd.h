@@ -22,7 +22,6 @@ class SGDParamState {
         static_cast<const SGDParamState&>(*this));
   }
   friend bool operator==(const SGDParamState& lhs, const SGDParamState& rhs);
-  ~SGDParamState() = default;
 };
 
 struct TORCH_API SGDOptions {
@@ -40,7 +39,6 @@ struct TORCH_API SGDOptions {
   TORCH_API friend bool operator==(
       const SGDOptions& lhs,
       const SGDOptions& rhs);
-  ~SGDOptions() = default;
 };
 
 /// Stores parameters in the param_group and stores a pointer to the SGDOptions

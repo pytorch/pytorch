@@ -402,7 +402,7 @@ def same_two_models(
     return passing
 
 
-def cast_convert_element_type_to_fp64(model):
+def cast_dtype_args_to_fp64(model):
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
@@ -411,6 +411,13 @@ def cast_convert_element_type_to_fp64(model):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
+        if node.op == "call_function":
+            dtype = node.kwargs.get("dtype")
+            if dtype is not None and is_float_dtype(dtype):
+                new_kwargs = dict(node.kwargs)
+                new_kwargs["dtype"] = torch.float64
+                node.kwargs = new_kwargs
+
     model.graph.lint()
     model.recompile()
     return model
@@ -422,8 +429,8 @@ def cast_to(dtype, model, inputs):
     model = model.to(dtype)
     if dtype == torch.float64:
         # If casting to fp64 for accuracy comparison, we need to
-        # take care of convert_element_type explicitly
-        model = cast_convert_element_type_to_fp64(model)
+        # replace dtype arguments embedded in the graph with fp64
+        model = cast_dtype_args_to_fp64(model)
 
     inputs = tree_map(
         lambda x: x.to(dtype)

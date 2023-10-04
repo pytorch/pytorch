@@ -15,7 +15,7 @@ on:
           required: false
           default: linux.12xlarge
           type: string
-          description: Hardware to run this "build"job on, linux.12xlarge or linux.t4g.2xlarge.
+          description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
       ALPINE_IMAGE:
         required: false
         type: string

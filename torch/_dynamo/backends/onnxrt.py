@@ -22,9 +22,9 @@ else:
         raise ImportError(
             "onnxrt is not registered as a backend. "
             "Please make sure all dependencies such as "
-            "numpy, onnx, onnxscript-preview, and onnxruntime-training are installed. "
+            "numpy, onnx, onnxscript, and onnxruntime-training are installed. "
             "Suggested procedure to fix dependency problem:\n"
-            "  (1) pip or conda install numpy onnx onnxscript-preview onnxruntime-training.\n"
+            "  (1) pip or conda install numpy onnx onnxscript onnxruntime-training.\n"
             "  (2) Open a new python terminal.\n"
             "  (3) Call the API `torch.onnx.is_onnxrt_backend_supported()`:\n"
             "  (4)   If it returns `True`, then you can use `onnxrt` backend.\n"

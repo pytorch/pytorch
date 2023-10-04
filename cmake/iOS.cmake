@@ -7,7 +7,7 @@
 # IOS_PLATFORM = OS (default) or SIMULATOR
 #   This decides if SDKS will be selected from the iPhoneOS.platform or iPhoneSimulator.platform folders
 #   OS - the default, used to build for iPhone and iPad physical devices, which have an arm arch.
-#   SIMULATOR - used to build for the Simulator platforms, which have an x86 arch.
+#   SIMULATOR - used to build for the Simulator platforms, which now uses arm64 arch.
 #
 # CMAKE_IOS_DEVELOPER_ROOT = automatic(default) or /path/to/platform/Developer folder
 #   By default this location is automatcially chosen based on the IOS_PLATFORM value above.
@@ -160,7 +160,7 @@ set(CMAKE_OSX_SYSROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Sysroot used for iOS sup
 if(IOS_PLATFORM STREQUAL "OS")
     set(DEFAULT_IOS_ARCH "arm64")
 elseif(IOS_PLATFORM STREQUAL "SIMULATOR")
-    set(DEFAULT_IOS_ARCH "x86_64")
+    set(DEFAULT_IOS_ARCH "arm64")
 elseif(IOS_PLATFORM STREQUAL "WATCHOS")
     set(DEFAULT_IOS_ARCH "armv7k;arm64_32")
 endif()

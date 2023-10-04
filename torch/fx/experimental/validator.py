@@ -212,6 +212,9 @@ try:
             self.validator.add_assertion(number >= 0)
             return number ** 0.5
 
+        def abs(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.Abs(number)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -263,6 +266,7 @@ try:
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
+            operator.abs: lift(ops.abs),
 
             # Math module.
             math.ceil: lift(ops.ceil),

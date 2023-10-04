@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {

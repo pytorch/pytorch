@@ -310,8 +310,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
   }
   auto size = PyLong_AsSsize_t(size_o);
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-  void* mem =
-      c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  void* mem = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  }
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
 }
@@ -420,7 +423,10 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* obj) {
   HANDLE_TH_ERRORS
   void* mem_ptr = PyLong_AsVoidPtr(obj);
-  c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -442,8 +448,10 @@ PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::device_synchronize();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::device_synchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -459,7 +467,11 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
-  at::cuda::sleep(THPUtils_unpackLong(cycles));
+  int64_t unpacked_cycles = THPUtils_unpackLong(cycles);
+  {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::sleep(unpacked_cycles);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

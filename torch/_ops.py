@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -127,6 +128,46 @@ class OperatorBase:
 
         return inner
 
+    # Registers an implementation to all **3** variants of functionalization that we have:
+    # - DispatchKey.Functionalize
+    # - functorch.TransformType.Functionalize
+    # - FunctionalTensorMode
+    # Example:
+    #   @py_functionalize_impl
+    #   def functionalize_rule(ctx, inner_f, *args):
+    #       args_unwrapped = ctx.unwrap_tensors(args)
+    #       with ctx.redispatch_to_next():
+    #           out = ctx.functionalize(inner_f)(*args_unwrapped)
+    #           return ctx.wrap_tensors(out)
+    def py_functionalize_impl(self, fn):
+        from torch._subclasses.functional_tensor import (
+            CppFunctionalizeAPI as _CppFunctionalizeAPI,
+            FunctorchFunctionalizeAPI as _FunctorchFunctionalizeAPI,
+            PythonFunctionalizeAPI as _PythonFunctionalizeAPI,
+        )
+
+        # Construct our three flavors of functionalization,
+        # each of which have slightly different wrap/unwrap/redispatch policies
+        def functionalize_dk_fn(*args, **kwargs):
+            return fn(_CppFunctionalizeAPI(), *args, **kwargs)
+
+        def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
+            # Mode is unused (there's a global FunctionalTensorMode that we can access)
+            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+
+        def functionalize_functorch_fn(interpreter, *args, **kwargs):
+            return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
+
+        self.py_impl(torch._C.DispatchKey.Functionalize)(functionalize_dk_fn)
+        self.py_impl(torch._subclasses.functional_tensor.FunctionalTensorMode)(
+            functionalize_dispatch_mode_fn
+        )
+        self.py_impl(torch._C._functorch.TransformType.Functionalize)(
+            functionalize_functorch_fn
+        )
+
+        return fn
+
     def name(self):
         raise NotImplementedError()
 
@@ -243,7 +284,9 @@ class HigherOrderOperator(OperatorBase):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
-            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            # The place to handle ProxyTorchDispatchMode, FakeTensorMode, etc
+            from torch.utils._python_dispatch import _pop_mode_temporarily
+
             curr_mode = _get_current_dispatch_mode()
             assert (
                 curr_mode is not None
@@ -251,11 +294,13 @@ class HigherOrderOperator(OperatorBase):
             assert (
                 type(curr_mode) in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
-            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+            handler = self.python_key_mode_table[type(curr_mode)]
+            with _pop_mode_temporarily() as mode:
+                return handler(mode, *args, **kwargs)
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
         if functionality_key in mode_stack_per_key():
+            # The place to handle DispatchKey.PreDispatch
             curr_stack = mode_stack_per_key()[functionality_key]
             # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
             # calls inside of a mode.
@@ -265,7 +310,13 @@ class HigherOrderOperator(OperatorBase):
                 DispatchKey.Python
             ):
                 curr_mode = curr_stack[-1]
-                return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+                pre_dispatch_modes = mode_stack_per_key().get(
+                    DispatchKey.PreDispatch, []  # type: ignore[attr-defined]
+                )
+                handler = self.python_key_mode_table[type(curr_mode)]
+                if len(pre_dispatch_modes) > 0:
+                    with temporarily_pop_mode(pre_dispatch_modes) as mode:
+                        return handler(mode, *args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
 
@@ -822,6 +873,25 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def import_module(self, module):
+        """
+        Imports a Python module that has torch.library registrations.
+
+        Generally, to extend PyTorch with custom operators, a user will
+        create a Python module whose import triggers registration of
+        the custom operators via a torch.ops.load_library call or a call
+        to one or more torch.library.* APIs.
+
+        It is unexpected for Python modules to have side effects, so some
+        linters and formatters will complain. Use this API to import Python
+        modules that contain these torch.library side effects.
+
+        Args:
+            module (str): The name of the Python module to import
+
+        """
+        importlib.import_module(module)
 
     def load_library(self, path):
         """

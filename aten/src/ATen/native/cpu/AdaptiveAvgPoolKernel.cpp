@@ -181,7 +181,7 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
 
     // temp buffer for sum, use float as accumulation type
     // can't reuse output buffer to store sum since it is BFloat16
-    std::unique_ptr<float []> sum_arr(new float[channels]);
+    auto sum_arr = std::make_unique<float []>(channels);
     float* sum = sum_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {
@@ -367,7 +367,7 @@ void adaptive_avg_pool2d_kernel_impl(
     IntArrayRef output_size) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_avg_pool2d", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_avg_pool2d", [&] {
         if (input.scalar_type() == ScalarType::BFloat16) {
           cpu_adaptive_avg_pool<BFloat16, /*accscalar_t*/float>(output, input, output_size);
         } else {
@@ -377,7 +377,7 @@ void adaptive_avg_pool2d_kernel_impl(
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
         cpu_adaptive_avg_pool_channels_last<scalar_t>(output, input, output_size);
       });
       break;

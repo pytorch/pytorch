@@ -166,6 +166,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     float getDuration() const override;
 
+    uint64_t getSequencenumber() const override;
+
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
@@ -267,6 +269,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
+    bool timingEnabled_;
     friend class ProcessGroupNCCL;
   };
 
@@ -481,6 +484,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
   void waitForPendingWorks() override;
+
+  void enableCollectivesTiming() override;
 
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
@@ -759,7 +764,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
-  bool enableTiming_;
+  std::atomic<bool> enableTiming_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;

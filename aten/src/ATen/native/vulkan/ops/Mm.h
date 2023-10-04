@@ -17,7 +17,10 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
   c10::impl::GenericList unpacked_;
 
  public:
-  LinearPackedContext(const Tensor& weight, const c10::optional<Tensor>& bias);
+  LinearPackedContext(
+      const Tensor& weight,
+      const c10::optional<Tensor>& bias,
+      const bool use_batch = false);
 
   /*
    * Assigns a name to each index in the unpacked list.

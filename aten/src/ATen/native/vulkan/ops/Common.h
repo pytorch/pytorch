@@ -48,6 +48,13 @@ struct Layout final {
     static constexpr size_t height = 0u;
     static constexpr size_t width = 1u;
   };
+
+  // Parameters (Pooling Kernels, Dilation, Padding, Stride, etc.)
+  struct BatchMatrices final {
+    static constexpr size_t batch = 0u;
+    static constexpr size_t height = 1u;
+    static constexpr size_t width = 2u;
+  };
 };
 
 /*

@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
 import sys
+
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
 
@@ -8,13 +11,22 @@ import torch
 
 import torch._numpy as np
 from torch._numpy.testing import assert_array_equal
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+skip = functools.partial(skipif, True)
 
 IS_PYPY = False
 
 
-class TestDLPack:
-    @pytest.mark.xfail(reason="pytorch seems to handle refcounts differently")
-    @pytest.mark.skipif(IS_PYPY, reason="PyPy can't get refcounts.")
+@instantiate_parametrized_tests
+class TestDLPack(TestCase):
+    @xfail  # (reason="pytorch seems to handle refcounts differently")
+    @skipif(IS_PYPY, reason="PyPy can't get refcounts.")
     def test_dunder_dlpack_refcount(self):
         x = np.arange(5)
         y = x.__dlpack__()
@@ -22,7 +34,7 @@ class TestDLPack:
         del y
         assert sys.getrefcount(x) == 2
 
-    @pytest.mark.xfail(reason="pytorch does not raise")
+    @xfail  # (reason="pytorch does not raise")
     def test_dunder_dlpack_stream(self):
         x = np.arange(5)
         x.__dlpack__(stream=None)
@@ -30,8 +42,8 @@ class TestDLPack:
         with pytest.raises(RuntimeError):
             x.__dlpack__(stream=1)
 
-    @pytest.mark.xfail(reason="pytorch seems to handle refcounts differently")
-    @pytest.mark.skipif(IS_PYPY, reason="PyPy can't get refcounts.")
+    @xfail  # (reason="pytorch seems to handle refcounts differently")
+    @skipif(IS_PYPY, reason="PyPy can't get refcounts.")
     def test_from_dlpack_refcount(self):
         x = np.arange(5)
         y = np.from_dlpack(x)
@@ -39,7 +51,7 @@ class TestDLPack:
         del y
         assert sys.getrefcount(x) == 2
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "dtype",
         [
             np.int8,
@@ -79,7 +91,7 @@ class TestDLPack:
         y5 = np.diagonal(x).copy()
         assert_array_equal(y5, np.from_dlpack(y5))
 
-    @pytest.mark.parametrize("ndim", range(33))
+    @parametrize("ndim", range(33))
     def test_higher_dims(self, ndim):
         shape = (1,) * ndim
         x = np.zeros(shape, dtype=np.float64)
@@ -103,7 +115,7 @@ class TestDLPack:
         with pytest.raises(RuntimeError):
             self.dlpack_deleter_exception()
 
-    @pytest.mark.skip(reason="no readonly arrays in pytorch")
+    @skip(reason="no readonly arrays in pytorch")
     def test_readonly(self):
         x = np.arange(5)
         x.flags.writeable = False
@@ -127,6 +139,4 @@ class TestDLPack:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

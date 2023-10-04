@@ -57,7 +57,7 @@ bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =
       c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
   if (nccl_use_nonblocking_) {
-    TORCH_WARN("Using experimental non-blocking NCCL communicator.");
+    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
   }
   return nccl_use_nonblocking_;
 }

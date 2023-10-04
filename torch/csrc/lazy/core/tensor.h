@@ -67,6 +67,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // used to rely on a LazyTensor obj with a null Data can now rely on a null
   // LazyTensorPtr instead.
   LazyTensor() = delete;
+  LazyTensor(const LazyTensor&) = default;
+  LazyTensor(LazyTensor&&) noexcept = default;
 
   ~LazyTensor() override = default;
 

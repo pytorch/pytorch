@@ -27,8 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -3368,5 +3367,4 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
 RegisterOperators reg2(createOperators(opGenArgs2));
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

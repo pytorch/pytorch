@@ -50,7 +50,7 @@ inline Tensor kl_div(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::Reduction::Reduction reduction_enum;
 
-  if (c10::get_if<enumtype::kMean>(&reduction)) {
+  if (std::holds_alternative<enumtype::kMean>(reduction)) {
     TORCH_WARN(
         "reduction: 'mean' divides the total loss by both the batch size and the support size."
         "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
@@ -58,7 +58,7 @@ inline Tensor kl_div(
   }
 
   // special case for batchmean
-  if (c10::get_if<enumtype::kBatchMean>(&reduction)) {
+  if (std::holds_alternative<enumtype::kBatchMean>(reduction)) {
     reduction_enum = torch::Reduction::Sum;
   } else {
     reduction_enum = enumtype::reduction_get_enum(reduction);
@@ -66,7 +66,8 @@ inline Tensor kl_div(
 
   auto reduced = torch::kl_div(input, target, reduction_enum, log_target);
 
-  if (c10::get_if<enumtype::kBatchMean>(&reduction) && input.dim() != 0) {
+  if (std::holds_alternative<enumtype::kBatchMean>(reduction) &&
+      input.dim() != 0) {
     reduced = reduced / input.sizes()[0];
   }
 
@@ -531,11 +532,11 @@ inline Tensor multilabel_soft_margin_loss(
 
   Tensor ret;
 
-  if (c10::get_if<enumtype::kNone>(&reduction)) {
+  if (std::holds_alternative<enumtype::kNone>(reduction)) {
     ret = loss;
-  } else if (c10::get_if<enumtype::kMean>(&reduction)) {
+  } else if (std::holds_alternative<enumtype::kMean>(reduction)) {
     ret = loss.mean();
-  } else if (c10::get_if<enumtype::kSum>(&reduction)) {
+  } else if (std::holds_alternative<enumtype::kSum>(reduction)) {
     ret = loss.sum();
   } else {
     ret = input;
@@ -661,11 +662,11 @@ inline Tensor triplet_margin_with_distance_loss(
   auto loss = torch::clamp_min(dist_pos - dist_neg + margin, 0);
 
   Tensor ret;
-  if (c10::get_if<enumtype::kNone>(&reduction)) {
+  if (std::holds_alternative<enumtype::kNone>(reduction)) {
     ret = loss;
-  } else if (c10::get_if<enumtype::kMean>(&reduction)) {
+  } else if (std::holds_alternative<enumtype::kMean>(reduction)) {
     ret = loss.mean();
-  } else if (c10::get_if<enumtype::kSum>(&reduction)) {
+  } else if (std::holds_alternative<enumtype::kSum>(reduction)) {
     ret = loss.sum();
   } else {
     ret = anchor;

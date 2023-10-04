@@ -13,6 +13,14 @@ import torch._dynamo.config as config
 import torch._numpy as tnp
 from torch._numpy.testing import assert_equal
 
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
+
 
 @contextmanager
 def control_stream(use_numpy=False):
@@ -24,28 +32,43 @@ def control_stream(use_numpy=False):
         config.use_numpy_random_stream = oldstate
 
 
-@pytest.mark.parametrize("use_numpy", [True, False])
-@pytest.mark.parametrize(
-    "func",
-    [
-        tnp.random.normal,
-        tnp.random.rand,
-        partial(tnp.random.randint, 0, 5),
-        tnp.random.randn,
-        tnp.random.random,
-        tnp.random.random_sample,
-        tnp.random.sample,
-        tnp.random.uniform,
-    ],
-)
-class TestScalarReturn:
-    def test_scalar(self, func, use_numpy):
+@instantiate_parametrized_tests
+class TestScalarReturn(TestCase):
+    @parametrize("use_numpy", [True, False])
+    @parametrize(
+        "func",
+        [
+            tnp.random.normal,
+            tnp.random.rand,
+            partial(tnp.random.randint, 0, 5),
+            tnp.random.randn,
+            subtest(tnp.random.random, name="random_random"),
+            subtest(tnp.random.random_sample, name="random_sample"),
+            tnp.random.sample,
+            tnp.random.uniform,
+        ],
+    )
+    def test_rndm_scalar(self, func, use_numpy):
         # default `size` means a python scalar return
         with control_stream(use_numpy):
             r = func()
         assert isinstance(r, (int, float))
 
-    def test_array(self, func, use_numpy):
+    @parametrize("use_numpy", [True, False])
+    @parametrize(
+        "func",
+        [
+            tnp.random.normal,
+            tnp.random.rand,
+            partial(tnp.random.randint, 0, 5),
+            tnp.random.randn,
+            subtest(tnp.random.random, name="random_random"),
+            subtest(tnp.random.random_sample, name="random_sample"),
+            tnp.random.sample,
+            tnp.random.uniform,
+        ],
+    )
+    def test_rndm_array(self, func, use_numpy):
         with control_stream(use_numpy):
             if func in (tnp.random.rand, tnp.random.randn):
                 r = func(10)
@@ -54,8 +77,9 @@ class TestScalarReturn:
         assert isinstance(r, tnp.ndarray)
 
 
-class TestShuffle:
-    @pytest.mark.parametrize("use_numpy", [True, False])
+@instantiate_parametrized_tests
+class TestShuffle(TestCase):
+    @parametrize("use_numpy", [True, False])
     def test_1d(self, use_numpy):
         ax = tnp.asarray([1, 2, 3, 4, 5, 6])
         ox = ax.copy()
@@ -66,7 +90,7 @@ class TestShuffle:
         assert isinstance(ax, tnp.ndarray)
         assert not (ax == ox).all()
 
-    @pytest.mark.parametrize("use_numpy", [True, False])
+    @parametrize("use_numpy", [True, False])
     def test_2d(self, use_numpy):
         # np.shuffle only shuffles the first axis
         ax = tnp.asarray([[1, 2, 3], [4, 5, 6]])
@@ -78,7 +102,7 @@ class TestShuffle:
         assert isinstance(ax, tnp.ndarray)
         assert not (ax == ox).all()
 
-    @pytest.mark.parametrize("use_numpy", [True, False])
+    @parametrize("use_numpy", [True, False])
     def test_shuffle_list(self, use_numpy):
         # on eager, we refuse to shuffle lists
         # under dynamo, we always fall back to numpy
@@ -89,18 +113,20 @@ class TestShuffle:
             tnp.random.shuffle(x)
 
 
-@pytest.mark.parametrize("use_numpy", [True, False])
-def test_choice(use_numpy):
-    kwds = dict(size=3, replace=False, p=[0.1, 0, 0.3, 0.6, 0])
-    with control_stream(use_numpy):
-        tnp.random.seed(12345)
-        x = tnp.random.choice(5, **kwds)
-        tnp.random.seed(12345)
-        x_1 = tnp.random.choice(tnp.arange(5), **kwds)
-        assert_equal(x, x_1)
+@instantiate_parametrized_tests
+class TestChoice(TestCase):
+    @parametrize("use_numpy", [True, False])
+    def test_choice(self, use_numpy):
+        kwds = dict(size=3, replace=False, p=[0.1, 0, 0.3, 0.6, 0])
+        with control_stream(use_numpy):
+            tnp.random.seed(12345)
+            x = tnp.random.choice(5, **kwds)
+            tnp.random.seed(12345)
+            x_1 = tnp.random.choice(tnp.arange(5), **kwds)
+            assert_equal(x, x_1)
 
 
-class TestNumpyGlobal:
+class TestNumpyGlobal(TestCase):
     def test_numpy_global(self):
         with control_stream(use_numpy=True):
             tnp.random.seed(12345)
@@ -120,6 +146,4 @@ class TestNumpyGlobal:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

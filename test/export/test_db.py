@@ -3,7 +3,7 @@
 import unittest
 
 import torch._dynamo as torchdynamo
-from torch._export import export
+from torch.export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import (
     filter_examples_by_support_level,
@@ -33,7 +33,7 @@ class ExampleTests(TestCase):
             model,
             inputs.args,
             inputs.kwargs,
-            constraints=case.constraints,
+            dynamic_shapes=case.dynamic_shapes,
         )
         exported_program.graph_module.print_readable()
 
@@ -63,7 +63,7 @@ class ExampleTests(TestCase):
                 model,
                 inputs.args,
                 inputs.kwargs,
-                constraints=case.constraints,
+                dynamic_shapes=case.dynamic_shapes,
             )
 
     @parametrize(
@@ -86,7 +86,7 @@ class ExampleTests(TestCase):
             rewrite_case.model,
             inputs.args,
             inputs.kwargs,
-            constraints=rewrite_case.constraints,
+            dynamic_shapes=rewrite_case.dynamic_shapes,
         )
 
 

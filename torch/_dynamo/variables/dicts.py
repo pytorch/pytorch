@@ -2,13 +2,10 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List
 
 import torch
 import torch.fx
-from torch.fx import _pytree as fx_pytree
-
-from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -126,7 +123,7 @@ class ConstDictVariable(VariableTracker):
             return TupleVariable(list(val.values()), **options)
         elif name == "__len__":
             assert not (args or kwargs)
-            return ConstantVariable(len(self.items), **options)
+            return ConstantVariable.create(len(self.items), **options)
         elif (
             name == "__setitem__"
             and args
@@ -196,7 +193,7 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
-            return ConstantVariable(
+            return ConstantVariable.create(
                 ConstDictVariable.get_key(args[0]) in self.items, **options
             )
         else:
@@ -239,7 +236,7 @@ class ConstDictVariable(VariableTracker):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
-            return ConstantVariable(key, **options)
+            return ConstantVariable.create(key, **options)
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -349,7 +346,7 @@ class DataClassVariable(ConstDictVariable):
             else:
                 if cls.include_none:
                     assert variables.ConstantVariable.is_literal(val)
-                    items[key] = variables.ConstantVariable(val)
+                    items[key] = variables.ConstantVariable.create(val)
                 else:
                     assert val is None, f"unexpected {val}"
 
@@ -424,13 +421,15 @@ class DataClassVariable(ConstDictVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
             return self.call_method(
-                tx, "__getitem__", [variables.ConstantVariable(name)], {}
+                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         elif not self.include_none:
             defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
-                return variables.ConstantVariable(defaults[name]).add_options(self)
+                return variables.ConstantVariable.create(defaults[name]).add_options(
+                    self
+                )
         super().var_getattr(tx, name)
 
 
@@ -494,7 +493,7 @@ class CustomizedDictVariable(ConstDictVariable):
             if isinstance(val, VariableTracker):
                 items[key] = val
             elif variables.ConstantVariable.is_literal(val):
-                items[key] = variables.ConstantVariable(val)
+                items[key] = variables.ConstantVariable.create(val)
             else:
                 unimplemented("expect VariableTracker or ConstantVariable.is_literal")
 
@@ -551,7 +550,7 @@ class CustomizedDictVariable(ConstDictVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
             return self.call_method(
-                tx, "__getitem__", [variables.ConstantVariable(name)], {}
+                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         super().var_getattr(tx, name)
 
@@ -582,44 +581,9 @@ class HFPretrainedConfigVariable(VariableTracker):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
 
-        return ConstantVariable(getattr(self.obj, name))
+        return ConstantVariable.create(getattr(self.obj, name))
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
-
-
-def _dictvariable_flatten(d: ConstDictVariable) -> Tuple[List[Any], pytree.Context]:
-    if d.python_type() is not dict:
-        # Note - ConstDictVariable can contain different kinds of dicts.
-        # However, flattening for those must differ and so cannot share the same registration as even if we
-        # consult the underlying python_type() to guide our flattening, that data will need to be propagated
-        # to unflatten. We do not have a good mechanism of doing this today, so we find it easier to treat this
-        # as unimplemented for now.
-
-        # TODO - Add support for flattening a ConstDictVariable with any underlying user_cls
-        unimplemented(f"Unsupported flattening of {d.python_type()}")
-    return list(d.items.values()), list(d.items.keys())
-
-
-def _dictvariable_unflatten(
-    values: List[Any], context: pytree.Context
-) -> ConstDictVariable:
-    assert all(isinstance(x, VariableTracker) for x in values)
-
-    # Guard propagation happens in the ConstDictVariable constructor
-    return ConstDictVariable(
-        dict(zip(context, values)), user_cls=dict, mutable_local=MutableLocal()
-    )
-
-
-def _register_dynamo_dict_to_tree_spec():
-    pytree._register_pytree_node(
-        ConstDictVariable,
-        _dictvariable_flatten,
-        _dictvariable_unflatten,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        ConstDictVariable,
-        _dictvariable_flatten,
-    )
+        return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
+            self
+        )

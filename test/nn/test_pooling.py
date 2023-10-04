@@ -749,9 +749,6 @@ torch.cuda.synchronize()
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
-                # adapative_avg_pool2d for int is implemented
-                if numel == 2 and pool_type == 'Avg':
-                    continue
                 cls_name = f'Adaptive{pool_type}Pool{numel}d'
                 module_cls = getattr(nn, cls_name)
                 output_size = (2,) * numel

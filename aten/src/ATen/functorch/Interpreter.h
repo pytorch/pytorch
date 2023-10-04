@@ -4,8 +4,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-#include <c10/util/variant.h>
 #include <bitset>
+#include <variant>
 
 namespace at::functorch {
 
@@ -70,7 +70,7 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 //
 // `Interpreter` is the struct for Interpreters. It holds ALL of the
 // relevant information (what type of interpreter it is and the metadata).
-// Metadata for each interpreter is represented as a Union (c10::variant)
+// Metadata for each interpreter is represented as a Union (std::variant)
 // of all possible metadata (VmapInterpreterMeta, GradInterpreterMeta, ...).
 //
 // Given an Interpreter, how do I get a "VmapInterpreter"? You may wish to do this
@@ -110,7 +110,7 @@ struct FunctionalizeInterpreterMeta {
   bool functionalizeAddBackViews_;
 };
 
-typedef c10::variant<
+typedef std::variant<
   int64_t,
   GradInterpreterMeta,
   JvpInterpreterMeta,

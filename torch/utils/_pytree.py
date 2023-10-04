@@ -1,5 +1,4 @@
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
-import functools
 from collections import namedtuple, OrderedDict
 import dataclasses
 import json
@@ -263,7 +262,7 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     This is the inverse operation of `tree_flatten`.
     """
     if not isinstance(spec, TreeSpec):
-        raise ValueError(
+        raise TypeError(
             f'tree_unflatten(values, spec): Expected `spec` to be instance of '
             f'TreeSpec but got item of type {type(spec)}.')
     if len(values) != spec.num_leaves:
@@ -337,7 +336,6 @@ def map_only(ty: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     You can also directly use 'tree_map_only'
     """
     def deco(f: Callable[[T], Any]) -> Callable[[Any], Any]:
-        @functools.wraps(f)
         def inner(x: T) -> Any:
             if isinstance(x, ty):
                 return f(x)

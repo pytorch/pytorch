@@ -64,6 +64,15 @@ constexpr bool is_pod_v = is_pod<T>::value;
 
 namespace guts {
 
+template <typename Base, typename Child, typename... Args>
+typename std::enable_if<
+    !std::is_array<Base>::value && !std::is_array<Child>::value &&
+        std::is_base_of<Base, Child>::value,
+    std::unique_ptr<Base>>::type
+make_unique_base(Args&&... args) {
+  return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
+}
+
 #if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
 
 template <class... B>

@@ -34,7 +34,6 @@ struct TORCH_API AdagradOptions
   TORCH_API friend bool operator==(
       const AdagradOptions& lhs,
       const AdagradOptions& rhs);
-  ~AdagradOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -45,12 +44,16 @@ struct TORCH_API AdagradParamState
   TORCH_ARG(int64_t, step) = 0;
 
  public:
+  AdagradParamState() = default;
+  AdagradParamState(const AdagradParamState&) = default;
+  AdagradParamState& operator=(const AdagradParamState&) = default;
+  AdagradParamState(AdagradParamState&&) noexcept = default;
+  AdagradParamState& operator=(AdagradParamState&&) noexcept = default;
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(
       const AdagradParamState& lhs,
       const AdagradParamState& rhs);
-  ~AdagradParamState() override = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {

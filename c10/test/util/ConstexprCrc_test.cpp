@@ -13,5 +13,5 @@ static_assert(
 
 // check concrete expected values (for CRC64 with Jones coefficients and an init
 // value of 0)
-static_assert(crc64_t{0} == crc64(""), "");
-static_assert(crc64_t{0xe9c6d914c4b8d9ca} == crc64("123456789"), "");
+static_assert(crc64_t{0} == crc64(""));
+static_assert(crc64_t{0xe9c6d914c4b8d9ca} == crc64("123456789"));

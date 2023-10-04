@@ -60,7 +60,7 @@ class BinaryBuildWorkflow:
     branches: str = "nightly"
     # Mainly for macos
     cross_compile_arm64: bool = False
-    xcode_version: str = ""
+    macos_runner: str = "macos-12-xl"
 
     def __post_init__(self) -> None:
         if self.abi_version:
@@ -307,7 +307,8 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.MACOS_ARM64
         ),
-        cross_compile_arm64=True,
+        cross_compile_arm64=False,
+        macos_runner="macos-13-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,

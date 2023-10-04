@@ -23,7 +23,8 @@ Tensor cat_batch(const MaterializedITensorListRef& tensors, vTensor& v_output) {
   uvec3 dst_offset{};
 
   for (const at::Tensor& tensor : tensors) {
-    const vTensor& v_self = convert(tensor);
+    const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
+    const vTensor& v_self = convert(self);
 
     api::PipelineBarrier pipeline_barrier{};
 
@@ -141,8 +142,7 @@ Tensor cat_feature(
 
 Tensor cat_feature_mult4ch(
     const MaterializedITensorListRef& tensors,
-    vTensor& v_output,
-    uint32_t ndim) {
+    vTensor& v_output) {
   api::Context* const context = api::context();
 
   int64_t depth_size_allprior = 0;
@@ -204,7 +204,8 @@ Tensor cat_width(const MaterializedITensorListRef& tensors, vTensor& v_output) {
   uvec3 dst_offset{};
 
   for (const at::Tensor& tensor : tensors) {
-    const vTensor& v_self = convert(tensor);
+    const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
+    const vTensor& v_self = convert(self);
 
     api::PipelineBarrier pipeline_barrier{};
 
@@ -240,7 +241,8 @@ Tensor cat_height(
   uvec3 dst_offset{};
 
   for (const at::Tensor& tensor : tensors) {
-    const vTensor& v_self = convert(tensor);
+    const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
+    const vTensor& v_self = convert(self);
 
     api::PipelineBarrier pipeline_barrier{};
 
@@ -312,7 +314,7 @@ Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
     return cat_height(materialized, v_output);
   } else if (dim == ndim - 3) {
     if (is_mult4ch) {
-      return cat_feature_mult4ch(materialized, v_output, ndim);
+      return cat_feature_mult4ch(materialized, v_output);
     }
     return cat_feature(materialized, v_output);
   }

@@ -8,6 +8,8 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/fft.cpp
   ${TORCH_API_TEST_DIR}/functional.cpp
+  ${TORCH_API_TEST_DIR}/init.cpp
+  ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/meta_tensor.cpp
@@ -40,13 +42,8 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/grad_mode.cpp
   ${TORCH_API_TEST_DIR}/operations.cpp
 )
-if(USE_CUDA)
+if(USE_CUDA OR USE_ROCM)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
-endif()
-
-if(NOT USE_ROCM)
-  list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/init.cpp)
-  list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/integration.cpp)
 endif()
 
 add_executable(test_api ${TORCH_API_TEST_SOURCES})

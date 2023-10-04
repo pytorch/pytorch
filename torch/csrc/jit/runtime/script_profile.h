@@ -9,8 +9,7 @@
 #include <torch/csrc/jit/frontend/source_ref.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace profiling {
 
 struct Datapoint {
@@ -97,5 +96,4 @@ class TORCH_API ScriptProfile : public CustomClassHolder {
   SourceMap sourceMap_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

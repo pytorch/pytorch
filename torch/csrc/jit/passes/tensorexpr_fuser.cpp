@@ -23,7 +23,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <utility>
 
@@ -550,7 +549,7 @@ class TensorExprFuser {
   }
 
   void run() {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    aliasDb_ = std::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());

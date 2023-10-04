@@ -398,6 +398,13 @@ class TestRefs(TestCase):
         expect = torch.linspace(2, 10 + 5j, steps=5)
         self.assertEqual(actual, expect)
 
+    # From https://github.com/pytorch/pytorch/issues/109558
+    def test_infinite_loop_from_py_dispatcher(self):
+        # enables prim decomps
+        with torch._dispatch.python.enable_python_dispatcher():
+            x = torch.ones(4)
+            y = x.to(device="meta")
+
 
 instantiate_device_type_tests(TestRefs, globals())
 

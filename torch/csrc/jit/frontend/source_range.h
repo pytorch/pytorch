@@ -3,10 +3,11 @@
 #include <c10/util/Optional.h>
 
 #include <algorithm>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <numeric>
+#include <ostream>
+#include <sstream>
 #include <unordered_map>
 
 namespace torch {

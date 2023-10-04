@@ -18,10 +18,10 @@ class KernelFunction;
 template <typename T>
 using has_symint =
   guts::disjunction<
-    std::is_same<c10::SymInt, std::decay_t<T>>,
-    std::is_same<c10::SymIntArrayRef, std::decay_t<T>>,
-    std::is_same<at::OptionalSymIntArrayRef, std::decay_t<T>>,
-    std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
+    std::is_same<c10::SymInt, T>,
+    std::is_same<c10::SymIntArrayRef, T>,
+    std::is_same<at::OptionalSymIntArrayRef, T>,
+    std::is_same<c10::optional<c10::SymInt>, T>
   >;
 
 template <typename T>
@@ -64,6 +64,14 @@ using fn_has_symint = typename guts::typelist::true_for_any_type<
   has_symint,
   typename guts::infer_function_traits<T>::type::parameter_types
 >;
+
+template <typename T>
+struct fn_remove_symint;
+
+template <typename Ret, typename... Args>
+struct fn_remove_symint<Ret(Args...)> {
+  using type = Ret(typename remove_symint<Args>::type...);
+};
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.

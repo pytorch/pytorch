@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.flat_param import (
+from torch.distributed.fsdp._flat_param import (
     FlatParamHandle,
     FlatParamShardMetadata,
     HandleShardingStrategy,

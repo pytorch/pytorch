@@ -5,7 +5,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
 using namespace at;

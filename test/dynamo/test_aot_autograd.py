@@ -798,10 +798,11 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     continue
                 if min_seq_nr < 0:
                     min_seq_nr = seq_nr
-                mod_name = node.meta.get("source_fn", "")
+                source_fn_stack = node.meta.get("source_fn_stack", [])
                 orig_aten = node.meta.get("original_aten", "")
-                if isinstance(mod_name, tuple):
-                    mod_name = mod_name[0]
+                mod_name = ""
+                if len(source_fn_stack) > 0:
+                    mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
@@ -816,6 +817,7 @@ SeqNr|OrigAten|SrcFn
 0|aten.add.Tensor|l__self___bn1
 1|aten._native_batch_norm_legit_functional.default|l__self___bn1
 2|aten.relu.default|l__self___relu1
+2|aten.detach.default|l__self___relu1
 3|aten.add.Tensor|add
 4|aten.view.default|flatten
 5|aten.view.default|l__self___fc1
@@ -841,6 +843,7 @@ SeqNr|OrigAten|SrcFn
 6|aten.t.default|
 5|aten.view.default|
 4|aten.view.default|
+2|aten.detach.default|
 2|aten.threshold_backward.default|
 1|aten.native_batch_norm_backward.default|
 0|aten.convolution_backward.default|
@@ -848,6 +851,32 @@ SeqNr|OrigAten|SrcFn
 """
             ),
         )
+
+    # https://github.com/pytorch/pytorch/issues/110121
+    def test_aot_export_joint_simple_repro(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.linear = torch.nn.Linear(5, 7)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def mini_backend(gm, sample_inputs):
+            from torch._functorch.aot_autograd import aot_export_joint_simple
+
+            fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
+
+            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+                return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
+
+        sample_inputs = [torch.rand((3, 4, 5))]
+        model = Mod()
+        m_compiled = torch.compile(model, backend=mini_backend)
+
+        out_ref = model(*sample_inputs)
+        out_test = m_compiled(*sample_inputs)
+        self.assertEqual(out_ref, out_test)
 
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):

@@ -23,7 +23,9 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
             # container types
             if hasattr(sequence_node.type, "_name"):
                 parameterized_types = sequence_node.type.__args__
-                if sequence_node.type._name == "Tuple":
+                if sequence_node.type._name == "Tensor":
+                    continue
+                elif sequence_node.type._name == "Tuple":
                     if len(parameterized_types) == 2 and isinstance(
                         parameterized_types[1], type(...)
                     ):

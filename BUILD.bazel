@@ -20,7 +20,6 @@ COMMON_COPTS = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-D_FILE_OFFSET_BITS=64",
-    "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
     "-DAT_PER_OPERATOR_HEADERS",
@@ -268,7 +267,6 @@ header_template_rule(
         "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
-        "@AT_FFTW_ENABLED@": "0",
         "@AT_POCKETFFT_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
@@ -1471,7 +1469,6 @@ cu_library(
 )
 
 PERF_COPTS = [
-    "-DTH_HAVE_THREAD",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
     "-DENABLE_ALIAS=1",

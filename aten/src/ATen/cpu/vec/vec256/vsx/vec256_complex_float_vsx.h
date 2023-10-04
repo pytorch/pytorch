@@ -449,6 +449,9 @@ class Vectorized<ComplexFlt> {
     auto ln = (sum / sub).log(); // ln((i + z)/(i - z))
     return ln * imag_half; // i/2*ln()
   }
+  Vectorized<ComplexFlt> atanh() const {
+    return map(std::atanh);
+  }
 
   Vectorized<ComplexFlt> acos() const {
     // acos(x) = pi/2 - asin(x)

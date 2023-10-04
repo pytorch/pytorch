@@ -156,6 +156,7 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+INSTANTIATE(c10::Half);
 #undef INSTANTIATE
 
 } // namespace blas_impl
@@ -250,7 +251,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 
 #define INSTANTIATE(scalar_t, _) \
 template void gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
+AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE);
 AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 #undef INSTANTIATE
 

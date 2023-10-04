@@ -292,9 +292,9 @@ def validate_hpu_device(location):
 
 
 def _hpu_deserialize(obj, location):
-    hpu = getattr(torch, "hpu", None)
-    assert hpu is not None, "HPU device module is not loaded"
     if location.startswith('hpu'):
+        hpu = getattr(torch, "hpu", None)
+        assert hpu is not None, "HPU device module is not loaded"
         device = validate_hpu_device(location)
         if getattr(obj, "_torch_load_uninitialized", False):
             with hpu.device(device):

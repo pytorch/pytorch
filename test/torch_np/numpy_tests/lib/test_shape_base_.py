@@ -3,7 +3,7 @@
 import functools
 import sys
 
-import pytest
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import torch._numpy as np
 
@@ -26,6 +26,14 @@ from torch._numpy import (
 from torch._numpy.random import rand, randint
 
 from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+skip = functools.partial(skipif, True)
 
 
 IS_64BIT = sys.maxsize > 2**32
@@ -44,7 +52,7 @@ def _add_keepdims(func):
     return wrapped
 
 
-class TestTakeAlongAxis:
+class TestTakeAlongAxis(TestCase):
     def test_argequivalent(self):
         """Test it translates from arg<func> to <func>"""
         a = rand(3, 4, 5)
@@ -101,7 +109,7 @@ class TestTakeAlongAxis:
         assert_equal(actual.shape, (3, 2, 5))
 
 
-class TestPutAlongAxis:
+class TestPutAlongAxis(TestCase):
     def test_replace_max(self):
         a_base = np.array([[10, 30, 20], [60, 40, 50]])
 
@@ -118,9 +126,8 @@ class TestPutAlongAxis:
 
             assert_equal(i_min, i_max)
 
-    @pytest.mark.xfail(
-        reason="RuntimeError: Expected index [1, 2, 5] to be smaller than self [3, 4, 1] apart from dimension 1"
-    )
+    @xfail  # (
+    # reason="RuntimeError: Expected index [1, 2, 5] to be smaller than self [3, 4, 1] apart from dimension 1")
     def test_broadcast(self):
         """Test that non-indexing dimensions are broadcast in both directions"""
         a = np.ones((3, 4, 1))
@@ -129,8 +136,8 @@ class TestPutAlongAxis:
         assert_equal(take_along_axis(a, ai, axis=1), 20)
 
 
-@pytest.mark.xfail(reason="apply_along_axis not implemented")
-class TestApplyAlongAxis:
+@xfail  # (reason="apply_along_axis not implemented")
+class TestApplyAlongAxis(TestCase):
     def test_simple(self):
         a = np.ones((20, 10), "d")
         assert_array_equal(apply_along_axis(len, 0, a), len(a) * np.ones(a.shape[1]))
@@ -258,15 +265,15 @@ class TestApplyAlongAxis:
             assert_equal(type(actual[i]), type(expected[i]))
 
 
-@pytest.mark.xfail(reason="apply_over_axes not implemented")
-class TestApplyOverAxes:
+@xfail  # (reason="apply_over_axes not implemented")
+class TestApplyOverAxes(TestCase):
     def test_simple(self):
         a = np.arange(24).reshape(2, 3, 4)
         aoa_a = apply_over_axes(np.sum, a, [0, 2])
         assert_array_equal(aoa_a, np.array([[[60], [92], [124]]]))
 
 
-class TestExpandDims:
+class TestExpandDims(TestCase):
     def test_functionality(self):
         s = (2, 3, 4, 5)
         a = np.empty(s)
@@ -297,7 +304,7 @@ class TestExpandDims:
         assert_raises(ValueError, expand_dims, a, axis=(1, 1))
 
 
-class TestArraySplit:
+class TestArraySplit(TestCase):
     def test_integer_0_split(self):
         a = np.arange(10)
         assert_raises(ValueError, array_split, a, 0)
@@ -443,7 +450,7 @@ class TestArraySplit:
         assert_(a.dtype.type is res[-1].dtype.type)
         # perhaps should check higher dimensions
 
-    @pytest.mark.skipif(not IS_64BIT, reason="Needs 64bit platform")
+    @skipif(not IS_64BIT, reason="Needs 64bit platform")
     def test_integer_split_2D_rows_greater_max_int32(self):
         a = np.broadcast_to([0], (1 << 32, 2))
         res = array_split(a, 4)
@@ -481,7 +488,7 @@ class TestArraySplit:
         compare_results(res, desired)
 
 
-class TestSplit:
+class TestSplit(TestCase):
     # The split function is essentially the same as array_split,
     # except that it test if splitting will result in an
     # equal split.  Only test for this case.
@@ -497,7 +504,7 @@ class TestSplit:
         assert_raises(ValueError, split, a, 3)
 
 
-class TestColumnStack:
+class TestColumnStack(TestCase):
     def test_non_iterable(self):
         assert_raises(TypeError, column_stack, 1)
 
@@ -523,7 +530,7 @@ class TestColumnStack:
         column_stack(np.arange(3) for _ in range(2))
 
 
-class TestDstack:
+class TestDstack(TestCase):
     def test_non_iterable(self):
         assert_raises(TypeError, dstack, 1)
 
@@ -573,7 +580,7 @@ class TestDstack:
 
 # array_split has more comprehensive test of splitting.
 # only do simple test on hsplit, vsplit, and dsplit
-class TestHsplit:
+class TestHsplit(TestCase):
     """Only testing for integer splits."""
 
     def test_non_iterable(self):
@@ -600,7 +607,7 @@ class TestHsplit:
         compare_results(res, desired)
 
 
-class TestVsplit:
+class TestVsplit(TestCase):
     """Only testing for integer splits."""
 
     def test_non_iterable(self):
@@ -625,7 +632,7 @@ class TestVsplit:
         compare_results(res, desired)
 
 
-class TestDsplit:
+class TestDsplit(TestCase):
     # Only testing for integer splits.
     def test_non_iterable(self):
         assert_raises(ValueError, dsplit, 1, 1)
@@ -656,7 +663,7 @@ class TestDsplit:
         compare_results(res, desired)
 
 
-class TestSqueeze:
+class TestSqueeze(TestCase):
     def test_basic(self):
         a = rand(20, 10, 10, 1, 1)
         b = rand(20, 1, 10, 1, 20)
@@ -696,7 +703,7 @@ class TestSqueeze:
         assert type(a.squeeze()) is np.ndarray
         assert type(b.squeeze()) is np.ndarray
 
-    @pytest.mark.skip(reason="XXX: order='F' not implemented")
+    @skip(reason="XXX: order='F' not implemented")
     def test_squeeze_contiguous(self):
         # Similar to GitHub issue #387
         a = np.zeros((1, 2)).squeeze()
@@ -705,13 +712,14 @@ class TestSqueeze:
         assert_(a.flags.f_contiguous)
         assert_(b.flags.f_contiguous)
 
-    @pytest.mark.xfail(reason="XXX: noop in torch, while numpy raises")
+    @xfail  # (reason="XXX: noop in torch, while numpy raises")
     def test_squeeze_axis_handling(self):
         with assert_raises(ValueError):
             np.squeeze(np.array([[1], [2], [3]]), axis=0)
 
 
-class TestKron:
+@instantiate_parametrized_tests
+class TestKron(TestCase):
     def test_basic(self):
         # Using 0-dimensional ndarray
         a = np.array(1)
@@ -741,7 +749,7 @@ class TestKron:
         k = np.array([[[1, 2], [3, 4]], [[2, 4], [6, 8]]])
         assert_array_equal(np.kron(a, b), k)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "shape_a,shape_b",
         [
             ((1, 1), (1, 1)),
@@ -763,7 +771,7 @@ class TestKron:
         assert np.array_equal(k.shape, expected_shape), "Unexpected shape from kron"
 
 
-class TestTile:
+class TestTile(TestCase):
     def test_basic(self):
         a = np.array([0, 1, 2])
         b = [[1, 2], [3, 4]]
@@ -802,8 +810,8 @@ class TestTile:
                 assert_equal(large, klarge)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestMayShareMemory:
+@xfail  # (reason="TODO: implement")
+class TestMayShareMemory(TestCase):
     def test_basic(self):
         d = np.ones((50, 60))
         d2 = np.ones((30, 60, 6))
@@ -829,6 +837,4 @@ def compare_results(res, desired):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

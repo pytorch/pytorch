@@ -56,7 +56,7 @@ def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
 ) -> Tuple[Any, Any]:
     """
-    Find d, dq pair corresponding to [producer ... -> q -> dq -> user]
+    Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
     producer
     """

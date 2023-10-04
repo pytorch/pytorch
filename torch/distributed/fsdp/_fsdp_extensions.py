@@ -44,6 +44,7 @@ class FSDPExtensions(ABC):
         world_size: int,
         num_devices_per_node: int,
         pg: dist.ProcessGroup,
+        device: Optional[torch.device] = None,
     ) -> torch.Tensor:
         """Shards a tensor to chunks and returns the local chunk."""
         ...

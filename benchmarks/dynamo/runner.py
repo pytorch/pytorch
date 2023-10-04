@@ -225,6 +225,14 @@ def parse_args():
         default=False,
         help="Log operator inputs",
     )
+    parser.add_argument(
+        "--include-slowdowns",
+        "--include_slowdowns",
+        action="store_true",
+        default=False,
+        help="Include slowdowns in geomean performance speedup report. By default, slowdowns are ignored. "
+        "This is because one can always use eager if compile is not speeding things up",
+    )
 
     parser.add_argument(
         "--extra-args", default="", help="Append commandline with these args"
@@ -617,10 +625,24 @@ class Parser:
 
 class ParsePerformanceLogs(Parser):
     def __init__(
-        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        self,
+        suites,
+        devices,
+        dtypes,
+        compilers,
+        flag_compilers,
+        mode,
+        output_dir,
+        include_slowdowns=False,
     ):
         super().__init__(
-            suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+            suites,
+            devices,
+            dtypes,
+            compilers,
+            flag_compilers,
+            mode,
+            output_dir,
         )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
@@ -632,6 +654,7 @@ class ParsePerformanceLogs(Parser):
         ]
         self.bottom_k = 50
         self.parse()
+        self.include_slowdowns = include_slowdowns
 
     def plot_graph(self, df, title):
         labels = df.columns.values.tolist()
@@ -766,7 +789,9 @@ class ParsePerformanceLogs(Parser):
         return f"{df.mean():.2f}"
 
     def geomean(self, compiler, df):
-        cleaned_df = self.get_passing_entries(compiler, df).clip(1)
+        cleaned_df = self.get_passing_entries(compiler, df)
+        if not self.include_slowdowns:
+            cleaned_df = cleaned_df.clip(1)
         if cleaned_df.empty:
             return "0.0x"
         return f"{gmean(cleaned_df):.2f}x"
@@ -979,10 +1004,18 @@ class ParsePerformanceLogs(Parser):
 def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
     build_summary(args)
+    include_slowdowns = args.include_slowdowns
 
     parser_class = ParsePerformanceLogs
     parser = parser_class(
-        suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        suites,
+        devices,
+        dtypes,
+        compilers,
+        flag_compilers,
+        mode,
+        output_dir,
+        include_slowdowns,
     )
     parser.gen_summary_files()
     return

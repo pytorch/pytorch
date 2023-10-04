@@ -71,6 +71,21 @@ TORCH_API IValue unpickle(
     TypeResolver type_resolver,
     c10::ArrayRef<at::Tensor> tensor_table,
     c10::TypePtr (*type_parser)(const std::string&) =
+        Unpickler::defaultTypeParser,
+    ObjLoader obj_loader = nullptr);
+
+/// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
+///
+/// If any `torch::IValue`s in the pickled data are `Object`s, then a
+/// `class_resolver` function must be provided.
+///
+/// See `torch::pickle` for details.
+TORCH_API IValue unpickle(
+    const char* data,
+    size_t size,
+    TypeResolver type_resolver = nullptr,
+    c10::ArrayRef<at::Tensor> tensor_table = {},
+    c10::TypePtr (*type_parser)(const std::string&) =
         Unpickler::defaultTypeParser);
 
 /// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
@@ -82,6 +97,7 @@ TORCH_API IValue unpickle(
 TORCH_API IValue unpickle(
     const char* data,
     size_t size,
+    ObjLoader obj_loader,
     TypeResolver type_resolver = nullptr,
     c10::ArrayRef<at::Tensor> tensor_table = {},
     c10::TypePtr (*type_parser)(const std::string&) =

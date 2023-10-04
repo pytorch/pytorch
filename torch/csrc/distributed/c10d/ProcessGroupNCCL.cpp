@@ -319,7 +319,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
-      seq_(seq) {
+      seq_(seq),
+      timingEnabled_(enableTiming) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -353,7 +354,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       startTraceUpdated_(w.startTraceUpdated_),
       numelIn_(w.numelIn_),
       numelOut_(w.numelOut_),
-      store_(w.store_) {
+      store_(w.store_),
+      timingEnabled_(w.timingEnabled_) {
   exception_ = w.exception_;
 }
 
@@ -408,6 +410,10 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 
 bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
   try {
+    // if timing is disabled we won't have allocated start events
+    if (!timingEnabled_) {
+      return false;
+    }
     for (const auto i : c10::irange(devices_.size())) {
       // Checking the work's corresponding CUDA events' status
       if (!(*ncclStartEvents_)[i].query()) {
@@ -641,7 +647,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  enableTiming_ = parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_;
+  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_);
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
@@ -683,10 +689,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char* torch_distributed_debug =
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options:"
-            << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+  LOG(INFO) << "[Rank " << rank_
+            << "] ProcessGroupNCCL initialization options:"
+#ifdef NCCL_VERSION_CODE
+            // NCCL > 2.3.5 should have NCCL_VERSION_CODE defined
+            << "NCCL VERSION: " << NCCL_VERSION_CODE
+#else
+            << "NCCL VERSION: " << NCCL_MAJOR << NCCL_MINOR << NCCL_PATCH
+#endif
+            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-            << ", NCCL_ENABLE_TIMING: " << enableTiming_
+            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
@@ -802,7 +815,7 @@ void ProcessGroupNCCL::registerOnCompletionHook(
       "ProcessGroupNCCL OnCompletion hook already registered");
 
   TORCH_CHECK(
-      enableTiming_,
+      enableTiming_.load(),
       "ProcessGroupNCCL OnCompletion hook requires recording start and end "
       "events which require setting NCCL_ENABLE_TIMING environment variable. "
       "This is only available for NCCL version >= 2.4.");
@@ -847,6 +860,9 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   }
 }
 
+void ProcessGroupNCCL::enableCollectivesTiming() {
+  enableTiming_.store(true);
+}
 void abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -1552,7 +1568,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       profilingTitle,
       inputs,
       desyncDebug_,
-      enableTiming_);
+      enableTiming_.load());
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1565,6 +1581,7 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
 }
 
 float ProcessGroupNCCL::WorkNCCL::getDuration() const {
+  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled")
   TORCH_CHECK(
       ncclStartEvents_->size() == 1,
       "getDuration only works for single device per ProcessGroup.");
@@ -1575,6 +1592,9 @@ float ProcessGroupNCCL::WorkNCCL::getDuration() const {
       (*ncclEndEvents_)[0].query(),
       "getDuration can only be called after work is succeeded.")
   return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
+}
+uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
+  return seq_;
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -1726,7 +1746,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   // Start event should only be recorded before the ncclGroupStart()
-  if (enableTiming_) {
+  if (work->timingEnabled_) {
     for (const auto i : c10::irange(devices.size())) {
       at::cuda::CUDAStream& ncclStream = ncclStreams[i];
       (*work->ncclStartEvents_)[i].record(ncclStream);
@@ -1806,9 +1826,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     // future blocks the stream this callback runs on the corresponding
     // ncclEndEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
-      work->future_->addCallback([work](at::ivalue::Future& /* unused */) {
-        work->recordFunctionEndCallback_();
-      });
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
+          /*uses_future=*/false);
     }
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
@@ -1850,6 +1875,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       avoidRecordStreams_,
       "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
       "collectives.");
+
+  // Bump sequence number, updated in collective() as well
+  seq_++;
 
   const auto devices = getDeviceList(tensors);
   std::string key;
@@ -1901,7 +1929,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   // Start event should only be recorded before the ncclGroupStart()
-  if (enableTiming_) {
+  if (work->timingEnabled_) {
     for (const auto i : c10::irange(tensors.size())) {
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       (*work->ncclStartEvents_)[i].record(ncclStream);
@@ -1986,9 +2014,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // future blocks the stream this callback runs on the corresponding
   // ncclEndEvents_ ensuring appropriate synchronization.
   if (work->recordFunctionEndCallback_) {
-    work->future_->addCallback([work](at::ivalue::Future& /* unused */) {
-      work->recordFunctionEndCallback_();
-    });
+    work->future_->addCallback(
+        [work](at::ivalue::Future& /* unused */) {
+          work->recordFunctionEndCallback_();
+        },
+        // uses_future = false allows us to skip synchronization in
+        // ivalue::Future, but is only valid as long as the lambda doesn't use
+        // the "Future" argument.
+        /*uses_future=*/false);
+  }
+
+  // Enqueue P2P op so that it can be cancelled by NCCL watchdog
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+    workEnqueue(work);
   }
 
   return work;

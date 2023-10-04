@@ -4,6 +4,7 @@ import torch
 import torch.fx
 from typing import Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name, _format_arg
+from torch.fx.graph import _parse_stack_trace
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
 from itertools import chain
@@ -66,11 +67,12 @@ if HAS_PYDOT:
             ignore_getattr: bool = False,
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
+            parse_stack_trace: bool = False,
         ):
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
-                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args
+                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args, parse_stack_trace
                 )
             }
 
@@ -83,12 +85,14 @@ if HAS_PYDOT:
                 if not isinstance(leaf_node, torch.fx.GraphModule):
                     continue
 
+
                 self._dot_graphs[f"{name}_{node.target}"] = self._to_dot(
                     leaf_node,
                     f"{name}_{node.target}",
                     ignore_getattr,
                     ignore_parameters_and_buffers,
                     skip_node_names_in_args,
+                    parse_stack_trace,
                 )
 
         def get_dot_graph(self, submod_name=None) -> pydot.Dot:
@@ -171,11 +175,26 @@ if HAS_PYDOT:
             # which triggers `Error: bad label format (...)` from dot
             return ret.replace("{", r"\{").replace("}", r"\}")
 
+        # shorten path to avoid drawing long boxes
+        # for full path = '/home/weif/pytorch/test.py'
+        # return short path = 'pytorch/test.py'
+        def _shorten_file_name(
+            self,
+            full_file_name: str,
+            truncate_to_last_n: int = 2,
+        ):
+            splits = full_file_name.split('/')
+            if len(splits) >= truncate_to_last_n:
+                return '/'.join(splits[-truncate_to_last_n:])
+            return full_file_name
+
+
         def _get_node_label(
             self,
             module: torch.fx.GraphModule,
             node: torch.fx.Node,
             skip_node_names_in_args: bool,
+            parse_stack_trace: bool,
         ) -> str:
             def _get_str_for_args_kwargs(arg):
                 if isinstance(arg, tuple):
@@ -220,6 +239,21 @@ if HAS_PYDOT:
 
             tensor_meta = node.meta.get('tensor_meta')
             label += self._tensor_meta_to_label(tensor_meta)
+
+            # for original fx graph
+            # print buf=buf0, n_origin=6
+            buf_meta = node.meta.get('buf_meta', None)
+            if buf_meta is not None:
+                label += f"|buf={buf_meta.name}" + r"\n"
+                label += f"|n_origin={buf_meta.n_origin}" + r"\n"
+
+            # for original fx graph
+            # print file:lineno code
+            if parse_stack_trace and node.stack_trace is not None:
+                parsed_stack_trace = _parse_stack_trace(node.stack_trace)
+                fname = self._shorten_file_name(parsed_stack_trace.file)
+                label += f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
+
 
             return label + "}"
 
@@ -280,6 +314,8 @@ if HAS_PYDOT:
         def _get_tensor_label(self, t: torch.Tensor) -> str:
             return str(t.dtype) + str(list(t.shape)) + r"\n"
 
+        # when parse_stack_trace=True
+        # print file:lineno code
         def _to_dot(
             self,
             graph_module: torch.fx.GraphModule,
@@ -287,13 +323,19 @@ if HAS_PYDOT:
             ignore_getattr: bool,
             ignore_parameters_and_buffers: bool,
             skip_node_names_in_args: bool,
+            parse_stack_trace: bool,
         ) -> pydot.Dot:
             """
             Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph.
             If ignore_parameters_and_buffers is True, the parameters and buffers
             created with the module will not be added as nodes and edges.
             """
+
+            # "TB" means top-to-bottom rank direction in layout
             dot_graph = pydot.Dot(name, rankdir="TB")
+
+
+            buf_name_to_subgraph = {}
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
@@ -301,9 +343,19 @@ if HAS_PYDOT:
 
                 style = self._get_node_style(node)
                 dot_node = pydot.Node(
-                    node.name, label=self._get_node_label(graph_module, node, skip_node_names_in_args), **style
+                    node.name, label=self._get_node_label(graph_module, node, skip_node_names_in_args, parse_stack_trace), **style
                 )
-                dot_graph.add_node(dot_node)
+
+                current_graph = dot_graph
+
+                buf_meta = node.meta.get('buf_meta', None)
+                if buf_meta is not None and buf_meta.n_origin > 1:
+                    buf_name = buf_meta.name
+                    if buf_name not in buf_name_to_subgraph:
+                        buf_name_to_subgraph[buf_name] = pydot.Cluster(buf_name, label=buf_name)
+                    current_graph = buf_name_to_subgraph.get(buf_name)
+
+                current_graph.add_node(dot_node)
 
                 def get_module_params_or_buffers():
                     for pname, ptensor in chain(
@@ -329,6 +381,9 @@ if HAS_PYDOT:
                     if not ignore_parameters_and_buffers and not isinstance(leaf_module, torch.fx.GraphModule):
                         get_module_params_or_buffers()
 
+            for subgraph in buf_name_to_subgraph.values():
+                dot_graph.add_subgraph(subgraph)
+
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
                     continue
@@ -342,6 +397,12 @@ else:
     if not TYPE_CHECKING:
         @compatibility(is_backward_compatible=False)
         class FxGraphDrawer:
-            def __init__(self, graph_module: torch.fx.GraphModule, name: str, ignore_getattr: bool = False):
+            def __init__(
+                self,
+                graph_module: torch.fx.GraphModule,
+                name: str,
+                ignore_getattr: bool = False,
+                parse_stack_trace: bool = False,
+            ):
                 raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
                                    'pydot through your favorite Python package manager.')

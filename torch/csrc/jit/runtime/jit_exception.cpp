@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static thread_local std::string caughtOriginalMsg = "";
 static thread_local std::string caughtPythonClassName = "";
@@ -28,5 +27,4 @@ void JITException::setCaughtPythonClassName(
   caughtPythonClassName = pythonClassName;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

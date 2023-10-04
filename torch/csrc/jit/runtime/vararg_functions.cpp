@@ -5,8 +5,7 @@
 #include <ATen/core/class_type.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 static constexpr int defaultPrecision = 6;
@@ -268,6 +267,9 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 }
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
+  if (num_inputs > stack.size()) {
+    TORCH_CHECK(false, "Invalid number of inputs: ", num_inputs);
+  }
   switch (num_inputs) {
     case 0:
       stack.emplace_back(c10::ivalue::Tuple::create());
@@ -424,5 +426,4 @@ void dequantize(Stack& stack) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

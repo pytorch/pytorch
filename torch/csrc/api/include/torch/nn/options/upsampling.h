@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/csrc/Export.h>
 #include <torch/enum.h>
@@ -28,7 +27,7 @@ struct TORCH_API UpsampleOptions {
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic" and "trilinear". Default: "nearest"
-  typedef c10::variant<
+  typedef std::variant<
       enumtype::kNearest,
       enumtype::kLinear,
       enumtype::kBilinear,
@@ -55,7 +54,7 @@ namespace functional {
 /// F::InterpolateFuncOptions().size(std::vector<int64_t>({4})).mode(torch::kNearest));
 /// ```
 struct TORCH_API InterpolateFuncOptions {
-  typedef c10::variant<
+  typedef std::variant<
       enumtype::kNearest,
       enumtype::kLinear,
       enumtype::kBilinear,

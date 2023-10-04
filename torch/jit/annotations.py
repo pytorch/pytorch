@@ -4,6 +4,7 @@ import dis
 import enum
 import inspect
 import re
+import typing
 import warnings
 
 from textwrap import dedent
@@ -398,6 +399,8 @@ def _fake_rcb(inp):
 
 
 def try_ann_to_type(ann, loc, rcb=None):
+    ann_args = typing.get_args(ann)  # always returns a tuple!
+
     if ann is inspect.Signature.empty:
         return TensorType.getInferred()
     if ann is None:
@@ -406,44 +409,44 @@ def try_ann_to_type(ann, loc, rcb=None):
         return TensorType.get()
     if is_tuple(ann):
         # Special case for the empty Tuple type annotation `Tuple[()]`
-        if len(ann.__args__) == 1 and ann.__args__[0] == ():
+        if len(ann_args) == 1 and ann_args[0] == ():
             return TupleType([])
-        return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
+        return TupleType([try_ann_to_type(a, loc) for a in ann_args])
     if is_list(ann):
-        elem_type = try_ann_to_type(ann.__args__[0], loc)
+        elem_type = try_ann_to_type(ann_args[0], loc)
         if elem_type:
             return ListType(elem_type)
     if is_dict(ann):
-        key = try_ann_to_type(ann.__args__[0], loc)
-        value = try_ann_to_type(ann.__args__[1], loc)
+        key = try_ann_to_type(ann_args[0], loc)
+        value = try_ann_to_type(ann_args[1], loc)
         # Raise error if key or value is None
         if key is None:
             raise ValueError(
-                f"Unknown type annotation: '{ann.__args__[0]}' at {loc.highlight()}"
+                f"Unknown type annotation: '{ann_args[0]}' at {loc.highlight()}"
             )
         if value is None:
             raise ValueError(
-                f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}"
+                f"Unknown type annotation: '{ann_args[1]}' at {loc.highlight()}"
             )
         return DictType(key, value)
     if is_optional(ann):
-        if issubclass(ann.__args__[1], type(None)):
-            contained = ann.__args__[0]
+        if issubclass(ann_args[1], type(None)):
+            contained = ann_args[0]
         else:
-            contained = ann.__args__[1]
+            contained = ann_args[1]
         valid_type = try_ann_to_type(contained, loc)
         msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
         assert valid_type, msg.format(repr(ann), repr(contained), repr(loc))
         return OptionalType(valid_type)
     if is_union(ann):
         # TODO: this is hack to recognize NumberType
-        if set(ann.__args__) == {int, float, complex}:
+        if set(ann_args) == {int, float, complex}:
             return NumberType.get()
         inner: List = []
         # We need these extra checks because both `None` and invalid
         # values will return `None`
         # TODO: Determine if the other cases need to be fixed as well
-        for a in ann.__args__:
+        for a in typing.get_args(ann):
             if a is None:
                 inner.append(NoneType.get())
             maybe_type = try_ann_to_type(a, loc)
@@ -452,15 +455,11 @@ def try_ann_to_type(ann, loc, rcb=None):
             inner.append(maybe_type)
         return UnionType(inner)  # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
-        return RRefType(try_ann_to_type(ann.__args__[0], loc))
+        return RRefType(try_ann_to_type(ann_args[0], loc))
     if is_future(ann):
-        return FutureType(try_ann_to_type(ann.__args__[0], loc))
+        return FutureType(try_ann_to_type(ann_args[0], loc))
     if is_await(ann):
-        elementType = (
-            try_ann_to_type(ann.__args__[0], loc)
-            if hasattr(ann, "__args__")
-            else AnyType.get()
-        )
+        elementType = try_ann_to_type(ann_args[0], loc) if ann_args else AnyType.get()
         return AwaitType(elementType)
     if ann is float:
         return FloatType.get()

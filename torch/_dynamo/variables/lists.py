@@ -3,19 +3,23 @@ import dataclasses
 import functools
 import inspect
 import operator
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.fx
-from torch.fx import _pytree as fx_pytree
-from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import (
+    get_fake_value,
+    guard_if_dyn,
+    is_namedtuple,
+    namedtuple_fields,
+    odict_values,
+)
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -26,7 +30,7 @@ def _listlike_contains_helper(items, search, tx, options):
         result = any(
             x.as_python_constant() == search.as_python_constant() for x in items
         )
-        return variables.ConstantVariable(result, **options)
+        return variables.ConstantVariable.create(result, **options)
 
     from .builtin import BuiltinVariable
 
@@ -40,11 +44,17 @@ def _listlike_contains_helper(items, search, tx, options):
                 tx, [check, result], {}
             )
     if result is None:
-        result = ConstantVariable(None)
+        result = ConstantVariable.create(None)
     return result
 
 
 class BaseListVariable(VariableTracker):
+    @staticmethod
+    def cls_for_instance(obj):
+        if is_namedtuple(obj):
+            return functools.partial(NamedTupleVariable, tuple_cls=type(obj))
+        return BaseListVariable.cls_for(type(obj))
+
     @staticmethod
     def cls_for(obj):
         return {
@@ -54,6 +64,9 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+            odict_values: ListVariable,
+            torch.nn.ParameterList: ListVariable,
+            torch.nn.ModuleList: ListVariable,
             collections.deque: DequeVariable,
         }[obj]
 
@@ -67,7 +80,6 @@ class BaseListVariable(VariableTracker):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
-
         # Sometimes, we know that we have passed in the guards from the items in the list
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
@@ -76,6 +88,10 @@ class BaseListVariable(VariableTracker):
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
+
+    @property
+    def value(self):
+        return self.as_python_constant()
 
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
@@ -126,7 +142,7 @@ class BaseListVariable(VariableTracker):
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
-                    value = variables.ConstantVariable(value.constant.item())
+                    value = variables.ConstantVariable.create(value.constant.item())
                 else:
                     unimplemented("__getitem__ with non-constant tensor")
             else:
@@ -162,9 +178,9 @@ class BaseListVariable(VariableTracker):
         # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
         # but `tuple([2]) != list([2])`
         if len(left.items) != len(right.items):
-            return ConstantVariable(False, **options)
+            return ConstantVariable.create(False, **options)
         if len(left.items) == 0:
-            return ConstantVariable(True, **options)
+            return ConstantVariable.create(True, **options)
 
         # Generic list comparison works by iterating over left aka self and right the compared-to list.
         # If we hit here, their lengths are the same and they cannot be expressed as python constants.
@@ -182,32 +198,13 @@ class BaseListVariable(VariableTracker):
             comps,
         ).add_options(options)
 
-    # List-like implementations for pytree
-    def __len__(self):
-        return len(self.items)
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            index = SliceVariable(
-                [
-                    ConstantVariable(index.start),
-                    ConstantVariable(index.stop),
-                    ConstantVariable(index.step),
-                ]
-            )
-        elif isinstance(index, int):
-            index = ConstantVariable(index)
-        else:
-            raise TypeError("Invalid index type. Must be int or slice.")
-        return self.getitem_const(index)
-
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
         items_to_map = items
-        start = variables.ConstantVariable(0)
+        start = variables.ConstantVariable.create(0)
         stop = None
-        step = variables.ConstantVariable(1)
+        step = variables.ConstantVariable.create(1)
 
         if len(items_to_map) == 1:
             (stop,) = items_to_map
@@ -232,7 +229,7 @@ class RangeVariable(BaseListVariable):
 
     def unpack_var_sequence(self, tx):
         return [
-            variables.ConstantVariable(x).add_options(self)
+            variables.ConstantVariable.create(x).add_options(self)
             for x in self.as_python_constant()
         ]
 
@@ -277,7 +274,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     **options,
                 ),
             )
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
         elif (
             name == "extend"
             and self.mutable_local
@@ -557,7 +554,7 @@ class SizeVariable(TupleVariable):
                 # Delay proxy calls  until we know it will be necessary
                 sym_sizes.append(v)
 
-        result = ConstantVariable(const_result).add_options(self)
+        result = ConstantVariable.create(const_result).add_options(self)
         if sym_sizes and const_result == 1:
             # Skip multiplying by 1
             result, *sym_sizes = sym_sizes
@@ -589,11 +586,16 @@ class SizeVariable(TupleVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
         if isinstance(index, slice):
             return SizeVariable(self.items[index]).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
 
@@ -644,13 +646,13 @@ class NamedTupleVariable(TupleVariable):
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         options = VariableTracker.propagate(self)
         fields = namedtuple_fields(self.tuple_cls)
-        return variables.ConstantVariable(name in fields, **options)
+        return variables.ConstantVariable.create(name in fields, **options)
 
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
         items_to_map = items
-        start, stop, step = [variables.ConstantVariable(None)] * 3
+        start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
         if len(items_to_map) == 1:
             (stop,) = items_to_map
@@ -730,56 +732,6 @@ class ListIteratorVariable(VariableTracker):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
-
-
-def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
-    return d.items, None
-
-
-def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
-    assert all(isinstance(x, VariableTracker) for x in values)
-
-    # Guard propagation happens in the BaseListVariable constructor
-    return ListVariable(values, mutable_local=MutableLocal())
-
-
-def _register_dynamo_list_to_tree_spec():
-    pytree._register_pytree_node(
-        ListVariable,
-        _listvariable_flatten,
-        _listvariable_unflatten,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        ListVariable,
-        _listvariable_flatten,
-    )
-
-
-def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
-    return d.items, None
-
-
-def _tuplevariable_unflatten(
-    values: List[Any], context: pytree.Context
-) -> TupleVariable:
-    assert all(isinstance(x, VariableTracker) for x in values)
-
-    # Guard propagation happens in the BaseListVariable constructor
-    return TupleVariable(values)
-
-
-def _register_dynamo_tuple_to_tree_spec():
-    pytree._register_pytree_node(
-        TupleVariable,
-        _tuplevariable_flatten,
-        _tuplevariable_unflatten,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        TupleVariable,
-        _tuplevariable_flatten,
-    )
 
 
 class SetVariable(VariableTracker):
@@ -909,7 +861,7 @@ class SetVariable(VariableTracker):
                 **options,
             )
             tx.replace_all(self, result)
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
             assert not args
@@ -921,7 +873,7 @@ class SetVariable(VariableTracker):
             )
             return result
         elif name == "__len__":
-            return ConstantVariable(len(self.items)).add_options(options)
+            return ConstantVariable.create(len(self.items)).add_options(options)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs

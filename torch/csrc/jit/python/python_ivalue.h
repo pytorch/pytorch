@@ -7,8 +7,7 @@
 
 namespace py = pybind11;
 
-namespace c10 {
-namespace ivalue {
+namespace c10::ivalue {
 
 // concrete ivalue Holder that hold a py::object
 struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
@@ -95,5 +94,4 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
   py::object py_obj_;
 };
 
-} // namespace ivalue
-} // namespace c10
+} // namespace c10::ivalue

@@ -71,14 +71,14 @@ Tensor TransformerEncoderLayerImpl::forward(
   Tensor ret = norm1(src + dropout1(src2));
 
   // feedforward
-  if (c10::get_if<enumtype::kGELU>(&options.activation())) {
+  if (std::holds_alternative<enumtype::kGELU>(options.activation())) {
     src2 = linear2(dropout(F::gelu(linear1(ret))));
-  } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.activation())) {
     src2 = linear2(dropout(F::relu(linear1(ret))));
-  } else if (c10::get_if<std::function<Tensor(const Tensor&)>>(
-                 &options.activation())) {
+  } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
+                 options.activation())) {
     auto callable_activation =
-        *c10::get_if<std::function<Tensor(const Tensor&)>>(
+        *std::get_if<std::function<Tensor(const Tensor&)>>(
             &options.activation());
     src2 = linear2(dropout(callable_activation(linear1(ret))));
   } else {
@@ -198,14 +198,14 @@ Tensor TransformerDecoderLayerImpl::forward(
 }
 
 Tensor TransformerDecoderLayerImpl::activation(const Tensor& input) {
-  if (c10::get_if<enumtype::kGELU>(&options.activation())) {
+  if (std::holds_alternative<enumtype::kGELU>(options.activation())) {
     return F::gelu(input);
-  } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.activation())) {
     return F::relu(input);
-  } else if (c10::get_if<std::function<Tensor(const Tensor&)>>(
-                 &options.activation())) {
+  } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
+                 options.activation())) {
     auto callable_activation =
-        *c10::get_if<std::function<Tensor(const Tensor&)>>(
+        *std::get_if<std::function<Tensor(const Tensor&)>>(
             &options.activation());
     return callable_activation(input);
   } else {

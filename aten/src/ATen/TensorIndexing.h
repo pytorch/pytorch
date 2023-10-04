@@ -22,8 +22,7 @@
 
 #include <utility>
 
-namespace at {
-namespace indexing {
+namespace at::indexing {
 
 const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
 const int64_t INDEX_MAX = -(INDEX_MIN + 1);
@@ -728,5 +727,4 @@ static inline void set_item(
   return;
 }
 
-} // namespace indexing
-} // namespace at
+} // namespace at::indexing

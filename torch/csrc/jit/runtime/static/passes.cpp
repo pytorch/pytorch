@@ -14,8 +14,7 @@ C10_DEFINE_bool(
     true,
     "If on, static runtime or optimize_sparse_nn_model will fuse clip ranges gather ops.");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
   DepthFirstGraphNodeIterator graph_it(graph);
@@ -1454,5 +1453,4 @@ void PrepackWeights(std::shared_ptr<Graph>& graph) {
   // Constant propagation should be called after this pass + others.
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

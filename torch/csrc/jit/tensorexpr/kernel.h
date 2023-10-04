@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/variant.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -59,23 +58,23 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<ExprHandle>& inputSizes);
 
 inline std::string getArgValueName(const ArgValue& a) {
-  if (c10::get_if<tensorexpr::BufHandle>(&a)) {
+  if (std::holds_alternative<tensorexpr::BufHandle>(a)) {
     return "BufHandle";
-  } else if (c10::get_if<tensorexpr::VarHandle>(&a)) {
+  } else if (std::holds_alternative<tensorexpr::VarHandle>(a)) {
     return "VarHandle";
-  } else if (c10::get_if<double>(&a)) {
+  } else if (std::holds_alternative<double>(a)) {
     return "double";
-  } else if (c10::get_if<int64_t>(&a)) {
+  } else if (std::holds_alternative<int64_t>(a)) {
     return "int64_t";
-  } else if (c10::get_if<bool>(&a)) {
+  } else if (std::holds_alternative<bool>(a)) {
     return "bool";
-  } else if (c10::get_if<BufList>(&a)) {
+  } else if (std::holds_alternative<BufList>(a)) {
     return "BufList";
-  } else if (c10::get_if<DoubleList>(&a)) {
+  } else if (std::holds_alternative<DoubleList>(a)) {
     return "DoubleList";
-  } else if (c10::get_if<IntList>(&a)) {
+  } else if (std::holds_alternative<IntList>(a)) {
     return "IntList";
-  } else if (c10::get_if<ArgNone>(&a)) {
+  } else if (std::holds_alternative<ArgNone>(a)) {
     return "None";
   } else {
     throw std::runtime_error("ArgValue type not handled in string conversion");
@@ -86,7 +85,7 @@ template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
   for (auto& x : v) {
-    auto val = c10::get_if<T>(&x);
+    auto val = std::get_if<T>(&x);
     if (val) {
       res.push_back(*val);
     } else {

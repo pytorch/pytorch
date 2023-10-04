@@ -18,8 +18,6 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
   RRefMessageBase(const RRefId& rrefId, MessageType type)
       : rrefId_(rrefId), type_(type) {}
 
-  ~RRefMessageBase() override = default;
-
   const RRefId& rrefId();
 
  protected:

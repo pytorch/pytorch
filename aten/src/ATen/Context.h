@@ -44,6 +44,8 @@ class TORCH_API Context {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
           device.index());
@@ -445,15 +447,28 @@ static inline void manual_seed(uint64_t seed) {
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
-  const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
-  if (hasCUDA() && num_gpus > 0) {
-    for (const auto i : c10::irange(num_gpus)) {
+  const auto cuda_num_gpus = detail::getCUDAHooks().getNumGPUs();
+  if (hasCUDA() && cuda_num_gpus > 0) {
+    for (const auto i : c10::irange(cuda_num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
           Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
       {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(cuda_gen.mutex());
         cuda_gen.set_current_seed(seed);
+      }
+    }
+  }
+
+  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
+  if (hasXPU() && xpu_num_gpus > 0) {
+    for (const auto i : c10::irange(xpu_num_gpus)) {
+      auto xpu_gen = globalContext().defaultGenerator(
+          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
+        xpu_gen.set_current_seed(seed);
       }
     }
   }

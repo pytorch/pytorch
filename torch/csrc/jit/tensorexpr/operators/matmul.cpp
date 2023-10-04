@@ -16,8 +16,8 @@ Tensor computeMatmul(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("matmul", outputShape, dtype);
-  const BufHandle a = c10::get<BufHandle>(inputs[0]);
-  const BufHandle b = c10::get<BufHandle>(inputs[1]);
+  const BufHandle a = std::get<BufHandle>(inputs[0]);
+  const BufHandle b = std::get<BufHandle>(inputs[1]);
 
   auto size_a = a.dims();
   auto size_b = b.dims();
@@ -68,11 +68,11 @@ Tensor computeAddMM(
       ExternalCall::make(
           ResultBuf,
           "nnc_aten_addmm",
-          {c10::get<BufHandle>(inputs[0]),
-           c10::get<BufHandle>(inputs[1]),
-           c10::get<BufHandle>(inputs[2])},
-          {c10::get<int64_t>(inputs[3]),
-           c10::get<int64_t>(
+          {std::get<BufHandle>(inputs[0]),
+           std::get<BufHandle>(inputs[1]),
+           std::get<BufHandle>(inputs[2])},
+          {std::get<int64_t>(inputs[3]),
+           std::get<int64_t>(
                inputs[4])})); // TODO: handle other dtypes of alpha and beta
 }
 

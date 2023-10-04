@@ -11,7 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
-from torch.distributed.fsdp.flat_param import FlatParamHandle
+from torch.distributed.fsdp._flat_param import FlatParamHandle
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     FullyShardedDataParallel as FSDP,

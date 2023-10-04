@@ -1224,6 +1224,35 @@ void GraphEncoder::EncodeTypeProto(
   }
 }
 
+static std::string get_little_endian_data(const at::Tensor& t) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return std::string(
+      static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  const size_t element_size = t.element_size();
+  const size_t num_elements = t.numel();
+
+  std::vector<char> data_copy{
+      static_cast<char*>(t.data_ptr()),
+      static_cast<char*>(t.data_ptr()) + element_size * num_elements};
+
+  for (size_t i = 0; i < num_elements; ++i) {
+    char* start_byte = data_copy.data() + i * element_size;
+    char* end_byte = start_byte + element_size - 1;
+    /* keep swapping */
+    for (size_t count = 0; count < element_size / 2; ++count) {
+      std::swap(*start_byte, *end_byte);
+      ++start_byte;
+      --end_byte;
+    }
+  }
+
+  return std::string(data_copy.data(), element_size * num_elements);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+}
+
 void GraphEncoder::EncodeTensor(
     onnx::TensorProto* tensor_proto,
     const at::Tensor& tensor,
@@ -1277,8 +1306,9 @@ void GraphEncoder::EncodeTensor(
       location->set_value(tensorName);
       tensor_proto->set_data_location(onnx::TensorProto_DataLocation_EXTERNAL);
     } else {
-      tensor_proto->set_raw_data(std::string(
-          static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
+      // According to ParseData function's comments in onnx, tensor data is
+      // always little endian.
+      tensor_proto->set_raw_data(get_little_endian_data(t));
     }
   }
 }

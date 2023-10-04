@@ -40,6 +40,8 @@ from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import Placement, DTensorSpec
 
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
+PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
+
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -113,25 +115,29 @@ class DTensorTestBase(MultiProcessTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
+    @property
+    def backend(self) -> str:
+        return PG_BACKEND
+
     def build_device_mesh(self) -> DeviceMesh:
         return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
 
-    def init_pg(self, backend: str = "nccl") -> None:
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+    def init_pg(self) -> None:
+        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if backend not in ["nccl", "gloo", "mpi"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
-            backend=backend,
+            backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
         )
 
         # set device for nccl pg for collectives
-        if backend == "nccl":
+        if "nccl" in self.backend:
             torch.cuda.set_device(self.rank)
 
     def destroy_pg(self) -> None:
@@ -180,13 +186,7 @@ def with_comms(func: TestFunc) -> TestFunc:
         else:
             self.device_type = "cpu"
 
-        pg_backend = (
-            "nccl" if self.device_type == "cuda" else "gloo"
-        )
-        if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        self.init_pg(backend=pg_backend)
+        self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 

@@ -932,7 +932,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
 else()
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)

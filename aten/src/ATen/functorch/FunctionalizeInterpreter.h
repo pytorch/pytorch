@@ -13,7 +13,7 @@ struct FunctionalizeInterpreterPtr {
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
   void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   bool functionalizeAddBackViews() const {
-    return c10::get<FunctionalizeInterpreterMeta>(base_->meta()).functionalizeAddBackViews_;
+    return std::get<FunctionalizeInterpreterMeta>(base_->meta()).functionalizeAddBackViews_;
   }
  private:
   const Interpreter* base_;

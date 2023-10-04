@@ -125,10 +125,9 @@ def _fft_c2r(
     input = _maybe_promote_tensor_fft(input, require_complex=True)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    num_points = 0 if n is None else n
     torch._check(
         last_dim_size >= 1,
-        lambda: f"Invalid number of data points ({num_points}) specified",
+        lambda: f"Invalid number of data points ({last_dim_size}) specified",
     )
 
     if n is not None:
@@ -157,18 +156,16 @@ def _fft_r2c(
     )
     input = _maybe_promote_tensor_fft(input)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
-    last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    num_points = 0 if n is None else n
+    dim_size = n if n is not None else input.shape[dim]
     torch._check(
-        last_dim_size >= 1,
-        lambda: f"Invalid number of data points ({num_points}) specified",
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
     )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
 
     ret = prims.fft_r2c(input, dim=dims, onesided=onesided)
-    ret = _apply_norm(ret, norm, input.shape[dim], forward)
+    ret = _apply_norm(ret, norm, dim_size, forward)
     return ret if forward else torch.conj(ret)
 
 
@@ -186,18 +183,16 @@ def _fft_c2c(
         lambda: f"{func_name} expects a complex input tensor, but got {input.dtype}",
     )
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
-    last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    num_points = 0 if n is None else n
+    dim_size = n if n is not None else input.shape[dim]
     torch._check(
-        last_dim_size >= 1,
-        lambda: f"Invalid number of data points ({num_points}) specified",
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
     )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
 
     ret = prims.fft_c2c(input, dim=dims, forward=forward)
-    return _apply_norm(ret, norm, input.shape[dim], forward)
+    return _apply_norm(ret, norm, dim_size, forward)
 
 
 @register_decomposition(aten.fft_fft)

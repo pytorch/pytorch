@@ -819,9 +819,9 @@ changes without warning in the future.
 First, to get a listing of all overridable functions, use
 ``torch.overrides._get_overridable_functions``. This returns a dictionary whose
 keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
-functions in that namespace that can be overriden. For example, let's print the
+functions in that namespace that can be overridden. For example, let's print the
 names of the first 5 functions in ``torch.nn.functional`` that can be
-overriden::
+overridden::
 
   >>> from torch.overrides import get_overridable_functions
   >>> func_dict = get_overridable_functions()
@@ -850,7 +850,7 @@ signature of the original ``PyTorch`` function::
 Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
 that explicitly cannot be overrided by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
-by ``get_overridable_functions`` cannot be overriden.
+by ``get_overridable_functions`` cannot be overridden.
 
 
 .. _extending-torch-c++:

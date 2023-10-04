@@ -78,7 +78,7 @@ def is_onnxrt_backend_supported() -> bool:
         ...             return x * x
         ...     print(f(torch.randn(10)))
         ... else:
-        ...     print("pip install onnx onnxscript-preview onnxruntime")
+        ...     print("pip install onnx onnxscript onnxruntime")
         ...
     """
     return _SUPPORT_ONNXRT

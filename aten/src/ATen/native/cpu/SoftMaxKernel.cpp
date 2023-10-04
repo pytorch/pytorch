@@ -1,3 +1,4 @@
+#include <memory>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cpu/SoftmaxKernel.h>
 
@@ -49,8 +50,8 @@ inline void _vec_log_softmax_lastdim(
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
-    std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
-    std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
+    auto tmp_sum_scalar = std::make_unique<scalar_t[]>(CHUNK_SIZE);
+    auto max_input_arr = std::make_unique<scalar_t[]>(CHUNK_SIZE);
     for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
       int64_t loop_end = CHUNK_SIZE;
       if (ii + CHUNK_SIZE > end)
@@ -148,7 +149,7 @@ inline void _vec_softmax_lastdim<BFloat16>(
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer.
-    std::unique_ptr<float []> buffer(new float[dim_size]);
+    auto buffer = std::make_unique<float []>(dim_size);
     float* buffer_data = buffer.get();
 
     for (const auto i : c10::irange(begin, end)) {
@@ -275,7 +276,7 @@ inline void _vec_softmax_backward(
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<scalar_t[]> buffer(new scalar_t[CHUNK_SIZE]);
+        auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -358,16 +359,14 @@ inline void _vec_softmax_backward<BFloat16>(
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<float[]> buffer(new float[CHUNK_SIZE]);
+        auto buffer = std::make_unique<float[]>(CHUNK_SIZE);
         float* tmp_sum_data = buffer.get();
 
         // thread local buffer that holds grad_output and output data in float32
-        std::unique_ptr<float[]> grad_output_buffer(
-            new float[dim_size * CHUNK_SIZE]);
+        auto grad_output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* grad_output_buffer_data = grad_output_buffer.get();
 
-        std::unique_ptr<float[]> output_buffer(
-            new float[dim_size * CHUNK_SIZE]);
+        auto output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* output_buffer_data = output_buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -486,7 +485,7 @@ inline void _vec_log_softmax_backward(
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<scalar_t[]> buffer(new scalar_t[CHUNK_SIZE]);
+        auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -568,12 +567,11 @@ inline void _vec_log_softmax_backward<BFloat16>(
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<float[]> buffer(new float[CHUNK_SIZE]);
+        auto buffer = std::make_unique<float[]>(CHUNK_SIZE);
         float* tmp_sum_data = buffer.get();
 
         // thread local buffer that holds grad_output data in float32
-        std::unique_ptr<float[]> grad_output_buffer(
-            new float[dim_size * CHUNK_SIZE]);
+        auto grad_output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* grad_output_buffer_data = grad_output_buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -897,7 +895,7 @@ inline void _vec_logsoftmax(
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   at::parallel_for(0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer which holds vertical reduction result: max and sum.
-    std::unique_ptr<scalar_t []> buffer(new scalar_t[CHUNK_SIZE * 2]);
+    auto buffer = std::make_unique<scalar_t []>(CHUNK_SIZE * 2);
     scalar_t* input_max_data = buffer.get();
     scalar_t* tmp_sum_data = buffer.get() + CHUNK_SIZE;
 
@@ -1000,12 +998,12 @@ inline void _vec_logsoftmax<BFloat16>(
 
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   at::parallel_for(0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
-    std::unique_ptr<float []> buffer(new float[CHUNK_SIZE * 2]);
+    auto buffer = std::make_unique<float []>(CHUNK_SIZE * 2);
     float* input_max_data = buffer.get();
     float* tmp_sum_data = buffer.get() + CHUNK_SIZE;
 
     // thread local buffer that holds input data in float32 to save next 2 dtype conversion
-    std::unique_ptr<float []> input_buffer(new float[dim_size * CHUNK_SIZE]);
+    auto input_buffer = std::make_unique<float []>(dim_size * CHUNK_SIZE);
     float* input_buffer_data = input_buffer.get();
 
     // init

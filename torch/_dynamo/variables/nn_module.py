@@ -95,7 +95,7 @@ class NNModuleVariable(VariableTracker):
         if isinstance(base, torch.nn.ModuleDict):
             result = []
             for name, submod in base.items():
-                name_var = variables.ConstantVariable(name)
+                name_var = variables.ConstantVariable.create(name)
                 tx.output.register_attr_or_module(
                     submod,
                     self.module_key,
@@ -127,7 +127,7 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self)
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
-        return variables.ConstantVariable(result, **options).add_guard(
+        return variables.ConstantVariable.create(result, **options).add_guard(
             NNModuleSource(AttrSource(self.source, name)).make_guard(
                 GuardBuilder.HASATTR
             )
@@ -160,7 +160,7 @@ class NNModuleVariable(VariableTracker):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
-            tx, [variables.ConstantVariable(name)], {}
+            tx, [variables.ConstantVariable.create(name)], {}
         )
 
     def var_getattr(self, tx, name):
@@ -396,7 +396,7 @@ class NNModuleVariable(VariableTracker):
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
-            return ConstantVariable(True, **options)
+            return ConstantVariable.create(True, **options)
 
         if name == "_get_item_by_idx":
             assert args[1].is_python_constant()
@@ -453,7 +453,7 @@ class NNModuleVariable(VariableTracker):
         def named_embed(name, obj):
             return TupleVariable(
                 [
-                    ConstantVariable(name, **options),
+                    ConstantVariable.create(name, **options),
                     tx.output.register_attr_or_module(
                         obj,
                         key,
@@ -513,7 +513,7 @@ class NNModuleVariable(VariableTracker):
             assert not (args or kwargs)
             result = []
             for name in module.keys():
-                result.append(ConstantVariable(name, **options))
+                result.append(ConstantVariable.create(name, **options))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "values":
             assert not (args or kwargs)
@@ -526,14 +526,14 @@ class NNModuleVariable(VariableTracker):
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "__len__":
             assert not (args or kwargs)
-            return ConstantVariable(len(module), **options)
+            return ConstantVariable.create(len(module), **options)
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
             and args
             and args[0].is_python_constant()
         ):
-            return ConstantVariable(
+            return ConstantVariable.create(
                 args[0].as_python_constant() in module._modules, **options
             )
         elif name == "__getitem__":

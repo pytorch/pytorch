@@ -119,10 +119,6 @@ def _disallowed_function_ids():
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
     ]
-    if torch.distributed.is_available():
-        from torch.distributed import _functional_collectives
-
-        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
 
     # extract all dtypes from torch
     dtypes = [
@@ -163,6 +159,7 @@ def _allowed_function_ids():
         disallowed_modules = (
             "torch.optim.",
             "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
+            "torch.utils._pytree",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
@@ -217,6 +214,7 @@ def _allowed_function_ids():
                     deprecated_func.grad,
                     torch.func.vmap,
                     deprecated_func.vmap,
+                    torch.nn.functional.triplet_margin_with_distance_loss,
                 ):
                     continue
 

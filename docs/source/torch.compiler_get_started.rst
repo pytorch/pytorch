@@ -92,7 +92,7 @@ hub.
    opt_model(torch.randn(1,3,64,64))
 
 And that is not the only available backend, you can run in a REPL
-``torch.compile.list_backends()`` to see all the available backends. Try out the
+``torch.compiler.list_backends()`` to see all the available backends. Try out the
 ``cudagraphs`` next as inspiration.
 
 Using a pretrained model

@@ -63,17 +63,17 @@ inline Tensor grid_sample(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t mode_enum, padding_mode_enum;
 
-  if (c10::get_if<enumtype::kBilinear>(&mode)) {
+  if (std::holds_alternative<enumtype::kBilinear>(mode)) {
     mode_enum = 0;
-  } else if (c10::get_if<enumtype::kNearest>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kNearest>(mode)) {
     mode_enum = 1;
   } else { /// mode == 'bicubic'
     mode_enum = 2;
   }
 
-  if (c10::get_if<enumtype::kZeros>(&padding_mode)) {
+  if (std::holds_alternative<enumtype::kZeros>(padding_mode)) {
     padding_mode_enum = 0;
-  } else if (c10::get_if<enumtype::kBorder>(&padding_mode)) {
+  } else if (std::holds_alternative<enumtype::kBorder>(padding_mode)) {
     padding_mode_enum = 1;
   } else { /// padding_mode == 'reflection'
     padding_mode_enum = 2;

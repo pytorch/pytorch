@@ -9,11 +9,11 @@ import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _get_handle_fqns_from_root
+from torch.distributed.fsdp._flat_param import HandleTrainingState
 from torch.distributed.fsdp._runtime_utils import (
     _get_handle_to_prefetch,
     _get_training_state,
 )
-from torch.distributed.fsdp.flat_param import HandleTrainingState
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest

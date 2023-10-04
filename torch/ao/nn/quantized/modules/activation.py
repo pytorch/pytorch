@@ -236,6 +236,9 @@ class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
             bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
             setattr(converted, 'bias_v', bias_v)  # noqa: B010
 
+        del converted.in_proj_weight
+        del converted.in_proj_bias
+
         return converted
 
 class PReLU(torch.nn.Module):

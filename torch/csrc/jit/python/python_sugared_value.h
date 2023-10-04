@@ -10,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::string typeString(py::handle h);
 
@@ -374,5 +373,4 @@ struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
       size_t n_binders) override;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

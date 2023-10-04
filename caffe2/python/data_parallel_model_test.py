@@ -9,7 +9,7 @@ import shutil
 import tempfile
 import unittest
 import time
-from mock import Mock
+from unittest.mock import Mock
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 

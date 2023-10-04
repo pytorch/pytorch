@@ -209,10 +209,18 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         p);
   }
 
+  // correctly assign values to only non-empty slots, as the empty slots should
+  // get skipped
   std::vector<Tensor> result;
   result.reserve(ntensors);
-  for (const auto& i : c10::irange(ntensors)) {
-    result.emplace_back(ret_per_tensor[i]);
+  int i = 0;
+  for (const auto& t : tensors) {
+    if (t.numel() != 0) {
+      result.emplace_back(ret_per_tensor[i]);
+      i++;
+    } else {
+      result.emplace_back(at::zeros({}, options));
+    }
   }
   return result;
 }

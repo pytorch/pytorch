@@ -16,8 +16,7 @@
 namespace dist_autograd = torch::distributed::autograd;
 namespace dist_rpc = torch::distributed::rpc;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 distributed::rpc::RegisterWorkerInfoOnce workerInfo{};
@@ -283,5 +282,4 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 }
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

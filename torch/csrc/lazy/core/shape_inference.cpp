@@ -1004,7 +1004,7 @@ std::vector<Shape> compute_shape__adaptive_avg_pool3d(
       "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
       self.sizes());
 
-  int64_t channels = self.size(-3);
+  int64_t channels = self.size(-4);
   int64_t output_depth = output_size[0];
   int64_t output_height = output_size[1];
   int64_t output_width = output_size[2];

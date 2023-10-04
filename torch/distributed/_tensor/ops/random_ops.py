@@ -1,58 +1,31 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast
-
 import torch
 
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.utils import register_prop_rule
-from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.op_schema import (
+    OpSchema,
+    OpStrategy,
+    PlacementStrategy,
+    StrategyType,
+)
+from torch.distributed._tensor.ops.utils import is_tensor_partial, register_op_strategy
 
 aten = torch.ops.aten
-random_ops = [
-    aten.normal_.default,
-    aten.uniform_.default,
-]
 
 
-def _register_non_deterministic_op(op):
-    @register_prop_rule(op)
-    def non_deterministic_rule(op_schema: OpSchema) -> OutputSharding:
-        self_spec = cast(DTensorSpec, op_schema.args_schema[0])
+@register_op_strategy(
+    [aten.normal_.default, aten.uniform_.default, aten.native_dropout.default]
+)
+def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    self_strategy = op_schema.args_schema[0]
+    assert isinstance(self_strategy, OpStrategy)
 
-        # NOTE: random op behavior on a partial tensor is TBD
-        partial = False
-        for placement in self_spec.placements:
-            if isinstance(placement, _Partial):
-                partial = True
-                break
+    random_strategy = OpStrategy([])
+    for arg_strategy in self_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_partial(arg_spec):
+            # TODO: figure out how inplace random op should behave when it's partial
+            raise RuntimeError(f"{op_schema.op} with _Partial is not supported yet!")
+        random_strategy.strategies.append(PlacementStrategy(output_spec=arg_spec))
 
-        if partial:
-            return OutputSharding(
-                None, failed_reason=f"{op} with _Partial is not supported yet!"
-            )
-        else:
-            return OutputSharding(self_spec)
-
-
-@register_prop_rule(aten.native_dropout.default)
-def dropout_rule(op_schema: OpSchema) -> OutputSharding:
-    self_spec = cast(DTensorSpec, op_schema.args_schema[0])
-
-    # NOTE: dropout on a partial tensor should be similar to the case of a replicate tensor
-    partial = False
-    for placement in self_spec.placements:
-        if isinstance(placement, _Partial):
-            partial = True
-            break
-
-    if partial:
-        return OutputSharding(
-            None,
-            failed_reason="aten.native_dropout.default with _Partial is not supported yet!",
-        )
-    else:
-        return OutputSharding([self_spec, self_spec])
-
-
-for op in random_ops:
-    _register_non_deterministic_op(op)
+    return random_strategy

@@ -3,14 +3,27 @@
 """
 Test the scalar constructors, which also do type-coercion
 """
+import functools
+
+from unittest import expectedFailure as xfail, skipIf as skipif
+
 import pytest
 
 import torch._numpy as np
 from torch._numpy.testing import assert_almost_equal, assert_equal
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
+
+skip = functools.partial(skipif, True)
 
 
-class TestFromString:
-    @pytest.mark.xfail(reason="XXX: floats from strings")
+class TestFromString(TestCase):
+    @xfail  # (reason="XXX: floats from strings")
     def test_floating(self):
         # Ticket #640, floats from string
         fsingle = np.single("1.234")
@@ -18,7 +31,7 @@ class TestFromString:
         assert_almost_equal(fsingle, 1.234)
         assert_almost_equal(fdouble, 1.234)
 
-    @pytest.mark.xfail(reason="XXX: floats from strings")
+    @xfail  # (reason="XXX: floats from strings")
     def test_floating_overflow(self):
         """Strings containing an unrepresentable float overflow"""
         fhalf = np.half("1e10000")
@@ -40,7 +53,7 @@ class TestFromString:
             np.bool_(False, garbage=True)
 
 
-class TestFromInt:
+class TestFromInt(TestCase):
     def test_intp(self):
         # Ticket #99
         assert_equal(1024, np.intp(1024))
@@ -50,13 +63,20 @@ class TestFromInt:
         assert_equal(np.uint8(-2), np.uint8(254))
 
 
-int_types = [np.byte, np.short, np.intc, np.int_, np.longlong]
+int_types = [
+    subtest(np.byte, name="np_byte"),
+    subtest(np.short, name="np_short"),
+    subtest(np.intc, name="np_intc"),
+    subtest(np.int_, name="np_int_"),
+    subtest(np.longlong, name="np_longlong"),
+]
 uint_types = [np.ubyte]
 float_types = [np.half, np.single, np.double]
 cfloat_types = [np.csingle, np.cdouble]
 
 
-class TestArrayFromScalar:
+@instantiate_parametrized_tests
+class TestArrayFromScalar(TestCase):
     """gh-15467"""
 
     def _do_test(self, t1, t2):
@@ -74,23 +94,21 @@ class TestArrayFromScalar:
         else:
             assert arr1.dtype.type is t2
 
-    @pytest.mark.parametrize("t1", int_types + uint_types)
-    @pytest.mark.parametrize("t2", int_types + uint_types + [None])
+    @parametrize("t1", int_types + uint_types)
+    @parametrize("t2", int_types + uint_types + [None])
     def test_integers(self, t1, t2):
         return self._do_test(t1, t2)
 
-    @pytest.mark.parametrize("t1", float_types)
-    @pytest.mark.parametrize("t2", float_types + [None])
+    @parametrize("t1", float_types)
+    @parametrize("t2", float_types + [None])
     def test_reals(self, t1, t2):
         return self._do_test(t1, t2)
 
-    @pytest.mark.parametrize("t1", cfloat_types)
-    @pytest.mark.parametrize("t2", cfloat_types + [None])
+    @parametrize("t1", cfloat_types)
+    @parametrize("t2", cfloat_types + [None])
     def test_complex(self, t1, t2):
         return self._do_test(t1, t2)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

@@ -11,20 +11,27 @@ by
 """
 import operator
 
-import pytest
+from unittest import skipIf as skip, SkipTest
 
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
-parametrize_unary_ufuncs = pytest.mark.parametrize("ufunc", [np.sin])
-parametrize_casting = pytest.mark.parametrize(
+parametrize_unary_ufuncs = parametrize("ufunc", [np.sin])
+parametrize_casting = parametrize(
     "casting", ["no", "equiv", "safe", "same_kind", "unsafe"]
 )
 
 
-class TestUnaryUfuncs:
+@instantiate_parametrized_tests
+class TestUnaryUfuncs(TestCase):
     def get_x(self, ufunc):
         return np.arange(5, dtype="float64")
 
@@ -34,17 +41,17 @@ class TestUnaryUfuncs:
         x = self.get_x(ufunc)[0]
         float(ufunc(x))
 
-    @pytest.mark.skip(reason="XXX: unary ufuncs ignore the dtype=... parameter")
+    @skip(True, reason="XXX: unary ufuncs ignore the dtype=... parameter")
     @parametrize_unary_ufuncs
     def test_x_and_dtype(self, ufunc):
         x = self.get_x(ufunc)
         res = ufunc(x, dtype="float")
         assert res.dtype == np.dtype("float")
 
-    @pytest.mark.skip(reason="XXX: unary ufuncs ignore the dtype=... parameter")
+    @skip(True, reason="XXX: unary ufuncs ignore the dtype=... parameter")
     @parametrize_casting
     @parametrize_unary_ufuncs
-    @pytest.mark.parametrize("dtype", ["float64", "complex128", "float32"])
+    @parametrize("dtype", ["float64", "complex128", "float32"])
     def test_x_and_dtype_casting(self, ufunc, casting, dtype):
         x = self.get_x(ufunc)
         if not np.can_cast(x, dtype, casting=casting):
@@ -55,7 +62,7 @@ class TestUnaryUfuncs:
 
     @parametrize_casting
     @parametrize_unary_ufuncs
-    @pytest.mark.parametrize("out_dtype", ["float64", "complex128", "float32"])
+    @parametrize("out_dtype", ["float64", "complex128", "float32"])
     def test_x_and_out_casting(self, ufunc, casting, out_dtype):
         x = self.get_x(ufunc)
         out = np.empty_like(x, dtype=out_dtype)
@@ -116,7 +123,7 @@ no_complex = [
     np.minimum,
 ]
 
-parametrize_binary_ufuncs = pytest.mark.parametrize(
+parametrize_binary_ufuncs = parametrize(
     "ufunc", ufuncs_with_dunders + numeric_binary_ufuncs + no_complex
 )
 
@@ -143,7 +150,8 @@ parametrize_binary_ufuncs = pytest.mark.parametrize(
 """
 
 
-class TestBinaryUfuncs:
+@instantiate_parametrized_tests
+class TestBinaryUfuncs(TestCase):
     def get_xy(self, ufunc):
         return np.arange(5, dtype="float64"), np.arange(8, 13, dtype="float64")
 
@@ -161,13 +169,13 @@ class TestBinaryUfuncs:
 
     @parametrize_casting
     @parametrize_binary_ufuncs
-    @pytest.mark.parametrize("out_dtype", ["float64", "complex128", "float32"])
+    @parametrize("out_dtype", ["float64", "complex128", "float32"])
     def test_xy_and_out_casting(self, ufunc, casting, out_dtype):
         x, y = self.get_xy(ufunc)
         out = np.empty_like(x, dtype=out_dtype)
 
         if ufunc in no_complex and np.issubdtype(out_dtype, np.complexfloating):
-            pytest.skip(f"{ufunc} does not accept complex.")
+            raise SkipTest(f"{ufunc} does not accept complex.")
 
         can_cast_x = np.can_cast(x, out_dtype, casting=casting)
         can_cast_y = np.can_cast(y, out_dtype, casting=casting)
@@ -199,10 +207,11 @@ class TestBinaryUfuncs:
 dtypes_numeric = [np.int32, np.float32, np.float64, np.complex128]
 
 
-class TestNdarrayDunderVsUfunc:
+@instantiate_parametrized_tests
+class TestNdarrayDunderVsUfunc(TestCase):
     """Test ndarray dunders which delegate to ufuncs, vs ufuncs."""
 
-    @pytest.mark.parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
+    @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
     def test_basic(self, ufunc, op, iop):
         """basic op/rop/iop, no dtypes, no broadcasting"""
 
@@ -229,15 +238,15 @@ class TestNdarrayDunderVsUfunc:
         iop(a, a)
         assert_equal(a, op(a0, a0))
 
-    @pytest.mark.parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
-    @pytest.mark.parametrize("other_dtype", dtypes_numeric)
+    @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
+    @parametrize("other_dtype", dtypes_numeric)
     def test_other_scalar(self, ufunc, op, iop, other_dtype):
         """Test op/iop/rop when the other argument is a scalar of a different dtype."""
         a = np.array([1, 2, 3])
         b = other_dtype(3)
 
         if ufunc in no_complex and issubclass(other_dtype, np.complexfloating):
-            pytest.skip(f"{ufunc} does not accept complex.")
+            raise SkipTest(f"{ufunc} does not accept complex.")
 
         # __op__
         result = op(a, b)
@@ -267,15 +276,15 @@ class TestNdarrayDunderVsUfunc:
             with assert_raises((TypeError, RuntimeError)):  # XXX np.UFuncTypeError
                 iop(a, b)
 
-    @pytest.mark.parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
-    @pytest.mark.parametrize("other_dtype", dtypes_numeric)
+    @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
+    @parametrize("other_dtype", dtypes_numeric)
     def test_other_array(self, ufunc, op, iop, other_dtype):
         """Test op/iop/rop when the other argument is an array of a different dtype."""
         a = np.array([1, 2, 3])
         b = np.array([5, 6, 7], dtype=other_dtype)
 
         if ufunc in no_complex and issubclass(other_dtype, np.complexfloating):
-            pytest.skip(f"{ufunc} does not accept complex.")
+            raise SkipTest(f"{ufunc} does not accept complex.")
 
         # __op__
         result = op(a, b)
@@ -303,7 +312,7 @@ class TestNdarrayDunderVsUfunc:
             with assert_raises((TypeError, RuntimeError)):  # XXX np.UFuncTypeError
                 iop(a, b)
 
-    @pytest.mark.parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
+    @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
     def test_other_array_bcast(self, ufunc, op, iop):
         """Test op/rop/iop with broadcasting"""
         # __op__
@@ -345,7 +354,7 @@ class TestNdarrayDunderVsUfunc:
             assert result_op.dtype == result_ufunc.dtype
 
 
-class TestUfuncDtypeKwd:
+class TestUfuncDtypeKwd(TestCase):
     def test_binary_ufunc_dtype(self):
         # default computation uses float64:
         r64 = np.add(1, 1e-15)
@@ -391,6 +400,4 @@ class TestUfuncDtypeKwd:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-#include <ATen/ATen.h>
 #include <curand_kernel.h>
 #include <cmath>
 #include <vector>
@@ -581,8 +580,8 @@ struct AttentionKernel {
           p.num_heads <= 1 || p.bias_strideH % kAlignmentQ == 0,
           "attn_bias is not correctly aligned (strideH)");
       TORCH_CHECK(
-          p.bias_strideM % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned");
+          p.num_queries <= 1 || p.bias_strideM % kAlignmentQ == 0,
+          "attn_bias is not correctly aligned (strideM)");
     }
     TORCH_CHECK(
         p.q_strideM % kAlignmentQ == 0,

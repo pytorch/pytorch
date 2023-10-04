@@ -8,8 +8,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace at {
-namespace autocast {
+namespace at::autocast {
 
 TORCH_API bool is_enabled();
 TORCH_API void set_enabled(bool enabled);
@@ -46,7 +45,9 @@ TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 namespace {
-bool is_autocast_eligible(const Tensor& tensor, c10::DeviceType device_type) {
+inline bool is_autocast_eligible(
+    const Tensor& tensor,
+    c10::DeviceType device_type) {
   switch (device_type) {
     case c10::DeviceType::CUDA:
       return (tensor.is_cuda() || tensor.is_xla()) &&
@@ -537,8 +538,7 @@ wouldn't try to get clever about it Therefore, for the moment, this is all
 copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 ********************************************************************************************************************/
 
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast
 
 #define ADD_NS(RAW_OP) at::RAW_OP
 

@@ -8,7 +8,7 @@ import torch
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import (
     AttrSource,
     ConstantSource,
@@ -639,3 +639,91 @@ class FunctoolsPartialVariable(VariableTracker):
                 *[arg.as_python_constant for arg in self.args],
                 **{k: v.as_python_constant() for k, v in self.keywords.items()},
             )
+
+
+class TritonKernelVariable(VariableTracker):
+    def __init__(self, kernel, grid, **kwargs):
+        super().__init__(**kwargs)
+        self.kernel = kernel
+        self.grid = grid
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .dicts import ConstDictVariable
+        from .lists import BaseListVariable
+
+        grid = self.grid
+
+        if grid is None:
+            raise Unsupported("Triton kernels should always be called with a grid")
+
+        # Both for grid's meta as well as for the kernel, we need combined
+        # args and kwargs normalized
+        normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        meta = ConstDictVariable(normalized_args, dict)
+
+        # If the grid is a function, then lets execute it and convert it to
+        # a list
+        if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
+            # Populate the special "meta" argument to call the grid function
+            grid = grid.call_function(tx, [meta], {})
+
+        # Now, the grid must be a list either originally or through above
+        # modification
+        if isinstance(grid, BaseListVariable):
+            grid = grid.as_proxy()
+        else:
+            unimplemented(f"grid for the triton kernel is {type(grid)}")
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+
+        fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
+        # FX graph needs __name__ and __module__ attributes
+        fn.__name__ = triton_kernel_wrapper_mutation.__name__
+        if not hasattr(fn, "__module__"):
+            # Super hacky but on AMD __module__ is not set
+            fn.__module__ = "itertools"
+
+        # Combine args and kwargs and pass as a dict so that if user defined triton
+        # kernel uses variables as 'grid' or 'kernel', it does not conflict with
+        # parameters of the wrapper function
+        tx.output.create_proxy(
+            "call_function",
+            fn,
+            (),
+            {
+                "grid": grid,
+                "kwargs": meta.as_proxy(),
+            },
+        )
+
+        return variables.ConstantVariable(
+            None,
+            **VariableTracker.propagate(self, args, kwargs.values()),
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__getitem__":
+            # __getitem__ should only be called if we don't already have a grid
+            # Only grid needs to be passed
+            if self.grid is not None or len(args) != 1:
+                raise Unsupported(
+                    "Triton kernels should be called with only a single grid"
+                )
+
+            grid = args[0]
+            return TritonKernelVariable(
+                self.kernel, grid, **VariableTracker.propagate(self)
+            )
+
+        # Bail out to parent's implementation
+        return super().call_method(tx, name, args, kwargs)

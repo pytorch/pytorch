@@ -280,6 +280,8 @@ jobs:
       test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
+    # don't run build twice on main
+    if: github.event_name == 'pull_request'
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:

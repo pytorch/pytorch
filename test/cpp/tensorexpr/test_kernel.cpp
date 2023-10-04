@@ -1667,7 +1667,7 @@ Tensor lowerNanToNum(
     const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  auto input_buf = c10::get<BufHandle>(inputs[0]);
+  auto input_buf = std::get<BufHandle>(inputs[0]);
   auto e = Compute(
       "custom_nan_to_num",
       outputShape,

@@ -759,7 +759,7 @@ TEST_F(NVFuserTest, FusionRegister_CUDA) {
 
 // dummy expr with 2 outputs only for toposort test.
 struct DummyExpr : public Expr {
-  ~DummyExpr() = default;
+  ~DummyExpr() override = default;
   DummyExpr(
       IrBuilderPasskey passkey,
       Val* _outlhs,

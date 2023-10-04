@@ -15,13 +15,13 @@ inline Tensor pad(
     PadFuncOptions::mode_t mode,
     double value) {
   const auto mode_enum = [&] {
-    if (c10::get_if<enumtype::kConstant>(&mode)) {
+    if (std::holds_alternative<enumtype::kConstant>(mode)) {
       return at::padding_mode::constant;
-    } else if (c10::get_if<enumtype::kReflect>(&mode)) {
+    } else if (std::holds_alternative<enumtype::kReflect>(mode)) {
       return at::padding_mode::reflect;
-    } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
+    } else if (std::holds_alternative<enumtype::kReplicate>(mode)) {
       return at::padding_mode::replicate;
-    } else if (c10::get_if<enumtype::kCircular>(&mode)) {
+    } else if (std::holds_alternative<enumtype::kCircular>(mode)) {
       return at::padding_mode::circular;
     }
     TORCH_CHECK(false, "Unrecognised padding mode");

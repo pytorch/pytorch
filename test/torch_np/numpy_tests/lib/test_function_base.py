@@ -1,10 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
 import math
 import operator
 import sys
 import warnings
 from fractions import Fraction
+
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import hypothesis
 import hypothesis.strategies as st
@@ -25,6 +28,15 @@ from torch._numpy.testing import (
     assert_warns,
     suppress_warnings,  # HAS_REFCOUNT, IS_WASM
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
+
+skip = functools.partial(skipif, True)
 
 HAS_REFCOUNT = True
 IS_WASM = False
@@ -74,7 +86,7 @@ def _make_complex(real, imag):
     return ret
 
 
-class TestRot90:
+class TestRot90(TestCase):
     def test_basic(self):
         assert_raises(ValueError, np.rot90, np.ones(4))
         assert_raises(
@@ -127,14 +139,14 @@ class TestRot90:
             )
 
 
-class TestFlip:
+class TestFlip(TestCase):
     def test_axes(self):
         assert_raises(np.AxisError, np.flip, np.ones(4), axis=1)
         assert_raises(np.AxisError, np.flip, np.ones((4, 4)), axis=2)
         assert_raises(np.AxisError, np.flip, np.ones((4, 4)), axis=-3)
         assert_raises(np.AxisError, np.flip, np.ones((4, 4)), axis=(0, 3))
 
-    @pytest.mark.skip(reason="no [::-1] indexing")
+    @skip(reason="no [::-1] indexing")
     def test_basic_lr(self):
         a = get_mat(4)
         b = a[:, ::-1]
@@ -143,7 +155,7 @@ class TestFlip:
         b = [[2, 1, 0], [5, 4, 3]]
         assert_equal(np.flip(a, 1), b)
 
-    @pytest.mark.skip(reason="no [::-1] indexing")
+    @skip(reason="no [::-1] indexing")
     def test_basic_ud(self):
         a = get_mat(4)
         b = a[::-1, :]
@@ -197,7 +209,7 @@ class TestFlip:
         assert_equal(np.flip(a, axis=(1, 2)), c)
 
 
-class TestAny:
+class TestAny(TestCase):
     def test_basic(self):
         y1 = [0, 0, 1, 0]
         y2 = [0, 0, 0, 0]
@@ -213,7 +225,7 @@ class TestAny:
         assert_array_equal(np.sometrue(y1, axis=1), [0, 1, 1])
 
 
-class TestAll:
+class TestAll(TestCase):
     def test_basic(self):
         y1 = [0, 1, 1, 0]
         y2 = [0, 0, 0, 0]
@@ -230,7 +242,7 @@ class TestAll:
         assert_array_equal(np.alltrue(y1, axis=1), [0, 0, 1])
 
 
-class TestCopy:
+class TestCopy(TestCase):
     def test_basic(self):
         a = np.array([[1, 2], [3, 4]])
         a_copy = np.copy(a)
@@ -239,7 +251,7 @@ class TestCopy:
         assert_equal(a[0, 0], 1)
         assert_equal(a_copy[0, 0], 10)
 
-    @pytest.mark.xfail(reason="order='F' not implemented")
+    @xfail  # (reason="order='F' not implemented")
     def test_order(self):
         # It turns out that people rely on np.copy() preserving order by
         # default; changing this broke scikit-learn:
@@ -258,7 +270,8 @@ class TestCopy:
         assert_(a_fort_copy.flags.f_contiguous)
 
 
-class TestAverage:
+@instantiate_parametrized_tests
+class TestAverage(TestCase):
     def test_basic(self):
         y1 = np.array([1, 2, 3])
         assert_(np.average(y1, axis=0) == 2.0)
@@ -277,7 +290,7 @@ class TestAverage:
         assert_almost_equal(y5.mean(0), np.average(y5, 0))
         assert_almost_equal(y5.mean(1), np.average(y5, 1))
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "x, axis, expected_avg, weights, expected_wavg, expected_wsum",
         [
             ([1, 2, 3], None, [2.0], [3, 4, 1], [1.75], [8.0]),
@@ -393,15 +406,15 @@ class TestAverage:
             w = np.array([[1, 2], [3, 4]], dtype=wt)
             assert_equal(np.average(a, weights=w).dtype, np.dtype(rt))
 
-    @pytest.mark.skip(reason="support Fraction objects?")
+    @skip(reason="support Fraction objects?")
     def test_average_class_without_dtype(self):
         # see gh-21988
         a = np.array([Fraction(1, 5), Fraction(3, 5)])
         assert_equal(np.average(a), Fraction(2, 5))
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestSelect:
+@xfail  # (reason="TODO: implement")
+class TestSelect(TestCase):
     choices = [np.array([1, 2, 3]), np.array([4, 5, 6]), np.array([7, 8, 9])]
     conditions = [
         np.array([False, False, False]),
@@ -464,8 +477,9 @@ class TestSelect:
         select(conditions, choices)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestInsert:
+@xfail  # (reason="TODO: implement")
+@instantiate_parametrized_tests
+class TestInsert(TestCase):
     def test_basic(self):
         a = [1, 2, 3]
         assert_equal(insert(a, 0, 1), [1, 1, 2, 3])
@@ -548,13 +562,13 @@ class TestInsert:
         with pytest.raises(IndexError):
             np.insert([0, 1, 2], np.array([], dtype=float), [])
 
-    @pytest.mark.parametrize("idx", [4, -4])
+    @parametrize("idx", [4, -4])
     def test_index_out_of_bounds(self, idx):
         with pytest.raises(IndexError, match="out of bounds"):
             np.insert([0, 1, 2], [idx], [3, 4])
 
 
-class TestAmax:
+class TestAmax(TestCase):
     def test_basic(self):
         a = [3, 4, 5, 10, -3, -5, 6.0]
         assert_equal(np.amax(a), 10.0)
@@ -563,7 +577,7 @@ class TestAmax:
         assert_equal(np.amax(b, axis=1), [9.0, 10.0, 8.0])
 
 
-class TestAmin:
+class TestAmin(TestCase):
     def test_basic(self):
         a = [3, 4, 5, 10, -3, -5, 6.0]
         assert_equal(np.amin(a), -5.0)
@@ -572,7 +586,7 @@ class TestAmin:
         assert_equal(np.amin(b, axis=1), [3.0, 4.0, 2.0])
 
 
-class TestPtp:
+class TestPtp(TestCase):
     def test_basic(self):
         a = np.array([3, 4, 5, 10, -3, -5, 6.0])
         assert_equal(a.ptp(axis=0), 15.0)
@@ -584,7 +598,7 @@ class TestPtp:
         assert_equal(b.ptp(axis=(0, 1), keepdims=True), [[8.0]])
 
 
-class TestCumsum:
+class TestCumsum(TestCase):
     def test_basic(self):
         ba = [1, 2, 10, 11, 6, 5, 4]
         ba2 = [[1, 2, 3, 4], [5, 6, 7, 9], [10, 3, 4, 5]]
@@ -611,7 +625,7 @@ class TestCumsum:
             assert_array_equal(np.cumsum(a2, axis=1), tgt)
 
 
-class TestProd:
+class TestProd(TestCase):
     def test_basic(self):
         ba = [1, 2, 10, 11, 6, 5, 4]
         ba2 = [[1, 2, 3, 4], [5, 6, 7, 9], [10, 3, 4, 5]]
@@ -634,7 +648,7 @@ class TestProd:
                 assert_array_equal(a2.prod(axis=-1), np.array([24, 1890, 600], ctype))
 
 
-class TestCumprod:
+class TestCumprod(TestCase):
     def test_basic(self):
         ba = [1, 2, 10, 11, 6, 5, 4]
         ba2 = [[1, 2, 3, 4], [5, 6, 7, 9], [10, 3, 4, 5]]
@@ -669,7 +683,7 @@ class TestCumprod:
                 )
 
 
-class TestDiff:
+class TestDiff(TestCase):
     def test_basic(self):
         x = [1, 4, 6, 7, 12]
         out = np.array([3, 2, 1, 5])
@@ -781,9 +795,10 @@ class TestDiff:
         assert_raises(np.AxisError, diff, x, append=0, axis=3)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestDelete:
-    def setup_method(self):
+@xfail  # (reason="TODO: implement")
+@instantiate_parametrized_tests
+class TestDelete(TestCase):
+    def setUp(self):
         self.a = np.arange(5)
         self.nd_a = np.arange(5).repeat(2).reshape(1, 5, 2)
 
@@ -852,7 +867,7 @@ class TestDelete:
         with pytest.raises(IndexError):
             np.delete([0, 1, 2], np.array([], dtype=float))
 
-    @pytest.mark.parametrize("indexer", [np.array([1]), [1]])
+    @parametrize("indexer", [np.array([1]), [1]])
     def test_single_item_array(self, indexer):
         a_del_int = delete(self.a, 1)
         a_del = delete(self.a, indexer)
@@ -879,7 +894,8 @@ class TestDelete:
         assert_array_equal(res, x[:, :0])
 
 
-class TestGradient:
+@instantiate_parametrized_tests
+class TestGradient(TestCase):
     def test_basic(self):
         v = [[1, 1], [3, 4]]
         x = np.array(v)
@@ -1056,7 +1072,7 @@ class TestGradient:
         assert_raises(ValueError, gradient, np.arange(1), edge_order=2)
         assert_raises(ValueError, gradient, np.arange(2), edge_order=2)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "f_dtype",
         [
             np.uint8,
@@ -1067,7 +1083,7 @@ class TestGradient:
         g = gradient(f)
         assert_array_equal(g, [-1] * len(f))
 
-    @pytest.mark.parametrize("f_dtype", [np.int8, np.int16, np.int32, np.int64])
+    @parametrize("f_dtype", [np.int8, np.int16, np.int32, np.int64])
     def test_f_signed_int_big_jump(self, f_dtype):
         maxint = np.iinfo(f_dtype).max
         x = np.array([1, 3])
@@ -1075,7 +1091,7 @@ class TestGradient:
         dfdx = gradient(f, x)
         assert_array_equal(dfdx, [(maxint + 1) // 2] * 2)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "x_dtype",
         [
             np.uint8,
@@ -1087,7 +1103,7 @@ class TestGradient:
         dfdx = gradient(f, x)
         assert_array_equal(dfdx, [-2] * len(x))
 
-    @pytest.mark.parametrize("x_dtype", [np.int8, np.int16, np.int32, np.int64])
+    @parametrize("x_dtype", [np.int8, np.int16, np.int32, np.int64])
     def test_x_signed_int_big_jump(self, x_dtype):
         minint = np.iinfo(x_dtype).min
         maxint = np.iinfo(x_dtype).max
@@ -1097,7 +1113,7 @@ class TestGradient:
         assert_array_equal(dfdx, [0.5, 0.5])
 
 
-class TestAngle:
+class TestAngle(TestCase):
     def test_basic(self):
         x = [
             1 + 3j,
@@ -1126,8 +1142,9 @@ class TestAngle:
         assert_array_almost_equal(z, zo, 11)
 
 
-@pytest.mark.xfail(reason="trim_zeros not implemented")
-class TestTrimZeros:
+@xfail  # (reason="trim_zeros not implemented")
+@instantiate_parametrized_tests
+class TestTrimZeros(TestCase):
     a = np.array([0, 0, 1, 0, 2, 3, 4, 0])
     b = a.astype(float)
     c = a.astype(complex)
@@ -1170,7 +1187,7 @@ class TestTrimZeros:
         res = trim_zeros(arr)
         assert_array_equal(arr, res)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "arr",
         [
             np.array([0, 2**62, 0]),
@@ -1193,8 +1210,8 @@ class TestTrimZeros:
         assert isinstance(res, list)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestExtins:
+@xfail  # (reason="TODO: implement")
+class TestExtins(TestCase):
     def test_basic(self):
         a = np.array([1, 3, 2, 1, 2, 3, 3])
         b = extract(a > 1, a)
@@ -1246,8 +1263,8 @@ def _foo2(x, y=1.0, z=0.0):
     return y * math.floor(x) + z
 
 
-@pytest.mark.skip(reason="vectorize not implemented")
-class TestVectorize:
+@skip  # (reason="vectorize not implemented")
+class TestVectorize(TestCase):
     def test_simple(self):
         def addsubtract(a, b):
             if a > b:
@@ -1595,8 +1612,8 @@ class TestVectorize:
             f(x)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestDigitize:
+@xfail  # (reason="TODO: implement")
+class TestDigitize(TestCase):
     def test_forward(self):
         x = np.arange(-6, 5)
         bins = np.arange(-5, 5)
@@ -1663,17 +1680,15 @@ class TestDigitize:
         x = 2**54  # loses precision in a float
         assert_equal(np.digitize(x, [x - 1, x + 1]), 1)
 
-    @pytest.mark.xfail(
-        reason="gh-11022: np.core.multiarray._monoticity loses precision"
-    )
+    @xfail  # "gh-11022: np.core.multiarray._monoticity loses precision"
     def test_large_integers_decreasing(self):
         # gh-11022
         x = 2**54  # loses precision in a float
         assert_equal(np.digitize(x, [x + 1, x - 1]), 1)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestUnwrap:
+@skip  # (reason="TODO: implement; here unwrap if from numpy")
+class TestUnwrap(TestCase):
     def test_simple(self):
         # check that unwrap removes jumps greater that 2*pi
         assert_array_equal(unwrap([1, 1 + 2 * np.pi]), [1, 1])
@@ -1699,9 +1714,10 @@ class TestUnwrap:
         assert sm_discont.dtype == wrap_uneven.dtype
 
 
-@pytest.mark.parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
-@pytest.mark.parametrize("M", [0, 1, 10])
-class TestFilterwindows:
+@instantiate_parametrized_tests
+class TestFilterwindows(TestCase):
+    @parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
+    @parametrize("M", [0, 1, 10])
     def test_hanning(self, dtype: str, M: int) -> None:
         scalar = M
 
@@ -1720,6 +1736,8 @@ class TestFilterwindows:
         else:
             assert_almost_equal(np.sum(w, axis=0), 4.500, 4)
 
+    @parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
+    @parametrize("M", [0, 1, 10])
     def test_hamming(self, dtype: str, M: int) -> None:
         scalar = M
 
@@ -1738,6 +1756,8 @@ class TestFilterwindows:
         else:
             assert_almost_equal(np.sum(w, axis=0), 4.9400, 4)
 
+    @parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
+    @parametrize("M", [0, 1, 10])
     def test_bartlett(self, dtype: str, M: int) -> None:
         scalar = M
 
@@ -1756,6 +1776,8 @@ class TestFilterwindows:
         else:
             assert_almost_equal(np.sum(w, axis=0), 4.4444, 4)
 
+    @parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
+    @parametrize("M", [0, 1, 10])
     def test_blackman(self, dtype: str, M: int) -> None:
         scalar = M
 
@@ -1774,6 +1796,8 @@ class TestFilterwindows:
         else:
             assert_almost_equal(np.sum(w, axis=0), 3.7800, 4)
 
+    @parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
+    @parametrize("M", [0, 1, 10])
     def test_kaiser(self, dtype: str, M: int) -> None:
         scalar = M
 
@@ -1793,8 +1817,8 @@ class TestFilterwindows:
             assert_almost_equal(np.sum(w, axis=0), 10, 15)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestTrapz:
+@xfail  # (reason="TODO: implement")
+class TestTrapz(TestCase):
     def test_simple(self):
         x = np.arange(-10, 10, 0.1)
         r = trapz(np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi), dx=0.1)
@@ -1839,7 +1863,7 @@ class TestTrapz:
         assert_almost_equal(r, qz)
 
 
-class TestSinc:
+class TestSinc(TestCase):
     def test_simple(self):
         assert_(sinc(0) == 1)
         w = sinc(np.linspace(-1, 1, 100))
@@ -1855,21 +1879,21 @@ class TestSinc:
         assert_array_equal(y1, y3)
 
 
-class TestUnique:
+class TestUnique(TestCase):
     def test_simple(self):
         x = np.array([4, 3, 2, 1, 1, 2, 3, 4, 0])
         assert_(np.all(unique(x) == [0, 1, 2, 3, 4]))
 
         assert_(unique(np.array([1, 1, 1, 1, 1])) == np.array([1]))
 
-    @pytest.mark.xfail(reason="unique not implemented for 'ComplexDouble'")
+    @xfail  # (reason="unique not implemented for 'ComplexDouble'")
     def test_simple_complex(self):
         x = np.array([5 + 6j, 1 + 1j, 1 + 10j, 10, 5 + 6j])
         assert_(np.all(unique(x) == [1 + 1j, 1 + 10j, 5 + 6j, 10]))
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestCheckFinite:
+@xfail  # (reason="TODO: implement")
+class TestCheckFinite(TestCase):
     def test_simple(self):
         a = [1, 2, 3]
         b = [1, 2, np.inf]
@@ -1885,7 +1909,8 @@ class TestCheckFinite:
         assert_(a.dtype == np.float64)
 
 
-class TestCorrCoef:
+@instantiate_parametrized_tests
+class TestCorrCoef(TestCase):
     A = np.array(
         [
             [0.15391142, 0.18045767, 0.14197213],
@@ -1932,7 +1957,7 @@ class TestCorrCoef:
         assert_almost_equal(tgt2, self.res2)
         assert_(np.all(np.abs(tgt2) <= 1.0))
 
-    @pytest.mark.skip(reason="deprecated in numpy, ignore")
+    @skip(reason="deprecated in numpy, ignore")
     def test_ddof(self):
         # ddof raises DeprecationWarning
         with suppress_warnings() as sup:
@@ -1945,7 +1970,7 @@ class TestCorrCoef:
             assert_almost_equal(corrcoef(self.A, ddof=3), self.res1)
             assert_almost_equal(corrcoef(self.A, self.B, ddof=3), self.res2)
 
-    @pytest.mark.skip(reason="deprecated in numpy, ignore")
+    @skip(reason="deprecated in numpy, ignore")
     def test_bias(self):
         # bias raises DeprecationWarning
         with suppress_warnings() as sup:
@@ -1986,14 +2011,15 @@ class TestCorrCoef:
         assert_array_almost_equal(c, np.array([[1.0, -1.0], [-1.0, 1.0]]))
         assert_(np.all(np.abs(c) <= 1.0))
 
-    @pytest.mark.parametrize("test_type", [np.half, np.single, np.double])
+    @parametrize("test_type", [np.half, np.single, np.double])
     def test_corrcoef_dtype(self, test_type):
         cast_A = self.A.astype(test_type)
         res = corrcoef(cast_A, dtype=test_type)
         assert test_type == res.dtype
 
 
-class TestCov:
+@instantiate_parametrized_tests
+class TestCov(TestCase):
     x1 = np.array([[0, 2], [1, 1], [2, 0]]).T
     res1 = np.array([[1.0, -1.0], [-1.0, 1.0]])
     x2 = np.array([0.0, 1.0, 2.0], ndmin=2)
@@ -2100,14 +2126,14 @@ class TestCov:
             self.res1,
         )
 
-    @pytest.mark.parametrize("test_type", [np.half, np.single, np.double])
+    @parametrize("test_type", [np.half, np.single, np.double])
     def test_cov_dtype(self, test_type):
         cast_x1 = self.x1.astype(test_type)
         res = cov(cast_x1, dtype=test_type)
         assert test_type == res.dtype
 
 
-class Test_I0:
+class Test_I0(TestCase):
     def test_simple(self):
         assert_almost_equal(i0(0.5), np.array(1.0634833707413234))
 
@@ -2154,7 +2180,7 @@ class Test_I0:
             res = i0(a)
 
 
-class TestKaiser:
+class TestKaiser(TestCase):
     def test_simple(self):
         assert_(np.isfinite(kaiser(1, 1.0)))
         assert_almost_equal(kaiser(0, 1.0), np.array([]))
@@ -2172,8 +2198,8 @@ class TestKaiser:
         kaiser(3, 4)
 
 
-@pytest.mark.skip(reason="msort is deprecated, do not bother")
-class TestMsort:
+@skip(reason="msort is deprecated, do not bother")
+class TestMsort(TestCase):
     def test_simple(self):
         A = np.array(
             [
@@ -2195,7 +2221,7 @@ class TestMsort:
             )
 
 
-class TestMeshgrid:
+class TestMeshgrid(TestCase):
     def test_simple(self):
         [X, Y] = meshgrid([1, 2, 3], [4, 5, 6, 7])
         assert_array_equal(X, np.array([[1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3]]))
@@ -2293,8 +2319,8 @@ class TestMeshgrid:
         assert_equal(c, [[[3, 4, 5], [3, 4, 5]]])
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestPiecewise:
+@xfail  # (reason="TODO: implement")
+class TestPiecewise(TestCase):
     def test_simple(self):
         # Condition is single bool list
         x = piecewise([0, 0], [True, False], [1])
@@ -2407,7 +2433,8 @@ class TestPiecewise:
         assert_array_equal(y, np.array([[-1.0, -1.0, -1.0], [3.0, 3.0, 1.0]]))
 
 
-class TestBincount:
+@instantiate_parametrized_tests
+class TestBincount(TestCase):
     def test_simple(self):
         y = np.bincount(np.arange(4))
         assert_array_equal(y, np.ones(4))
@@ -2484,7 +2511,7 @@ class TestBincount:
             lambda: np.bincount(x, minlength=-1),
         )
 
-    @pytest.mark.skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
+    @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_dtype_reference_leaks(self):
         # gh-6805
         intp_refcount = sys.getrefcount(np.dtype(np.intp))
@@ -2500,7 +2527,7 @@ class TestBincount:
         assert_equal(sys.getrefcount(np.dtype(np.intp)), intp_refcount)
         assert_equal(sys.getrefcount(np.dtype(np.double)), double_refcount)
 
-    @pytest.mark.parametrize("vals", [[[2, 2]], 2])
+    @parametrize("vals", [[[2, 2]], 2])
     def test_error_not_1d(self, vals):
         # Test that values has to be 1-D (both as array and nested list)
         vals_arr = np.asarray(vals)
@@ -2510,8 +2537,8 @@ class TestBincount:
             np.bincount(vals)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestInterp:
+@xfail  # (reason="TODO: implement")
+class TestInterp(TestCase):
     def test_exceptions(self):
         assert_raises(ValueError, interp, 0, [], [])
         assert_raises(ValueError, interp, 0, [0], [1, 2])
@@ -2710,7 +2737,8 @@ class TestInterp:
         assert_almost_equal(np.interp(x, xp, fp, period=360), y)
 
 
-class TestPercentile:
+@instantiate_parametrized_tests
+class TestPercentile(TestCase):
     def test_basic(self):
         x = np.arange(8) * 0.5
         assert_equal(np.percentile(x, 0), 0.0)
@@ -2720,7 +2748,7 @@ class TestPercentile:
         assert_equal(np.percentile(x, 0), np.nan)
         assert_equal(np.percentile(x, 0, method="nearest"), np.nan)
 
-    @pytest.mark.skip(reason="support Fraction objects?")
+    @skip(reason="support Fraction objects?")
     def test_fraction(self):
         x = [Fraction(i, 2) for i in range(8)]
 
@@ -2747,7 +2775,7 @@ class TestPercentile:
         o = np.ones((1,))
         np.percentile(d, 5, None, o, False, "linear")
 
-    @pytest.mark.xfail(reason="TODO: implement")
+    @xfail  # (reason="TODO: implement")
     def test_complex(self):
         arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
         assert_raises(TypeError, np.percentile, arr_c, 0.5)
@@ -2758,8 +2786,8 @@ class TestPercentile:
         x = np.array([[1, 1, 1], [1, 1, 1], [4, 4, 3], [1, 1, 1], [1, 1, 1]])
         assert_array_equal(np.percentile(x, 50, axis=0), [1, 1, 1])
 
-    @pytest.mark.xfail(reason="TODO: implement")
-    @pytest.mark.parametrize("dtype", np.typecodes["Float"])
+    @xfail  # (reason="TODO: implement")
+    @parametrize("dtype", np.typecodes["Float"])
     def test_linear_nan_1D(self, dtype):
         # METHOD 1 of H&F
         arr = np.asarray([15.0, np.NAN, 35.0, 40.0, 50.0], dtype=dtype)
@@ -2775,10 +2803,10 @@ class TestPercentile:
         (np.float64, np.float64),
     ]
 
-    @pytest.mark.xfail(reason="TODO: implement percentile interpolations")
-    @pytest.mark.parametrize(["input_dtype", "expected_dtype"], H_F_TYPE_CODES)
-    @pytest.mark.parametrize(
-        ["method", "expected"],
+    @xfail  # (reason="TODO: implement percentile interpolations")
+    @parametrize("input_dtype, expected_dtype", H_F_TYPE_CODES)
+    @parametrize(
+        "method, expected",
         [
             ("inverted_cdf", 20),
             ("averaged_inverted_cdf", 27.5),
@@ -2808,12 +2836,12 @@ class TestPercentile:
 
     TYPE_CODES = np.typecodes["AllInteger"] + np.typecodes["Float"]
 
-    @pytest.mark.parametrize("dtype", TYPE_CODES)
+    @parametrize("dtype", TYPE_CODES)
     def test_lower_higher(self, dtype):
         assert_equal(np.percentile(np.arange(10, dtype=dtype), 50, method="lower"), 4)
         assert_equal(np.percentile(np.arange(10, dtype=dtype), 50, method="higher"), 5)
 
-    @pytest.mark.parametrize("dtype", TYPE_CODES)
+    @parametrize("dtype", TYPE_CODES)
     def test_midpoint(self, dtype):
         assert_equal(
             np.percentile(np.arange(10, dtype=dtype), 51, method="midpoint"), 4.5
@@ -2828,7 +2856,7 @@ class TestPercentile:
             np.percentile(np.arange(11, dtype=dtype), 50, method="midpoint"), 5
         )
 
-    @pytest.mark.parametrize("dtype", TYPE_CODES)
+    @parametrize("dtype", TYPE_CODES)
     def test_nearest(self, dtype):
         assert_equal(np.percentile(np.arange(10, dtype=dtype), 51, method="nearest"), 5)
         assert_equal(np.percentile(np.arange(10, dtype=dtype), 49, method="nearest"), 4)
@@ -2919,9 +2947,7 @@ class TestPercentile:
         assert_almost_equal(c1, r1)
         assert_equal(c1.shape, r1.shape)
 
-    @pytest.mark.xfail(
-        reason="numpy: x.dtype is int, out is int; torch: result is float"
-    )
+    @xfail  # (reason="numpy: x.dtype is int, out is int; torch: result is float")
     def test_scalar_q_2(self):
         x = np.arange(12).reshape(3, 4)
         out = np.empty((), dtype=x.dtype)
@@ -3050,7 +3076,7 @@ class TestPercentile:
         b = np.percentile([2, 3, 4, 1], [50], overwrite_input=True)
         assert_equal(b, np.array([2.5]))
 
-    @pytest.mark.xfail(reason="pytorch percentile does not support tuple axes.")
+    @xfail  # (reason="pytorch percentile does not support tuple axes.")
     def test_extended_axis(self):
         o = np.random.normal(size=(71, 23))
         x = np.dstack([o] * 10)
@@ -3115,7 +3141,7 @@ class TestPercentile:
         d = np.ones((3, 5, 7, 11))
         assert_equal(np.percentile(d, 7, axis=None, keepdims=True).shape, (1, 1, 1, 1))
 
-    @pytest.mark.xfail(reason="pytorch percentile does not support tuple axes.")
+    @xfail  # (reason="pytorch percentile does not support tuple axes.")
     def test_keepdims_2(self):
         assert_equal(
             np.percentile(d, 7, axis=(0, 1), keepdims=True).shape, (1, 1, 7, 11)
@@ -3139,21 +3165,39 @@ class TestPercentile:
             np.percentile(d, [1, 7], axis=(0, 3), keepdims=True).shape, (2, 1, 5, 7, 1)
         )
 
-    @pytest.mark.parametrize("q", [7, [1, 7]])
-    @pytest.mark.parametrize(
-        argnames="axis",
-        argvalues=[
+    @parametrize(
+        "q",
+        [
+            7,
+            subtest(
+                [1, 7],
+                decorators=[
+                    xfail,
+                ],
+            ),
+        ],
+    )
+    @parametrize(
+        "axis",
+        [
             None,
             1,
-            (1,),
-            (0, 1),
-            (-3, -1),
+            subtest((1,)),
+            subtest(
+                (0, 1),
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                (-3, -1),
+                decorators=[
+                    xfail,
+                ],
+            ),
         ],
     )
     def test_keepdims_out(self, q, axis):
-        if isinstance(axis, tuple) or isinstance(q, list):
-            pytest.xfail("NotImplemented")
-
         d = np.ones((3, 5, 7, 11))
         if axis is None:
             shape_out = (1,) * d.ndim
@@ -3198,7 +3242,7 @@ class TestPercentile:
             assert_equal(np.percentile(d, 1, out=o), o)
             assert_equal(np.percentile(d, 1, method="nearest", out=o), o)
 
-    @pytest.mark.xfail(reason="np.percentile undocumented nan weirdness")
+    @xfail  # (reason="np.percentile undocumented nan weirdness")
     def test_nan_behavior(self):
         a = np.arange(24, dtype=float)
         a[2] = np.nan
@@ -3272,10 +3316,11 @@ class TestPercentile:
             np.percentile([1, 2, 3, 4.0], q)
 
 
-class TestQuantile:
+@instantiate_parametrized_tests
+class TestQuantile(TestCase):
     # most of this is already tested by TestPercentile
 
-    @pytest.mark.skip(reason="do not chase 1ulp")
+    @skip(reason="do not chase 1ulp")
     def test_max_ulp(self):
         x = [0.0, 0.2, 0.4]
         a = np.quantile(x, 0.45)
@@ -3290,7 +3335,7 @@ class TestQuantile:
         assert_equal(np.quantile(x, 1), 3.5)
         assert_equal(np.quantile(x, 0.5), 1.75)
 
-    @pytest.mark.xfail(reason="quantile w/integers or bools")
+    @xfail  # (reason="quantile w/integers or bools")
     def test_correct_quantile_value(self):
         a = np.array([True])
         tf_quant = np.quantile(True, False)
@@ -3301,7 +3346,7 @@ class TestQuantile:
         assert_array_equal(quant_res, a)
         assert_equal(quant_res.dtype, a.dtype)
 
-    @pytest.mark.skip(reason="support arrays of Fractions?")
+    @skip(reason="support arrays of Fractions?")
     def test_fraction(self):
         # fractional input, integral quantile
         x = [Fraction(i, 2) for i in range(8)]
@@ -3329,7 +3374,7 @@ class TestQuantile:
         x = np.arange(8)
         assert_equal(np.quantile(x, Fraction(1, 2)), Fraction(7, 2))
 
-    @pytest.mark.skip(reason="does not raise in numpy?")
+    @skip(reason="does not raise in numpy?")
     def test_complex(self):
         # See gh-22652
         arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
@@ -3349,24 +3394,64 @@ class TestQuantile:
         np.quantile(np.arange(100.0), p, method="midpoint")
         assert_array_equal(p, p0)
 
-    @pytest.mark.xfail(reason="TODO: make quantile preserve integers")
-    @pytest.mark.parametrize("dtype", np.typecodes["AllInteger"])
+    @xfail  # (reason="TODO: make quantile preserve integers")
+    @parametrize("dtype", np.typecodes["AllInteger"])
     def test_quantile_preserve_int_type(self, dtype):
         res = np.quantile(np.array([1, 2], dtype=dtype), [0.5], method="nearest")
         assert res.dtype == dtype
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "method",
         [
-            "inverted_cdf",
-            "averaged_inverted_cdf",
-            "closest_observation",
-            "interpolated_inverted_cdf",
-            "hazen",
-            "weibull",
+            subtest(
+                "inverted_cdf",
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                "averaged_inverted_cdf",
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                "closest_observation",
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                "interpolated_inverted_cdf",
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                "hazen",
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                "weibull",
+                decorators=[
+                    xfail,
+                ],
+            ),
             "linear",
-            "median_unbiased",
-            "normal_unbiased",
+            subtest(
+                "median_unbiased",
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                "normal_unbiased",
+                decorators=[
+                    xfail,
+                ],
+            ),
             "nearest",
             "lower",
             "higher",
@@ -3374,9 +3459,6 @@ class TestQuantile:
         ],
     )
     def test_quantile_monotonic(self, method):
-        if method not in ("linear", "lower", "higher", "midpoint", "nearest"):
-            pytest.xfail("Not implemented")
-
         # GH 14685
         # test that the return value of quantile is monotonic if p0 is ordered
         # Also tests that the boundary values are not mishandled.
@@ -3392,7 +3474,7 @@ class TestQuantile:
         quantile = np.quantile([0.0, 1.0, 2.0, 3.0], p0, method=method)
         assert_equal(np.sort(quantile), quantile)
 
-    @pytest.mark.skip(reason="no hypothesis")
+    @skip(reason="no hypothesis")
     @hypothesis.given(
         arr=arrays(
             dtype=np.float64,
@@ -3415,7 +3497,8 @@ class TestQuantile:
         assert_equal(np.quantile(a, 0.5), np.nan)
 
 
-class TestMedian:
+@instantiate_parametrized_tests
+class TestMedian(TestCase):
     def test_basic(self):
         a0 = np.array(1)
         a1 = np.arange(2)
@@ -3434,7 +3517,7 @@ class TestMedian:
         a = np.array([0.0444502, 0.141249, 0.0463301])
         assert_equal(a[-1], np.median(a))
 
-    @pytest.mark.xfail(reason="median: scalar output vs 0-dim")
+    @xfail  # (reason="median: scalar output vs 0-dim")
     def test_basic_2(self):
         # check array scalar result
         a = np.array([0.0444502, 0.141249, 0.0463301])
@@ -3543,7 +3626,7 @@ class TestMedian:
         b[1, 2] = np.nan
         assert_equal(np.median(a, 1), b)
 
-    @pytest.mark.xfail(reason="median: does not support tuple axes")
+    @xfail  # (reason="median: does not support tuple axes")
     def test_nan_behavior_2(self):
         a = np.arange(24, dtype=float).reshape(2, 3, 4)
         a[1, 2, 3] = np.nan
@@ -3555,7 +3638,7 @@ class TestMedian:
         b[2] = np.nan
         assert_equal(np.median(a, (0, 2)), b)
 
-    @pytest.mark.xfail(reason="median: scalar vs 0-dim")
+    @xfail  # (reason="median: scalar vs 0-dim")
     def test_nan_behavior_3(self):
         a = np.arange(24, dtype=float).reshape(2, 3, 4)
         a[1, 2, 3] = np.nan
@@ -3564,8 +3647,8 @@ class TestMedian:
         # no axis
         assert_equal(np.median(a).ndim, 0)
 
-    @pytest.mark.xfail(reason="median: torch.quantile does not handle empty tensors")
-    @pytest.mark.skipif(IS_WASM, reason="fp errors don't work correctly")
+    @xfail  # (reason="median: torch.quantile does not handle empty tensors")
+    @skipif(IS_WASM, reason="fp errors don't work correctly")
     def test_empty(self):
         # mean(empty array) emits two warnings: empty slice and divide by 0
         a = np.array([], dtype=float)
@@ -3595,7 +3678,7 @@ class TestMedian:
             assert_equal(np.median(a, axis=2), b)
             assert_(w[0].category is RuntimeWarning)
 
-    @pytest.mark.xfail(reason="median: tuple axes not implemented")
+    @xfail  # (reason="median: tuple axes not implemented")
     def test_extended_axis(self):
         o = np.random.normal(size=(71, 23))
         x = np.dstack([o] * 10)
@@ -3645,7 +3728,7 @@ class TestMedian:
         d = np.ones((3, 5, 7, 11))
         assert_equal(np.median(d, axis=None, keepdims=True).shape, (1, 1, 1, 1))
 
-    @pytest.mark.xfail(reason="median: tuple axis")
+    @xfail  # (reason="median: tuple axis")
     def test_keepdims_2(self):
         d = np.ones((3, 5, 7, 11))
         assert_equal(np.median(d, axis=(0, 1), keepdims=True).shape, (1, 1, 7, 11))
@@ -3654,20 +3737,27 @@ class TestMedian:
         assert_equal(np.median(d, axis=(0, 1, 2, 3), keepdims=True).shape, (1, 1, 1, 1))
         assert_equal(np.median(d, axis=(0, 1, 3), keepdims=True).shape, (1, 1, 7, 1))
 
-    @pytest.mark.parametrize(
-        argnames="axis",
-        argvalues=[
+    @parametrize(
+        "axis",
+        [
             None,
             1,
-            (1,),
-            (0, 1),
-            (-3, -1),
+            subtest((1,)),
+            subtest(
+                (0, 1),
+                decorators=[
+                    xfail,
+                ],
+            ),
+            subtest(
+                (-3, -1),
+                decorators=[
+                    xfail,
+                ],
+            ),
         ],
     )
     def test_keepdims_out(self, axis):
-        if isinstance(axis, tuple):
-            pytest.xfail("median: tuple axis")
-
         d = np.ones((3, 5, 7, 11))
         if axis is None:
             shape_out = (1,) * d.ndim
@@ -3682,9 +3772,10 @@ class TestMedian:
         assert_equal(result.shape, shape_out)
 
 
-@pytest.mark.xfail(reason="TODO: implement")
-class TestSortComplex:
-    @pytest.mark.parametrize(
+@xfail  # (reason="TODO: implement")
+@instantiate_parametrized_tests
+class TestSortComplex(TestCase):
+    @parametrize(
         "type_in, type_out",
         [
             ("l", "D"),
@@ -3713,6 +3804,4 @@ class TestSortComplex:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()
