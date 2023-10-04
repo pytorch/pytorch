@@ -859,10 +859,9 @@ class FlatParamHandle:
             if (
                 not torch.distributed._functional_collectives.is_torchdynamo_compiling()
             ):
-                allocated = torch._storage_size_allocated(flat_param)
+                allocated = flat_param._typed_storage()._size() > 0
                 if allocated:
-                    # flat_param._typed_storage()._resize_(0)
-                    flat_param = flat_param.resize_storage_(0)
+                    flat_param._typed_storage()._resize_(0)
             flat_param.set_(sharded_flat_param)
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive

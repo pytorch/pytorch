@@ -159,15 +159,13 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         if (
             not torch.distributed._functional_collectives.is_torchdynamo_compiling()
         ):
-            # already_allocated = tensor._typed_storage()._size() == size.numel()
-            already_allocated = torch._same_storage_size(tensor, size.numel())
+            already_allocated = tensor._typed_storage()._size() == size.numel()
             if not already_allocated:
-                # _p_assert(
-                #     not torch._data_ptr_allocated(tensor),
-                #     f"Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
-                # )
-                # tensor._typed_storage()._resize_(size.numel())
-                tensor = tensor.resize_storage_(size.numel())
+                _p_assert(
+                    not torch._data_ptr_allocated(tensor),
+                    f"Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
+                )
+                tensor._typed_storage()._resize_(size.numel())
         return tensor
 
 
@@ -183,17 +181,16 @@ def _free_storage(tensor: torch.Tensor):
         if (
             not torch.distributed._functional_collectives.is_torchdynamo_compiling()
         ):
-            already_freed = not torch._storage_size_allocated(tensor)
+            already_freed = tensor._typed_storage()._size() == 0
             if not already_freed:
                 _p_assert(
                     tensor.storage_offset() == 0,
                     "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
                     f"storage offset: {tensor.storage_offset()}\n"
-                    f"storage size: PLACEHOLDER\n"
+                    f"storage size: {tensor._typed_storage()._size()}\n"
                     f"tensor shape: {tensor.shape}",
                 )
-                tensor = tensor.resize_storage_(0)
-                # tensor._typed_storage()._resize_(0)
+                tensor._typed_storage()._resize_(0)
         return tensor
 
 
