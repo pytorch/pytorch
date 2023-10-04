@@ -472,6 +472,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_promote_types(x):
+        if x.dtype == torch.promote_types(torch.int32, torch.float32):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_get_calculate_correct_fan(x):
         fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
         return x + fan_in
@@ -1200,6 +1207,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         multiply = lambda x, y: x * y
         triple = functools.partial(multiply, y=3)
         return triple(x)
+
+    def test_tensor_size_indexed_by_symint(self):
+        def fn(x, y):
+            index = x.shape[-1]
+            return x + y.shape[index]
+
+        x = torch.rand(10, 2)
+        y = torch.rand(10, 8, 6)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
 
     def test_partials_as_input_partials_lambda(self):
         def fn(f0, f1, x):
