@@ -203,8 +203,9 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
     else:
         try:
             tensor = torch.as_tensor(obj)
-        except Exception:
-            raise NotImplementedError(f"failed to convert {obj} to ndarray")
+        except Exception as e:
+            mesg = f"failed to convert {obj} to ndarray. \nInternal error is: {str(e)}."
+            raise NotImplementedError(mesg)
 
         # tensor.dtype is the pytorch default, typically float32. If obj's elements
         # are not exactly representable in float32, we've lost precision:

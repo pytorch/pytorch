@@ -340,4 +340,6 @@ def is_builtin_constant(obj):
 def is_numpy(obj):
     if np is None:
         return False
-    return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
+    return (isinstance(obj, np.ndarray) or
+            isinstance(obj, np.generic) or   # array scalars [np.float32(2.) etc]
+            id(obj) in _numpy_function_ids)

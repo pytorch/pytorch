@@ -1696,6 +1696,35 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         assert r2 in ("L", "U")
 
+    def test_trace_ndarray_frame(self):
+        def fn(x):
+            x = x**2
+            print("graph break.")
+            return 2 * x
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+
+        x = np.arange(8)
+        self.assertEqual(fn(x), compiled_fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_numpy_non_torch_dtype(self):
+        # test that we gracefully graph break on dtypes
+        # that do not have pytorch equivalents.
+        def fn(x):
+            return isinstance(x, torch.Tensor)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        # torch does not have the `uint16` dtype
+        for x in [np.array([42], dtype=np.uint16), np.uint16(42), np.dtype('uint16') ]:
+            r = opt_fn(x)
+
+            self.assertEqual(r, False)
+            self.assertEqual(cnts.frame_count, 0)  # graph break
+
     def test_dtypes_no_graphbreaks(self):
         # cache size limit needs to be larger than the `dtypes` list size
         torch._dynamo.config.cache_size_limit = 12
@@ -7733,7 +7762,6 @@ fn
         x = np.arange(8)
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
-
 
 
 class TestTracer(JitTestCase):
