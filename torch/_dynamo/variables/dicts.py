@@ -10,6 +10,7 @@ import torch.fx
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
+from ..guards import make_dupe_guard
 
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
