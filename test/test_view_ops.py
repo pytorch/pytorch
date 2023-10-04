@@ -1820,6 +1820,7 @@ class TestOldViewOps(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     @onlyCPU
     def test_conj_neg_view_numpy_error(self, device):
         self.assertRaisesRegex(RuntimeError, "has conjugate bit set", lambda: torch.tensor([1 + 2j]).conj().numpy())

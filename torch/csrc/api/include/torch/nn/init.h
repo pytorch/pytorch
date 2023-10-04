@@ -8,7 +8,7 @@ namespace torch {
 namespace nn {
 namespace init {
 
-using NonlinearityType = c10::variant<
+using NonlinearityType = std::variant<
     enumtype::kLinear,
     enumtype::kConv1D,
     enumtype::kConv2D,
@@ -21,7 +21,7 @@ using NonlinearityType = c10::variant<
     enumtype::kReLU,
     enumtype::kLeakyReLU>;
 
-using FanModeType = c10::variant<enumtype::kFanIn, enumtype::kFanOut>;
+using FanModeType = std::variant<enumtype::kFanIn, enumtype::kFanOut>;
 
 } // namespace init
 } // namespace nn

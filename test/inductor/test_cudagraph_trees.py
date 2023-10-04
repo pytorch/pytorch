@@ -1280,6 +1280,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_storage_access_error(self):
+            x = torch.rand([4], device="cuda")
+            torch._C._set_storage_access_error_msg(x, "custom error msg")
+
+            with self.assertRaisesRegex(Exception, "custom error msg"):
+                device = x.untyped_storage()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
