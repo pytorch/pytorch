@@ -55,8 +55,6 @@ void cpu_flash_attention(
     const Tensor& logsumexp,
     const Tensor& cum_seq_q,
     const Tensor& cum_seq_k,
-    int64_t& max_q,
-    int64_t& max_k,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
     const Tensor& debug_attn_mask,
@@ -279,8 +277,6 @@ void cpu_flash_attention_backward(
     const at::Tensor& logsumexp,
     const Tensor& cumulative_sequence_length_q,
     const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     const at::Tensor& philox_seed,
@@ -540,8 +536,6 @@ void flash_attention_kernel_impl(
     const Tensor& logsumexp,
     const Tensor& cum_seq_q,
     const Tensor& cum_seq_k,
-    int64_t& max_q,
-    int64_t& max_k,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
     const Tensor& debug_attn_mask,
@@ -558,17 +552,17 @@ void flash_attention_kernel_impl(
     if (q_seq_len >= 768) {
       cpu_flash_attention<scalar_t, 256, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
-        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        philox_seed, philox_offset, debug_attn_mask,
         query, key, value, dropout_p, is_causal, return_debug_mask, scale);
     } else if (q_seq_len >= 192) {
       cpu_flash_attention<scalar_t, 64, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
-        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        philox_seed, philox_offset, debug_attn_mask,
         query, key, value, dropout_p, is_causal, return_debug_mask, scale);
     } else {
       cpu_flash_attention<scalar_t, 32, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
-        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        philox_seed, philox_offset, debug_attn_mask,
         query, key, value, dropout_p, is_causal, return_debug_mask, scale);
     }
   });
@@ -586,8 +580,6 @@ void flash_attention_backward_kernel_impl(
     const at::Tensor& logsumexp,
     const Tensor& cum_seq_q,
     const Tensor& cum_seq_k,
-    const int64_t max_q,
-    const int64_t max_k,
     double dropout_p,
     bool is_causal,
     const at::Tensor& philox_seed,
@@ -604,19 +596,19 @@ void flash_attention_backward_kernel_impl(
       cpu_flash_attention_backward<scalar_t, 256, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
-        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        cum_seq_q, cum_seq_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
     } else if (q_seq_len >= 192) {
       cpu_flash_attention_backward<scalar_t, 64, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
-        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        cum_seq_q, cum_seq_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
     } else {
       cpu_flash_attention_backward<scalar_t, 32, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
-        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        cum_seq_q, cum_seq_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
     }
   });

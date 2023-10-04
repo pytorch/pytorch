@@ -264,25 +264,22 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
     AtenTensorHandle* ret3, // returns new reference
-    int64_t* ret4,
-    int64_t* ret5,
-    AtenTensorHandle* ret6, // returns new reference
-    AtenTensorHandle* ret7, // returns new reference
-    AtenTensorHandle* ret8 // returns new reference
+    AtenTensorHandle* ret4, // returns new reference
+    AtenTensorHandle* ret5, // returns new reference
+    AtenTensorHandle* ret6 // returns new reference
 ) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* query_tensor = tensor_handle_to_tensor_pointer(query);
     at::Tensor* key_tensor = tensor_handle_to_tensor_pointer(key);
     at::Tensor* value_tensor = tensor_handle_to_tensor_pointer(value);
-    auto [r0, r1, r2, r3, r4, r5, r6, r7, r8] =
-        at::_scaled_dot_product_flash_attention(
-            *query_tensor,
-            *key_tensor,
-            *value_tensor,
-            dropout_p,
-            is_causal,
-            return_debug_mask,
-            scale);
+    auto [r0, r1, r2, r3, r4, r5, r6] = at::_scaled_dot_product_flash_attention(
+        *query_tensor,
+        *key_tensor,
+        *value_tensor,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale);
 
     at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
     *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
@@ -297,14 +294,12 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       at::Tensor* ret3_tensor = new at::Tensor(std::move(r3));
       *ret3 = tensor_pointer_to_tensor_handle(ret3_tensor);
     }
-    *ret4 = r4.expect_int();
-    *ret5 = r5.expect_int();
+    at::Tensor* ret4_tensor = new at::Tensor(std::move(r4));
+    *ret4 = tensor_pointer_to_tensor_handle(ret4_tensor);
+    at::Tensor* ret5_tensor = new at::Tensor(std::move(r5));
+    *ret5 = tensor_pointer_to_tensor_handle(ret5_tensor);
     at::Tensor* ret6_tensor = new at::Tensor(std::move(r6));
     *ret6 = tensor_pointer_to_tensor_handle(ret6_tensor);
-    at::Tensor* ret7_tensor = new at::Tensor(std::move(r7));
-    *ret7 = tensor_pointer_to_tensor_handle(ret7_tensor);
-    at::Tensor* ret8_tensor = new at::Tensor(std::move(r8));
-    *ret8 = tensor_pointer_to_tensor_handle(ret8_tensor);
   });
 }
 

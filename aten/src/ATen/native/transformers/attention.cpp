@@ -595,6 +595,10 @@ at::Tensor post_process_flash_output(
   return out;
 }
 
+bool has_nested_inputs(const Tensor& query, const Tensor& key, const Tensor& value){
+  return query.is_nested() || key.is_nested() || value.is_nested();
+}
+
 } // namespace
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -651,6 +655,11 @@ Tensor scaled_dot_product_attention(
         Tensor value_padded = pad_last_dim<8, false>(value);
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
+        if (has_nested_inputs(query_padded, key_padded, value_padded)) {
+            auto out_lse_softmax = at::_scaled_dot_product_flash_attention_nested(
+            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
+            return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
+        }
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
@@ -749,8 +758,6 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor,
-    c10::SymInt,
-    c10::SymInt,
     at::Tensor,
     at::Tensor,
     at::Tensor>
@@ -785,21 +792,19 @@ _scaled_dot_product_flash_attention_cpu(
       query.options().dtype(accumulate_dtype));
   at::Tensor cum_seq_q = at::empty({}, at::kLong);
   at::Tensor cum_seq_k = at::empty({}, at::kLong);
-  int64_t max_q = 0;
-  int64_t max_k = 0;
   at::Tensor philox_seed = at::empty({}, at::kLong);
   at::Tensor philox_offset = at::empty({}, at::kLong);
   at::Tensor debug_attn_mask = at::empty({}, query.options());
 
   flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
-      max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+      philox_seed, philox_offset, debug_attn_mask,
       query, key, value, dropout_p, is_causal, return_debug_mask, scale);
 
   output = output.transpose(1, 2);
   logsumexp = logsumexp.transpose(1, 2);
 
   return std::make_tuple(std::move(output), std::move(logsumexp),
-      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
+      std::move(cum_seq_q), std::move(cum_seq_k),
       std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
 }
 
@@ -836,7 +841,7 @@ _scaled_dot_product_flash_attention_backward_cpu(
 
   flash_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v,
       grad_out_t, q_t, k_t, v_t, o_t, lse_t, cum_seq_q, cum_seq_k,
-      max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale);
+      dropout_p, is_causal, philox_seed, philox_offset, scale);
 
   grad_q = grad_q.transpose(1, 2);
   grad_k = grad_k.transpose(1, 2);

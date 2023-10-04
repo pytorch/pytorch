@@ -52,7 +52,7 @@ TORCH_API Tensor qkv_projection(
 using flash_attention_fn = void (*)(
     const Tensor& output, const Tensor& logsumexp,
     const Tensor& cum_seq_q, const Tensor& cum_seq_k,
-    int64_t& max_q, int64_t& max_k, const Tensor& philox_seed,
+    const Tensor& philox_seed,
     const Tensor& philox_offset, const Tensor& debug_attn_mask,
     const Tensor& query, const Tensor& key, const Tensor& value,
     double dropout_p, bool is_causal, bool return_debug_mask,
@@ -64,7 +64,6 @@ using flash_attention_backward_fn = void (*)(
     const Tensor& query, const Tensor& key,
     const Tensor& value, const Tensor& out, const Tensor& logsumexp,
     const Tensor& cum_seq_q, const Tensor& cum_seq_k,
-    const int64_t max_q, const int64_t max_k,
     double dropout_p, bool is_causal,
     const Tensor& philox_seed, const Tensor& philox_offset,
     c10::optional<double> scale);

@@ -189,11 +189,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
     AtenTensorHandle* ret3, // returns new reference
-    int64_t* ret4,
-    int64_t* ret5,
-    AtenTensorHandle* ret6, // returns new reference
-    AtenTensorHandle* ret7, // returns new reference
-    AtenTensorHandle* ret8 // returns new reference
+    AtenTensorHandle* ret4, // returns new reference
+    AtenTensorHandle* ret5, // returns new reference
+    AtenTensorHandle* ret6 // returns new reference
 );
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
