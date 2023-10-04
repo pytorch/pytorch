@@ -29,6 +29,7 @@ from torch.nn import functional as F
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -471,6 +472,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_get_autocast_gpu_dtype(x):
         dtype = torch.get_autocast_gpu_dtype()
         return x.type(dtype)
+
+    @make_test
+    def test_promote_types(x):
+        if x.dtype == torch.promote_types(torch.int32, torch.float32):
+            return x + 1
+        else:
+            return x - 1
 
     @make_test
     def test_get_calculate_correct_fan(x):
@@ -1562,6 +1570,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @requires_triton()
+    @skipIfRocm
     def test_triton_kernel_functionalize(self):
         import functorch
         from functorch import make_fx

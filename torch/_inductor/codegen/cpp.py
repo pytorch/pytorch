@@ -381,6 +381,10 @@ class CppPrinter(ExprPrinter):
             il = "{" + ", ".join(args) + "}"
             return f"std::max({il})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"std::abs({self._print(expr.args[0])})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint
@@ -838,7 +842,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype):
@@ -1313,7 +1317,7 @@ class CppKernel(Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy_symbol(f"i{n}") for n in range(len(self.ranges))]
+            self.itervars = [sympy_symbol(f"x{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],

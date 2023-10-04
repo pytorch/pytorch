@@ -12,7 +12,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
-from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
 
 from .. import codecache, config, ir
@@ -497,6 +497,10 @@ class WrapperCodeGen(CodeGen):
         outputs=None,
     ):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
+
+    def generate_inf_and_nan_checker(self, node):
+        # TODO: Add check for python too.
+        pass
 
     @dynamo_timed
     def generate(self):
@@ -1131,7 +1135,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         output_handles, // array for writing output AtenTensorHandle; handles
                                         // will be stolen by the caller; the array itself is
                                         // borrowed
-                    cudaStream_t stream,
+                    DeviceStreamType stream,
                     AOTIProxyExecutorHandle proxy_executor
                 ) {
                 """
@@ -1542,6 +1546,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
+    def generate_inf_and_nan_checker(self, nodes):
+        for buf in nodes.get_names():
+            # TODO: Add buf name directly into check_inf_and_nan.
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_check_inf_and_nan({buf}));"
+            )
+
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
             return f"aoti_torch_device_type_{device.type}(),{device.index if device.index else 0}"
@@ -1768,7 +1779,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
         for output_arg in output_args:
-            if output_arg is not None:
+            assert output_arg is not None, "Optional return types are not yet supported"
+            if isinstance(output_arg, (list, tuple)):
+                for out in output_arg:
+                    fill_output_arg(out, torch.TensorType.get())
+            else:
                 fill_output_arg(output_arg, torch.TensorType.get())
 
         return new_tensor_args, new_int_args
@@ -1838,10 +1853,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
         raw_args,  # contains both args and flatten kwargs
         outputs,
     ):
-        if isinstance(outputs, (list, tuple)):
-            output_args = [output.get_name() for output in outputs]
-        else:
-            output_args = [outputs.get_name()]
+        def extract_output_name(out):
+            assert out is not None, "None, i.e. optional output is not supported"
+            if isinstance(out, ir.MultiOutput):
+                return out.get_name()
+            elif isinstance(out, (list, tuple)):
+                return type(out)(extract_output_name(o) for o in out)
+            else:
+                raise AssertionError(f"Unexpected output: {type(out)}")
+
+        # output_args has the same pytree structure as outputs
+        output_args = extract_output_name(outputs)
+        if isinstance(output_args, str):
+            output_args = [output_args]
 
         (
             tensor_call_args,
@@ -1950,6 +1974,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 uint32_t grid_x;
                 uint32_t grid_y;
                 uint32_t grid_z;
+
+                bool is_non_zero() {
+                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
+                }
             };
 
             }  // anonymous namespace
@@ -2123,12 +2151,14 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             grid, (list, tuple)
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
-        grid_args = [
-            self.grid_expr_printer(V.graph.sizevars.simplify(item)) for item in grid
-        ]
+        grid = [V.graph.sizevars.simplify(item) for item in grid]
+        grid_has_unbacked_symbols = any(free_unbacked_symbols(item) for item in grid)
+        grid_args = [self.grid_expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
+        if grid_has_unbacked_symbols:
+            self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -2141,3 +2171,5 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 stream,
             )
         )
+        if grid_has_unbacked_symbols:
+            self.writeline("}")
