@@ -816,7 +816,6 @@ class BuiltinVariable(VariableTracker):
         if obj is None:
             if cls is SetVariable:
                 return cls(
-                    tx,
                     [],
                     mutable_local=MutableLocal(),
                 )
@@ -834,7 +833,6 @@ class BuiltinVariable(VariableTracker):
                     guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             if cls is SetVariable:
                 return cls(
-                    tx,
                     list(obj.unpack_var_sequence(tx)),
                     mutable_local=MutableLocal(),
                     guards=guards,
