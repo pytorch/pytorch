@@ -6,9 +6,7 @@
 
 #include <algorithm>
 #include <memory>
-#include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace torch {
 
@@ -19,17 +17,12 @@ std::string py_typename(PyObject* object) {
 }
 
 struct Type {
-  Type() = default;
-  Type(const Type&) = default;
-  Type& operator=(const Type&) = default;
-  Type(Type&&) noexcept = default;
-  Type& operator=(Type&&) noexcept = default;
   virtual bool is_matching(PyObject* object) = 0;
   virtual ~Type() = default;
 };
 
 struct SimpleType : public Type {
-  SimpleType(std::string_view name) : name(name){};
+  SimpleType(std::string& name) : name(name){};
 
   bool is_matching(PyObject* object) override {
     return py_typename(object) == name;
@@ -43,10 +36,11 @@ struct MultiType : public Type {
       : types(accepted_types){};
 
   bool is_matching(PyObject* object) override {
-    return types.find(py_typename(object)) != types.end();
+    auto it = std::find(types.begin(), types.end(), py_typename(object));
+    return it != types.end();
   }
 
-  std::unordered_set<std::string> types;
+  std::vector<std::string> types;
 };
 
 struct NullableType : public Type {
@@ -99,8 +93,8 @@ struct SequenceType : public Type {
 };
 
 struct Argument {
-  Argument(std::string_view name, std::unique_ptr<Type> type)
-      : name(name), type(std::move(type)){};
+  Argument(std::string name, std::unique_ptr<Type> type)
+      : name(std::move(name)), type(std::move(type)){};
 
   std::string name;
   std::unique_ptr<Type> type;
@@ -124,13 +118,13 @@ struct Option {
   bool has_out;
 };
 
-std::vector<std::string_view> _splitString(
-    std::string_view s,
-    std::string_view delim) {
-  std::vector<std::string_view> tokens;
+std::vector<std::string> _splitString(
+    const std::string& s,
+    const std::string& delim) {
+  std::vector<std::string> tokens;
   size_t start = 0;
   size_t end = 0;
-  while ((end = s.find(delim, start)) != std::string_view::npos) {
+  while ((end = s.find(delim, start)) != std::string::npos) {
     tokens.push_back(s.substr(start, end - start));
     start = end + delim.length();
   }
@@ -138,7 +132,7 @@ std::vector<std::string_view> _splitString(
   return tokens;
 }
 
-std::unique_ptr<Type> _buildType(std::string_view type_name, bool is_nullable) {
+std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   std::unique_ptr<Type> result;
   if (type_name == "float") {
     result = std::make_unique<MultiType>(MultiType{"float", "int", "long"});
@@ -146,16 +140,14 @@ std::unique_ptr<Type> _buildType(std::string_view type_name, bool is_nullable) {
     result = std::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
     auto type_list = type_name.substr(6);
-    type_list.remove_suffix(1);
-    auto sub_string_views = _splitString(type_list, ",");
+    type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
-    types.reserve(sub_string_views.size());
-    for (auto& type : sub_string_views)
+    for (auto& type : _splitString(type_list, ","))
       types.emplace_back(_buildType(type, false));
     result = std::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
     auto subtype = type_name.substr(9);
-    subtype.remove_suffix(1);
+    subtype.pop_back();
     result = std::make_unique<SequenceType>(_buildType(subtype, false));
   } else {
     result = std::make_unique<SimpleType>(type_name);
@@ -202,7 +194,7 @@ std::pair<Option, std::string> _parseOption(
     if (arg[type_start_idx] == '[') {
       is_nullable = true;
       type_start_idx++;
-      arg.remove_suffix(std::string(" or None]").length());
+      arg.erase(arg.length() - std::string(" or None]").length());
     }
 
     auto type_end_idx = arg.find_last_of(' ');
@@ -211,15 +203,17 @@ std::pair<Option, std::string> _parseOption(
     // "type ... name" => "type ... name"
     //          ^              ^
     auto dots_idx = arg.find("...");
-    if (dots_idx != std::string_view::npos)
+    if (dots_idx != std::string::npos)
       type_end_idx -= 4;
 
-    auto type_name = arg.substr(type_start_idx, type_end_idx - type_start_idx);
-    auto name = arg.substr(name_start_idx);
+    std::string type_name =
+        arg.substr(type_start_idx, type_end_idx - type_start_idx);
+    std::string name = arg.substr(name_start_idx);
+
     arguments.emplace_back(name, _buildType(type_name, is_nullable));
   }
 
-  bool is_variadic = option_str.find("...") != std::string_view::npos;
+  bool is_variadic = option_str.find("...") != std::string::npos;
   return std::pair<Option, std::string>(
       Option(std::move(arguments), is_variadic, has_out),
       std::move(printable_option));
