@@ -55,10 +55,13 @@ class SuperVariable(VariableTracker):
 
         source = None
         if self.objvar.source is not None:
+            # Walk the mro tuple to find out the actual class where the
+            # attribute resides.
             search_mro = self.objvar.python_type().__mro__
             start_index = search_mro.index(search_type) + 1
             for index in range(start_index, len(search_mro)):
                 if hasattr(search_mro[index], name):
+                    # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     source = AttrSource(
                         GetItemSource(
                             AttrSource(TypeSource(self.objvar.source), "__mro__"), index
@@ -66,10 +69,19 @@ class SuperVariable(VariableTracker):
                         name,
                     )
                     break
+
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
         return getattr(super(search_type, type_to_use), name), source
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        # Check if getattr is a constant. If not, delay the actual work by
+        # wrapping the result in GetAttrVariable. Mostly super is called with a
+        # method, so most of the work is delayed to call_function.
+        #
+        # We could have just implemented a const_getattr. However, super is
+        # special when it comes to finding sources. Compared to other VTs, super
+        # requires the attr name to walk the mro and find the actual source (and
+        # not just AttrSource).
         options = VariableTracker.propagate(self, self.objvar, self.typevar)
         value, source = self._resolved_getattr_and_source(self, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -92,7 +104,6 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn, source = self._resolved_getattr_and_source(self, name)
-        search_type = self.typevar.as_python_constant()
 
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)

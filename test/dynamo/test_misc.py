@@ -4969,10 +4969,6 @@ def fn():
             def mul(self, x):
                 return x * 0.1
 
-            @staticmethod
-            def square(x):
-                return x * x
-
         class B(A):
             coeff = 4
 
@@ -4988,27 +4984,28 @@ def fn():
 
         class C(B):
             def add(self, x):
-                # a = super().square(x)
-                a = 1
                 b = super().cube(x)
                 c = A.add(self, x)
                 d = B.mul(self, x)
                 e = super(B, self).add(x)
                 f = super().a * x
-                return a + b + c + d + e + f
+                return b + c + d + e + f
 
         x = torch.rand(4)
         fn = C().add
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnt.frame_count, 1)
 
         # Check recomputation
         A.a = 5
         ref = fn(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_builder_for_class_with_metaclass(self):
         class ExampleMeta(type):
