@@ -18,7 +18,6 @@ from .dicts import (
     DefaultDictVariable,
 )
 from .functions import (
-    BoundedUserMethodVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,

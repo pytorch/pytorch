@@ -4988,7 +4988,8 @@ def fn():
 
         class C(B):
             def add(self, x):
-                a = super().square(x)
+                # a = super().square(x)
+                a = 1
                 b = super().cube(x)
                 c = A.add(self, x)
                 d = B.mul(self, x)
@@ -5000,6 +5001,12 @@ def fn():
         fn = C().add
         ref = fn(x)
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+        # Check recomputation
+        A.a = 5
+        ref = fn(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 

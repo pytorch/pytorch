@@ -11,12 +11,12 @@ import torch._numpy as tnp
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
+from ..guards import GuardBuilder
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs, nothing
+from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 from .functions import (
-    BoundedUserMethodVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -25,10 +25,11 @@ from .user_defined import UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
-    def __init__(self, typevar, objvar=None, **kwargs):
+    def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super().__init__(**kwargs)
         self.typevar = typevar
         self.objvar = objvar
+        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen(variables.BuiltinVariable(super))
@@ -39,21 +40,19 @@ class SuperVariable(VariableTracker):
         else:
             return create_call_function(1, True)
 
-    def var_getattr(self, tx, name):
-        from .builder import SourcelessBuilder, VariableBuilder
-
+    def _resolved_getattr_and_source(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
+        if self.specialized:
+            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        if not hasattr(self.objvar, "value"):
-            unimplemented(f"super() not implemented for {self.objvar}")
+        # We default to the python type of the object. However, if this is
+        # a `type` or subclass of `type`, then the original object represents
+        # the user defined type.
+        type_to_use = self.objvar.python_type()
+        if issubclass(type_to_use, type):
+            type_to_use = self.objvar.value
 
-        object_or_type = self.objvar.value
-
-        # # TODO(jansel): there is a small chance this could trigger user code, prevent that
-        obj = getattr(super(search_type, object_or_type), name)
-
-        options = VariableTracker.propagate(self, self.objvar, self.typevar)
         source = None
         if self.objvar.source is not None:
             search_mro = self.objvar.python_type().__mro__
@@ -67,21 +66,20 @@ class SuperVariable(VariableTracker):
                         name,
                     )
                     break
-        if isinstance(obj, types.FunctionType):
-            return UserFunctionVariable(obj, source=source, **options)
-        elif isinstance(obj, types.MethodWrapperType) and name == "__init__":
-            init_slot_wrapper = getattr(super(search_type, self.objvar.python_type()), name)
-            if init_slot_wrapper is object.__init__:
-                return LambdaVariable(nothing, **options)
-            unimplemented(f"super() nn.Module.__init__")
-        elif isinstance(obj, types.MethodType):
-            return BoundedUserMethodVariable(
-                obj.__func__, self.objvar, source=source, **options
-            )
+        # TODO(jansel): there is a small chance this could trigger user code, prevent that
+        return getattr(super(search_type, type_to_use), name), source
 
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self, self.objvar, self.typevar)
+        value, source = self._resolved_getattr_and_source(self, name)
+        if not variables.ConstantVariable.is_literal(value):
+            return GetAttrVariable(self, name, **options)
         if source:
-            return VariableBuilder(tx, source)(obj).add_options(options)
-        return SourcelessBuilder()(tx, obj).add_options(options)
+            options["source"] = source
+            return variables.ConstantVariable.create(value, **options).add_guard(
+                source.make_guard(GuardBuilder.CONSTANT_MATCH)
+            )
+        return variables.ConstantVariable.create(value, **options)
 
     def call_method(
         self,
@@ -93,8 +91,9 @@ class SuperVariable(VariableTracker):
         options = VariableTracker.propagate(
             self, args, kwargs.values(), self.objvar, self.typevar
         )
-        inner_fn = self.const_getattr(self, name)
-        source = None if self.source is None else AttrSource(self.source, name)
+        inner_fn, source = self._resolved_getattr_and_source(self, name)
+        search_type = self.typevar.as_python_constant()
+
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif inner_fn is torch.nn.Module.__init__:
@@ -541,7 +540,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs)#.add_options(self)
+        return self.fn(*args, **kwargs).add_options(self)
 
 
 class GetAttrVariable(VariableTracker):
@@ -580,8 +579,70 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        # This variable is True when it corresponds to user code such as
+        #
+        #   super().__torch_function__(...)
+        #
+        # and the super().__torch_function__ attribute resolves
+        # to torch.Tensor.__torch_function__.
+        is_original_tensor_torch_function = (
+            self.name == "__torch_function__"
+            and isinstance(self.obj, SuperVariable)
+            # for now, only support one level of inheritance
+            and len(self.obj.objvar.value.__mro__) > 1
+            and self.obj.objvar.value.__mro__[1] == torch.Tensor
+        )
+        if is_original_tensor_torch_function:
+            # Instead of tracing inside torch.Tensor.__torch_function__,
+            # record the `call_function` or `call_method` call into the graph.
+            from . import TorchVariable
+
+            original_torch_or_getattr_variable = args[0]
+            new_args = args[2].items
+            new_kwargs = args[3].items
+            options = VariableTracker.propagate(self, new_args, new_kwargs.values())
+            # Disable __torch_function__ here to prevent the clone of the
+            # example tensor from going into the override.
+            with torch._C.DisableTorchFunctionSubclass():
+                if isinstance(args[0], TorchVariable):
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function",
+                            original_torch_or_getattr_variable.value,
+                            *proxy_args_kwargs(new_args, new_kwargs),
+                        ),
+                        **options,
+                    )
+                elif isinstance(args[0], GetAttrVariable):
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_method",
+                            original_torch_or_getattr_variable.name,
+                            *proxy_args_kwargs(new_args, new_kwargs),
+                        ),
+                        **options,
+                    )
+                else:
+                    unimplemented(
+                        f"GetAttrVariable.call_function original __torch_function__ {args}"
+                    )
+
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
+        # calling parent class‘s non classmethod from child class
+        # https://github.com/pytorch/pytorch/issues/90558
+        elif (
+            isinstance(self.obj, variables.UserDefinedClassVariable)
+            and len(args) > 0
+            and issubclass(args[0].python_type(), self.obj.value)
+        ):
+            return SuperVariable(self.obj, args[0], True).call_method(
+                tx, self.name, args[1:], kwargs
+            )
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
 
     def call_method(
