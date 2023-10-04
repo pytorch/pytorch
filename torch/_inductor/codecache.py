@@ -797,10 +797,13 @@ def get_include_and_linking_paths(
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
-        libs = []
+
+        # Unconditionally link with "c10" to use TORCH_CHECK. See PyTorch#108690
+        libs = ["c10"]
+
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu"]
+            libs += ["torch", "torch_cpu"]
             libs += ["gomp"]
             if not aot_mode:
                 libs += ["torch_python"]
@@ -893,8 +896,6 @@ def get_include_and_linking_paths(
             # and raise error together with instructions at compilation error later
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
-            if config.assert_indirect_indexing:
-                libs += ["c10", "torch_cpu"]
 
     # third party libs
     if config.is_fbcode():
