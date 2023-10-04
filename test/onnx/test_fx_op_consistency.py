@@ -164,9 +164,9 @@ COMPLEX_TESTED_OPS = frozenset(
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
-# use **xfail_onnxscript** and **skip_onnxscript** instead of xfail or skip
+# use **xfail_onnxscript_forward_compatibility** and **skip_torchlib_forward_compatibility** instead of xfail or skip
 # to make the signal apparent for maintainers.
-def xfail_onnxscript(
+def xfail_onnxscript_forward_compatibility(
     op_name: str,
     variant_name: str = "",
     *,
@@ -188,7 +188,7 @@ def xfail_onnxscript(
     )
 
 
-def skip_onnxscript(
+def skip_torchlib_forward_compatibility(
     op_name: str,
     variant_name: str = "",
     *,
@@ -589,7 +589,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
     ),
-    skip_onnxscript(
+    skip_torchlib_forward_compatibility(
         "nn.functional.embedding_bag",
         matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
         reason=onnx_test_common.reason_onnx_script_does_not_support(
@@ -604,7 +604,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         and sample.kwargs.get("padding") == 1,
         reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
     ),
-    skip_onnxscript(
+    skip_torchlib_forward_compatibility(
         "nn.functional.nll_loss",
         matcher=lambda sample: isinstance(sample.kwargs.get("reduction"), str),
         reason=onnx_test_common.reason_onnx_script_does_not_support(
