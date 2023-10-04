@@ -370,6 +370,9 @@ def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = No
 
 def dynamic_dim(t: torch.Tensor, index: int):
     """
+    .. warning::
+        (This feature is DEPRECATED. See :func:`Dim` instead.)
+
     :func:`dynamic_dim` constructs a :class:`Constraint` object that describes the dynamism of
     a dimension ``index`` of tensor ``t``. :class:`Constraint` objects should be passed to
     ``constraints`` argument of :func:`export`.
@@ -449,9 +452,6 @@ class _Dim(type):
 
 def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     """
-    .. warning::
-        (Experimental new feature.)
-
     :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
     It can be used to describe multiple possible values of a dynamic tensor dimension.
     Note that different dynamic dimensions of the same tensor, or of different tensors,
@@ -466,16 +466,13 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
         A type that can be used in dynamic shape specifications for tensors.
     """
     _min = 2 if min is None else builtins.max(min, 2)
-    _max = sys.maxsize if max is None else builtins.min(max, sys.maxsize)
+    _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     return _Dim(name, (int,), {"min": _min, "max": _max})
 
 
 def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
     """
-    .. warning::
-        (Experimental new feature.)
-
     Util to create multiple :func:`Dim` types.
     """
     return tuple(Dim(name, min=min, max=max) for name in names)
@@ -509,36 +506,27 @@ def export(
     The output :class:`ExportedProgram` is considered valid only when these
     assumptions hold true.
 
-    There are 2 types of assumptions made during tracing
-
-    - Shapes (not values) of input tensors.
-    - Ranges (lower and upper bound) of values extracted from intermediate tensors via ``.item()`` or direct indexing.
-
-
-    All assumptions must be validated at graph capture time for :func:`export`
+    Tracing makes assumptions on the shapes (not values) of input tensors.
+    Such assumptions must be validated at graph capture time for :func:`export`
     to succeed. Specifically:
 
     - Assumptions on static shapes of input tensors are automatically validated without additional effort.
-    - Assumptions on dynamic shape of input tensors require explicit `Input Constraint`
-      constructed with :func:`dynamic_dim` APIs
-    - Assumptions on range of intermediate values require explicit `Inline Constraint`,
-      constructed use :func:`constrain_as_size` and :func:`constraint_as_value` APIs.
+    - Assumptions on dynamic shape of input tensors require explicit specification
+      by using the :func:`Dim` API to construct dynamic dimensions and by associating
+      them with example inputs through the ``dynamic_shapes`` argument.
 
     If any assumption can not be validated, a fatal error will be raised. When that happens,
-    the error message will include suggested code needed to construct necessary
-    constraints to validate the assumptions, for example :func:`export` would suggest
-    following code for input constraints::
+    the error message will include suggested fixes to the specification that are needed
+    to validate the assumptions. For example :func:`export` might suggest the
+    following fix to the definition of a dynamic dimension ``dim0_x``, say appearing in the
+    shape associated with input ``x``, that was previously defined as ``Dim("dim0_x")``::
 
-        def specify_constraints(x):
-            return [
-                # x:
-                dynamic_dim(x, 0) <= 5,
-            ]
+        dim = Dim("dim0_x", max=5)
 
-    This example means the program requires the dim 0 of input ``x`` to be less
-    than or equal to 5 to be valid. You can inspect the constraints needed and
-    then copy this exact function into your code to generated needed
-    constraints to be passed into ``constraints`` argument.
+    This example means the generated code requires dimension 0 of input ``x`` to be less
+    than or equal to 5 to be valid. You can inspect the suggested fixes to dynamic dimension
+    definitions and then copy them verbatim into your code without needing to change the
+    ``dynamic_shapes`` argument to your :func:`export` call.
 
     Args:
         f: The callable to trace.
@@ -547,7 +535,8 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
-        constraints: An optional list of constraints on the dynamic arguments
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
          that specify their possible range of shapes. By default, shapes of
          input torch.Tensors are assumed to be static. If an input torch.Tensor
          is expected to have dynamic shapes, please use :func:`dynamic_dim`
@@ -555,8 +544,7 @@ def export(
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
-        dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
-         Should be a dict from argument names of ``f`` to their dynamic shape specifications,
+        dynamic_shapes: Should be a dict from argument names of ``f`` to their dynamic shape specifications,
          as follows. The dynamic shape of a tensor argument can be specified as either
          (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
          not required to include static dimension indices in this dict, but when they are,

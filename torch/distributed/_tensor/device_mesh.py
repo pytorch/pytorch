@@ -160,6 +160,10 @@ class DeviceMesh:
             else torch.tensor(mesh, dtype=torch.int)
         )
         self.mesh_dim_names = mesh_dim_names
+
+        # private field to pre-generate DeviceMesh's hash
+        self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -278,14 +282,17 @@ class DeviceMesh:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash((self.mesh, id(self)))
+        return self._hash
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
-        if id(self) == id(other):
+        if id(self.mesh) == id(other.mesh):
             return True
-        return self.mesh.equal(other.mesh)
+        return (
+            self.mesh.shape == other.mesh.shape
+            and self._flatten_mesh_list == other._flatten_mesh_list
+        )
 
     def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
         """
