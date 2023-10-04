@@ -296,6 +296,7 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
+    @skipIfTorchDynamo()
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1., 2., 3.], device=device)
         captured = torch.randn(3, device=device)
@@ -2324,6 +2325,7 @@ class TestHessian(TestCase):
 
 
 class TestJvp(TestCase):
+    @skipIfTorchDynamo()
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1., 2., 3.], device=device)
         captured = torch.randn(3, device=device)
@@ -3294,6 +3296,7 @@ class TestComposability(TestCase):
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
+    @skipIfTorchDynamo()
     def test_autograd_function_no_setup_context(self, device, transform):
         class MySin(torch.autograd.Function):
             @staticmethod

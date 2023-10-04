@@ -141,6 +141,7 @@ class TestForeach(TestCase):
             'fastpath' if not x else 'slowpath', 'inplace' if y else 'outplace'
         )
     )
+    @skipIfTorchDynamo()
     def test_parity(self, device, dtype, op, noncontiguous, inplace):
         if inplace:
             _, _, func, ref = self._get_funcs(op)

@@ -2470,14 +2470,24 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
+        def dynamo_wrapper(backend, function):
+            @functools.wraps(function)
+            def inner(*args, **kwargs):
+                # We disable the cache limit so that Dynamo never falls back to eager-mode.
+                # This hides tests that would have otherwise failed.
+                # Previously, we instead attempted to reset() before every test, but that
+                # takes too long because it triggers a lot of recompiles.
+                with torch._dynamo.utils.disable_cache_limit():
+                    return torch._dynamo.optimize(backend)(function)(*args, **kwargs)
+            return inner
+
         super_run = super().run
         if TEST_WITH_TORCHINDUCTOR:
-            super_run = torch._dynamo.optimize("inductor")(super_run)
+            super_run = dynamo_wrapper("inductor", super_run)
         elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager")(super_run)
+            super_run = dynamo_wrapper("aot_eager", super_run)
         elif TEST_WITH_TORCHDYNAMO:
-            # TorchDynamo optimize annotation
-            super_run = torch._dynamo.optimize("eager")(super_run)
+            super_run = dynamo_wrapper("eager", super_run)
 
         super_run(result=result)
 

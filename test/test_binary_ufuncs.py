@@ -1565,6 +1565,7 @@ class TestBinaryUfuncs(TestCase):
             regex = "doesn't match the broadcast shape"
             self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
 
+    @torch.testing._internal.common_utils.skipIfTorchDynamo()
     def test_int_tensor_pow_neg_ints(self, device):
         ints = [
             torch.iinfo(torch.int32).min,

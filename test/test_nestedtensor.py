@@ -2881,6 +2881,7 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
 
+    @torch.testing._internal.common_utils.skipIfTorchDynamo()
     def test_unary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
