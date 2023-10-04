@@ -886,10 +886,14 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
+    supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat)
+    def is_supported_type(arg):
+        return isinstance(arg, supported_types)
+
     def produce_matching(sources, candidates):
         source_types = " or ".join(
             [
-                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
+                desc + " of types: (" + ", ".join([str(type(arg)) for arg in args]) + ")"
                 for desc, args in sources.items()
             ]
         )
@@ -901,21 +905,17 @@ def rewrite_signature(
 
         for candidate_desc, candidate_args in candidates.items():
             for i, arg in enumerate(candidate_args):
-                if isinstance(arg, torch.Tensor):
+                if is_supported_type(arg):
                     if id(arg) in dict_of_source_args:
                         matched_elements_positions.append(dict_of_source_args[id(arg)])
-                    # 1-element tensor arg can be unspec int/float
-                    elif torch.numel(arg) == 1 and id(arg.item()) in dict_of_source_args:
-                        matched_elements_positions.append(
-                            dict_of_source_args[id(arg.item())]
-                        )
                     else:
                         raise AssertionError(
-                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                            f"{candidate_desc} #{i+1}, of type {type(arg)}, is not among {source_types}"
                         )
                 else:
                     raise AssertionError(
-                        f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                        f"{candidate_desc} #{i+1} is {arg}, but only "
+                        f"the following types are supported: {supported_types}"
                     )
 
         return matched_elements_positions
