@@ -2183,7 +2183,7 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
-    def test_dataclass_input(self):
+    def test_dataclass_input_output(self):
         from dataclasses import dataclass
 
         @dataclass
@@ -2196,11 +2196,22 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "graph-captured input #0.*Tensor.*not among original args.*Tensors",
+            "graph-captured input #1, of type .*Tensor.*, "
+            "is not among original inputs of types: .*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
             )
+
+        def f(x, y):
+            return Tensors(x=x.sin(), y=y.cos())
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #1 is .*Tensors.*, "
+            "but only the following types are supported",
+        ):
+            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
     def test_none_out(self):
         def f(x, y):
@@ -2208,9 +2219,40 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #0.*NoneType.*not among graph-captured outputs.*or original args.*Tensor.*Tensor",
+            "original output #1 is None, but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+
+    def test_primitive_constant_output(self):
+        def foo(x):
+            # return a constant of primitive type
+            y = 5
+            return y * x, y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #2 is 5, but only the following types are supported",
+        ):
+            torch.export.export(foo, (torch.tensor(3),))
+
+        def bar(x, y):
+            return y * x, y
+
+        # new behavior
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #2 is 5, but only the following types are supported",
+        ):
+            torch.export.export(bar, (torch.tensor(3), 5))
+
+        def qux(x, y):
+            return y * x, y - 1
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #2 is 4, but only the following types are supported",
+        ):
+            torch.export.export(qux, (torch.tensor(3), 5))
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
@@ -3226,10 +3268,10 @@ def forward(self, x):
                         if "L['pred']" in code
                     ]
                     self.assertEqual(guard_code_on_predicate, exp_guard_code[i])
-                    outter_shape_env_guards = [
+                    outer_shape_env_guards = [
                         str(guard.expr) for guard in shape_env.guards
                     ]
-                    self.assertEqual(outter_shape_env_guards, exp_shape_env_guards[i])
+                    self.assertEqual(outer_shape_env_guards, exp_shape_env_guards[i])
 
         true_graph = """\
 class GraphModule(torch.nn.Module):
@@ -3245,10 +3287,10 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["convert_symbool_to_int_with_hint(L['pred']) == 1"]
+        true_guard_code = ["L['pred'].__int__() == 1"]
         false_guard_code = [
-            "Ne(convert_symbool_to_int_with_hint(L['pred']), 1)",
-            "-9223372036854775808 <= convert_symbool_to_int_with_hint(L['pred'])",
+            "Ne(L['pred'].__int__(), 1)",
+            "-9223372036854775808 <= L['pred'].__int__()",
         ]
         test_symbool_guards(
             f,
