@@ -1,6 +1,6 @@
 import dataclasses
 
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
 
@@ -49,7 +49,7 @@ def register_dataclass_as_pytree_node(
                 none_names.append(name)
         return flattened, (typ, flat_names, none_names)
 
-    def default_unflatten_fn(values: List[Any], context: Context) -> Any:
+    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
         return typ(**dict(zip(flat_names, values)), **{k: None for k in none_names})
 
