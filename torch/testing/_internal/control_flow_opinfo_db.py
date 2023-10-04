@@ -2,7 +2,9 @@ import torch
 import functools
 from torch.testing import make_tensor
 from functorch.experimental.control_flow import map
+from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.opinfo.core import (
+    DecorateInfo,
     OpInfo,
     SampleInput,
 )
@@ -71,5 +73,8 @@ control_flow_opinfo_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(slowTest, "TestBwdGradients", "test_fn_gradgrad", device_type="cpu", dtypes=(torch.float64,))
+        )
     )
 ]

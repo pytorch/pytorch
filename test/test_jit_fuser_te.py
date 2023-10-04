@@ -22,7 +22,7 @@ torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN, \
-    IS_FBCODE
+    IS_FBCODE, slowTestIf, ATEN_CPU_CAPABILITY, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
     clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions, NoTracerWarnContextManager
@@ -1356,6 +1356,7 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 ) from e
 
+    @slowTestIf(TEST_CUDA and not ATEN_CPU_CAPABILITY)
     def test_unary_ops(self):
         with torch._jit_internal._disable_emit_hooks():
             def apply(fn):

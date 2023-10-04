@@ -3665,6 +3665,7 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
         self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
 
+    @common_utils.slowTest  # Variable test times but generally slow
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):

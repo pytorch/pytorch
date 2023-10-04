@@ -363,3 +363,9 @@ def expectedFailureCodegenDynamic(fn):
 def expectedFailureDynamicWrapper(fn):
     fn._expected_failure_dynamic_wrapper = True
     return fn
+
+
+def slowTestDynamicIf(fn, condition=True):
+    if condition:
+        fn.slow_test = True
+    return fn
