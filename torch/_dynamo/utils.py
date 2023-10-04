@@ -33,27 +33,30 @@ try:
 except ModuleNotFoundError:
     np = None
 
-import torch._logging
-import torch._numpy as tnp
-from torch._guards import detect_fake_mode  # noqa: F401
-from torch._logging import LazyString
-from . import config
+try:
+    import torch._logging
+    import torch._numpy as tnp
+    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._logging import LazyString
+    from . import config
 
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+    if np:
+        NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-if np:
-    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+        NP_TO_TNP_MODULE = {
+            np: tnp,
+            np.fft: tnp.fft,
+            np.linalg: tnp.linalg,
+            np.random: tnp.random,
+        }
+    else:
+        NP_SUPPORTED_MODULES = {}
 
-    NP_TO_TNP_MODULE = {
-        np: tnp,
-        np.fft: tnp.fft,
-        np.linalg: tnp.linalg,
-        np.random: tnp.random,
-    }
-else:
-    NP_SUPPORTED_MODULES = {}
-
-    NP_TO_TNP_MODULE = {}
+        NP_TO_TNP_MODULE = {}
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+except ImportError:
+    pass
 
 import importlib
 
@@ -62,7 +65,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
