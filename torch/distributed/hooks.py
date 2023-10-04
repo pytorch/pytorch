@@ -8,7 +8,11 @@ from typing import Callable, Dict, List, Optional
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 
-from torch._C._distributed_c10d import _dequeue_c10d_event, _enable_event_collection
+from torch._C._distributed_c10d import (
+    _dequeue_c10d_event,
+    _enable_event_collection,
+    EventKind,
+)
 
 __all__ = [
     "CollectiveStatus",
@@ -28,10 +32,14 @@ class CollectiveStatus:
     operation: str = "unknown"  # collective name
     timestamp: int = 0  # timestamp to the earliest time we noticed this event
     duration: Optional[float] = None  # value in milliseconds it took executing
+    drop_count: int = 0  # number of events dropped following this one
 
 
 COLLECTIVE_HOOK_TYPE = Callable[[CollectiveStatus], None]
 PG_HOOK_TYPE = Callable[[dist.ProcessGroup, str], None]
+
+# This controls the number of internal failures we'll tolerate before giving up
+_MAX_INTERNAL_FAILURES = 10
 
 """
 TODO:
@@ -47,6 +55,7 @@ _pp_w = -1
 
 
 def _c10d_pg_hooks_loops():
+    internal_failures = 0
     while True:
         # we don't care about the result, this is how we implement notification
         _ = os.read(_pp_r, 1)
@@ -55,16 +64,35 @@ def _c10d_pg_hooks_loops():
             event_kind = evt.pop("event_kind", None)
             if event_kind is None:
                 logger.warning(
-                    "c10d returned event dictionary without 'event_kind' key, cannot dispatch"
+                    "c10d returned event dictionary %s without 'event_kind' key, cannot dispatch",
+                    evt,
                 )
+                internal_failures += 1
+                if internal_failures >= _MAX_INTERNAL_FAILURES:
+                    logger.warning(
+                        "too many internal c10d failures processing callback loop. stopping"
+                    )
+                    return
+                time.sleep(1)
                 continue
 
-            if event_kind == 0:
+            if event_kind == int(EventKind.START):  # type: ignore[call-overload]
                 cb_list = _start_callbacks
-            elif event_kind == 1:
+            elif event_kind == int(EventKind.END):  # type: ignore[call-overload]
                 cb_list = _end_callbacks
             else:
-                logger.warning("c10d invalid 'event_kind' with value %d", event_kind)
+                logger.warning(
+                    "c10d event %s with invalid 'event_kind' with value %d",
+                    evt,
+                    event_kind,
+                )
+                internal_failures += 1
+                if internal_failures >= _MAX_INTERNAL_FAILURES:
+                    logger.warning(
+                        "too many internal c10d failures processing callback loop. stopping"
+                    )
+                    return
+                time.sleep(1)
                 continue
 
             status = CollectiveStatus(**evt)  # type: ignore[arg-type]
@@ -73,7 +101,8 @@ def _c10d_pg_hooks_loops():
                     cb(status)
                 except Exception as e:
                     logger.info(
-                        "c10d event callback with event %s threw exception %s",
+                        "c10d event callback %s with event %s threw exception %s",
+                        cb,
                         status,
                         e,
                     )
@@ -84,6 +113,13 @@ def _c10d_pg_hooks_loops():
                 evt,
                 e,
             )
+            internal_failures += 1
+            if internal_failures >= _MAX_INTERNAL_FAILURES:
+                logger.warning(
+                    "too many internal c10d failures processing callback loop. stopping"
+                )
+                return
+
             # Sleep for a second to avoid hogging the GIL in case of a persistent failure
             time.sleep(1)
 

@@ -307,6 +307,7 @@ py::object c10d_dequeue_python_event() {
   data["operation"] = evt.operation;
   data["timestamp"] = evt.timestamp;
   data["duration"] = evt.duration_ms.value_or(-1);
+  data["drop_count"] = evt.drop_count;
 
   return std::move(data);
 }
@@ -659,6 +660,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_static_graph",
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
+
+  py::enum_<::c10d::EventKind>(module, "EventKind", R"(
+An enum for collective hooks event types.)")
+      .value("START", ::c10d::EventKind::CollectiveStart)
+      .value("END", ::c10d::EventKind::CollectiveEnd);
 
   py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
       An enum whose values correspond to different debug levels of the
