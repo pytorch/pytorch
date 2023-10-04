@@ -681,7 +681,7 @@
   structured_delegate: all.out
   variants: function, method
 
-- func: all.dims(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor
+- func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: all.dims_out
   variants: function, method
@@ -696,7 +696,7 @@
     CPU, CUDA: all_out
     MPS: all_out_mps
 
-- func: all.dims_out(Tensor self, int[1]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
@@ -723,7 +723,7 @@
   variants: function, method
   tags: core
 
-- func: any.dims(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor
+- func: any.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: any.dims_out
   variants: function, method
@@ -739,7 +739,7 @@
     CPU, CUDA: any_out
     MPS: any_out_mps
 
-- func: any.dims_out(Tensor self, int[1]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: any.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
