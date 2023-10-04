@@ -123,6 +123,10 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     return val_;
   }
 
+  bool is_symbolic() override {
+    return false;
+  }
+
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
     TORCH_CHECK(false, #name " not supported by SingletonSymNode"); \

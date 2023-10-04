@@ -11,7 +11,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
@@ -37,6 +37,10 @@ from .scheduler import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+SchedulerNodeList = List[Any]
+BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
+GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
 
 @functools.lru_cache(None)
@@ -172,6 +176,72 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
     return graph
+
+
+def update_orig_fx_node_name_to_buf_name(
+    nodes: SchedulerNodeList,
+    node_name_to_buf_name: Dict[str, str],
+    parent_buf_name: Optional[str] = None,
+    n_origins: int = 0,
+):
+    if nodes is None:
+        return
+    for node in nodes:
+        # for FusedSchedulerNode, traverse recursively into get_nodes()
+        buf_name = node.get_name()
+        children_nodes = node.get_nodes()
+        if children_nodes is not None and len(children_nodes) > 1:
+            update_orig_fx_node_name_to_buf_name(
+                children_nodes,
+                node_name_to_buf_name,
+                buf_name if parent_buf_name is None else parent_buf_name,
+            )
+            continue
+        else:
+            assert len(children_nodes) == 1 and children_nodes[0] == node
+
+        ir_node = node.node
+        if ir_node is None or ir_node.origins is None:
+            continue
+        for origin in ir_node.origins:
+            node_name = origin.name
+            # when buf1 and buf2 both have origin=node1
+            # we draw node1 according to buf1
+            if node_name not in node_name_to_buf_name:
+                node_name_to_buf_name[node_name] = (
+                    buf_name if parent_buf_name is None else parent_buf_name
+                )
+
+
+def get_node_name_to_buf_meta(node_name_to_buf_name: Dict[str, str]):
+    buf_name_to_n_node = {}
+    for node_name, buf_name in node_name_to_buf_name.items():
+        if buf_name not in buf_name_to_n_node:
+            buf_name_to_n_node[buf_name] = {node_name}
+        else:
+            buf_name_to_n_node[buf_name].add(node_name)
+
+    node_name_to_buf_meta = {}
+    for node_name, buf_name in node_name_to_buf_name.items():
+        n_node = len(buf_name_to_n_node[buf_name])
+        node_name_to_buf_meta[node_name] = BufMeta(buf_name, n_node)
+    return node_name_to_buf_meta
+
+
+def annotate_orig_fx_with_snodes(
+    gm: torch.fx.GraphModule, snodes: SchedulerNodeList
+) -> None:
+    """
+    Creates a FX Graph from a list of SchedulerNode objects.
+    """
+    node_name_to_buf_name: Dict[str, str] = {}
+    update_orig_fx_node_name_to_buf_name(snodes, node_name_to_buf_name)
+    if node_name_to_buf_name is None:
+        return
+    node_name_to_buf_meta = get_node_name_to_buf_meta(node_name_to_buf_name)
+    for node in gm.graph.nodes:
+        if node.name in node_name_to_buf_meta:
+            node.meta["buf_meta"] = node_name_to_buf_meta.get(node.name)
 
 
 @contextlib.contextmanager
@@ -354,9 +424,6 @@ class DebugContext:
             return ignored
 
 
-SchedulerNodeList = List[Any]
-
-
 class DebugFormatter:
     def __init__(self, handler):
         self.fopen = handler.fopen
@@ -390,6 +457,16 @@ class DebugFormatter:
 
     def graph_diagram(self, nodes: SchedulerNodeList):
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+
+    def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
+        annotate_orig_fx_with_snodes(gm, nodes)
+        draw_graph(
+            gm,
+            fname=self.filename("orig_fx_graph_diagram.svg"),
+            clear_meta=False,
+            prog=GRAPHVIZ_COMMAND_SCALABLE,
+            parse_stack_trace=True,
+        )
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
