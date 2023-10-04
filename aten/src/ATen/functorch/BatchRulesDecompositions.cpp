@@ -320,6 +320,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("upsample_nearest3d.vec", native::upsample_nearest3d);
   m.impl("upsample_trilinear3d.vec", native::upsample_trilinear3d);
 
+  // views on complex tensor
+  OP_DECOMPOSE(imag);
+  OP_DECOMPOSE(real);
+
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);
   OP_DECOMPOSE2(divide_, Tensor);

@@ -77,8 +77,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(op ## _); \
   VMAP_SUPPORT(op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
-  UNARY_POINTWISE(imag);
-  UNARY_POINTWISE(real);
   UNARY_POINTWISE(view_as_real);
   VMAP_SUPPORT(view_as_complex, view_as_complex_batch_rule);
   VMAP_SUPPORT(clone, clone_batch_rule);
