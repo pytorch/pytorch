@@ -74,7 +74,7 @@ from .utils import (
 from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable, EnumVariable
+from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
@@ -1303,6 +1303,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
+        assert all(map(SetVariable.is_valid_key, items))
+        items = set(map(SetVariable.get_key, items))
         new_set = SetVariable(items, mutable_local=MutableLocal())
         self.push(new_set)
 
@@ -1327,12 +1329,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert (
-                isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable))
-                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
-                or k.is_python_constant()
-            )
-
+            assert ConstDictVariable.is_valid_key(k)
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
@@ -2241,9 +2238,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        if skipfiles.check(
-            func.get_filename()
-        ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
+        if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
                 produce_trampoline_autograd_bwd,
@@ -2258,9 +2254,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
-                return
+                return skipfiles.SkipResult(False, "allowlist in dynamo known function")
             unimplemented(
-                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
@@ -2269,6 +2265,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(
                 f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
+        else:
+            return result
 
     @staticmethod
     def inline_call_(
@@ -2278,7 +2276,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
         )
-        InliningInstructionTranslator.check_inlineable(func)
+        result = InliningInstructionTranslator.check_inlineable(func)
+        assert result.skipped is False
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -2319,7 +2318,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 return f"TRACE inlined call {code.co_name} from {header}\n{line}"
 
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
-        log.debug("INLINING %s%s", code, suffix)
+        log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
         # Detect inline GraphModule calls in order to propgate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
