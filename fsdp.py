@@ -25,7 +25,6 @@ def init():
         model,
         **fsdp_kwargs,
     )
-    # TODO: Add `model = torch.compile(model)` here if desired
     optim = torch.optim.SGD(model.parameters(), lr=1e-3)
     return model, optim
 
@@ -63,29 +62,21 @@ def run(model, optim):
     return losses
 
 
-def main(compiled):
+def main(compiled_fwd, compiled_bwd):
     model, optim = init()
 
     def compiler_fn(gm):
         print("Compiling autograd?")
         return torch.compile(gm, backend="eager", fullgraph=True, dynamic=False)
 
-    compile_bwd = False
-    ctx = compiled_autograd.enable(compiler_fn) if compile_bwd else contextlib.nullcontext()
+    ctx = compiled_autograd.enable(compiler_fn) if compiled_bwd else contextlib.nullcontext()
 
     with ctx:
-        if compiled:
+        if compiled_fwd:
                 print("RUNNING COMPILE")
                 torch._dynamo.config.capture_dynamic_output_shape_ops = True
                 torch._dynamo.config.capture_scalar_outputs = True
-                if gpu_id == 0:
-                    params = {
-                        **dict(model.named_parameters(remove_duplicate=False)),
-                        **dict(model.named_buffers(remove_duplicate=False)),
-                    }
-                    for name, param in params.items():
-                        print(f"Pre compile. {name} {param.size()}")
-                model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
+                model = torch._dynamo.optimize("eager", nopython=True, dynamic=False)(model)
                 res = run(model, optim)
         else:
             res = run(model, optim)
@@ -98,11 +89,5 @@ if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    # eager = main(compiled=False)
-    # print("EAGER:", eager)
-    # exit(0)
-    print("--------------------")
-    # time.sleep(5)
-    print("--------------------")
-    compiled = main(compiled=True)
-    print("COMPILED:", compiled)
+    res = main(compiled_fwd=False, compiled_bwd=True)
+    print("res:", res)
