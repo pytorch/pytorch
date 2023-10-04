@@ -122,7 +122,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           set -x
-          if [[ -n $TESTS_TO_INCLUDE ]]; then sed -i 's!test/run_test.py !&--include $TESTS_TO_INCLUDE !g' ${GITHUB_WORKSPACE}/.ci/pytorch/test.sh; fi
+          if [[ -n $TESTS_TO_INCLUDE ]]; then sed -i "s!test/run_test.py !&--include $TESTS_TO_INCLUDE !g" ${GITHUB_WORKSPACE}/.ci/pytorch/test.sh; fi
 
       - name: Test
         id: test
