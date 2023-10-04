@@ -58,8 +58,8 @@ class AOTInductorModelContainer {
       available_models_.push_back(models_.back().get());
     }
 
-    // Note that the all following fields (input_names_, output_names
-    // and max_output_shapes_) can be filled in by the AOT
+    // Note that the all following fields (input_names_, output_names,
+    // etc) can be filled in by the AOT
     // codegen. However, we choose to query such information from
     // the owned AOTInductorModel for a couple of reasons:
     //   * simplify the codegen templates
@@ -69,24 +69,14 @@ class AOTInductorModelContainer {
     auto* model = available_models_[0];
     size_t num_inputs = model->num_inputs();
     input_names_.reserve(num_inputs);
-    input_dtypes_.reserve(num_inputs);
-    max_input_shapes_.reserve(num_inputs);
     for (size_t i = 0; i < num_inputs; i++) {
       input_names_.push_back(model->input_name(i));
-      input_dtypes_.push_back(model->get_input_dtype(i));
-      max_input_shapes_.push_back(model->max_input_shape(i));
     }
 
     size_t num_outputs = model->num_outputs();
     output_names_.reserve(num_outputs);
-    output_dtypes_.reserve(num_outputs);
-    max_output_shapes_.reserve(num_outputs);
-    output_shapes_.reserve(num_outputs);
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.push_back(model->output_name(i));
-      output_dtypes_.push_back(model->get_output_dtype(i));
-      max_output_shapes_.push_back(model->max_output_shape(i));
-      output_shapes_.emplace_back(max_output_shapes_.back().size(), -1);
     }
 
     size_t num_constants = model->num_constants();
@@ -179,36 +169,13 @@ class AOTInductorModelContainer {
     return output_names_.at(idx).c_str();
   }
 
-  const char* get_input_dtype(size_t idx) const {
-    return input_dtypes_.at(idx).c_str();
-  }
-
-  const char* get_output_dtype(size_t idx) const {
-    return output_dtypes_.at(idx).c_str();
-  }
-
   size_t num_models() const {
     return models_.size();
-  }
-
-  const std::vector<int64_t>& max_input_shape(size_t idx) const {
-    return max_input_shapes_[idx];
-  }
-
-  const std::vector<int64_t>& max_output_shape(size_t idx) const {
-    return max_output_shapes_[idx];
   }
 
  private:
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
-  std::vector<std::string> input_dtypes_;
-  std::vector<std::string> output_dtypes_;
-  // Holds the upper-bound value for each dimension of any input shape.
-  std::vector<std::vector<int64_t>> max_input_shapes_;
-
-  // Holds the upper-bound value for each dimension of any output shape.
-  std::vector<std::vector<int64_t>> max_output_shapes_;
 
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
@@ -219,9 +186,6 @@ class AOTInductorModelContainer {
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
   // or _binary_constants_bin_start (for CPU).
   std::shared_ptr<ConstantMap> constants_;
-
-  // Holds the current value for each dimension of any output shape.
-  std::vector<std::vector<int64_t>> output_shapes_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;

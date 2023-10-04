@@ -99,8 +99,7 @@ inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
 // AOTInductor cpp codegen. Since we do not need dynamic dispatch, we rely
 // on curiously recurring template pattern (CRTP) to save some runtime
 // v-table overhead. The generated AOTInductorModel is specialized with
-// methods such as run_impl and members like shape params used for dynamic
-// shape cases.
+// methods such as run_impl.
 template <typename Model>
 class AOTInductorModelBase {
  public:
@@ -184,24 +183,8 @@ class AOTInductorModelBase {
     return outputs_info_.at(idx).name;
   }
 
-  const char* get_input_dtype(int64_t idx) const {
-    return inputs_info_.at(idx).dtype;
-  }
-
-  const char* get_output_dtype(int64_t idx) const {
-    return outputs_info_.at(idx).dtype;
-  }
-
   const char* constant_name(int64_t idx) const {
     return constants_info_.at(idx).name;
-  }
-
-  std::vector<int64_t> max_input_shape(int64_t idx) const {
-    return max_shape(inputs_info_, idx);
-  }
-
-  std::vector<int64_t> max_output_shape(int64_t idx) const {
-    return max_shape(outputs_info_, idx);
   }
 
   size_t constant_ndim(int64_t idx) {
@@ -226,14 +209,6 @@ class AOTInductorModelBase {
 
   size_t constant_data_size(int64_t idx) const {
     return constants_info_.at(idx).data_size;
-  }
-
-  std::vector<int64_t> input_shape(int64_t idx) const {
-    return shape(inputs_info_, idx);
-  }
-
-  std::vector<int64_t> output_shape(int64_t idx) const {
-    return shape(outputs_info_, idx);
   }
 
   void update_constants_map(std::shared_ptr<ConstantMap>&& constants_map) {
@@ -274,102 +249,8 @@ class AOTInductorModelBase {
   }
 
  protected:
-  class DimInfo {
-   public:
-    virtual int64_t value() const = 0;
-    virtual void set_value(int64_t val) = 0;
-    virtual int64_t lower_bound() const = 0;
-    virtual int64_t upper_bound() const = 0;
-    virtual ~DimInfo() {}
-  };
-
-  class StaticDimInfo : public DimInfo {
-   public:
-    StaticDimInfo(int64_t val) : value_(val) {}
-
-    int64_t value() const {
-      return value_;
-    }
-
-    void set_value(int64_t val) {
-      throw std::runtime_error("cannot change the value of a StaticDim");
-    }
-
-    int64_t lower_bound() const {
-      return value_;
-    }
-
-    int64_t upper_bound() const {
-      return value_;
-    }
-
-   private:
-    const int64_t value_;
-  };
-
-  class DynamicDimInfo : public DimInfo {
-   public:
-    DynamicDimInfo(const char* name, int64_t lb, int64_t ub)
-        : name_(name), lower_bound_(lb), upper_bound_(ub), value_(-1) {}
-
-    void set_value(int64_t val) {
-      if (val != 1 && (val < lower_bound_ || val > upper_bound_)) {
-        throw std::runtime_error(
-            std::string(
-                "dim value out of bounds: expected value to be between (") +
-            std::to_string(lower_bound_) + ", " + std::to_string(upper_bound_) +
-            "), but got " + std::to_string(val));
-      }
-      value_ = val;
-    }
-
-    int64_t value() const {
-      return value_;
-    }
-
-    int64_t lower_bound() const {
-      return lower_bound_;
-    }
-
-    int64_t upper_bound() const {
-      return upper_bound_;
-    }
-
-   private:
-    const std::string name_;
-    const int64_t lower_bound_;
-    const int64_t upper_bound_;
-    int64_t value_;
-  };
-
-  DynamicDimInfo* find_dynamic_dim(const char* name) {
-    auto iter = dynamic_dims_.find(name);
-    if (iter == dynamic_dims_.end()) {
-      throw std::runtime_error(
-          std::string("dynamic_dim `") + name + "` does not exist");
-    }
-    return iter->second.get();
-  }
-
-  DynamicDimInfo* make_dynamic_dim(const char* name, int64_t lb, int64_t ub) {
-    if (dynamic_dims_.find(name) != dynamic_dims_.end()) {
-      throw std::runtime_error(
-          std::string("dynamic_dim `") + name + "` already exists");
-    }
-    auto iter = dynamic_dims_.emplace(
-        name, std::make_unique<DynamicDimInfo>(name, lb, ub));
-    return (iter.first->second).get();
-  }
-
-  StaticDimInfo* make_static_dim(int64_t val) {
-    static_dims_.push_back(std::make_unique<StaticDimInfo>(val));
-    return static_dims_.back().get();
-  }
-
   struct ParamInfo {
     const char* name = nullptr;
-    const char* dtype = nullptr;
-    std::vector<DimInfo*> shape;
   };
 
   struct ConstInfo {
@@ -400,37 +281,6 @@ class AOTInductorModelBase {
 
   // Generated model uses this device index to create CUDA guards.
   int device_idx_;
-
- protected:
-  std::vector<std::unique_ptr<StaticDimInfo>> static_dims_;
-  // A map from dynamic symbol names to their dim info
-  std::unordered_map<std::string, std::unique_ptr<DynamicDimInfo>>
-      dynamic_dims_;
-
- private:
-  std::vector<int64_t> shape(
-      const std::vector<ParamInfo>& params,
-      int64_t idx,
-      bool max = false) const {
-    std::vector<int64_t> shape;
-    const ParamInfo& param = params.at(idx);
-    auto rank = param.shape.size();
-    shape.reserve(rank);
-    for (size_t i = 0; i < rank; i++) {
-      if (max) {
-        shape.push_back(param.shape[i]->upper_bound());
-      } else {
-        shape.push_back(param.shape[i]->value());
-      }
-    }
-    return shape;
-  }
-
-  std::vector<int64_t> max_shape(
-      const std::vector<ParamInfo>& params,
-      int64_t idx) const {
-    return shape(params, idx, /*max=*/true);
-  }
 };
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
