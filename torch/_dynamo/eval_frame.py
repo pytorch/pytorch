@@ -887,13 +887,17 @@ def rewrite_signature(
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
     supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool)
+
     def is_supported_type(arg):
         return isinstance(arg, supported_types)
 
     def produce_matching(sources, candidates):
         source_types = " or ".join(
             [
-                desc + " of types: (" + ", ".join([str(type(arg)) for arg in args]) + ")"
+                desc
+                + " of types: ("
+                + ", ".join([str(type(arg)) for arg in args])
+                + ")"
                 for desc, args in sources.items()
             ]
         )

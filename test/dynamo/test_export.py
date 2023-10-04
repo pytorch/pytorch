@@ -2183,7 +2183,7 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
-    def test_dataclass_input(self):
+    def test_dataclass_input_output(self):
         from dataclasses import dataclass
 
         @dataclass
@@ -2196,11 +2196,22 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "graph-captured input #1.*Tensor.*not among original args.*Tensors",
+            "graph-captured input #1, of type .*Tensor.*, "
+            "is not among original args of types: .*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
             )
+
+        def f(x, y):
+            return Tensors(x=x.sin(), y=y.cos())
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "traced result #1 is .*Tensors.*, "
+            "but only the following types are supported",
+        ):
+            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
     def test_none_out(self):
         def f(x, y):
