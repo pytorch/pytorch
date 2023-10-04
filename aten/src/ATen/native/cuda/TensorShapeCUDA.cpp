@@ -30,41 +30,11 @@ Tensor& set_cuda_(Tensor& result) {
 }
 
 Tensor& resize_storage_cuda_(Tensor& result, int64_t s) {
-  // c10::cuda::device_synchronize();
-  // if (s == 0){
-  //   caffe2::TypeMeta dtype = result.dtype();
-  //   Storage storage(
-  //       Storage::use_byte_size_t(),
-  //       0,
-  //       at::cuda::getCUDADeviceAllocator(),
-  //       true);
-  //   result.set_(storage, 0, result.sizes(), {});
-  //   return result;
-  // }
-  // c10::cuda::device_synchronize();
   auto size_bytes = s * elementSize(result.scalar_type());
-  // std::cout << "size_bytes" << std::endl;
   const auto new_size_bytes = static_cast<size_t>(size_bytes);
-  // std::cout << "new_size_bytes" << std::endl;
   const Storage &storage = result.unsafeGetTensorImpl()->unsafe_storage();
   std::cout << "resize_storage_cuda_ on " <<  storage.device_type() << " to " << new_size_bytes << std::endl;
-  // if (storage.nbytes() == 0) {
-    // std::cout << "from empty storage" << std::endl;
-
-  // Storage new_storage(
-  //       Storage::use_byte_size_t(),
-  //       size_bytes,
-  //       at::cuda::getCUDADeviceAllocator(),
-  //       true);
-  // result.set_(new_storage, 0, result.sizes(), {});
-  // return result;
-  // }
-  // std::cout << "storage " << storage.nbytes() << " . " << std::endl;
-  // TORCH_CHECK(storage, "Tensor: invalid null storage");
-  // std::cout << "resize time" << std::endl;
   resize_bytes_cuda(storage.unsafeGetStorageImpl(), new_size_bytes);
-  // std::cout << "done resize" << std::endl;
-  // c10::cuda::device_synchronize();
   return result;
 }
 

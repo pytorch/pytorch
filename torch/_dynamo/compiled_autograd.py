@@ -71,14 +71,7 @@ class AutogradCompilerInstance:
         self.bind_tensors_to_proxies(inputs, proxies)
 
         # size inputs to symints
-        sizes = [
-            self.shape_env.create_unspecified_symint_and_symbol(
-                val,
-                self.source("sizes", idx),
-                DimDynamic.DYNAMIC,
-            )
-            for idx, val in enumerate(sizes)
-        ]
+        sizes = [val for size in sizes]
         self.bind_tensors_to_proxies(sizes, sizes_proxy)
 
         # TODO(jansel): are all these modes needed?

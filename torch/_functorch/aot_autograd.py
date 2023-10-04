@@ -632,7 +632,6 @@ class ViewAndMutationMeta:
         # of output_info that corresponds to an alias (either of an input or intermediate)
         self.aliased_out_indices = aliased_out_indices
         self.unsafe_view_out_indices = unsafe_view_out_indices
-        print("output_info", self.output_info)
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
             [x for x in self.output_info
@@ -1056,7 +1055,7 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        # assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
@@ -1148,7 +1147,6 @@ def run_functionalized_fw_and_collect_metadata(
             is_result_of_custom_autograd_fn = False
             if isinstance(o, torch.Tensor):
                 # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
-                # print("Grad fn?!", o.grad_fn)
                 if type(o.grad_fn).__name__ == "CppFunction":
                     is_result_of_custom_autograd_fn = True
                 if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
@@ -1669,14 +1667,12 @@ def create_joint(
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
-                    print("ABOUT TO RUN BACKWARD OUT")
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
                         allow_unused=True,
                     )
                 else:
-                    print("ABOUT TO RUN BACKWARD OUT")
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
@@ -1869,7 +1865,7 @@ def make_boxed_compiler(compiler):
 def call_func_with_args(f, args, steal_args=False, disable_amp=False):
     if not steal_args:
         args = list(args)
-    assert isinstance(args, list), args
+    assert isinstance(args, list)
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
@@ -1922,7 +1918,7 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
 
-    # fw_module.graph.eliminate_dead_code()
+    fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
@@ -1930,7 +1926,6 @@ def aot_dispatch_base_graph(
     assert copy_count == copy_count2
 
     if aot_config.enable_log:
-        print("AOT GRAPH")
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
@@ -2996,8 +2991,7 @@ def create_runtime_wrapper(
                 len(runtime_metadata.mutated_inp_runtime_indices) == num_mutated_inps
             )
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        # num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices)
-        num_mutations_to_apply = 0
+        num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices)
         if num_mutations_to_apply > 0:
             updated_inputs = all_outs[: num_mutations_to_apply]
             fw_outs = all_outs[num_mutations_to_apply :]
@@ -3051,8 +3045,7 @@ def create_runtime_wrapper(
 
         # Step 4: Manually regenerate any outputs that are aliased to inputs, instead of
         # compiling them.
-        # if runtime_metadata.num_outputs_aliased > 0:
-        if False:
+        if runtime_metadata.num_outputs_aliased > 0:
             # The compiled forward also returned intermediate bases. We don't want to return them to the user.
             if runtime_metadata.num_intermediate_bases > 0:
                 fw_outs_no_intermediate_bases = fw_outs[
@@ -3556,9 +3549,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
-            print("fw_outs", [n for n in fw_module.graph.nodes if n.op == "output"])
-            print("fw_outs_meta", [n.meta for n in fw_module.graph.nodes if n.op == "output"])
-            print("num_inner_fwd_outputs", num_inner_fwd_outputs)
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
@@ -3640,10 +3630,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
-            gpu_id = int(os.environ.get("LOCAL_RANK", 0))
-            if gpu_id == 0:
-                aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
-                aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
+            aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+            aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
             # flat_args at this point might still be subclasses-
@@ -3662,27 +3650,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 torch._guards.TracingContext.get().fw_metadata = inner_meta
 
             with TracingContext.report_output_strides() as fwd_output_strides:
-                kept_flat_args = []
-                kept_input_pos = []
-                unused_nodes = []
-                for i, node in enumerate(fw_module.graph.nodes):
-                    if node.op == "placeholder":
-                        # This should be as simple as rejecting nodes without users. Unfortunately,
-                        # there are a ton of edge cases here https://github.com/pytorch/pytorch/issues/97894, activation
-                        # checkpointing, etc. So we just skip what should be a nice invariant, in favor of explicitly rejecting
-                        # functions.
-                        # if (len(node.users) == 0))
-                        if isinstance(adjusted_flat_args[i], (types.FunctionType, functools.partial)):
-                            unused_nodes.append(node)
-                        else:
-                            kept_flat_args.append(adjusted_flat_args[i])
-                            kept_input_pos.append(i)
-                for un in unused_nodes:
-                    # Note - we could do this inline, but this is far easier to debug and computationally the same.
-                    fw_module.graph.erase_node(un)
-
                 compiled_fw_func = aot_config.fw_compiler(
-                    fw_module, kept_flat_args
+                    fw_module, adjusted_flat_args
                 )
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
@@ -3757,7 +3726,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         compiled_bw_func = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )
-                        # breakpoint()
                     except Exception:
                         log.warning(
                             "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
@@ -3768,7 +3736,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
-        kept_fw_input_pos = kept_input_pos
         compiled_bw = compiled_bw_func
         metadata = fw_metadata
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
@@ -3790,18 +3757,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
-            # Trim unused args
-            kept_args = []
-            for kept_pos in CompiledFunction.kept_fw_input_pos:
-                kept_args.append(args[kept_pos])
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw,
-                kept_args,
+                args,
                 disable_amp=disable_amp,
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
-            print("num_outputs?", num_outputs)
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -3893,9 +3855,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 fw_outs[num_forward_returns:num_forward],
                 return_new_outs=False
             )
-            # ctx.mark_non_differentiable(raw_returns[0])
-            print("raw_returns", raw_returns)
-            print("num_outputs", num_outputs)
             return tuple(raw_returns)
 
         @staticmethod
@@ -4405,7 +4364,6 @@ def create_functional_call(mod, params_spec, params_len):
                     with torch.autograd.detect_anomaly(check_nan=False):
                         out = Interpreter(mod).run(*args[params_len:], **kwargs)
             else:
-                print("RUNNING MOD?")
                 out = mod(*args[params_len:], **kwargs)
 
         if not isinstance(out, (tuple, list)):
@@ -4724,10 +4682,6 @@ def aot_module_simplified(
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
-    #     for i, param in enumerate(params.values()):
-    #         print(f"{i}. Post compile. {param.size()}")
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = list(params_flat)
     params_len = len(params_flat)
@@ -4765,7 +4719,6 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    hooked_nodes = []
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
         for i, node in enumerate(mod.graph.nodes):
@@ -4778,14 +4731,9 @@ def aot_module_simplified(
                     assert source not in seen_sources, source
                     seen_sources.add(source)
                     aot_autograd_arg_pos_to_source.append(source)
-            if 'hooks' in node.meta:
-                hooked_nodes.append(node)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
-
-    # for i, arg in enumerate(full_args):
-    #     print(f"{i}. post compile args compile. {arg.size() if isinstance(arg, torch.Tensor) else 'n/a'} src: {aot_autograd_arg_pos_to_source[i].name()}")
 
     dynamic_shapes = False
     for x in full_args:
@@ -4985,9 +4933,7 @@ https://github.com/pytorch/pytorch/issues/101192
                 else:
                     assert grad is None
             return *fw_outs, *output_gradients
-        # breakpoint()
         fx_g = make_fx(flattened_joint)(*full_args)
-        # breakpoint()
 
     user_args_flat, _ = pytree.tree_flatten(args)
     return fx_g, create_graph_signature(

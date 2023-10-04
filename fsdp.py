@@ -70,28 +70,26 @@ def main(compiled):
         print("Compiling autograd?")
         return torch.compile(gm, backend="eager", fullgraph=True, dynamic=False)
 
-    compile_bwd = True
+    compile_bwd = False
     ctx = compiled_autograd.enable(compiler_fn) if compile_bwd else contextlib.nullcontext()
 
-    if compiled:
-        with ctx:
-            print("RUNNING COMPILE")
-            torch._dynamo.config.capture_dynamic_output_shape_ops = True
-            torch._dynamo.config.capture_scalar_outputs = True
-            if gpu_id == 0:
-                params = {
-                    **dict(model.named_parameters(remove_duplicate=False)),
-                    **dict(model.named_buffers(remove_duplicate=False)),
-                }
-                for name, param in params.items():
-                    print(f"Pre compile. {name} {param.size()}")
-            model = torch._dynamo.optimize("eager", nopython=True, dynamic=False)(model)
+    with ctx:
+        if compiled:
+                print("RUNNING COMPILE")
+                torch._dynamo.config.capture_dynamic_output_shape_ops = True
+                torch._dynamo.config.capture_scalar_outputs = True
+                if gpu_id == 0:
+                    params = {
+                        **dict(model.named_parameters(remove_duplicate=False)),
+                        **dict(model.named_buffers(remove_duplicate=False)),
+                    }
+                    for name, param in params.items():
+                        print(f"Pre compile. {name} {param.size()}")
+                model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
+                res = run(model, optim)
+        else:
             res = run(model, optim)
-    else:
-        res = run(model, optim)
     return res
-
-
 
 
 if __name__ == "__main__":

@@ -30,7 +30,6 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
     storage->set_nbytes(0);
     return;
   }
-  std::cout << "Trying to resize storage from" << storage->nbytes() << " to " << size_bytes << " bytes\n";
   at::DataPtr data = allocator->allocate(size_bytes);
   if (storage->data_ptr()) {
     // Enable p2p access when the memcpy is across devices

@@ -439,7 +439,7 @@ class NullContextVariable(ContextWrappingVariable):
 class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
-        from .builder import wrap_fx_proxy_cls, GraphArg
+        from .builder import wrap_fx_proxy_cls
 
         current_stream_method = get_interface_for_device(
             target_value.device
@@ -575,7 +575,6 @@ class EventVariable(VariableTracker):
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
-        self.device = device
 
     def call_method(
         self,
@@ -607,15 +606,6 @@ class EventVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
-
-    def reconstruct(self, codegen):
-        unimplemented(
-            f"Cannot reconstruct stream {self.source} {self.value} {self.proxy}"
-        )
-
-    def as_python_constant(self):
-        return self.value
-
 
 
 class WithExitFunctionVariable(VariableTracker):

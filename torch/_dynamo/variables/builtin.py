@@ -1248,69 +1248,22 @@ class BuiltinVariable(VariableTracker):
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
-                    # torch._C._set_grad_enabled(False)
 
-                    # out = wrap_fx_proxy(
-                    #     tx,
-                    #     tx.output.create_proxy(
-                    #         "call_function",
-                    #         torch.clone,
-                    #         *proxy_args_kwargs([obj], {}),
-                    #     ),
-                    # )
-                    # out = wrap_fx_proxy(
-                    #     tx,
-                    #     tx.output.create_proxy(
-                    #         "call_function",
-                    #         torch.nn.Parameter,
-                    #         *proxy_args_kwargs([obj], {}),
-                    #     ),
-                    # )
                     version = obj.as_proxy().node.meta['example_value']._version
                     with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
-                        # val.as_proxy().requires_grad = False
-                    # with torch.no_grad():
                         out = wrap_fx_proxy(
                             tx,
                             tx.output.create_proxy(
                                 "call_function",
-                                # torch.ops.aten._set_data,
                                 torch.Tensor.set_,
-                                # torch._set_data,
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )
                     tx.output.create_proxy(
                         "call_function", torch._C._autograd._unsafe_set_version_counter, (out.as_proxy(), 0), {}
                     )
-
-                    # out = wrap_fx_proxy(
-                    #     tx,
-                    #     tx.output.create_proxy(
-                    #         "call_function",
-                    #         torch.Tensor.set_,
-                    #         *proxy_args_kwargs([out, out], {}),
-                    #     ),
-                    # )
-                    # obj.as_proxy().node.meta['example_value'].data = val.as_proxy().node.meta['example_value']
                     tx.replace_all(obj, out)
 
-                        # val.as_proxy().requires_grad = False
-                        # setattr(out.as_proxy(), 'grad_fn', val.as_proxy().grad_fn)
-                        # obj.as_proxy().set_(val.as_proxy())
-
-                    # tx.output.create_proxy(
-                    #     "call_function", torch._C._set_grad_enabled, (True,), {}
-                    # ),
-                    # torch._C._set_grad_enabled(True)
-                        # out = tx.output.create_proxy(
-                        #     "call_function",
-                        #     torch.ops.aten._set_data,
-                        #     *proxy_args_kwargs([obj, val], {}),
-                        # )
-                    # torch._set_data(obj.as_proxy().node.meta['example_value'], val.as_proxy().node.meta['example_value'])
-
-                    # tx.replace_all(obj, val)
 
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):

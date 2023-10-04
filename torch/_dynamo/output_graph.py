@@ -1045,6 +1045,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
+        gm.graph.print_tabular()
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 

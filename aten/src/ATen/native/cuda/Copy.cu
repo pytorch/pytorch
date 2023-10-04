@@ -278,12 +278,6 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
     dst_contig.copy_(src_contig, non_blocking);
 
-    printf("CUDA STORAGE? %d \n", src_contig.storage().nbytes());
-    cudaDeviceSynchronize();
-    if (src_contig.storage().nbytes() == 0) {
-      return;
-    }
-
     // if necessary, copy back into dst
     if (!dst_contig.is_same(dst)) {
       TORCH_INTERNAL_ASSERT(dst_contig.device() == dst.device());

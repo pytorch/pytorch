@@ -642,6 +642,8 @@ def _pre_backward_hook(
     if gpu_id == 0:
         # print(id(state), "Running pre backward!")
         print("STATE?", state, module, handle, unused)
+    # import traceback
+    # traceback.print_stack()
     """
     Prepares ``_handle`` 's ``FlatParameter`` s for gradient computation.
 
@@ -652,8 +654,8 @@ def _pre_backward_hook(
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
     if handle and hasattr(handle, "_ran_pre_backward_hook") and handle._ran_pre_backward_hook:
-        # if gpu_id == 0:
-            # print(id(state), "Not Running pre backward! Already Ran!")
+        if gpu_id == 0:
+            print(id(state), "Not Running pre backward! Already Ran!")
         return
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
@@ -681,11 +683,11 @@ def _pre_backward_hook(
         if handle._needs_pre_backward_unshard:
             # If the handles have been prefetched, then there is no need to
             # call `_unshard()` again
-            # if gpu_id == 0:
-                # print(id(state), "HANDLE _needs_pre_backward_unshard", state.training_state)
+            if gpu_id == 0:
+                print(id(state), "HANDLE _needs_pre_backward_unshard", state.training_state)
             if not handle._prefetched:
-                # if gpu_id == 0:
-                    # print(id(state), "NOT PREFETCHED!")
+                if gpu_id == 0:
+                    print(id(state), "NOT PREFETCHED!")
                 _unshard(
                     state,
                     handle,
@@ -696,6 +698,8 @@ def _pre_backward_hook(
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
+        if gpu_id == 0:
+            print(id(state), "SET _needs_pre_backward_unshard!")
         handle._needs_pre_backward_unshard = False
         with torch.profiler.record_function(
             "FullyShardedDataParallel._pre_backward_prefetch"
@@ -1459,13 +1463,16 @@ def _register_post_backward_hook(
         "The `grad_fn` is needed to access the `AccumulateGrad` and "
         "register the post-backward hook",
     )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook = functools.partial(_post_backward_hook, state, handle)
-    hook_handle = acc_grad.register_hook(
-        hook
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+    if (
+        not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+    ):
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        assert acc_grad is not None
+        hook = functools.partial(_post_backward_hook, state, handle)
+        hook_handle = acc_grad.register_hook(
+            hook
+        )
+        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(

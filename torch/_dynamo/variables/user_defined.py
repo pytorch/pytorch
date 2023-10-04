@@ -731,7 +731,6 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from .tensor import record_hook_fn
         from .builder import wrap_fx_proxy
 
         options = VariableTracker.propagate(self)
@@ -768,14 +767,14 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
                     tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
                 # if not compiled_autograd.compiled_autograd_enabled:
-                    # TODO(voz):
-                    # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
-                    # python state.
-                    # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
-                    # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
-                    # unimplemented(
-                    #     "Compilation of intermediate hooks requires compiled autograd"
-                    # )
+                #     # TODO(voz):
+                #     # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
+                #     # python state.
+                #     # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
+                #     # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
+                #     unimplemented(
+                #         "Compilation of intermediate hooks requires compiled autograd"
+                #     )
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
