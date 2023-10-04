@@ -199,19 +199,9 @@ def preferred_linalg_library(
 
     return torch._C._get_linalg_preferred_backend()
 
+# TODO how to do I get the same devex experience
+from torch._C import SDPBackend as SDPBackend
 
-class SDPBackend(IntEnum):
-    r"""Enum class for the scaled dot product attention backends.
-
-    .. warning:: This class is in beta and subject to change.
-
-    This class needs to stay aligned with the enum defined in:
-    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
-    """
-    ERROR = -1
-    MATH = 0
-    FLASH_ATTENTION = 1
-    EFFICIENT_ATTENTION = 2
 
 
 def flash_sdp_enabled():

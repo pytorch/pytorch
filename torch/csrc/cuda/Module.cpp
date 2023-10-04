@@ -914,6 +914,17 @@ static void registerSDPAUtilities(PyObject* module) {
       .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
       .def_readonly("dropout", &sdp::sdp_params::dropout)
       .def_readonly("is_causal", &sdp::sdp_params::is_causal);
+
+  py::enum_<sdp::SDPBackend>(
+      m,
+      "SDPBackend",
+      py::arithmetic(),
+      "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
+      .value("ERROR", sdp::SDPBackend::error)
+      .value("MATH", sdp::SDPBackend::math)
+      .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
+      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention);
+
   m.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
