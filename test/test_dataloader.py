@@ -2273,7 +2273,7 @@ except RuntimeError as e:
 
 
 class TestDataLoaderDeviceType(TestCase):
-    @parametrize("context", ["spawn", "fork", "forkserver"])
+    @parametrize("context", [ctx for ctx in supported_multiprocessing_contexts if ctx is not None])
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if 'cuda' in device and context == "fork":
