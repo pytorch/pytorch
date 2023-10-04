@@ -3,8 +3,6 @@ import dataclasses
 import enum
 from typing import Any, Optional, Union
 
-import torch
-
 from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
@@ -256,22 +254,10 @@ class ConvertIntSource(ChainedSource):
         # To provide the correct SymInt inputs for dynamo extracted graph, we additionally insert a
         # cast_symbool_to_symint higher order operator call into the byte code.
         # This is to ensure the conversion from SymBool to SymInt can be properly traced.
-        cast_fn_name = "__cast_symbool_to_symint_guardless"
-        if cast_fn_name not in codegen.tx.output.global_scope:
-            codegen.tx.output.install_global(
-                cast_fn_name,
-                torch._higher_order_ops.cast_symbool_to_symint.cast_symbool_to_symint,
-            )
-
-        def _create_cast_instructions():
-            instructions = [
-                *codegen.load_function_name(cast_fn_name, True),
-                *self.base.reconstruct(codegen),
-                *create_call_function(1, False),
-            ]
-            return instructions
-
-        return _create_cast_instructions()
+        codegen.load_import_from(
+            "torch._higher_order_ops.cast_symbool_to_symint", "cast_symbool_to_symint"
+        )
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -281,18 +267,12 @@ class ConvertIntSource(ChainedSource):
         # the guards produced are for the SymInts. However, these guards must be checked against the outer SymBool.
         # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression
         # generated for Dynamo's SymInt.
-        #
-        # Additionally, instead of creating a SymInt in the outer shape_env, we inspect the hint of the SymBool.
-        # This approach prevents the creation of a new guard in the outer shape_env, which is unnecessary because
-        # we have already propagated the guard to the outer shape_env when constructing SHAPE_ENV guard during Dynamo's
-        # tracing phase.
-        # If the guard check succeeds, we reuse the cached code, and no new guard is created. If the guard check fails,
-        # a new guard will be installed after Dynamo recompiles. In either case, we avoid installing a guard in the outer shape_env
-        # during guard checking, opting to rely on the hint to determine if recompilation is required.
-        #
-        # Furthermore, we avoid creating a proxy for the casting logic during guard checking.
-        # The proxy is generated when the optimized Python bytecode is executed.
-        return f"convert_symbool_to_int_with_hint({self.base.name()})"
+
+        # Note: __int__() will install a guard on the outer shape_env. This is desirable because dynamo guard checking
+        # is essentially an if-else statement based on input: if the guard check succeed, dynamo uses the
+        # cahced optimized code. if the guard check fails, dynamo re-compiles and install necessary guards in SHAPE_ENV
+        # and propagate the guards to outer shape_env.
+        return f"{self.base.name()}.__int__()"
 
 
 @dataclasses.dataclass(frozen=True)
