@@ -244,7 +244,7 @@ void cpu_avg_pool_channels_last<BFloat16>(
 
     // temp buffer for sum, use float as accumulation type
     // can't reuse output buffer to store sum since it is BFloat16
-    std::unique_ptr<float []> sum_arr(new float[channels]);
+    auto sum_arr = std::make_unique<float []>(channels);
     float* sum = sum_arr.get();
 
     int64_t size = channels;

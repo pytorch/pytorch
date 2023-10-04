@@ -2,8 +2,7 @@
 
 #include <ATen/WrapDimUtils.h>
 
-namespace at {
-namespace namedinference {
+namespace at::namedinference {
 
 // TensorName and TensorNames are wrappers around Dimname and DimnameList
 // that contain helper functions to make writing name inference rules easier.
@@ -71,5 +70,4 @@ struct TORCH_API TensorNames {
   TensorNameVec names_;
 };
 
-} // namespace namedinference
-} // namespace at
+} // namespace at::namedinference

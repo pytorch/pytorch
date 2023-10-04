@@ -96,19 +96,10 @@ void check_foreach_api_restrictions(
       scalars.size());
 }
 
-// To go via 'fast' path, several conditions must be satisfied
-// - All tensors in all lists must have the same dtype.
-// - All tensors must be on the same device
-// - All tensors must have strided layout
-// - All tensors must be non-overlapping and dense
-// - Resulting tensor must have the same dtype as the input one
-
-// Please, make sure to call check_foreach_api_restrictions before calling this
-// method. There is a set of preconditions that have to be satisfied.
-bool check_fast_path_restrictions(
-    ArrayRef<TensorList> tensorLists,
-    ArrayRef<Scalar> scalarList = {},
-    bool does_op_promote_integer_inputs_to_float = false) {
+// Helper function called in check_fast_path_restrictions to check whether all
+// corresponding tensors (aligning in index across the tensorLists) share the
+// same device and dtype.
+bool _check_tensors_share_device_and_dtype(ArrayRef<TensorList> tensorLists) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
 
@@ -126,35 +117,45 @@ bool check_fast_path_restrictions(
     }
   }
 
-  // Check if corresponding tensors in tensor lists have the same sizes and
-  // strides.
-  for (const auto& tensor_list : tensorLists) {
+  return true;
+}
+
+// Helper function called in check_fast_path_restrictions to check if
+// corresponding tensors in tensor lists have the same sizes and strides.
+bool _check_tensors_share_sizes_and_strides(ArrayRef<TensorList> tensorLists) {
+  for (const auto i : c10::irange(1, tensorLists.size())) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
-      if (tensorLists[0][j].sizes() != tensor_list[j].sizes()) {
-        return false;
-      }
-      if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
+      if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
+          tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
         return false;
       }
     }
   }
 
-  // This function has already checked that `tensorList[j][i]` for all j, i has
-  // the same dtype using `is_tensor_okay` function above. This means we only
-  // need to check if {tensorList[0][0], tensorList[0][1], tensorList[0][2],
-  // ...} do type promotion with scalarLIst.
-  for (const auto i : c10::irange(tensorLists[0].size())) {
+  return true;
+}
+
+// Helper function called in check_fast_path_restrictions to check whether
+// all tensors type promote properly with the scalars in scalarList. This
+// function assumes that _check_tensors_share_device_and_dtype has already been
+// called so that all corresponding tensors in tensorLists have the same dtype.
+// Then, it is sufficient to check the type promotion with just one tensorList.
+bool _check_tensors_do_type_promotion_with_scalars(
+    TensorList tensorList,
+    ArrayRef<Scalar> scalarList = {},
+    bool does_op_promote_integer_inputs_to_float = false) {
+  for (const auto i : c10::irange(tensorList.size())) {
     // For division, integer inputs will result in float.
     if (does_op_promote_integer_inputs_to_float) {
       if (at::isIntegralType(
-              tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
+              tensorList[i].scalar_type(), /*includeBool*/ true)) {
         return false;
       }
     }
     if (!scalarList.empty()) {
       const auto& scalar =
           scalarList.size() == 1 ? scalarList[0] : scalarList[i];
-      const auto& tensor = tensorLists[0][i];
+      const auto& tensor = tensorList[i];
       // note(mkozuki): This check might be responsible for
       // `_foreach_add(bool_tensors, bool_tensors)` being pushed to slow path.
       if (tensor.scalar_type() != at::native::result_type(scalar, tensor)) {
@@ -164,6 +165,27 @@ bool check_fast_path_restrictions(
   }
 
   return true;
+}
+
+// To go via 'fast' path, several conditions must be satisfied
+// - All tensors in all lists must have the same dtype.
+// - All tensors must be on the same device
+// - All tensors must have strided layout
+// - All tensors must be non-overlapping and dense
+// - Resulting tensor must have the same dtype as the input one
+
+// Please, make sure to call check_foreach_api_restrictions before calling this
+// method. There is a set of preconditions that have to be satisfied.
+bool check_fast_path_restrictions(
+    ArrayRef<TensorList> tensorLists,
+    ArrayRef<Scalar> scalarList = {},
+    bool does_op_promote_integer_inputs_to_float = false) {
+  return _check_tensors_share_device_and_dtype(tensorLists) &&
+      _check_tensors_share_sizes_and_strides(tensorLists) &&
+      _check_tensors_do_type_promotion_with_scalars(
+             tensorLists[0],
+             scalarList,
+             does_op_promote_integer_inputs_to_float);
 }
 
 std::vector<c10::Scalar> convert_tensor_to_scalar_list(
