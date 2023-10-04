@@ -670,6 +670,20 @@ class AOTInductorTestsTemplate:
         ):
             self.check_model(Repro(), example_inputs)
 
+    def test_aten_sort_fallback(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x):
+                # aten::cumsum
+                # aten::_embedding_bag_forward_only
+                # aten::resize_
+                # return torch.nonzero(x)
+                return torch.sort(x, dim=0)
+
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+        )
+        self.check_model(Repro(), example_inputs)
+
     @unittest.skipIf(
         torch.cuda.device_count() < 2, "The test requires multiple devices"
     )

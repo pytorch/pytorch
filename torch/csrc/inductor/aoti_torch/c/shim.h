@@ -197,6 +197,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_sort(
+    AtenTensorHandle self,
+    int64_t dim,
+    bool descending,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1  // returns new reference
+);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_check_inf_and_nan(AtenTensorHandle tensor);
 
@@ -213,7 +221,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
-#endif
+#endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(

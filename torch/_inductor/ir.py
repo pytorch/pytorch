@@ -3770,6 +3770,7 @@ class FallbackKernel(ExternKernelAlloc):
                     schema = kernel._schema
                 else:
                     self.kernel = f"at::{op_base_name}"
+                    schema = kernel._schema
             else:
                 self.kernel = f"aten.{op_base_name}"
 

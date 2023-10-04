@@ -17,6 +17,7 @@
 
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -298,6 +299,24 @@ AOTITorchError aoti_torch_mm_out(
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
     at::mm_out(*out_tensor, *self_tensor, *mat2_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_sort(
+    AtenTensorHandle self,
+    int dim,
+    bool descending,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1  // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    auto [sort_int, sort_indicies] = at::sort(*self_tensor, /*stable*/false, dim, descending);
+
+    at::Tensor* ret0_tensor = new at::Tensor(std::move(sort_int));
+    *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
+    at::Tensor* ret1_tensor = new at::Tensor(std::move(sort_indicies));
+    *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
   });
 }
 
