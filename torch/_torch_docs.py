@@ -2637,124 +2637,121 @@ Example::
 add_docstr(
     torch.cholesky_solve,
     r"""
-cholesky_solve(input, input2, upper=False, *, out=None) -> Tensor
+cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
 
-Solves a linear system of equations with a positive semidefinite
-matrix to be inverted given its Cholesky factor matrix :math:`u`.
+Computes the solution of a system of linear equations with complex Hermitian
+or real symmetric positive-definite lhs given its Cholesky decomposition.
 
-If :attr:`upper` is ``False``, :math:`u` is and lower triangular and `c` is
-returned such that:
-
-.. math::
-    c = (u u^T)^{{-1}} b
-
-If :attr:`upper` is ``True`` or not provided, :math:`u` is upper triangular
-and `c` is returned such that:
+Let :math:`A` be a complex Hermitian or real symmetric positive-definite matrix,
+and :math:`L` its Cholesky decomposition such that:
 
 .. math::
-    c = (u^T u)^{{-1}} b
 
-`torch.cholesky_solve(b, u)` can take in 2D inputs `b, u` or inputs that are
-batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `c`
+    A = LL^{\text{H}}
 
-Supports real-valued and complex-valued inputs.
-For the complex-valued inputs the transpose operator above is the conjugate transpose.
+where :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex,
+and the transpose when :math:`L` is real-valued.
+
+Returns the solution :math:`X` of the following linear system:
+
+.. math::
+
+    AX = B
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :math:`A` or :math:`B` is a batch of matrices
+then the output has the same batch dimensions.
 
 Args:
-    input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
-                where :math:`*` is zero or more batch dimensions
-    input2 (Tensor): input matrix :math:`u` of size :math:`(*, m, m)`,
-                where :math:`*` is zero of more batch dimensions composed of
-                upper or lower triangular Cholesky factor
-    upper (bool, optional): whether to consider the Cholesky factor as a
-                            lower or upper triangular matrix. Default: ``False``.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`
+        where :math:`*` is zero or more batch dimensions
+    L (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+        consisting of lower or upper triangular Cholesky decompositions of
+        symmetric or Hermitian positive-definite matrices.
+    upper (bool, optional): flag that indicates whether :math:`L` is lower triangular
+        or upper triangular. Default: ``False``.
 
 Keyword args:
-    out (Tensor, optional): the output tensor for `c`
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Example::
 
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.linalg.cholesky(a)
-    >>> a
-    tensor([[ 0.7747, -1.9549,  1.3086],
-            [-1.9549,  6.7546, -5.4114],
-            [ 1.3086, -5.4114,  4.8733]])
-    >>> b = torch.randn(3, 2)
-    >>> b
-    tensor([[-0.6355,  0.9891],
-            [ 0.1974,  1.4706],
-            [-0.4115, -0.6225]])
-    >>> torch.cholesky_solve(b, u)
+    >>> A = torch.randn(3, 3)
+    >>> A = A @ A.T + torch.eye(3) * 1e-3 # Creates a symmetric positive-definite matrix
+    >>> L = torch.linalg.cholesky(A) # Extract Cholesky decomposition
+    >>> B = torch.randn(3, 2)
+    >>> torch.cholesky_solve(B, L)
     tensor([[ -8.1625,  19.6097],
             [ -5.8398,  14.2387],
             [ -4.3771,  10.4173]])
-    >>> torch.mm(a.inverse(), b)
+    >>> A.inverse() @  B
     tensor([[ -8.1626,  19.6097],
             [ -5.8398,  14.2387],
             [ -4.3771,  10.4173]])
+
+    >>> A = torch.randn(3, 2, 2, dtype=torch.complex64)
+    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian positive-definite matrices
+    >>> L = torch.linalg.cholesky(A)
+    >>> B = torch.randn(2, 1, dtype=torch.complex64)
+    >>> X = torch.cholesky_solve(B, L)
+    >>> torch.dist(X, A.inverse() @ B)
+    tensor(1.6881e-5)
 """,
 )
 
 add_docstr(
     torch.cholesky_inverse,
     r"""
-cholesky_inverse(input, upper=False, *, out=None) -> Tensor
+cholesky_inverse(L, upper=False, *, out=None) -> Tensor
 
-Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
-Cholesky factor :math:`u`: returns matrix ``inv``. The inverse is computed using
-LAPACK routines ``dpotri`` and ``spotri`` (and the corresponding MAGMA routines).
+Computes the inverse of a complex Hermitian or real symmetric
+positive-definite matrix given its Cholesky decomposition.
 
-If :attr:`upper` is ``False``, :math:`u` is lower triangular
-such that the returned tensor is
-
-.. math::
-    inv = (uu^{{T}})^{{-1}}
-
-If :attr:`upper` is ``True`` or not provided, :math:`u` is upper
-triangular such that the returned tensor is
+Let :math:`A` be a complex Hermitian or real symmetric positive-definite matrix,
+and :math:`L` its Cholesky decomposition such that:
 
 .. math::
-    inv = (u^T u)^{{-1}}
+
+    A = LL^{\text{H}}
+
+where :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex,
+and the transpose when :math:`L` is real-valued.
+
+Computes the inverse matrix :math:`A^{-1}`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :math:`A` is a batch of matrices then the output has the same batch dimensions.
+Also supports batches of matrices, and if :math:`A` is a batch of matrices
+then the output has the same batch dimensions.
 
 Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
-                consisting of symmetric positive-definite matrices
-                where :math:`*` is zero or more batch dimensions.
-    upper (bool, optional): flag that indicates whether to return a
-                upper or lower triangular matrix. Default: False
+    L (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+        consisting of lower or upper triangular Cholesky decompositions of
+        symmetric or Hermitian positive-definite matrices.
+    upper (bool, optional): flag that indicates whether :math:`L` is lower triangular
+        or upper triangular. Default: ``False``
 
 Keyword args:
-    out (Tensor, optional): the output tensor for `inv`
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Example::
 
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) + 1e-05 * torch.eye(3) # make symmetric positive definite
-    >>> u = torch.linalg.cholesky(a)
-    >>> a
-    tensor([[  0.9935,  -0.6353,   1.5806],
-            [ -0.6353,   0.8769,  -1.7183],
-            [  1.5806,  -1.7183,  10.6618]])
-    >>> torch.cholesky_inverse(u)
+    >>> A = torch.randn(3, 3)
+    >>> A = A @ A.T + torch.eye(3) * 1e-3 # Creates a symmetric positive-definite matrix
+    >>> L = torch.linalg.cholesky(A) # Extract Cholesky decomposition
+    >>> torch.cholesky_inverse(L)
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
-    >>> a.inverse()
+    >>> A.inverse()
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
-    >>> a = torch.randn(3, 2, 2) # Example for batched input
-    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.linalg.cholesky(a)
-    >>> z = l @ l.mT
-    >>> torch.dist(z, a)
-    tensor(3.5894e-07)
+
+    >>> A = torch.randn(3, 2, 2, dtype=torch.complex64)
+    >>> A = A @ A.mH + torch.eye(2) * 1e-3 # Batch of Hermitian positive-definite matrices
+    >>> L = torch.linalg.cholesky(A)
+    >>> torch.dist(torch.inverse(A), torch.cholesky_inverse(L))
+    tensor(5.6358e-7)
 """,
 )
 

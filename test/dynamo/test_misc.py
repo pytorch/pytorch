@@ -60,6 +60,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
@@ -69,7 +70,11 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    IS_FBCODE,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -519,6 +524,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             guard_failure.reason,
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
         )
+
+    def test_builtin_abs(self):
+        def fn(x, y):
+            return abs(x) + abs(y)
+
+        sample = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+
+        for sample in [
+            (torch.randn(10, 10), torch.randn(10, 10)),
+            (-10, make_tensor(10, dtype=torch.int64, device="cpu")),
+            (-0.1, torch.randn(10)),
+        ]:
+            expect = fn(*sample)
+            actual = opt_fn(*sample)
+            self.assertEqual(expect, actual)
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -6100,37 +6121,41 @@ def fn():
         finally:
             torch.set_grad_enabled(prior)
 
-    def test_determinstic_algorithms_mutated(self):
+    def test_deterministic_algorithms_mutated(self):
         prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         value = None
+        warn_only = None
         cnt = CompileCounter()
 
         @torch._dynamo.allow_in_graph
         def check_state():
             nonlocal value
+            nonlocal warn_only
             value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
-            torch.use_deterministic_algorithms(False)
+            torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
+        def run_fn():
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            fn(torch.randn(10))
+            assert value is True
+            assert warn_only is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+            assert torch.is_deterministic_algorithms_warn_only_enabled() is False
+
         try:
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
-            value = None
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
             assert cnt.frame_count == 1
         finally:
-            torch.use_deterministic_algorithms(prior)
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
@@ -7609,10 +7634,10 @@ ShapeEnv not equal: field values don't match:
 
             inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
 
-        torch.set_default_dtype(torch.float)
-        foo()
-        torch.set_default_dtype(torch.double)
-        foo()
+        with set_default_dtype(torch.float):
+            foo()
+        with set_default_dtype(torch.double):
+            foo()
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):

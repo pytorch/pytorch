@@ -224,6 +224,8 @@ def _share_state_and_init_handle_attrs(
         handle._has_optim_in_backward = flat_param._params is not None and any(
             hasattr(param, "_in_backward_optimizers") for param in flat_param._params
         )
+        if handle._has_optim_in_backward:
+            torch._C._log_api_usage_once("fsdp.optimizer_in_backward")
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(

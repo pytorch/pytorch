@@ -79,6 +79,8 @@ def _reverse_map(d: Dict[Any, Enum]):
 MetaType = Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]
 
 
+ST_DELIMITER = ";"
+
 _TORCH_TO_SERIALIZE_DTYPE = {
     torch.uint8: ScalarType.BYTE,
     torch.int8: ScalarType.CHAR,
@@ -465,12 +467,11 @@ class GraphModuleSerializer:
                 f"{k}:({v[0]},{self.serialize_operator(v[1])})"
                 for k, v in nn_module_stack.items()
             ]
-            ret["nn_module_stack"] = ";".join(nn_module_list)
+            ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
 
-        if source_fn := node.meta.get("source_fn"):
-            # Serialize to "fx_node_name,op_str"
-            op = self.serialize_operator(source_fn[1])
-            ret["source_fn"] = f"{source_fn[0]},{op}"
+        if source_fn_st := node.meta.get("source_fn_stack"):
+            source_fn_list = [f"{source_fn[0]},{self.serialize_operator(source_fn[1])}" for source_fn in source_fn_st]
+            ret["source_fn_stack"] = ST_DELIMITER.join(source_fn_list)
 
         return ret
 
@@ -527,11 +528,8 @@ class GraphModuleSerializer:
     def serialize_input(self, arg) -> Argument:
         import torch._inductor.ir as inductor_ir
         inductor_tensor_buffers = (
-            inductor_ir.InputBuffer,
-            inductor_ir.ComputedBuffer,
-            inductor_ir.ConcatKernel,
-            inductor_ir.ExternKernelOut,
-            inductor_ir.MultiOutput,
+            inductor_ir.Buffer,
+            inductor_ir.ReinterpretView,
         )
 
         if isinstance(arg, torch.fx.Node):
@@ -559,8 +557,9 @@ class GraphModuleSerializer:
             # This is a special branch for handling buffers (representing tensor arguments)
             # for inductor's ExternalFallbackNode
             # export_extern_kernel_node() is using this function to serialize arguments
-            assert arg.name is not None, "Input buffer must have valid name"
-            return Argument.create(as_tensor=TensorArgument(name=arg.name))
+            arg_name = arg.get_name()
+            assert arg_name is not None, "Buffer must have valid name"
+            return Argument.create(as_tensor=TensorArgument(name=arg_name))
         elif isinstance(arg, bool):
             return Argument.create(as_bool=arg)
         elif isinstance(arg, str):
@@ -623,17 +622,17 @@ class GraphModuleSerializer:
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             elif all(isinstance(a, inductor_tensor_buffers) for a in arg):
-                # list of tensors
+                # list of inductor buffers
                 return Argument.create(
-                    as_tensors=[TensorArgument(name=a.name) for a in arg],
+                    as_tensors=[TensorArgument(name=a.get_name()) for a in arg],
                 )
             elif all(isinstance(a, (*inductor_tensor_buffers, type(None))) for a in arg):
-                # list of optional tensors
+                # list of inductor buffers as optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
                         return OptionalTensorArgument.create(as_none=())
                     elif isinstance(a, inductor_tensor_buffers):
-                        return OptionalTensorArgument.create(as_tensor=a.name)
+                        return OptionalTensorArgument.create(as_tensor=a.get_name())
                     else:
                         raise SerializeError(f"Unsupported list/tuple argument: {a}")
                 return Argument.create(
@@ -1292,7 +1291,7 @@ class GraphModuleDeserializer:
 
         if nn_module_stack_str := metadata.get("nn_module_stack"):
             # Originally serialized to "fx_node_name:(orig_ref,type_str)"
-            nn_module_stack_list = nn_module_stack_str.split(";")
+            nn_module_stack_list = nn_module_stack_str.split(ST_DELIMITER)
             nn_module_stack = {}
             for kv in nn_module_stack_list:
                 key_idx = kv.find(":")
@@ -1316,12 +1315,13 @@ class GraphModuleDeserializer:
                 nn_module_stack[key] = (kv[key_idx + 2:comma_idx], module)
             ret["nn_module_stack"] = nn_module_stack
 
-        if source_fn_str := metadata.get("source_fn"):
+        if source_fn_st_str := metadata.get("source_fn_stack"):
             # Originally serializes to "fx_node_name,op_str"
-            source_fn = source_fn_str.split(",")
-            op = deserialize_meta_func(source_fn[1])
-            ret["source_fn"] = (source_fn[0], op)
-
+            source_fn_st = []
+            for source_fn_str in source_fn_st_str.split(ST_DELIMITER):
+                name, target_str = source_fn_str.split(",")
+                source_fn_st.append((name, deserialize_meta_func(target_str)))
+            ret["source_fn_stack"] = source_fn_st
         return ret
 
     def deserialize_module_call_signature(self, module_call_signature: ModuleCallSignature) -> ep.ModuleCallSignature:
