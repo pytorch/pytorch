@@ -2136,7 +2136,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
         cubin_path = params.get("cubin_path", None)
-        assert os.path.exists(
+        assert cubin_path is not None and os.path.exists(
             cubin_path
         ), f"cubin file should already exist at this moment: {cubin_path}"
         shared_mem = params.get("shared_mem", 0)
