@@ -6,7 +6,7 @@ import numpy as np
 from itertools import product
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests)
+    (skipIfTorchDynamo, TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -157,6 +157,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     def test_to_numpy_force_argument(self, device) -> None:
         for force in [False, True]:
             for requires_grad in [False, True]:

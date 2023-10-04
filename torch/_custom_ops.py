@@ -3,11 +3,11 @@ import inspect
 from torch._custom_op.impl import (
     _custom_op_with_schema,
     _find_custom_op,
-    get_ctx,
     infer_schema,
     parse_qualname,
     validate_namespace,
 )
+from torch.library import get_ctx
 
 __all__ = [
     "custom_op",
@@ -248,15 +248,9 @@ def impl_abstract(qualname, *, func=None):
         >>>     return torch.tensor(res, device=x.device)
 
     """
+    import torch.library
 
-    def inner(func):
-        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
-        custom_op.impl_abstract(_stacklevel=3)(func)
-        return func
-
-    if func is None:
-        return inner
-    return inner(func)
+    return torch.library.impl_abstract(qualname, func, _stacklevel=2)
 
 
 def impl_save_for_backward(qualname, *, func=None):
