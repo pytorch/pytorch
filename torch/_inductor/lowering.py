@@ -4602,7 +4602,7 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
-register_pointwise(aten.abs)
+abs = register_pointwise(aten.abs)
 bitwise_and = register_pointwise(aten.bitwise_and)
 bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
 bitwise_not = register_pointwise(

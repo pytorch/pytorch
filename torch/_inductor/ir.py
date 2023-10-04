@@ -3969,6 +3969,8 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
+            self.codegen_comment(wrapper)
+
             exported_args = None
             args = None
             if config.is_fbcode():
