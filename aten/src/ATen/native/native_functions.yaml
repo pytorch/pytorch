@@ -701,6 +701,7 @@
   structured: True
   dispatch:
     CPU, CUDA: all_dims_out
+    CompositeExplicitAutograd: all_dims_out_default
   cpp_no_default_args: ['dim']
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
@@ -743,6 +744,7 @@
   structured: True
   dispatch:
     CPU, CUDA: any_dims_out
+    CompositeExplicitAutograd: any_dims_out_default
   cpp_no_default_args: ['dim']
 
 - func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
