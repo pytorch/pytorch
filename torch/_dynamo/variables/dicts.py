@@ -105,7 +105,6 @@ class ConstDictVariable(VariableTracker):
         elif name == "keys":
             assert not (args or kwargs)
             return SetVariable(
-                tx=tx,
                 items=[
                     ConstDictVariable._key_to_var(
                         tx,

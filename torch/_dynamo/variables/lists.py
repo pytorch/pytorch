@@ -748,7 +748,6 @@ class SetVariable(VariableTracker):
 
     def __init__(
         self,
-        tx,
         items: List[VariableTracker],
         recursively_contains=None,
         regen_guards=True,
@@ -760,15 +759,11 @@ class SetVariable(VariableTracker):
         assert all(isinstance(x, VariableTracker) for x in items)
 
         self.items = []
-        self._add(tx, items)
+        self._add(items)
 
         # Sometimes, we know that we have passed in the guards from the items in the set
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
-
-        # Really annoying to store this here - but required because of how
-        # VariableTracker's clone works w/r/t attr setting from dict
-        self.tx = tx
 
     def as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -784,7 +779,7 @@ class SetVariable(VariableTracker):
         ] + create_call_function(1, True)
 
     # Note - this is only used for producing a set
-    def _as_set_element(self, tx, vt):
+    def _as_set_element(self, vt):
         from .base import VariableTracker
         from .tensor import TensorVariable
 
@@ -805,10 +800,10 @@ class SetVariable(VariableTracker):
             assert (
                 current_item not in underlying_items
             ), "Items modeling set invariant violated"
-            underlying_items.add(self._as_set_element(self.tx, current_item))
+            underlying_items.add(self._as_set_element(current_item))
         return underlying_items
 
-    def _add(self, tx, item):
+    def _add(self, item):
         underlying_items = self._underlying_items
 
         if isinstance(item, (list, set)):
@@ -817,7 +812,7 @@ class SetVariable(VariableTracker):
             items_to_add = [item]
 
         for item_to_add in items_to_add:
-            set_element = self._as_set_element(tx, item_to_add)
+            set_element = self._as_set_element(item_to_add)
             if set_element not in underlying_items:
                 underlying_items.add(set_element)
                 self.items.append(set_element.vt)
@@ -849,8 +844,7 @@ class SetVariable(VariableTracker):
             assert not kwargs
             item = args[0]
             result = SetVariable(
-                tx,
-                self._add(tx, item),
+                self._add(item),
                 mutable_local=self.mutable_local,
                 regen_guards=False,
                 **options,
@@ -864,7 +858,7 @@ class SetVariable(VariableTracker):
             result = items.pop()
             tx.replace_all(
                 self,
-                SetVariable(tx, items, regen_guards=False, **options),
+                SetVariable(items, regen_guards=False, **options),
             )
             return result
         elif name == "__len__":
