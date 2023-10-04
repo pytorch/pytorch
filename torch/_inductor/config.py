@@ -64,7 +64,7 @@ pattern_matcher = True
 post_grad_custom_pre_pass = None
 post_grad_custom_post_pass = None
 
-# Optimize away split cat patterns (Experimental)
+# Optimize away split cat patterns
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
@@ -75,6 +75,9 @@ group_fusion = False
 
 # enable pattern match with batch fusion (using torch op)
 batch_fusion = True
+
+# Find more opportunities for optimizing the graph (Experimental)
+optimus_opportunity_finder = False
 
 # enable reordering pass
 reordering = True
