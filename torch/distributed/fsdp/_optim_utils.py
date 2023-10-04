@@ -1347,8 +1347,8 @@ def _convert_all_state_info(
             {n for state in state_info for n in state.tensors.keys()}
         )
         empty_ranks: Set[int] = set()
-        # First check all the non-scalar states and get the exist status of the
-        # the states on each rank.
+        # First check all the non-scalar states and get the information of
+        # states on each rank.
         for state_name in all_tensor_states:
             numels = []
             dtype: Optional[torch.dtype] = None
@@ -1374,9 +1374,9 @@ def _convert_all_state_info(
             local_state = input_states[fqn].get(state_name, None)
             state_buffers[state_name][fsdp_param_info.param_indices[fqn]] = local_state
 
-        # Restoring the scalar and non-tensor states. If the corresponding non-scalar
-        # states do not exist on the rank, we also skip the scalar and non-tensor
-        # states on that rank
+        # Restoring the scalar and non-tensor states. If the corresponding
+        # non-scalar states do not exist on the rank, we also skip the scalar
+        # non-tensor states on that rank.
         for rank, object_state in enumerate(state_info):
             if rank in empty_ranks:
                 continue
@@ -1467,6 +1467,11 @@ def _allgather_orig_param_states(
         fsdp_param_info, gathered_state_info, input_states, output_states
     )
 
+    has_state_params: List[bool] = [
+        True if fqn in output_states else False
+        for fqn, idx in fsdp_param_info.param_indices.items()
+    ]
+
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
     # sharded states. The size of the constructed state will be the same size as
     # flat_param (also sharded).
@@ -1492,11 +1497,12 @@ def _allgather_orig_param_states(
         for numel, is_padding in zip(
             flat_param._numels_with_padding, flat_param._is_padding_mask
         ):
-            frozen = (
-                not is_padding and not fsdp_param_info.param_requires_grad[param_idx]
+            frozen_and_no_state = not is_padding and (
+                not fsdp_param_info.param_requires_grad[param_idx]
+                and not has_state_params[param_idx]
             )
 
-            if is_padding or frozen:
+            if is_padding or frozen_and_no_state:
                 # This memory range is a padding or the param is frozen and does
                 # not require gradient. For the later case, we treat it as a
                 # padding and add empty values to the local_buffers.
@@ -1530,7 +1536,7 @@ def _allgather_orig_param_states(
             if not is_padding:
                 # This memory range is a parameter in FlatParameter. So there
                 # should be an corresponding state in the optimizer unless the
-                #  parameter is frozen, which we treat it a padding above.
+                # parameter is frozen, which we treat it as a padding above.
 
                 # We need to check if this rank owns the buffer. If this is None:
                 # 1.) the rank does not own any part of the original parameter.
@@ -1583,7 +1589,7 @@ def _allgather_orig_param_states(
             "logic."
         )
         for fqn, idx in fsdp_param_info.param_indices.items():
-            if fsdp_param_info.param_requires_grad[idx]:
+            if fsdp_param_info.param_requires_grad[idx] or fqn in output_states:
                 output_states[fqn][state_name] = orig_states[idx]
 
         _unflatten_orig_param_states(
@@ -1633,9 +1639,9 @@ def _gather_all_orig_param_state(
             raise RuntimeError(
                 f"{key} is not in the output state. "
                 "The FSDPParamInfo has the param keys "
-                f"{sorted(list(fsdp_param_info.param_indices.keys()))} while "
-                "the output_states doesn't have the param keys "
-                f"{sorted(list(output_states.keys()))}."
+                f"{sorted(fsdp_param_info.param_indices.keys())} while "
+                "the output_states has the param keys "
+                f"{sorted(output_states.keys())}."
             )
         return output_states
     else:
@@ -1705,9 +1711,9 @@ def _convert_state_with_orig_params(
             raise RuntimeError(
                 f"{key} is not in the optimizer state. "
                 "The FSDPParamInfo has the param keys "
-                f"{sorted(list(fsdp_param_info.param_indices.keys()))} while "
-                "the optimizer does not have the param keys "
-                f"{sorted(list(_all_states.keys()))}."
+                f"{sorted(fsdp_param_info.param_indices.keys())} while "
+                "the optimizer has the param keys "
+                f"{sorted(_all_states.keys())}."
             )
         fsdp_osd_state.update(
             _gather_all_orig_param_state(
