@@ -29,6 +29,9 @@ void enable_event_collection(int pipe) {
 
 namespace details {
 
+// we start dropping events after this
+const size_t MAX_QUEUE_SIZE = 512;
+
 bool dequeue_c10d_event(EventInfo& evt) {
   std::unique_lock<std::mutex> lock(event_queue_lock);
   if (event_queue.size() == 0) {
@@ -44,9 +47,13 @@ void enqueue_c10d_event(EventInfo&& evt) {
     return;
 
   std::unique_lock<std::mutex> lock(event_queue_lock);
-  event_queue.push_back(std::move(evt));
-  char m = 'x';
-  write(sync_pipe, &m, 1);
+  if (event_queue.size() >= MAX_QUEUE_SIZE) {
+    event_queue.back().drop_count++;
+  } else {
+    event_queue.push_back(std::move(evt));
+    char m = 'x';
+    write(sync_pipe, &m, 1);
+  }
 }
 
 } // namespace details

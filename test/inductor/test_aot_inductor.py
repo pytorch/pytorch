@@ -69,7 +69,7 @@ class AOTInductorModelRunner:
                 cpp_sources=[launcher],
                 functions=["run"],
                 extra_ldflags=[so_path],
-                with_cuda=True,  # TODO: change this to not is_cpu
+                with_cuda=not is_cpu,
             ).run
 
         return optimized, exported
@@ -394,6 +394,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.rand(6, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_inf(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        x = torch.randn(10, 10, device=self.device)
+        x[0][0] = float("Inf")
+        example_inputs = (
+            x,
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(
+            Model().to(self.device),
+            example_inputs,
+            options={"debug_check_inf_and_nan": True},
+        )
+
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_nan(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        x = torch.randn(10, 10, device=self.device)
+        x[0][0] = float("nan")
+        example_inputs = (
+            x,
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(
+            Model().to(self.device),
+            example_inputs,
+            options={"debug_check_inf_and_nan": True},
+        )
+
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -626,6 +670,25 @@ class AOTInductorTestsTemplate:
         ):
             self.check_model(Repro(), example_inputs)
 
+    def test_dynamic_cat(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x1, x2):
+                return torch.cat([x1, x2], dim=0)
+
+        a = torch.randn(2, 4, device=self.device)
+        b = torch.randn(3, 4, device=self.device)
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 10,
+            torch._export.dynamic_dim(b, 0) >= 1,
+            torch._export.dynamic_dim(b, 0) <= 20,
+        ]
+        example_inputs = (a, b)
+        self.check_model(Model(), example_inputs, constraints=constraints)
+
     @unittest.skipIf(
         torch.cuda.device_count() < 2, "The test requires multiple devices"
     )
@@ -675,6 +738,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
