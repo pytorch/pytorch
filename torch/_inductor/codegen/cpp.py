@@ -381,6 +381,10 @@ class CppPrinter(ExprPrinter):
             il = "{" + ", ".join(args) + "}"
             return f"std::max({il})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"std::abs({self._print(expr.args[0])})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint

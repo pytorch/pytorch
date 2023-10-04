@@ -3522,7 +3522,7 @@ def max_pool2d_with_indices_backward(
     grad_output.realize_hint()
     try:
         gO_stride = grad_output.get_stride()
-    except NotImplementedError:
+    except AttributeError:
         # some classes don't have `get_stride`
         # TODO will need a better way of determining if inputs are channels-last
         gO_stride = None
@@ -3542,7 +3542,7 @@ def max_pool2d_with_indices_backward(
     else:
         try:
             x_stride = x.get_stride()
-        except NotImplementedError:
+        except AttributeError:
             x_stride = None
 
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
@@ -4602,7 +4602,7 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
-register_pointwise(aten.abs)
+abs = register_pointwise(aten.abs)
 bitwise_and = register_pointwise(aten.bitwise_and)
 bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
 bitwise_not = register_pointwise(
@@ -4686,6 +4686,7 @@ register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
+register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
