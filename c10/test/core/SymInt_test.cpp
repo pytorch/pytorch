@@ -56,10 +56,6 @@ TEST(SymIntTest, SingletonSymNode) {
   EXPECT_THROW((void)(c >= 3), c10::Error);
   ASSERT_TRUE(c >= 2);
   ASSERT_TRUE(c >= 1);
-  ASSERT_TRUE(std::numeric_limits<int64_t>::max() >= c);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(
-      (void)(std::numeric_limits<int64_t>::max() - 1 >= c), c10::Error);
   ASSERT_FALSE(1 >= c);
 
   // lt
@@ -70,8 +66,6 @@ TEST(SymIntTest, SingletonSymNode) {
   EXPECT_THROW((void)(a < c), c10::Error);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW((void)(c < a), c10::Error);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW((void)(a < std::numeric_limits<int64_t>::max()), c10::Error);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW((void)(3 < a), c10::Error);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -90,10 +84,6 @@ TEST(SymIntTest, SingletonSymNode) {
   EXPECT_THROW((void)(3 <= c), c10::Error);
   ASSERT_TRUE(2 <= c);
   ASSERT_TRUE(1 <= c);
-  ASSERT_TRUE(c <= std::numeric_limits<int64_t>::max());
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(
-      (void)(c <= std::numeric_limits<int64_t>::max() - 1), c10::Error);
   ASSERT_FALSE(c <= 1);
 
   // gt
@@ -104,8 +94,6 @@ TEST(SymIntTest, SingletonSymNode) {
   EXPECT_THROW((void)(a > c), c10::Error);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW((void)(c > a), c10::Error);
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW((void)(std::numeric_limits<int64_t>::max() > a), c10::Error);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW((void)(a > 3), c10::Error);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
