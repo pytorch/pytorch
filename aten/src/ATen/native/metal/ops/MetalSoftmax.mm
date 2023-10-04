@@ -50,14 +50,14 @@ Tensor mpscnn_softmax(
   return output;
 }
 
-static Tensor log_softmax_int(
+Tensor log_softmax_int(
     const Tensor& input,
     int64_t dim,
     c10::optional<ScalarType> dtype) {
   return mpscnn_softmax<MPSCNNLogSoftMax>(input, dim, dtype);
 }
 
-static Tensor softmax_int(
+Tensor softmax_int(
     const Tensor& input,
     int64_t dim,
     c10::optional<ScalarType> dtype) {

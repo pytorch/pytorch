@@ -212,9 +212,9 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>
         >>> # Example 1: an operator without data-dependent output shape
         >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-        >>> lib.define("mylibrary::custom_linear(Tensor x, Tensor weight, Tensor bias)"
+        >>> lib.define("mylibrary::custom_linear(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
-        >>> @torch.library.impl_abstract("mylibrary::custom_linear"):
+        >>> @torch.library.impl_abstract("mylibrary::custom_linear")
         >>> def custom_linear_abstract(x, weight):
         >>>     assert x.dim() == 2
         >>>     assert weight.dim() == 2
@@ -227,9 +227,9 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>
         >>> # Example 2: an operator with data-dependent output shape
         >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-        >>> lib.define("mylibrary::custom_nonzero(Tensor x) -> Tensor"
+        >>> lib.define("mylibrary::custom_nonzero(Tensor x) -> Tensor")
         >>>
-        >>> @torch.library.impl_abstract("mylibrary::custom_nonzero"):
+        >>> @torch.library.impl_abstract("mylibrary::custom_nonzero")
         >>> def custom_nonzero_abstract(x):
         >>>     # Number of nonzero-elements is data-dependent.
         >>>     # Since we cannot peek at the data in an abstract impl,
@@ -237,18 +237,14 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
         >>>     nnz = ctx.new_dynamic_size()
-        >>>     shape = [x.dim(), nnz]
-        >>>     result = x.new_empty(shape, dtype=torch.long)
+        >>>     shape = [nnz, x.dim()]
+        >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
         >>> @torch.library.impl(lib, "custom_nonzero", "CPU")
         >>> def custom_nonzero_cpu(x):
-        >>>     x_np = to_numpy(x)
+        >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
-        >>>     # unbacked symbolic ints in PyTorch must be >= 2, so we
-        >>>     # constrain the range to at least 2
-        >>>     if res.shape[0] <= 1:
-        >>>         raise RuntimeError("not supported")
         >>>     return torch.tensor(res, device=x.device)
 
     """

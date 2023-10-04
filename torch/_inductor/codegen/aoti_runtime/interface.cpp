@@ -77,7 +77,7 @@ AOTIRuntimeError AOTInductorModelContainerRun(
   AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
   AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
 
-  auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+  auto stream = reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     container->run(
         input_handles,
@@ -180,6 +180,64 @@ AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
         container->max_output_shape(output_idx);
     *ret_output_sizes = max_output_shape.data();
     *ret_output_ndim = max_output_shape.size();
+  })
+}
+
+AOTIRuntimeError AOTInductorModelCreate(
+    AOTInductorModelHandle* model_handle,
+    AOTInductorConstantMapHandle constant_map_handle) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+
+      for (auto const& kv : *input_map) {
+        constant_map->emplace(kv.first, kv.second);
+      }
+
+      auto model = new torch::aot_inductor::AOTInductorModel(
+          constant_map,
+          ""
+      );
+      *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
+  })
+}
+
+AOTIRuntimeError AOTInductorModelRun(
+    AOTInductorModelHandle model_handle,
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles) {
+  auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      model->run_impl(
+          input_handles,
+          output_handles,
+          (torch::aot_inductor::DeviceStreamType)nullptr,
+          nullptr);
+  })
+}
+
+
+AOTIRuntimeError AOTInductorModelDelete(
+    AOTInductorModelHandle model_handle
+) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+      delete model;
+  })
+}
+
+AOTIRuntimeError AOTInductorModelUpdateConstants(
+    AOTInductorModelHandle model_handle,
+    AOTInductorConstantMapHandle constant_map_handle) {
+  auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+
+      for (auto const& kv : *input_map) {
+        constant_map->emplace(kv.first, kv.second);
+      }
+      model->update_constants_map(std::move(constant_map));
   })
 }
 

@@ -37,7 +37,7 @@ static void THPCapturedTraceback_dealloc(PyObject* self_) {
 
 PyTypeObject THPCapturedTracebackType = {
     PyVarObject_HEAD_INIT(
-        NULL,
+        nullptr,
         0) "torch._C._profiler.CapturedTraceback", /* tp_name */
     sizeof(THPCapturedTraceback), /* tp_basicsize */
     0, /* tp_itemsize */
@@ -162,7 +162,12 @@ int RecordFunctionFast_init(
   constexpr const char* kwlist[] = {"name", nullptr};
   PyObject* name = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "O", const_cast<char**>(kwlist), &name)) {
+          args,
+          kwargs,
+          "O",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<char**>(kwlist),
+          &name)) {
     return -1;
   }
   if (name) {
@@ -383,7 +388,7 @@ void initPythonBindings(PyObject* module) {
           [](const torch_op_t& op) {
             py::list out;
             for (const auto& input : op.inputs_) {
-              c10::visit(
+              std::visit(
                   c10::overloaded(
                       [&](const c10::IValue& v) {
                         out.append(torch::jit::toPyObject(v));
@@ -536,11 +541,11 @@ void initPythonBindings(PyObject* module) {
   static PyMethodDef RecordFunctionFast_methods[] = {
       {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
       {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
-      {NULL},
+      {nullptr},
   };
 
   static PyTypeObject RecordFunctionFast_Type = {
-      PyVarObject_HEAD_INIT(NULL, 0)};
+      PyVarObject_HEAD_INIT(nullptr, 0)};
 
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",
   RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);

@@ -11,13 +11,14 @@ def _add_file(filename):
     try:
         with open(filename) as f:
             tokens = list(tokenize.generate_tokens(f.readline))
-    except Exception:
+    except IOError:
         cache[filename] = {}
         return
 
     # NOTE: undefined behavior if file is not valid Python source,
     # since tokenize will have undefined behavior.
     result = {}
+    # current full funcname, e.g. xxx.yyy.zzz
     cur_name = ""
     cur_indent = 0
     significant_indents = []
@@ -30,6 +31,7 @@ def _add_file(filename):
             # possible end of function or class
             if significant_indents and cur_indent == significant_indents[-1]:
                 significant_indents.pop()
+                # pop the last name
                 cur_name = cur_name.rpartition(".")[0]
         elif (
             token.type == tokenize.NAME

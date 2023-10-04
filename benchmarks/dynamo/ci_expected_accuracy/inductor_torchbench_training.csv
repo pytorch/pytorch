@@ -4,7 +4,6 @@ BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
 alexnet,pass,8
-attention_is_all_you_need_pytorch,pass,8
 basic_gnn_edgecnn,pass,23
 basic_gnn_gcn,pass,14
 basic_gnn_gin,pass,8
@@ -27,6 +26,7 @@ maml_omniglot,pass,8
 mnasnet1_0,pass,8
 mobilenet_v2,pass,8
 moco,pass,19
+nanogpt,pass,8
 nvidia_deeprecommender,pass,8
 phlippe_densenet,pass,8
 phlippe_resnet,pass,8
@@ -41,7 +41,8 @@ shufflenet_v2_x1_0,pass,8
 soft_actor_critic,pass,7
 speech_transformer,pass,18
 squeezenet1_1,pass,8
-stable_diffusion,pass,7
+stable_diffusion_text_encoder,pass,7
+stable_diffusion_unet,pass_due_to_skip,0
 timm_efficientnet,pass,8
 timm_regnet,pass,8
 timm_resnest,pass,8
