@@ -12,7 +12,7 @@ from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import check_constant_args, identity, proxy_args_kwargs, nothing
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 from .functions import (
@@ -69,6 +69,11 @@ class SuperVariable(VariableTracker):
                     break
         if isinstance(obj, types.FunctionType):
             return UserFunctionVariable(obj, source=source, **options)
+        elif isinstance(obj, types.MethodWrapperType) and name == "__init__":
+            init_slot_wrapper = getattr(super(search_type, self.objvar.python_type()), name)
+            if init_slot_wrapper is object.__init__:
+                return LambdaVariable(nothing, **options)
+            unimplemented(f"super() nn.Module.__init__")
         elif isinstance(obj, types.MethodType):
             return BoundedUserMethodVariable(
                 obj.__func__, self.objvar, source=source, **options
@@ -536,7 +541,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs).add_options(self)
+        return self.fn(*args, **kwargs)#.add_options(self)
 
 
 class GetAttrVariable(VariableTracker):
