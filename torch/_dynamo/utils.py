@@ -95,14 +95,10 @@ def tabulate(rows, headers):
         )
 
 
-CPROFILE_ENABLED = False
-
-
 def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
-        global timer_counter, CPROFILE_ENABLED
-        CPROFILE_ENABLED = True
+        global timer_counter
         profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
         prof = cProfile.Profile()
         prof.enable()
@@ -209,7 +205,7 @@ def print_time_report():
 
 def dynamo_timed(original_function=None, phase_name=None):
     def dynamo_timed_inner(func):
-        if CPROFILE_ENABLED:
+        if config.cprofile:
             return func
 
         @wraps(func)
