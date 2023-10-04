@@ -41,6 +41,7 @@ jobs:
           REBASE: ${{ github.event.client_payload.rebase }}
           IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
         run: |
           set -ex
           if [ -n "${REBASE}" ]; then

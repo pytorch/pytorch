@@ -2945,15 +2945,16 @@ class TestNestedTensorSubclass(TestCase):
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     @onlyCUDA
     def test_pin_memory(self, device):
-        nt = random_nt_from_dims([3, None, 5], device='cpu')
-        self.assertFalse(nt.is_pinned())
-        pinned = nt.pin_memory(device)
-        self.assertTrue(pinned.is_pinned())
-        self.assertEqual(nt, pinned)
-        self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
-        # test that pin_memory on already pinned tensor has no effect
-        self.assertIs(pinned, pinned.pin_memory())
-        self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
+        for nt in [nt_contiguous, nt_noncontiguous]:
+            self.assertFalse(nt.is_pinned())
+            pinned = nt.pin_memory(device)
+            self.assertTrue(pinned.is_pinned())
+            self.assertEqual(nt, pinned)
+            self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
+            # test that pin_memory on already pinned tensor has no effect
+            self.assertIs(pinned, pinned.pin_memory())
+            self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
 
 instantiate_parametrized_tests(TestNestedTensor)

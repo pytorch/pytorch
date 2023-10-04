@@ -302,9 +302,9 @@ def validate_failures_dict_structure(
                 if not actual_test_name.startswith(test):
                     continue
                 base_test_name = actual_test_name[len(test) + 2 :]
-                if testcase.__name__ == test_class and hasattr(
-                    testcase, base_test_name
-                ):
+                if testcase.__name__ != test_class:
+                    continue
+                if hasattr(testcase, base_test_name):
                     continue
                 raise RuntimeError(
                     f"In failures dict, got test name '{test_name}'. We parsed this as "

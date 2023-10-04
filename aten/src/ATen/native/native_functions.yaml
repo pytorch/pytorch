@@ -4413,15 +4413,13 @@
 # pinned memory
 - func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
   variants: method
-  dispatch:
-    NestedTensorCUDA, NestedTensorCPU: pin_memory_nested
-    CompositeImplicitAutograd: pin_memory
 
 # Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
 - func: _pin_memory(Tensor self, Device? device=None) -> Tensor
   dispatch:
     CUDA: _pin_memory_cuda
     MPS: _pin_memory_mps
+    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
@@ -9547,7 +9545,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: nextafter_out
+    CPU, CUDA, MPS: nextafter_out
   tags: pointwise
 
 - func: nextafter(Tensor self, Tensor other) -> Tensor

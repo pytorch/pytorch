@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA)
+                                                  IS_MACOS, TEST_CUDA, parametrize)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
@@ -111,9 +111,9 @@ JOIN_TIMEOUT = 60.0  # seconds
 supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
 
 
-# Identity function; defined globally here for pickle purposes.
-def _identity(x):
-    return x
+# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
+def _clone_collate(b):
+    return [x.clone() for x in b]
 
 
 @unittest.skipIf(
@@ -2273,8 +2273,14 @@ except RuntimeError as e:
 
 
 class TestDataLoaderDeviceType(TestCase):
-    def test_nested_tensor_multiprocessing(self, device):
-        dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(100)]
+    @parametrize("context", ["spawn", "fork", "forkserver"])
+    def test_nested_tensor_multiprocessing(self, device, context):
+        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+        if 'cuda' in device and context == "fork":
+            # TODO: Skip this better in a better way when the test framework allows
+            return
+
+        dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(10)]
 
         pin_memory_settings = [False]
         if device == 'cpu' and torch.cuda.is_available():
@@ -2285,13 +2291,26 @@ class TestDataLoaderDeviceType(TestCase):
                 dataset,
                 batch_size=1,
                 num_workers=4,
-                collate_fn=_identity,
+                collate_fn=_clone_collate,
                 pin_memory=pin_memory,
-                multiprocessing_context=('spawn' if 'cuda' in device else 'fork'),
+                multiprocessing_context=context,
             )
 
             for i, batch in enumerate(loader):
                 self.assertEqual(batch[0], dataset[i])
+
+        # Error case: default collate_fn doesn't currently support batches of nested tensors.
+        # Following the current semantics, we'd need to stack them, which isn't possible atm.
+        with self.assertRaisesRegex(
+                RuntimeError, "not currently supported by the default collate_fn"):
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                multiprocessing_context=context,
+            )
+
+            next(iter(loader))
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
