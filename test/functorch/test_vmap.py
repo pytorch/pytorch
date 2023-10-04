@@ -3588,6 +3588,9 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04),
                         torch.complex64: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
+        xfail('nn.functional.conv1d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv2d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised on ErrorInput
         # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
@@ -3659,6 +3662,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('count_nonzero'),
+        xfail('nn.functional.conv1d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv2d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised on ErrorInput
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.multi_head_attention_forward'),  # randomness

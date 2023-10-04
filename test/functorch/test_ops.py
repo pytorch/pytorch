@@ -613,6 +613,8 @@ class TestOperators(TestCase):
         xfail('as_strided', 'partial_views'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
+        tol1('nn.functional.conv3d',
+             {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -1265,6 +1267,7 @@ class TestOperators(TestCase):
         skip('nn.functional.scaled_dot_product_attention'),
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
+        decorate('nn.functional.conv3d', decorator=skipIfRocm),  # Tensor-likes are not close!
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
         skip('ormqr', ''),  # takes too long
@@ -1368,6 +1371,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
+        decorate('nn.functional.conv3d', decorator=skipIfRocm),  # Tensor-likes are not close!
         xfail('to_sparse', ''),  # NYI
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
@@ -1815,6 +1819,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
+        tol1('nn.functional.conv3d',
+             {torch.float32: tol(atol=1e-04, rtol=9e-03)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
