@@ -869,6 +869,7 @@ def check_signature_rewritable(graph):
             "like its value to be embedded as an exported constant, wrap its access "
             "in a function marked with @assume_constant_result.\n\n"
             + "\n\n".join(input_errors),
+            case_name="assume_constant_result",
         )
 
 
@@ -1284,7 +1285,11 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(
+                        UserErrorType.DYNAMIC_CONTROL_FLOW,
+                        str(e),
+                        case_name="cond_operands",
+                    )
 
         if same_signature:
             flat_args_dynamic_dims = [
