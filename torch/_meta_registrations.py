@@ -4943,8 +4943,6 @@ def meta__scaled_dot_product_flash(
         logsumexp,
         None,
         None,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
         torch.empty((), dtype=torch.long, device="meta"),
         torch.empty((), dtype=torch.long, device="meta"),
         debug_mask,

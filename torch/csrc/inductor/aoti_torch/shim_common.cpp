@@ -203,15 +203,14 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     at::Tensor* query_tensor = tensor_handle_to_tensor_pointer(query);
     at::Tensor* key_tensor = tensor_handle_to_tensor_pointer(key);
     at::Tensor* value_tensor = tensor_handle_to_tensor_pointer(value);
-    auto [r0, r1, r2, r3, r4, r5, r6] =
-        at::_scaled_dot_product_flash_attention(
-            *query_tensor,
-            *key_tensor,
-            *value_tensor,
-            dropout_p,
-            is_causal,
-            return_debug_mask,
-            scale);
+    auto [r0, r1, r2, r3, r4, r5, r6] = at::_scaled_dot_product_flash_attention(
+        *query_tensor,
+        *key_tensor,
+        *value_tensor,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale);
 
     at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
     *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);

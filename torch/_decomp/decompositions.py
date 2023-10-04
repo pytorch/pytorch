@@ -4089,7 +4089,7 @@ def scaled_dot_product_flash_attention(
     return_debug_mask: bool = False,
     *,
     scale: Optional[float] = None,
-) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     dtype = query.dtype
     batchSize, num_head, qSize, headSize = (
         query.shape[0],
@@ -4119,7 +4119,6 @@ def scaled_dot_product_flash_attention(
     cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
         [], dtype=torch.long
     )
-    max_q, max_k = 0, 0
     philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
         [], dtype=torch.long
     )
@@ -4171,8 +4170,6 @@ def scaled_dot_product_flash_attention(
         logsumexp,
         cum_seq_q,
         cum_seq_k,
-        max_q,
-        max_k,
         philox_seed,
         philox_offset,
         debug_attn_mask,
