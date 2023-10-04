@@ -278,7 +278,6 @@ class FunctionalTensorMode(TorchDispatchMode):
                 old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
                 outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
                 outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
-
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
@@ -291,6 +290,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         )
         assert is_excluded or not is_included
 
+        # If no outputs are our functional subclass, then don't try to fix up aliasing
+        if not any(
+            isinstance(x, FunctionalTensor)
+            for x in pytree.tree_flatten(outs_wrapped)[0]
+        ):
+            return outs_wrapped
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
