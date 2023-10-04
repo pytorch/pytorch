@@ -77,7 +77,7 @@ AOTIRuntimeError AOTInductorModelContainerRun(
   AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
   AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
 
-  auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+  auto stream = reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     container->run(
         input_handles,
@@ -208,7 +208,11 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles) {
   auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-      model->run_impl(input_handles, output_handles, (cudaStream_t)nullptr, nullptr);
+      model->run_impl(
+          input_handles,
+          output_handles,
+          (torch::aot_inductor::DeviceStreamType)nullptr,
+          nullptr);
   })
 }
 

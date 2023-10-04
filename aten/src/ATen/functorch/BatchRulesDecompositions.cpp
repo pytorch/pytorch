@@ -308,6 +308,17 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
   OP_DECOMPOSE(unfold_copy);
+  // Easy way to decompose upsample*.vec overloads instead of introducing *_symint methods
+  // if used OP_DECOMPOSE2.
+  m.impl("upsample_bilinear2d.vec", native::upsample_bilinear2d);
+  m.impl("upsample_bicubic2d.vec", native::upsample_bicubic2d);
+  m.impl("_upsample_bilinear2d_aa.vec", native::_upsample_bilinear2d_aa);
+  m.impl("_upsample_bicubic2d_aa.vec", native::_upsample_bicubic2d_aa);
+  m.impl("upsample_linear1d.vec", native::upsample_linear1d);
+  m.impl("upsample_nearest1d.vec", native::upsample_nearest1d);
+  m.impl("upsample_nearest2d.vec", native::upsample_nearest2d);
+  m.impl("upsample_nearest3d.vec", native::upsample_nearest3d);
+  m.impl("upsample_trilinear3d.vec", native::upsample_trilinear3d);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);
