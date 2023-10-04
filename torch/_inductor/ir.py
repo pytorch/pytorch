@@ -1769,7 +1769,7 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-        size_hint = V.graph.sizevars.size_hint
+        size_hint = partial(V.graph.sizevars.size_hint, fallback=8192)
         vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
 
         stack_new = list(zip(vars, new_size))

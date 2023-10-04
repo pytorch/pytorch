@@ -49,7 +49,7 @@ class MemoryDep(typing.NamedTuple):
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return V.graph.sizevars.size_hint(numel) * get_dtype_size(
+        return V.graph.sizevars.size_hint(numel, fallback=8192) * get_dtype_size(
             V.graph.get_dtype(self.name)
         )
 
@@ -80,7 +80,7 @@ class StarDep(typing.NamedTuple):
 
     def numbytes_hint(self):
         return V.graph.sizevars.size_hint(
-            V.graph.get_numel(self.name)
+            V.graph.get_numel(self.name), fallback=8192
         ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:

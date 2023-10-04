@@ -31,9 +31,9 @@ def filtered_configs(
     # it's safer to use at least [32, 32] block size for int8/uint8
     # tensors
     min_block_size = 32 if has_int8_tensor else 16
-    m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), min_block_size)
-    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), min_block_size)
-    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), min_block_size)
+    m = max(next_power_of_2(V.graph.sizevars.size_hint(m, fallback=8192)), min_block_size)
+    n = max(next_power_of_2(V.graph.sizevars.size_hint(n, fallback=8192)), min_block_size)
+    k = max(next_power_of_2(V.graph.sizevars.size_hint(k, fallback=8192)), min_block_size)
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
