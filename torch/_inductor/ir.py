@@ -3917,11 +3917,19 @@ class FallbackKernel(ExternKernelAlloc):
 
         # serialize_outputs
         def handle_single_output(return_type, output):
-            if isinstance(output, list):
-                # For single TensorList
-                assert isinstance(return_type, torch.ListType) and isinstance(
-                    return_type.getElementType(), torch.TensorType
+            if isinstance(return_type, torch.TensorType):
+                # For single Tensor
+                out = output
+                if isinstance(output, (list, tuple)):
+                    assert len(output) == 1
+                    out = output[0]
+                return export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=out.get_name())
                 )
+            elif isinstance(return_type, torch.ListType) and isinstance(
+                return_type.getElementType(), torch.TensorType
+            ):
+                # For single TensorList
                 return export_schema.Argument.create(
                     as_tensors=[
                         export_schema.TensorArgument(name=out.get_name())
@@ -3929,11 +3937,7 @@ class FallbackKernel(ExternKernelAlloc):
                     ]
                 )
             else:
-                # for single Tensor
-                assert isinstance(return_type, torch.TensorType)
-                return export_schema.Argument.create(
-                    as_tensor=export_schema.TensorArgument(name=output.get_name())
-                )
+                raise RuntimeError("Unsupported return type")
 
         target = self.op_overload
         returns = target._schema.returns
