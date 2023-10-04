@@ -5,7 +5,7 @@
 
 namespace c10d {
 
-enum class TORCH_API EventKind { CollectionStart, CollectionEnd };
+enum class EventKind { CollectiveStart, CollectiveEnd };
 
 struct TORCH_API EventInfo {
   EventKind event_kind;
@@ -15,6 +15,7 @@ struct TORCH_API EventInfo {
   std::string operation;
   int64_t timestamp;
   c10::optional<float> duration_ms;
+  int64_t drop_count;
   c10::optional<std::string> error_message;
 };
 

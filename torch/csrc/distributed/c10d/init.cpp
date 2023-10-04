@@ -296,18 +296,24 @@ std::atomic<bool> event_queue_enabled = false;
 int sync_pipe;
 std::mutex event_queue_lock;
 std::deque<::c10d::EventInfo> event_queue;
+// we start dropping events after this
+const size_t MAX_QUEUE_SIZE = 512;
 
 void enqueue_event_for_python(const ::c10d::EventInfo& evt) {
   if (!event_queue_enabled.load())
     return;
 
   std::unique_lock<std::mutex> lock(event_queue_lock);
-  event_queue.push_back(evt);
-  char m = 'x';
-  write(sync_pipe, &m, 1);
+  if (event_queue.size() >= MAX_QUEUE_SIZE) {
+    event_queue.back().drop_count++;
+  } else {
+    event_queue.push_back(std::move(evt));
+    char m = 'x';
+    write(sync_pipe, &m, 1);
+  }
 }
 
-void enable_event_collection(int pipe) {
+void enable_python_event_collection(int pipe) {
   sync_pipe = pipe;
   event_queue_enabled.store(true);
   ::c10d::register_collective_callback(enqueue_event_for_python);
@@ -338,6 +344,7 @@ py::object c10d_dequeue_python_event() {
   data["operation"] = evt.operation;
   data["timestamp"] = evt.timestamp;
   data["duration"] = evt.duration_ms.value_or(-1);
+  data["drop_count"] = evt.drop_count;
   if (evt.error_message)
     data["error_message"] = evt.error_message.value();
 
@@ -693,6 +700,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
+  py::enum_<::c10d::EventKind>(module, "EventKind", R"(
+An enum for collective hooks event types.)")
+      .value("START", ::c10d::EventKind::CollectiveStart)
+      .value("END", ::c10d::EventKind::CollectiveEnd);
+
   py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
       An enum whose values correspond to different debug levels of the
       torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
@@ -719,7 +731,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
       .def(
           "_enable_event_collection",
-          &enable_event_collection,
+          &enable_python_event_collection,
           "(Enables events collection).",
           py::call_guard<py::gil_scoped_release>())
       .def(
