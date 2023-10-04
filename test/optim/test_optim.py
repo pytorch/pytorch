@@ -89,6 +89,7 @@ class TestOptim(TestCase):
             # NB: We torture test the optimizer by returning an
             # uncoalesced sparse tensor
 
+            # Depending on w, provide only the x or y gradient
             if sparse_grad:
                 if w:
                     i = torch.LongTensor([[0, 0]])
@@ -107,7 +108,6 @@ class TestOptim(TestCase):
             return grad_out
 
         def eval(params, sparse_grad, w):
-            # Depending on w, provide only the x or y gradient
             optimizer.zero_grad()
             if multi_tensor:
                 loss = sum(rosenbrock(param) for param in params)
@@ -133,6 +133,8 @@ class TestOptim(TestCase):
                     scheduler.step()
             if not sparse_only:
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
+                # Tolerance is increased due to floating point error from different 
+                # code path for dense case: x v.s. x - x / 4.0 + x / 4.0
                 self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
 
         if not maximize:
@@ -622,12 +624,10 @@ class TestOptim(TestCase):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach),
-                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=0.0048, foreach=foreach),
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
-                multi_tensor=foreach,
             )
 
     def test_sgd_complex(self):
