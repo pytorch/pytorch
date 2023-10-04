@@ -1407,23 +1407,18 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
         if epoch is None:
             epoch = self.last_epoch + 1
-            self.T_cur = self.T_cur + 1
-            if self.T_cur >= self.T_i:
-                self.T_cur = self.T_cur % self.T_i
-                self.T_i = self.T_i * self.T_mult
-        else:
-            if epoch < 0:
-                raise ValueError(f"Expected non-negative epoch, but got {epoch}")
-            if epoch >= self.T_0:
-                if self.T_mult == 1:
-                    self.T_cur = epoch % self.T_0
-                else:
-                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
-                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
-                    self.T_i = self.T_0 * self.T_mult ** (n)
+        if epoch < 0:
+            raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
+        if epoch >= self.T_0:
+            if self.T_mult == 1:
+                self.T_cur = epoch % self.T_0
             else:
-                self.T_i = self.T_0
-                self.T_cur = epoch
+                n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
+                self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+             self.T_i = self.T_0 * self.T_mult ** (n)
+        else:
+            self.T_i = self.T_0
+            self.T_cur = epoch
         self.last_epoch = math.floor(epoch)
 
         class _enable_get_lr_call:
