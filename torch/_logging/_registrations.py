@@ -82,9 +82,9 @@ register_artifact(
 register_artifact("perf_hints", "", off_by_default=True)
 register_artifact("onnx_diagnostics", "", off_by_default=True)
 register_artifact(
-    "fusion", 
+    "fusion",
     "Detailed Inductor fusion decisions. More detailed than 'schedule'",
-    off_by_default=True
+    off_by_default=True,
 )
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
