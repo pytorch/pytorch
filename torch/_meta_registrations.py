@@ -4902,8 +4902,6 @@ def meta__scaled_dot_product_flash(
             logsumexp,
             torch.empty((), dtype=torch.int32, device="meta"),
             torch.empty((), dtype=torch.int32, device="meta"),
-            0,
-            0,
             torch.empty((), dtype=torch.long, device="meta"),
             torch.empty((), dtype=torch.long, device="meta"),
             torch.empty((), dtype=query.dtype, device=query.device),
