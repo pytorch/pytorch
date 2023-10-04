@@ -10,6 +10,7 @@ import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
 from unittest.mock import patch
+from unittest.mock import Mock
 
 import numpy as np
 
@@ -473,7 +474,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
       
     @make_test
     def test_generated_custom_object_types(x):
-        return type(x)
+        obj = Mock()
+        return type(obj)
     
     @make_test
     def test_promote_types(x):
