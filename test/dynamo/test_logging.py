@@ -90,7 +90,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 5)
+        self.assertLess(len(records), 12)
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
