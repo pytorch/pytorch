@@ -6,6 +6,9 @@ import torch
 import torch.distributed as dist
 from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch.distributed.fsdp._flat_param import (
+    _safe_set_data,
+)
 
 log = logging.getLogger(__name__)
 
@@ -183,7 +186,7 @@ class ShardedGradScaler(GradScaler):
                 torch.isinf(grad).any().item() is True
                 or torch.isnan(grad).any().item() is True
             ):
-                found_inf.data = torch.tensor([1.0])
+                _safe_set_data(found_inf, torch.tensor([1.0]))
                 break
             else:
                 grad.data *= inv_scale.item()

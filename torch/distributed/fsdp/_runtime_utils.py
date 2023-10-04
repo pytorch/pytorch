@@ -28,6 +28,7 @@ from torch.distributed.fsdp._flat_param import (
     HandleShardingStrategy,
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
+    _safe_set_data,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.fsdp.api import BackwardPrefetch
@@ -762,7 +763,7 @@ def _post_backward_hook(
                 # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
                 and not handle._force_full_precision
             ):
-                flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
+                _safe_set_data(flat_param.grad, flat_param.grad.to(handle._reduce_dtype))
             if handle.uses_sharded_strategy:
                 _reduce_grad(state, handle)
             else:
@@ -1023,7 +1024,7 @@ def _cast_grad_to_param_dtype(
     _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
     if not _low_precision_hook_enabled(state) and sharded_grad.dtype != param.dtype:
         low_prec_grad_data = sharded_grad.data
-        sharded_grad.data = sharded_grad.data.to(dtype=param.dtype)
+        _safe_set_data(sharded_grad.grad, sharded_grad.grad.to(dtype=param.dtype))
         # Since for `NO_SHARD`, the gradient is produced in the computation
         # stream and consumed here in the post-backward stream, inform the
         # caching allocator; for the sharded strategies, the gradient is
@@ -1593,6 +1594,6 @@ def _cast_buffers_to_dtype_and_device(
     )
     for buffer, buffer_dtype in zip(buffers, buffer_dtypes):
         if not torch.is_floating_point(buffer) or buffer_dtype is None:
-            buffer.data = buffer.to(device=device)
+            _safe_set_data(buffer, buffer.to(device=device))
         else:
-            buffer.data = buffer.to(device=device, dtype=buffer_dtype)
+            _safe_set_data(buffer, buffer.to(device=device, dtype=buffer_dtype))

@@ -1225,7 +1225,7 @@ class FlatParamHandle:
             )
         )
         # Invariant: `_mp_shard` is always on the compute device.
-        flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
+        _safe_set_data(flat_param, flat_param._mp_shard)
 
     def unshard(self):
         """
@@ -1352,11 +1352,12 @@ class FlatParamHandle:
         view into the *padded* unsharded flat parameter.
         """
         unsharded_size = self.flat_param._unpadded_unsharded_size
-        self.flat_param.data = padded_unsharded_flat_param[
+        new_flat_unsharded_view = padded_unsharded_flat_param[
             : unsharded_size.numel()
         ].view(
             unsharded_size
         )  # this `.view()` is not autograd visible
+        _safe_set_data(self.flat_param, new_flat_unsharded_view)
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
@@ -1516,7 +1517,7 @@ class FlatParamHandle:
                     self._keep_low_precision_grads
                     and sharded_grad.dtype != local_shard_dtype
                 ):
-                    sharded_grad.data = sharded_grad.to(local_shard_dtype)
+                    _safe_set_data(self.flat_param, new_flat_unsharded_view)
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 _p_assert(
@@ -1538,7 +1539,7 @@ class FlatParamHandle:
             if not self._force_full_precision and self._keep_low_precision_grads:
                 _p_assert(flat_param.grad is not None, "Unexpected None grad!")
                 if flat_param.grad.dtype != self._fwd_bwd_param_dtype:
-                    flat_param.grad.data = flat_param.grad.to(self._fwd_bwd_param_dtype)
+                    _safe_set_data(flat_param.grad, flat_param.grad.to(self._fwd_bwd_param_dtype))
                     if self._use_orig_params:
                         self._use_sharded_grad_views()
 
@@ -1693,7 +1694,7 @@ class FlatParamHandle:
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
-        flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
+        _safe_set_data(flat_param, flat_param._local_shard)
         if self._use_orig_params:
             if skip_use_sharded_views:
                 self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
@@ -1815,7 +1816,7 @@ class FlatParamHandle:
                     continue
                 param = self.flat_param._params[i]
                 self._setattr_param(module, param_name, param)
-                param.data = view
+                _safe_set_data(param, view)
             elif as_params:
                 self._setattr_param(
                     module,
@@ -1833,7 +1834,7 @@ class FlatParamHandle:
                         # preserve the autograd graph so that the post-backward
                         # hook fires (e.g. for reentrant AC)
                         tensor = self.flat_param._tensors[i]
-                        tensor.data = view
+                        _safe_set_data(tensor, view)
                         param_var = tensor
                 self._setattr_tensor(module, param_name, param_var)
                 if (
@@ -1859,7 +1860,7 @@ class FlatParamHandle:
             if self._use_orig_params and as_params:
                 shared_param = self.flat_param._shared_params[i]
                 self._setattr_param(module, param_name, shared_param)
-                shared_param.data = prim_param
+                _safe_set_data(shared_param, view)
             elif as_params:
                 self._setattr_param(module, param_name, prim_param)
             else:
@@ -1908,7 +1909,7 @@ class FlatParamHandle:
                 # 3. `view` can be on GPU.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
-                param.grad.data = view
+                _safe_set_data(param.grad, view)
             else:
                 param.grad = view
         for i, (
@@ -1934,7 +1935,7 @@ class FlatParamHandle:
                 # size check.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
-                param.grad.data = prim_param.grad
+                _safe_set_data(param.grad, prim_param.grad)
             else:
                 param.grad = prim_param.grad
 
@@ -1987,11 +1988,11 @@ class FlatParamHandle:
             self._setattr_param(module, param_name, param)
             if not shard_param_info.in_shard:
                 # Allow the original data to be freed via garbage collection
-                param.data = size_0_empty_tensor
+                _safe_set_data(param, size_0_empty_tensor)
             else:
                 offset = shard_param_info.offset_in_shard
                 numel_in_shard = shard_param_info.numel_in_shard
-                param.data = flat_param[offset : offset + numel_in_shard]
+                _safe_set_data(param, flat_param[offset : offset + numel_in_shard])
         assert self.flat_param._shared_params is not None
         for i, (
             param,
@@ -2001,7 +2002,7 @@ class FlatParamHandle:
         ):
             self._setattr_param(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
-            param.data = prim_param  # could be both empty and non-empty
+            _safe_set_data(param, prim_param)
         if self._training_state == HandleTrainingState.BACKWARD_POST:
             # Clear the saved `Tensor`s since they are unneeded now
             for i in range(len(self.flat_param._tensors)):
@@ -2047,9 +2048,10 @@ class FlatParamHandle:
                         if param.grad is None:
                             # `.grad` must have the same shape as `param`
                             param.grad = torch.empty_like(param)
-                        param.grad.data = grad[
+                        new_grad_reshape = grad[
                             offset : offset + numel_in_shard
                         ].reshape(param.shape)
+                        _safe_set_data(param.grad, new_grad_reshape)
                     else:
                         param.grad = grad[offset : offset + numel_in_shard].reshape(
                             param.shape
@@ -2318,7 +2320,7 @@ class FlatParamHandle:
     ###########
     def flat_param_to(self, *args, **kwargs):
         """Wraps an in-place call to ``.to()`` for ``self.flat_param``."""
-        self.flat_param.data = self.flat_param.to(*args, **kwargs)
+        _safe_set_data(self.flat_param, self.flat_param.to(*args, **kwargs))
         if self._use_orig_params:
             # Refresh the views because their storage may have changed
             if self.is_sharded(self.flat_param):
@@ -2615,3 +2617,8 @@ def _construct_padding_tensor(
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
     log.warning(warning)
+
+def _safe_set_data(dest, src):
+    with torch.no_grad():
+        dest.set_(src)
+        torch._C._autograd._unsafe_set_version_counter(dest, 0)

@@ -41,6 +41,7 @@ from torch.distributed.fsdp._flat_param import (
     FlatParameter,
     FlatParamHandle,
     HandleShardingStrategy,
+    _safe_set_data,
 )
 from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
@@ -992,11 +993,11 @@ def _move_states_to_device(
         # `nn.Module._apply()`, which underlies `nn.Module.to()`
         for param in params:
             with torch.no_grad():
-                param.data = param.to(device_from_device_id)
+                _safe_set_data(param, param.to(device_from_device_id))
                 if param.grad is not None:
-                    param.grad.data = param.grad.to(device_from_device_id)
+                    _safe_set_data(param.grad, param.grad.to(device_from_device_id))
         for buffer in buffers:
-            buffer.data = buffer.to(device_from_device_id)
+            _safe_set_data(buffer, buffer.to(device_from_device_id))
     elif current_device == cpu_device:
         _warn_cpu_init()
 
