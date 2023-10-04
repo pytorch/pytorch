@@ -882,7 +882,7 @@ class SkipFilesVariable(VariableTracker):
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
             unimplemented(
-                f"'call_function {self.value.__qualname__} in skip_files {path}, skip reason: {self.reason}'"
+                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
             )
 
 

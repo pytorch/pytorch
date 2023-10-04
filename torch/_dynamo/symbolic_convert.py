@@ -2243,7 +2243,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        result = skipfiles.check_verbose(func.get_filename(), allow_torch=True)
+        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
@@ -2261,7 +2261,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}, skip reason: {result.reason}'"  # noqa: B950
+                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
@@ -2323,7 +2323,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 return f"TRACE inlined call {code.co_name} from {header}\n{line}"
 
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
-        log.debug("INLINING %s%s, inline reason: %s", code, suffix, result.reason)
+        log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
         # Detect inline GraphModule calls in order to propgate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
