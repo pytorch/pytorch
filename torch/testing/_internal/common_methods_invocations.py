@@ -12808,7 +12808,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv3d',
            aliases=('conv3d',),
            aten_name='conv3d',
-           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv3d,
            error_inputs_func=error_inputs_conv3d,
@@ -12820,10 +12820,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
-                   'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                ),
            ),
            skips=(
