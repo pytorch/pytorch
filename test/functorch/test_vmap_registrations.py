@@ -194,7 +194,6 @@ xfail_not_implemented = {
     "aten::qr.Q",
     "aten::quantile",
     "aten::quantile.scalar",
-    "aten::real",
     "aten::refine_names",
     "aten::rename",
     "aten::rename_",
