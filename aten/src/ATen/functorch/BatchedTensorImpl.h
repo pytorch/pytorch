@@ -62,6 +62,10 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   // bt.actualDim(3) -> Error
   int64_t actualDim(int64_t dim, bool wrap_dim = true) const;
 
+  IntArrayRef sizes_custom() const override;
+  SymIntArrayRef sym_sizes_custom() const override;
+  int64_t size_custom(int64_t d) const override;
+  c10::SymInt sym_size_custom(int64_t d) const override;
   // We have to override this because we opted into CustomStrides
   IntArrayRef strides_custom() const override;
   SymIntArrayRef sym_strides_custom() const override;
@@ -109,7 +113,8 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
 // BatchedTensorImpl.
 inline bool isBatchedTensor(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::FuncTorchBatched);
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::FuncTorchBatched) ||
+      tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::BatchedNestedTensor);
 }
 
 // It is unsafe to call this on a Tensor that is not backed by a

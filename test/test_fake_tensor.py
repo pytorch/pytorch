@@ -18,7 +18,7 @@ from torch._subclasses.fake_tensor import (
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -97,7 +97,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not dist.is_available(), "requires distributed")
     def test_fsdp_flat_param(self):
-        from torch.distributed.fsdp.flat_param import FlatParameter
+        from torch.distributed.fsdp._flat_param import FlatParameter
         with FakeTensorMode() as m:
             data = torch.randn(2, 2)
             param = FlatParameter(data, requires_grad=True)
@@ -782,16 +782,11 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
-        data_dependent_outputs = {
-            'NumpyNMSCustomOp',
-            'NumpyNonzeroCustomOp',
-        }
-
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
+            optests.fake_check(op, args, kwargs)
 
 
 class FakeTensorConverterTest(TestCase):
@@ -1011,31 +1006,38 @@ class FakeTensorOperatorInvariants(TestCase):
             self.assertEqual(ref.size(), meta_out.size())
 
     @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_attention(self):
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
-                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3)
+                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3, scale=0.17677669529663687)
 
         args_new = [
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            [
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ],
+            [
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+            ]
         ]
-
-        args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
-                (bsz, num_heads, seq_len, head_dim) in args_new]
-        try:
-            with torch._subclasses.CrossRefFakeMode():
-                Repro()(*args)
-        except RuntimeError as e:
-            # We expect the cross ref to succed for the first output to fail
-            # for the rng state, see Note [Seed and Offset]
-            self.assertTrue("output[0]" not in str(e))
-            self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
+        for args_list in args_new:
+            args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
+                    (bsz, num_heads, seq_len, head_dim) in args_list]
+            try:
+                with torch._subclasses.CrossRefFakeMode():
+                    Repro()(*args)
+            except RuntimeError as e:
+                # We expect the cross ref to succed for the first output to fail
+                # for the rng state, see Note [Seed and Offset]
+                self.assertTrue("output[0]" not in str(e))
+                self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

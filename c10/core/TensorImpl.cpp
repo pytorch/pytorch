@@ -73,9 +73,7 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-TensorImpl::~TensorImpl() {
-  pyobj_slot_.destroy_pyobj_if_needed();
-}
+TensorImpl::~TensorImpl() = default;
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -582,7 +580,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  pyobj_slot_.destroy_pyobj_if_needed();
+  pyobj_slot_.maybe_destroy_pyobj();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -591,7 +589,15 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      false, "Cannot call ", meth, "() on tensor with symbolic sizes/strides");
+}
+
 void TensorImpl::throw_storage_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
+    TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
 }

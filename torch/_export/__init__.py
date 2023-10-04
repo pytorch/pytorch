@@ -1,13 +1,17 @@
 import copy
 import dataclasses
 import io
-import re
 import pathlib
+import re
+import sys
+import warnings
+
 import types
 import weakref
 import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -21,7 +25,6 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.export import Constraint, _create_constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -31,6 +34,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.export import _create_constraint, _Dim, Constraint
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -54,6 +58,7 @@ from .exported_program import (
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
+from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
@@ -61,7 +66,153 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 from .wrappers import _wrap_submodules
 
 
-def dynamic_dim(t: torch.Tensor, index: int):
+def export__RC__(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
+) -> ExportedProgram:
+    """
+    API for exporting with dynamic shape specifications instead of constraints.
+    It should be considered "release candidate" (RC), meant to replace `export`.
+
+    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
+    argument names of `f` to dynamic shape specifications, as follows:
+    - The dynamic shape of a tensor argument can be specified as:
+      - Either a dict from dynamic dimension indices to Dim types. It is not
+        required to include static dimension indices in this dict, but when
+        they are, they should be mapped to None.
+      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
+        dimensions, whereas static dimensions are denoted by None.
+    - Arguments that are dicts or tuples of tensors are recursively specified
+      by using mappings or sequences of contained specifications.
+
+    See `export` for documentation of `f`, `args`, `kwargs` and return.
+    """
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
+        return export(f, args, kwargs)
+
+    kwargs = kwargs if kwargs is not None else {}
+
+    from collections.abc import Mapping, Sequence
+
+    def tree_zip(combined_args, dynamic_shapes):
+        if isinstance(combined_args, (tuple, list)):
+            if not isinstance(dynamic_shapes, Sequence):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
+                    f"got {dynamic_shapes} instead",
+                )
+            if len(combined_args) != len(dynamic_shapes):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+                )
+            for i, shape in enumerate(dynamic_shapes):
+                yield from tree_zip(combined_args[i], shape)
+        elif isinstance(combined_args, dict):
+            if not isinstance(dynamic_shapes, Mapping):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
+                    f"got {dynamic_shapes} instead",
+                )
+            if len(combined_args) != len(dynamic_shapes):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+                )
+            for k, shape in dynamic_shapes.items():
+                yield from tree_zip(combined_args[k], shape)
+        elif dataclasses.is_dataclass(combined_args):
+            if not type(dynamic_shapes) == type(combined_args):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
+                    f"got {dynamic_shapes} instead",
+                )
+            for f in dataclasses.fields(combined_args):
+                yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
+        elif isinstance(combined_args, torch.Tensor):
+            yield (combined_args, dynamic_shapes)
+        else:
+            if dynamic_shapes is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic_shapes of a {type(combined_args)} to be None, "
+                    f"got {dynamic_shapes} instead",
+                )
+
+    from collections import defaultdict
+    symbols = defaultdict(list)
+
+    def to_constraint(dim, tensor, i):
+        constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
+        if dim.min != 2:
+            constraint = constraint >= dim.min
+        if dim.max != sys.maxsize - 1:
+            constraint = constraint <= dim.max
+        return constraint
+
+    def update_symbols(tensor, shape):
+        if isinstance(shape, dict):
+            for i, dim in shape.items():
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
+                else:
+                    if dim is not None:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                            "try None instead",
+                        )
+        elif isinstance(shape, (tuple, list)):
+            for i, dim in enumerate(shape):
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
+                else:
+                    if dim is not None:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                            "try None instead",
+                        )
+        else:
+            if shape is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Unexpected dynamic_shape {shape} of Tensor, "
+                    "try None instead",
+                )
+
+    if isinstance(f, ExportedProgram):
+        combined_args = {
+            k: args[i] if i < len(args) else kwargs[k]
+            for i, k in enumerate(dynamic_shapes)
+        }
+    else:
+        import inspect
+        signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+        combined_args = signature.bind(*args, **kwargs).arguments
+
+    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
+        update_symbols(tensor, shape)
+
+    constraints = []
+    for dynamic_dims in symbols.values():
+        primary, *others = dynamic_dims
+        if others:
+            for other in others:
+                constraints.append(primary == other)
+        else:
+            constraints.append(primary)
+
+    return _export(f, args, kwargs, constraints=constraints)
+
+
+def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     if not isinstance(t, torch.Tensor):
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
@@ -88,6 +239,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
         StrictMinMaxConstraint(
             vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
         ),
+        debug_name=debug_name,
     )
 
 
@@ -102,6 +254,17 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 DECOMP_TABLE = core_aten_decompositions()
+
+
+# TODO(zhxchen17) This is not needed if we output pre_dispatch graph upfront from export().
+@contextmanager
+def _disable_decomp_table():
+    global DECOMP_TABLE
+    prev, DECOMP_TABLE = DECOMP_TABLE, {}
+    try:
+        yield
+    finally:
+        DECOMP_TABLE = prev
 
 
 @compatibility(is_backward_compatible=False)
@@ -210,7 +373,91 @@ def _safe_to_skip_dynamo(gm: torch.fx.GraphModule):
     return False
 
 
+def _replace_param_buffer_names(param_buffer_table, sig):
+    def replace(x):
+        return param_buffer_table.get(x, x)
+
+    sig.parameters = pytree.tree_map(replace, sig.parameters)
+    sig.buffers = pytree.tree_map(replace, sig.buffers)
+    sig.inputs_to_parameters = pytree.tree_map(replace, sig.inputs_to_parameters)
+    sig.inputs_to_buffers = pytree.tree_map(replace, sig.inputs_to_buffers)
+    sig.buffers_to_mutate = pytree.tree_map(replace, sig.buffers_to_mutate)
+    if sig.backward_signature is not None:
+        sig.backward_signature.gradients_to_parameters = pytree.tree_map(
+            replace, sig.backward_signature.gradients_to_parameters
+        )
+
+
+def _normalize_nn_module_stack(gm_torch_level, root_cls):
+    # Append a root module to every nn_module_stack.
+    root = "L['self']"
+    root_key = re.sub(r'[^a-zA-Z0-9]', '_', root)
+    for gm in gm_torch_level.modules():
+        if not isinstance(gm, torch.fx.GraphModule):
+            continue
+        for node in gm.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                continue
+            add_root = True
+            if nn_module_stack := node.meta.get("nn_module_stack", {}):
+                path, ty = next(iter(nn_module_stack.values()))
+                assert issubclass(ty, torch.nn.Module)
+                # TODO Figure out why sometimes we have root sometimes we don't.
+                if path == root and ty is root_cls:
+                    add_root = False
+            if add_root:
+                def normalize_path(path):
+                    try:
+                        parts = []
+
+                        class Path:
+                            def __getattr__(self, name):
+                                parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
+
+                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                node.meta["nn_module_stack"] = {
+                    key: (normalize_path(path), ty)
+                    for key, (path, ty) in nn_module_stack.items()
+                }
+
+
 def export(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+    *,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+) -> ExportedProgram:
+
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints,
+        preserve_module_call_signature=preserve_module_call_signature,
+    )
+
+
+def _export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
@@ -257,7 +504,7 @@ def export(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
-            module_call_signatures: Dict[str, ModuleCallSignature] = {}
+            module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
                 if len(constraints) > 0:
@@ -267,7 +514,7 @@ def export(
                     )
                 gm_torch_level = f
             else:
-                with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):
+                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
                     gm_torch_level, _ = torch._dynamo.export(
                         f,
                         constraints=constraints,
@@ -284,11 +531,11 @@ def export(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
-    params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
-    for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
+    params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
+    for name, param in gm_torch_level.named_parameters(remove_duplicate=False):
         params_buffers[name] = param
 
-    for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
+    for name, buffer in gm_torch_level.named_buffers(remove_duplicate=False):
         params_buffers[name] = buffer
 
     fake_args, fake_kwargs, fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
@@ -307,7 +554,7 @@ def export(
     # When aot_export lifts the params, we lose the nn_module_stack
     # and source_fn from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
-    params_buffers_to_node_meta = OrderedDict()
+    params_buffers_to_node_meta = {}
     for node in gm_torch_level.graph.nodes:
         target = node.target
         meta = node.meta
@@ -352,6 +599,27 @@ def export(
     )
     gm_torch_level.recompile()
 
+    param_buffer_table: Dict[str, str] = {}
+    if isinstance(f, torch.nn.Module):
+        param_lookup: Dict[int, List[str]] = {}
+        buffer_lookup: Dict[int, List[str]] = {}
+        for name, param in f.named_parameters(remove_duplicate=False):
+            param_lookup.setdefault(id(param), []).append(name)
+        for name, buffer in f.named_buffers(remove_duplicate=False):
+            buffer_lookup.setdefault(id(buffer), []).append(name)
+        for dynamo_name, dynamo_param in gm_torch_level.named_parameters(remove_duplicate=False):
+            assert dynamo_name not in param_buffer_table
+            if id(dynamo_param) in param_lookup:
+                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+
+        for dynamo_name, dynamo_buffer in gm_torch_level.named_buffers(remove_duplicate=False):
+            assert dynamo_name not in param_buffer_table
+            if id(dynamo_buffer) in buffer_lookup:
+                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+
+    if isinstance(f, torch.nn.Module):
+        _normalize_nn_module_stack(gm_torch_level, type(f))
+
     # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
     # to follow the order in orig_args and correctly call gm_torch_level
     gm, graph_signature = aot_export_module(
@@ -387,6 +655,7 @@ def export(
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
     flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    _, orig_in_spec = pytree.tree_flatten((args, kwargs))
     index = 0
     total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
     for node in gm.graph.nodes:
@@ -433,24 +702,41 @@ def export(
         export_graph_signature,
         flat_args,
     )
+
+    if isinstance(f, torch.nn.Module):
+        _replace_param_buffer_names(param_buffer_table, export_graph_signature)
+        params_buffers = {param_buffer_table.get(name, name): tensor for name, tensor in params_buffers.items()}
+
+    module_call_signatures = {fqn: ModuleCallSignature(inputs=[], outputs=[], **specs) for fqn, specs in module_call_specs.items()}
+
+    if len(preserve_module_call_signature) > 0:
+        res = CollectTracepointsPass(module_call_signatures)(gm)
+        assert res is not None
+        gm = res.graph_module
+
     assert orig_out_spec is not None
     exported_program = ExportedProgram(
         gm,
         gm.graph,
         export_graph_signature,
+        # TODO(zhxchen17) Remove this field.
         CallSpec(in_spec, orig_out_spec),
+        # TODO(zhxchen17) Return empty state_dict for functions.
         params_buffers,
         range_constraints,
         equality_constraints,
+        [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
-        (args, {}),
+        (args, kwargs),
     )
 
-    exported_program = exported_program._transform(
-        _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-    )
-    if len(preserve_module_call_signature) > 0:
-        exported_program = exported_program._transform(CollectTracepointsPass(module_call_signatures))
+    if torch._dynamo.config.add_runtime_assertions_for_inline_constraints:
+        if len(range_constraints) > 0 or len(equality_constraints) > 0:
+            exported_program = exported_program._transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+            )
+    exported_program = lift_constant_tensor_pass(exported_program)
+
     return exported_program._transform(_ReplaceSymSizeOpPass())
 
 
@@ -529,7 +815,9 @@ def aot_compile(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
+    *,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, ExportedProgram]:
     """
@@ -549,16 +837,31 @@ def aot_compile(
         constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
+        dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
+            A dict mapping argument names of ``f`` to their dynamic shape
+            specifications, as follows. Dynamic shape specifications can be a
+            dict from dynamic dimensions to ``Dim`` types, or a tuple/list of
+            ``Optional[Dim]`` corresponding to each input dimension.
+
         options: A dictionary of options to control inductor
 
     Returns:
         Path to the generated shared library, and the exported program
     """
+    if constraints is not None:
+        warnings.warn(
+            "The constraints field is deprecated. "
+            "Please use dynamic_shapes instead."
+        )
+
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
     DECOMP_TABLE = select_decomp_table()
-    ep = export(f, args, kwargs, constraints)
+    if constraints is not None:
+        ep = export(f, args, kwargs, constraints)
+    else:
+        ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
@@ -588,14 +891,14 @@ def aot_compile(
         unlifted_module,
         unlifted_module.graph,
         ExportGraphSignature(
-            [],
-            [],
-            user_inputs,
-            user_outputs,
-            {},
-            {},
-            {},
-            None,
+            parameters=[],
+            buffers=[],
+            user_inputs=user_inputs,
+            user_outputs=user_outputs,
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
         ),
         call_spec=copy.deepcopy(ep.call_spec),
         state_dict={},

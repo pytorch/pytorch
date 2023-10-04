@@ -2,15 +2,46 @@
 import functools
 import unittest
 
+from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 import torch
 import torch.utils._pytree as pytree
-from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
+from torch._subclasses.functional_tensor import FunctionalTensor
+
+# TODO: pull these helpers from AOTAutograd later
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
+
+def to_fun_old(t):
+    if isinstance(t, torch.Tensor) and not torch._is_functional_tensor(t):
+        out = torch._to_functional_tensor(t)
+        torch._mirror_autograd_meta_to(t, out)
+        return out
+    return t
+
+def from_fun_old(t):
+    # quick sanity assert
+    if isinstance(t, torch.Tensor):
+        assert torch._is_functional_tensor(t)
+        torch._sync(t)
+        return torch._from_functional_tensor(t)
+    return t
 
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
@@ -19,6 +50,15 @@ def _fake_map(f, x, *args):
     for xp in x_pytrees:
         zs.append(f(xp, *args))
     return _stack_pytree(zs)
+
+def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_field_name):
+    ret = []
+    for mod in gm.modules():
+        for node in mod.graph.nodes:
+            if node.name in node_names:
+                for field_name in meta_field_name:
+                    ret.append(node.meta.get(field_name))
+    return ret
 
 
 @skipIfNoDynamoSupport
@@ -258,7 +298,6 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
-    @unittest.expectedFailure
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -304,7 +343,6 @@ class TestControlFlowTraced(TestCase):
         gm_functional = make_fx(torch.func.functionalize(gm_non_functional), tracing_mode="real")(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
-    @unittest.expectedFailure
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
             y = x.cos()
@@ -473,7 +511,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(4, 5)
         try:
-            example_input_func = to_fun(example_input)
+            example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
                 f(example_input_func)
@@ -511,7 +549,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(5, 5)
         try:
-            example_input_func = to_fun(example_input)
+            example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
                 f(example_input_func)
@@ -523,8 +561,10 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    func_args = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
                     return func(*func_args, **func_kwargs)
                 finally:
                     torch._disable_functionalization()
@@ -553,9 +593,11 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
-                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
+                    func_args = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(from_fun_old, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -662,7 +704,7 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile"
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -827,7 +869,7 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile"
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -992,7 +1034,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun_old, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1056,7 +1098,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun_old, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1207,7 +1249,6 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res, main(p, pred, xs, y))
         self.check_map_count(gm, 2)
 
-    @unittest.expectedFailure
     def test_cond_with_sym_pred(self):
         def true_fn(x):
             return x + x
@@ -1219,9 +1260,26 @@ class TestControlFlowTraced(TestCase):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
+        # The symbols in make_fx's shape_env should not be speciliazed.
+        self.assertEqual(len(gm.shape_env.guards), 0)
+
+        exp_code = """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
+eq = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional
+"""
+        self._expected_inline_normalized(gm.code, exp_code)
+
+        # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
         self.assertEqual(gm(x), true_fn(x))
         self.assertEqual(foo(x), true_fn(x))
+
 
     def _check_closure_correctly_lifted(self, f, *, args, exp_res, exp_arg_num):
         assert isinstance(args, (tuple, list))
@@ -1389,6 +1447,134 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
+    def _expected_inline_normalized(self, actual_code, exp_code):
+        normalized_actual = "".join(actual_code.split())
+        normalized_exp = "".join(exp_code.split())
+        self.assertExpectedInline(normalized_actual, normalized_exp)
+
+    def test_map_unfunc_boolean_tensor_for_nested_map_cond(self):
+        def map_fn(pred, x):
+            def fn(x, pred):
+                return control_flow.cond(pred, lambda x: x * 2, lambda x: x / 2 , (x,))
+            return control_flow.map(fn, x, pred)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    func_args = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(from_fun_old, func(*func_args, **func_kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
+        exp_graph = """\
+def forward(self, pred_1, x_1):
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
+  body_graph_0 = x_1 = pred_1 = None
+    getitem = map_impl[0];  map_impl = None
+    return getitem
+"""
+        exp_body_graph = """\
+def forward(self, arg0_1, arg1_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0,\
+ [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    return [conditional]
+"""
+        self._expected_inline_normalized(gm.code, exp_graph)
+        self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
+
+    def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
+
+        def true_fn(x):
+            return x + x.cos()
+
+        def false_fn(x):
+            return x * x.sin()
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
+        inp = torch.randn([4, 3])
+        gm, _ = torch._dynamo.export(foo)(inp)
+
+        def run_with_interpreter(*args):
+            with torch.fx.traceback.preserve_node_meta():
+                return torch.fx.Interpreter(gm).run(*args)
+        new_gm = make_fx(run_with_interpreter)(inp)
+
+
+        checked_ops = {"add", "mul", "sin", "cos"}
+        checked_meta = ["source_fn_stack", "stack_trace"]
+        all_source_fns = collect_meta_for_filtered_nodes(gm, checked_ops, checked_meta)
+        new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
+        self.assertEqual(all_source_fns, new_source_fns)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "triggers cache limit for foo and changes unique_graphs count.")
+    def test_cond_no_dynamo_cache_limit(self):
+        torch._dynamo.reset()
+        counters = torch._dynamo.utils.counters
+        counters.clear()
+
+        def foo(x, true_fn, false_fn):
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
+
+        inp = torch.ones(3, 4)
+        exp_out = inp.sin()
+        iter_n = torch._dynamo.config.cache_size_limit + 1
+        for _ in range(iter_n):
+            # each lambda has a different object id thus fails the guard
+            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
+        self.assertEqual(counters["stats"]["calls_captured"], iter_n)
+        self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
+
+    def test_cond_with_consecutive_make_fx_symbolic(self):
+        def true_fn(x):
+            return x - x.cos()
+
+        def false_fn(x):
+            return x + x.sin()
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        exp_graph = """\
+class foo(torch.nn.Module):
+    def forward(self, x_1: f32[s0, s1]):
+        # No stacktrace found for following nodes
+        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
+        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        conditional: f32[s0, s1] = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
+eq = true_graph_0 = false_graph_0 = x_1 = None
+        return conditional
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: f32[s0, s1]):
+            # No stacktrace found for following nodes
+            cos: f32[s0, s1] = torch.ops.aten.cos.default(arg0_1)
+            sub: f32[s0, s1] = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
+            return sub
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: f32[s0, s1]):
+            # No stacktrace found for following nodes
+            sin: f32[s0, s1] = torch.ops.aten.sin.default(arg0_1)
+            add: f32[s0, s1] = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
+            return add
+"""
+        inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
+        for inp in inps:
+            gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
+            self._expected_inline_normalized(gm.print_readable(print_output=False), exp_graph)
 
 if __name__ == '__main__':
     run_tests()
