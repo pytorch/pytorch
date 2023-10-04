@@ -6,7 +6,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
 
 #include <c10/util/Exception.h>
@@ -19,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+
 namespace sdp {
 
 constexpr int32_t num_backends = 3;

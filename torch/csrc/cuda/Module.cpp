@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
@@ -9,6 +10,8 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <autograd/python_variable.h>
 
 #if AT_CUDNN_ENABLED()
 
@@ -871,6 +874,71 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Scaled Dot Product Attention utilities
+////////////////////////////////////////////////////////////////////////////////
+
+static void registerSDPAUtilities(PyObject* module) {
+  // Add _SDPAParams and helper methods class to torch._C
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<sdp::sdp_params>(m, "_SDPAParams")
+      // .def(py::init<const at::Tensor, const at::Tensor, const at::Tensor,
+      // const c10::optional<at::Tensor>, double, bool>())
+      .def(py::init([](py::object query,
+                       py::object key,
+                       py::object value,
+                       py::object attn_mask,
+                       double dropout,
+                       bool is_causal) {
+        // Check if pyobj attn_mask is none if not cast
+        if (attn_mask.ptr() == Py_None) {
+          return sdp::sdp_params{
+              THPVariable_Unpack(query.ptr()),
+              THPVariable_Unpack(key.ptr()),
+              THPVariable_Unpack(value.ptr()),
+              c10::nullopt,
+              dropout,
+              is_causal};
+        }
+        return sdp::sdp_params{
+            THPVariable_Unpack(query.ptr()),
+            THPVariable_Unpack(key.ptr()),
+            THPVariable_Unpack(value.ptr()),
+            THPVariable_Unpack(attn_mask.ptr()),
+            dropout,
+            is_causal};
+      }))
+      // TODO Add nice repr
+      // .def_readonly("query", &sdp::sdp_params::query)
+      // .def_readonly("key", &sdp::sdp_params::key)
+      // .def_readonly("value", &sdp::sdp_params::value)
+      .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
+      .def_readonly("dropout", &sdp::sdp_params::dropout)
+      .def_readonly("is_causal", &sdp::sdp_params::is_causal);
+  m.def(
+      "_can_use_flash_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+        return sdp::can_use_flash_attention(params, debug);
+      });
+  m.def(
+      "_can_use_mem_efficient_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+        return sdp::can_use_mem_efficient_attention(params, debug);
+      });
+}
+
+// PyObject* THPModule_can_use_flash_attention(PyObject* unused, sdp::sdp_params sdp_params, bool debug) {
+//   HANDLE_TH_ERRORS
+//   if (sdp::can_use_flash_attention(std::move(sdp_params), debug)) {
+//     Py_RETURN_TRUE;
+//   } else {
+//     Py_RETURN_FALSE;
+//   }
+//   END_HANDLE_TH_ERRORS
+// }
+
+
+
+////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1526,6 +1594,7 @@ void initModule(PyObject* module) {
 #endif
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
+  registerSDPAUtilities(module);
 }
 
 } // namespace torch::cuda
