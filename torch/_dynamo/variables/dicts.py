@@ -2,7 +2,7 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import torch
 import torch.fx
@@ -13,7 +13,7 @@ from ..eval_frame import skip_code
 
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
-from ..utils import global_key_name, istensor, iter_contains
+from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
@@ -296,105 +296,53 @@ class DefaultDictVariable(ConstDictVariable):
             return super().call_method(tx, name, args, kwargs)
 
 
-class SetVariable(VariableTracker):
-    @dataclasses.dataclass
-    class SetElement:
-        vt: VariableTracker
-        underlying_value: Any
-
-        def __hash__(self) -> int:
-            return hash(self.underlying_value)
-
-        def __eq__(self, other: object) -> bool:
-            if not isinstance(other, SetVariable.SetElement):
-                return False
-            if isinstance(self.vt, variables.TensorVariable):
-                return self.underlying_value is other.underlying_value
-            else:
-                return self.underlying_value == other.underlying_value
+class SetVariable(ConstDictVariable):
+    """We model a sets as dictonary with None values"""
 
     def __init__(
         self,
-        items: List[VariableTracker],
+        items,
         recursively_contains=None,
         regen_guards=True,
         **kwargs,
     ):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
-        # Note - Set is still backed by a list, because we want set behavior over the contents,
-        assert isinstance(items, list)
-        assert all(isinstance(x, VariableTracker) for x in items)
+        if "user_cls" in kwargs:
+            assert kwargs["user_cls"] is dict
+        else:
+            kwargs = dict(user_cls=dict, **kwargs)
 
-        self.items = []
-        self._add(items)
+        items = dict.fromkeys(items, SetVariable._default_value())
+        super().__init__(items, recursively_contains=recursively_contains, **kwargs)
 
-        # Sometimes, we know that we have passed in the guards from the items in the set
-        if regen_guards:
-            self.guards.update(VariableTracker.propagate(items)["guards"])
+    @staticmethod
+    def _default_value():
+        # Variable to fill in he keys of the dictinary
+        return ConstantVariable.create(None)
 
     def as_proxy(self):
-        return [x.as_proxy() for x in self.items]
+        return set(super().as_proxy().keys())
 
     def python_type(self):
         return set
 
+    def as_python_constant(self):
+        return set(super().as_python_constant().keys())
+
     def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "set")
-        codegen.foreach(self.items)
+        # instructions to build the keys and values
+        for key in self.items.keys():
+            if istensor(key):
+                codegen.append_output(
+                    codegen.create_load_global(global_key_name(key), True, add=True)
+                )
+                codegen.extend_output(create_call_function(0, False))
+            else:
+                codegen.append_output(codegen.create_load_const(key))
+            codegen(self.items[key])
+
         return [
             create_instruction("BUILD_SET", arg=len(self.items))
         ] + create_call_function(1, True)
-
-    # Note - this is only used for producing a set
-    def _as_set_element(self, vt):
-        from .base import VariableTracker
-        from .tensor import TensorVariable
-
-        assert isinstance(vt, VariableTracker)
-
-        if isinstance(vt, TensorVariable):
-            tensor_node = vt.as_proxy().node
-            return SetVariable.SetElement(vt, tensor_node)
-        if isinstance(vt, ConstantVariable):
-            return SetVariable.SetElement(vt, vt.value)
-
-        unimplemented(f"Sets with {type(vt)} NYI")
-
-    @property
-    def _underlying_items(self):
-        underlying_items = set()
-        for current_item in self.items:
-            assert (
-                current_item not in underlying_items
-            ), "Items modeling set invariant violated"
-            underlying_items.add(self._as_set_element(current_item))
-        return underlying_items
-
-    def _add(self, item):
-        underlying_items = self._underlying_items
-
-        if isinstance(item, (list, set)):
-            items_to_add = item
-        else:
-            items_to_add = [item]
-
-        for item_to_add in items_to_add:
-            set_element = self._as_set_element(item_to_add)
-            if set_element not in underlying_items:
-                underlying_items.add(set_element)
-                self.items.append(set_element.vt)
-            else:
-                for e in underlying_items:
-                    if hash(set_element) == hash(e):
-                        alias_guard = make_dupe_guard(
-                            e.vt.source, set_element.vt.source
-                        )
-                        if alias_guard:
-                            e.vt = e.vt.add_guards(
-                                {e.vt.source.make_guard(alias_guard)}
-                            )
-
-        return self.items
 
     def call_method(
         self,
@@ -403,48 +351,22 @@ class SetVariable(VariableTracker):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        # Somewhat duplicative of CommonListMethodsVariable - but better than to violate substitution
-        # principles and end up with things like direct item access attempts on a set, or
-        # getitem sources.
-        if name == "add" and args and self.mutable_local:
+        # We foward the calls to the dictionary model
+        if name == "add":
             assert not kwargs
-            item = args[0]
-            result = SetVariable(
-                self._add(item),
-                mutable_local=self.mutable_local,
-                regen_guards=False,
-                **options,
-            )
-            tx.replace_all(self, result)
-            return ConstantVariable.create(None)
-        elif name == "pop" and self.mutable_local:
+            assert len(args) == 1
+            name = "__setitem__"
+            args = (args[0], SetVariable._default_value())
+        elif name == "pop":
             assert not kwargs
             assert not args
-            items = list(self.items)
+            items = set(self.items.keys())
             result = items.pop()
-            tx.replace_all(
-                self,
-                SetVariable(items, regen_guards=False, **options),
-            )
-            return result
-        elif name == "__len__":
-            return ConstantVariable.create(len(self.items)).add_options(options)
-        elif name == "__contains__":
-            assert len(args) == 1
-            assert not kwargs
-            return iter_contains(self.items, args[0], tx, options)
-        else:
-            return super().call_method(tx, name, args, kwargs)
+            args = (result,)
+        return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
-
-    def as_python_constant(self):
-        return self.python_type()([x.as_python_constant() for x in self.items])
-
-    def unpack_var_sequence(self, tx):
-        return [x.add_options(self) for x in self.items]
 
 
 class DataClassVariable(ConstDictVariable):
