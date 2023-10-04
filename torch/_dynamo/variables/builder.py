@@ -1117,12 +1117,12 @@ class VariableBuilder:
         source = NumpyTensorSource(self.get_source())
 
         from torch._numpy import _util
+
         try:
             tensor_value = _util._coerce_to_tensor(value)
         except NotImplementedError as e:
             # failed to convert to tensor, graph break
             unimplemented(str(e))
-
 
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here

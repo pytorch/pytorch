@@ -1719,7 +1719,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
 
         # torch does not have the `uint16` dtype
-        for x in [np.array([42], dtype=np.uint16), np.uint16(42), np.dtype('uint16') ]:
+        for x in [np.array([42], dtype=np.uint16), np.uint16(42), np.dtype("uint16")]:
             r = opt_fn(x)
 
             self.assertEqual(r, False)

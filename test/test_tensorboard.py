@@ -53,7 +53,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     IS_WINDOWS,
     IS_MACOS,
-    skipIfTorchDynamo,
 )
 
 def tensor_N(shape, dtype=float):

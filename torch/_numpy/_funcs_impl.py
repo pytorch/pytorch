@@ -586,7 +586,7 @@ def _conv_corr_impl(a, v, mode):
 
     padding = v.shape[0] - 1 if mode == "full" else mode
 
-    if padding == 'same' and v.shape[0] % 2 == 0:
+    if padding == "same" and v.shape[0] % 2 == 0:
         # UserWarning: Using padding='same' with even kernel lengths and odd
         # dilation may require a zero-padded copy of the input be created
         # (Triggered internally at pytorch/aten/src/ATen/native/Convolution.cpp:1010.)
