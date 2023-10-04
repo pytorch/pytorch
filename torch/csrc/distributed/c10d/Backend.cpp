@@ -28,6 +28,7 @@ void commonEventinit(
   evt.backend = backend.getBackendName();
   evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
+  evt.drop_count = 0;
   // isCompleted is mutable :facepalm:
   if (const_cast<Work&>(work).isCompleted() && !work.isSuccess())
     evt.error_message = exceptionPtrWhat(work.exception());
@@ -49,7 +50,7 @@ void Backend::emitCollectiveStart(const Work& work) {
   details::EventInfo evt;
   commonEventinit(evt, *this, work);
 
-  evt.event_kind = details::EventKind::CollectionStart;
+  evt.event_kind = ::c10d::EventKind::CollectiveStart;
   details::enqueue_c10d_event(std::move(evt));
 }
 
@@ -57,7 +58,7 @@ void Backend::emitCollectiveEnd(const Work& work) {
   details::EventInfo evt;
   commonEventinit(evt, *this, work);
 
-  evt.event_kind = details::EventKind::CollectionEnd;
+  evt.event_kind = ::c10d::EventKind::CollectiveEnd;
   // FIXME change getDuration to return Optional<float>
   try {
     evt.duration_ms = work.getDuration();

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import tempfile
 import threading
 import time
 from datetime import timedelta
@@ -22,7 +23,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class PgHooks(MultiProcessTestCase):
@@ -280,6 +281,55 @@ class NcclHooks(MultiProcessTestCase, CollectiveHooks):
     @with_comms(timeout=timedelta(seconds=5))
     def test_collective_timeout(self):
         self._test_failure()
+
+
+class SingleRankTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.rank = 0
+        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        dist.init_process_group(
+            backend="gloo",
+            rank=0,
+            world_size=1,
+            store=dist.FileStore(self.file_name, 1),
+        )
+
+    def tearDown(self) -> None:
+        dist.destroy_process_group()
+
+    def test_queue_overflow(self) -> None:
+        cv_done_colls = threading.Condition()
+        cv_done_cb = threading.Condition()
+        colls_done = False
+        starts = []
+        status_with_dropped = None
+
+        def coll_start(status: dhooks.CollectiveStatus):
+            starts.append(status)
+            with cv_done_colls:
+                while not colls_done:
+                    cv_done_colls.wait()
+            if status.drop_count > 0:
+                nonlocal status_with_dropped
+                status_with_dropped = status
+                with cv_done_cb:
+                    cv_done_cb.notify()
+
+        dhooks.register_collective_start_hook(coll_start)
+
+        # native limit is 512
+        for i in range(600):
+            dist.all_reduce(torch.ones([2, 3]))
+        colls_done = True
+        with cv_done_colls:
+            cv_done_colls.notify()
+
+        with cv_done_cb:
+            cv_done_cb.wait(10)
+
+        self.assertTrue(status_with_dropped is not None)
+        self.assertTrue(status_with_dropped.drop_count > 0)
 
 
 if __name__ == "__main__":
