@@ -28,7 +28,7 @@ install_ubuntu() {
   elif [[ "$CLANG_VERSION" == 10 ]]; then
     maybe_libomp_dev="libomp-10-dev"
   else
-    maybe_libomp_dev=""
+    maybe_libomp_dev="libomp-dev"
   fi
 
   # HACK: UCC testing relies on libnccl library from NVIDIA repo, and version 2.16 crashes
