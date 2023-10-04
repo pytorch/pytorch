@@ -20,7 +20,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
-from torch._dynamo.testing import normalize_gm
+from torch._dynamo.testing import normalize_gm, slowTestDynamic
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -3628,6 +3628,7 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
     return add_2""",
         )
 
+    @slowTestDynamic()  # Variable test times but generally slow
     def test_retracibility(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -3665,7 +3666,7 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
         self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
 
-    @common_utils.slowTest  # Variable test times but generally slow
+    @slowTestDynamic()  # Variable test times but generally slow
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):

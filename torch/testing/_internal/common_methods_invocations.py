@@ -8993,12 +8993,18 @@ foreach_binary_op_db: List[OpInfo] = [
         foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            DecorateInfo(slowTest, "TestDecomp", "test_quick_core_backward", dtypes=[torch.float64]),
+        ),
     ),
     ForeachFuncInfo(
         "clamp_max",
         foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            DecorateInfo(slowTest, "TestDecomp", "test_quick_core_backward", dtypes=[torch.float64]),
+        ),
     ),
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
@@ -9972,7 +9978,8 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-           )),
+               DecorateInfo(slowTest, "TestDecomp", "test_quick_core_backward", dtypes=[torch.float64]),
+           ),),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -13206,6 +13213,7 @@ op_db: List[OpInfo] = [
                # Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data()
                # to actually allocate memory
                DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
+               DecorateInfo(slowTest, 'TestJit', 'test_variant_consistency_jit', active_if=TEST_WITH_ASAN),
            ),
            error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -15307,6 +15315,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_backward'),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -17921,7 +17930,12 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=False,
-        gradcheck_nondet_tol=1e-15),
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            DecorateInfo(slowTest, "TestDecomp", "test_comprehensive",
+                         device_type="cuda", dtypes=[torch.float64, torch.float32]),
+        ),
+    ),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
         "grid_sampler_2d",
@@ -17930,7 +17944,12 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
-        gradcheck_nondet_tol=1e-15),
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            DecorateInfo(slowTest, "TestDecomp", "test_comprehensive",
+                         device_type="cuda", dtypes=[torch.float64, torch.float32]),
+        ),
+    ),
     OpInfo(
         "argwhere",
         ref=np.argwhere,

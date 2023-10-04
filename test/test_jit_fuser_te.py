@@ -1751,6 +1751,7 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 ) from e
 
+    @slowTestIf(TEST_WITH_ASAN)
     def test_ternary_norm_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(x, y, z)
@@ -2257,6 +2258,7 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_pass_inline(g)
         FileCheck().check_count("prim::If", 1, exactly=True).run(g)
 
+    @slowTestIf(TEST_WITH_ASAN)
     def test_dynamic_shapes(self):
         from functools import partial
         n = 10

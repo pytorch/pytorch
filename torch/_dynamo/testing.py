@@ -13,6 +13,7 @@ from unittest.mock import patch
 import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
+from torch.testing._internal.common_utils import slowTest
 
 from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
@@ -365,7 +366,10 @@ def expectedFailureDynamicWrapper(fn):
     return fn
 
 
-def slowTestDynamicIf(fn, condition=True):
-    if condition:
-        fn.slow_test = True
-    return fn
+def slowTestDynamic(condition=True):
+    def wrapper(fn):
+        if condition:
+            fn = slowTest(fn)
+        return fn
+
+    return wrapper

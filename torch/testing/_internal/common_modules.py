@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS, slowTest)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -3251,7 +3251,8 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for Transformer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   DecorateInfo(slowTest, 'TestModule', "test_gradgrad", device_type="cuda", dtypes=[torch.float64]),),
                ),
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,

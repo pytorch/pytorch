@@ -74,7 +74,7 @@ control_flow_opinfo_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         skips=(
-            DecorateInfo(slowTest, "TestBwdGradients", "test_fn_gradgrad", device_type="cpu", dtypes=(torch.float64,))
+            DecorateInfo(slowTest, "TestBwdGradients", "test_fn_gradgrad", device_type="cpu", dtypes=[torch.float64]),
         )
     )
 ]
