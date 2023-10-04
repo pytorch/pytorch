@@ -6,7 +6,6 @@
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
-#import <ATen/native/metal/ops/MetalCopy.h>
 
 #include <torch/library.h>
 

@@ -20,6 +20,8 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
+from .allowed_functions import is_allowed
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -148,7 +150,7 @@ def strip_function_call(name):
     "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
     "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
     """
-    # recursively find valid object name in fuction
+    # recursively find valid object name in function
     valid_name = re.compile("[A-Za-z_].*")
     curr = ""
     for char in name:
@@ -468,6 +470,11 @@ class GuardBuilder(GuardBuilderBase):
             # leading to recompilations.
             log.warning("Skipping nn module guard on LSTMs")
             return
+
+        # Dynamo does not trace inside the inbuilt torch nn modules. Skip
+        # guarding on those. More rationale at https://github.com/pytorch/pytorch/issues/110048
+        if is_allowed(val.__class__):
+            return
         try:
             g = torch._C._dynamo.guards.nn_module_guard(val)
         except AttributeError:
@@ -480,9 +487,14 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        # debug_msg is only for debugging help and goes to kwargs of guard call,
-        # which is ignored.
-        self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
+        if guards_log.isEnabledFor(logging.DEBUG):
+            # Avoid debug_msg related python bytecode overhead in the runtime.
+
+            # debug_msg is only for debugging help and goes to kwargs of guard call,
+            # which is ignored.
+            self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
+        else:
+            self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -1009,7 +1021,7 @@ class CheckFunctionManager:
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         # TODO(janimesh) - Currently this information is stored as an attr on
-        # the check_fn itself to avoid changing CacehEntry datastrucutre in
+        # the check_fn itself to avoid changing CacehEntry datastructure in
         # eval_frame.c. In future, we should probably replace check_fn with a
         # queryable data structure such that this information is already present
         # in some form.
@@ -1410,7 +1422,7 @@ def make_dupe_guard(obj_source, dupe_source):
         # so maybe we should do this refactor before we land this...
         # TODO(voz): Combine local and global guard builders.
         if ser_source_is_local == source_is_local:
-            # Note - this is a little agressive - these being duplicate input does not always matter.
+            # Note - this is a little aggressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
