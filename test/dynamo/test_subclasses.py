@@ -10,7 +10,6 @@ import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
-from torch._functorch.aot_autograd import to_fun
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
@@ -240,6 +239,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
+        # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
+        def to_fun(x):
+            x_functional = torch._to_functional_tensor(x)
+            torch._mirror_autograd_meta_to(x, x_functional)
+            return x_functional
+
         def aot_f_wrapper(func):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
@@ -322,7 +327,8 @@ class GraphModule(torch.nn.Module):
         check_count_and_graph(2, 2, 2, expected_graph)
 
         try:
-            x = torch._to_functional_tensor(t_clone2, mirror_autograd_meta=True)
+            x = torch._to_functional_tensor(t_clone2)
+            torch._mirror_autograd_meta_to(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
             aot_f_out = f(x)
         finally:
@@ -330,6 +336,39 @@ class GraphModule(torch.nn.Module):
 
         # frame count and op count are incremented due to re-compilation
         check_count_and_graph(3, 3, 3, expected_graph)
+
+    def test_has_torch_function(self):
+        class MyTensor:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.max:
+                    return torch.tensor(123)
+                return func(*args, **kwargs)
+
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return torch.overrides.has_torch_function_unary(
+                x
+            ), torch.overrides.has_torch_function_variadic(x)
+
+        for test_class in [MyTensor, LocalSubclass]:
+            x = test_class()
+            ref0 = fn(x)
+            ref1 = fn(4)
+            opt_fn = torch._dynamo.optimize("eager")(fn)
+            res0 = opt_fn(x)
+            res1 = opt_fn(4)
+            self.assertEqual(ref0, res0)
+            self.assertEqual(ref1, res1)
 
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.

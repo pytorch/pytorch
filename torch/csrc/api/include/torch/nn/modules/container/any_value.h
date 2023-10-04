@@ -6,7 +6,6 @@
 #include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <memory>
@@ -41,8 +40,8 @@ class AnyValue {
   template <typename T>
   // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   explicit AnyValue(T&& value)
-      : content_(
-            torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
+      : content_(std::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {
+  }
 
   /// Returns a pointer to the value contained in the `AnyValue` if the type
   /// passed as template parameter matches the type of the value stored, and
@@ -92,6 +91,8 @@ class AnyValue {
   struct Placeholder {
     explicit Placeholder(const std::type_info& type_info_) noexcept
         : type_info(type_info_) {}
+    Placeholder(const Placeholder&) = default;
+    Placeholder(Placeholder&&) = default;
     virtual ~Placeholder() = default;
     virtual std::unique_ptr<Placeholder> clone() const {
       TORCH_CHECK(false, "clone() should only be called on `AnyValue::Holder`");
@@ -110,7 +111,7 @@ class AnyValue {
     explicit Holder(U&& value_) noexcept
         : Placeholder(typeid(T)), value(std::forward<U>(value_)) {}
     std::unique_ptr<Placeholder> clone() const override {
-      return torch::make_unique<Holder<T>>(value);
+      return std::make_unique<Holder<T>>(value);
     }
     T value;
   };

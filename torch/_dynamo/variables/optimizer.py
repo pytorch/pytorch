@@ -65,7 +65,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tx.store_global_weakref(self.get_global_name(), self.value)
                 self.create_finalizer(tx)
 
-                return ConstantVariable(None)
+                return ConstantVariable.create(None)
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
                 pass

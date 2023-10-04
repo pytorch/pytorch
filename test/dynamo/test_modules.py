@@ -2299,6 +2299,35 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         expected = mod(x)
         self.assertEqual(actual, expected)
 
+    def test_no_guard_on_torch_nn_modules(self):
+        # https://github.com/pytorch/pytorch/issues/110048
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def generate(x, c):
+            return mod(x) + c
+
+        for _ in range(0, 10):
+            generate(torch.randn(10, 10), 0)
+            generate(torch.randn(10, 10), 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # Ensure that modification in user module causes recompile
+        mod.eval()
+        generate(torch.randn(10, 10), 0)
+        self.assertEqual(cnt.frame_count, 3)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
