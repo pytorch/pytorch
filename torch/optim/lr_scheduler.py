@@ -1408,7 +1408,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         if epoch is None:
             epoch = self.last_epoch + 1
         if epoch < 0:
-            raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
+            raise ValueError(f"Expected non-negative epoch, but got {epoch}")
         if epoch >= self.T_0:
             if self.T_mult == 1:
                 self.T_cur = epoch % self.T_0
