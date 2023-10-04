@@ -1408,7 +1408,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         if epoch is None:
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
-            if self.T_cur >= self.T_i:
+            while self.T_cur >= self.T_i:
                 self.T_cur = self.T_cur - self.T_i
                 self.T_i = self.T_i * self.T_mult
         else:
