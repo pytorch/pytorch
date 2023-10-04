@@ -197,6 +197,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_check_inf_and_nan(AtenTensorHandle tensor);
+
 #ifdef USE_CUDA
 
 struct CUDAStreamGuardOpaque;

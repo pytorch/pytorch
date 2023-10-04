@@ -132,8 +132,10 @@ class FakeTensorUpdater:
                 ):
                     continue
                 updating_node.meta["val"] = new_fake_tensor
-                # FIXME: defaultdict has no add() method
-                existing_storages.add(get_node_storage(new_fake_tensor))  # type: ignore[attr-defined]
+
+                # todo(chilli): This code path is not exercised by our existing
+                # tests - add a test
+                existing_storages[get_node_storage(new_fake_tensor)] += 1
                 processed.add(updating_node)
                 for user in updating_node.users:
                     processing.append(user)

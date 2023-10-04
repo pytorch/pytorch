@@ -164,8 +164,6 @@ struct TORCH_API RNNCellOptionsBase {
       int64_t hidden_size,
       bool bias,
       int64_t num_chunks);
-  virtual ~RNNCellOptionsBase() = default;
-
   TORCH_ARG(int64_t, input_size);
   TORCH_ARG(int64_t, hidden_size);
   TORCH_ARG(bool, bias);

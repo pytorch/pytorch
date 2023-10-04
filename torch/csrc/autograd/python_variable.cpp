@@ -1666,6 +1666,7 @@ PyTypeObject THPVariableMetaType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
@@ -1711,6 +1712,7 @@ PyTypeObject THPVariableType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
