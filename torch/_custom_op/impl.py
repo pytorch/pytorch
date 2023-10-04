@@ -84,30 +84,30 @@ def custom_op(
         >>> # Step 1: define the CustomOp.
         >>> # We need to provide the decorator a "prototype function"
         >>> # (a function with Python ellipses as the body).
-        >>> @custom_op("mylibrary::numpy_sin")
-        >>> def numpy_sin(x: Tensor) -> Tensor:
+        >>> @custom_op("mylibrary::numpy_sinh")
+        >>> def numpy_sinh(x: Tensor) -> Tensor:
         >>>     ...
         >>>
-        >>> # numpy_sin is now an instance of class CustomOp
-        >>> print(type(numpy_sin))
+        >>> # numpy_sinh is now an instance of class CustomOp
+        >>> print(type(numpy_sinh))
         >>>
         >>> # Step 2: Register an implementation for various PyTorch subsystems
         >>>
         >>> # Register an implementation for CPU tensors
-        >>> @numpy_sin.impl('cpu')
-        >>> def numpy_sin_impl_cpu(x):
-        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>> @numpy_sinh.impl('cpu')
+        >>> def numpy_sinh_impl_cpu(x):
+        >>>     return torch.from_numpy(np.sinh(x.numpy()))
         >>>
         >>> # Register an implementation for CUDA tensors
-        >>> @numpy_sin.impl('cuda')
-        >>> def numpy_sin_impl_cuda(x):
-        >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
+        >>> @numpy_sinh.impl('cuda')
+        >>> def numpy_sinh_impl_cuda(x):
+        >>>     return torch.from_numpy(np.sinh(x.cpu().numpy())).to(x.device)
         >>>
         >>> x = torch.randn(3)
-        >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
+        >>> numpy_sinh(x)  # calls numpy_sinh_impl_cpu
         >>>
         >>> x_cuda = x.cuda()
-        >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
+        >>> numpy_sinh(x)  # calls numpy_sinh_impl_cuda
 
     """
 
@@ -278,25 +278,25 @@ class CustomOp:
             >>> import numpy as np
             >>> from torch import Tensor
             >>>
-            >>> @custom_op("mylibrary::numpy_sin")
-            >>> def numpy_sin(x: Tensor) -> Tensor:
+            >>> @custom_op("mylibrary::numpy_cosh")
+            >>> def numpy_cosh(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> # Register an implementation for CPU Tensors
-            >>> @numpy_sin.impl('cpu')
-            >>> def numpy_sin_impl_cpu(x):
-            >>>     return torch.from_numpy(np.sin(x.numpy()))
+            >>> @numpy_cosh.impl('cpu')
+            >>> def numpy_cosh_impl_cpu(x):
+            >>>     return torch.from_numpy(np.cosh(x.numpy()))
             >>>
             >>> # Register an implementation for CUDA Tensors
-            >>> @numpy_sin.impl('cuda')
-            >>> def numpy_sin_impl_cuda(x):
-            >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
+            >>> @numpy_cosh.impl('cuda')
+            >>> def numpy_cosh_impl_cuda(x):
+            >>>     return torch.from_numpy(np.cosh(x.cpu().numpy())).to(x.device)
             >>>
             >>> x = torch.randn(3)
-            >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
+            >>> numpy_cosh(x)  # calls numpy_cosh_impl_cpu
             >>>
             >>> x_cuda = x.cuda()
-            >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
+            >>> numpy_cosh(x)  # calls numpy_cosh_impl_cuda
 
         """
         if isinstance(device_types, str):
@@ -363,7 +363,7 @@ class CustomOp:
             >>>
             >>> # Example 1: an operator without data-dependent output shape
             >>> @custom_op('mylibrary::custom_linear')
-            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor):
+            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> @custom_linear.impl_abstract()
@@ -394,7 +394,7 @@ class CustomOp:
             >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
             >>>
-            >>> @numpy_nonzero.impl(['cpu', 'cuda'])
+            >>> @custom_nonzero.impl(['cpu', 'cuda'])
             >>> def custom_nonzero_impl(x):
             >>>     x_np = to_numpy(x)
             >>>     res = np.stack(np.nonzero(x_np), axis=1)

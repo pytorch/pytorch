@@ -141,30 +141,30 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
         >>> # We need to provide the API a "prototype function"
         >>> # (a function that returns NotImplementedError), from which
         >>> # we will infer the types of the inputs and outputs.
-        >>> @torch._custom_ops.custom_op("mylibrary::numpy_sin")
-        >>> def numpy_sin(x: Tensor) -> Tensor:
+        >>> @torch._custom_ops.custom_op("mylibrary::numpy_cos")
+        >>> def numpy_cos(x: Tensor) -> Tensor:
         >>>     raise NotImplementedError()
         >>>
         >>> # The custom op is now accessible via the torch.ops module:
-        >>> torch.ops.mylibrary.numpy_sin
+        >>> torch.ops.mylibrary.numpy_cos
         >>>
         >>> # Step 2: Register an implementation for various PyTorch subsystems
         >>>
         >>> # Register an implementation for CPU tensors
-        >>> @torch._custom_ops.impl("mylibrary::numpy_sin", device_types="cpu")
-        >>> def numpy_sin_impl_cpu(x):
-        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>> @torch._custom_ops.impl("mylibrary::numpy_cos", device_types="cpu")
+        >>> def numpy_cos_impl_cpu(x):
+        >>>     return torch.from_numpy(np.cos(x.numpy()))
         >>>
         >>> # Register an implementation for CUDA tensors
-        >>> @torch._custom_ops.impl("mylibrary::numpy_sin", device_types="cuda")
-        >>> def numpy_sin_impl_cuda(x):
-        >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
+        >>> @torch._custom_ops.impl("mylibrary::numpy_cos", device_types="cuda")
+        >>> def numpy_cos_impl_cuda(x):
+        >>>     return torch.from_numpy(np.cos(x.cpu().numpy())).to(x.device)
         >>>
         >>> x = torch.randn(3)
-        >>> torch.ops.mylibrary.numpy_sin(x)  # calls numpy_sin_impl_cpu
+        >>> torch.ops.mylibrary.numpy_cos(x)  # calls numpy_cos_impl_cpu
         >>>
         >>> x_cuda = x.cuda()
-        >>> torch.ops.mylibrary.numpy_sin(x)  # calls numpy_sin_impl_cuda
+        >>> torch.ops.mylibrary.numpy_cos(x)  # calls numpy_cos_impl_cuda
 
     """
 
