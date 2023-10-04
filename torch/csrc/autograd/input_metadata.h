@@ -12,6 +12,7 @@
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
