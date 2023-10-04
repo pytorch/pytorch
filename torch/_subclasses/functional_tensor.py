@@ -170,6 +170,15 @@ class FunctionalTensor(torch.Tensor):
         torch._sync(self)
         return torch._from_functional_tensor(self.elem)
 
+    def replace_(self, output) -> None:
+        torch._functionalize_replace(self.elem, output)
+
+    def commit_update(self) -> None:
+        torch._functionalize_commit_update(self.elem)
+
+    def sync(self) -> None:
+        torch._functionalize_sync(self.elem)
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self):
@@ -278,7 +287,6 @@ class FunctionalTensorMode(TorchDispatchMode):
                 old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
                 outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
                 outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
-
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
@@ -291,6 +299,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         )
         assert is_excluded or not is_included
 
+        # If no outputs are our functional subclass, then don't try to fix up aliasing
+        if not any(
+            isinstance(x, FunctionalTensor)
+            for x in pytree.tree_flatten(outs_wrapped)[0]
+        ):
+            return outs_wrapped
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
@@ -382,6 +396,18 @@ class BaseFunctionalizeAPI(ABC):
     def redispatch_to_next(self) -> ContextManager:
         pass
 
+    @abstractmethod
+    def replace(self, input_tensor, output_tensor) -> None:
+        pass
+
+    @abstractmethod
+    def commit_update(self, tensor) -> None:
+        pass
+
+    @abstractmethod
+    def sync(self, tensor) -> None:
+        pass
+
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
@@ -399,6 +425,19 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def redispatch_to_next(self) -> ContextManager:
         return unset_functional_temporarily()
+
+    def replace(self, input_tensor, output_tensor) -> None:
+        assert isinstance(input_tensor, FunctionalTensor)
+        assert not isinstance(output_tensor, FunctionalTensor)
+        input_tensor.replace_(output_tensor)
+
+    def commit_update(self, tensor) -> None:
+        assert isinstance(tensor, FunctionalTensor)
+        tensor.commit_update()
+
+    def sync(self, tensor) -> None:
+        assert isinstance(tensor, FunctionalTensor)
+        tensor.sync()
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -421,6 +460,15 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
         return torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
+
+    def replace(self, input_tensor, output_tensor) -> None:
+        torch._functionalize_replace(input_tensor, output_tensor)
+
+    def commit_update(self, tensor) -> None:
+        torch._functionalize_commit_update(tensor)
+
+    def sync(self, tensor) -> None:
+        torch._functionalize_sync(tensor)
 
 
 class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -451,3 +499,12 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def redispatch_to_next(self) -> ContextManager:
         return self.interpreter.lower()
+
+    def replace(self, input_tensor, output_tensor) -> None:
+        torch._functionalize_replace(input_tensor, output_tensor)
+
+    def commit_update(self, tensor) -> None:
+        torch._functionalize_commit_update(tensor)
+
+    def sync(self, tensor) -> None:
+        torch._functionalize_sync(tensor)

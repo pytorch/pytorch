@@ -104,7 +104,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: "3.9"
-          environment-file: .github/requirements/conda-env-iOS
+          environment-file: .github/requirements/conda-env-iOS.txt
           pip-requirements-file: .github/requirements/pip-requirements-iOS.txt
 
       - name: Setup Fastlane
@@ -194,6 +194,7 @@ jobs:
           cat /Users/runner/Library/Logs/scan/*.log
 
       - name: Prepare the build artifacts for upload
+        if: matrix.ios_platform == 'OS'
         shell: bash
         run: |
           set -eux
@@ -256,15 +257,15 @@ jobs:
           popd
 
       - uses: actions/upload-artifact@v3
+        if: matrix.ios_platform == 'OS'
         with:
           name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
           if-no-files-found: error
           path: ${{ runner.temp }}/${{ matrix.ios_arch }}/${{ matrix.ios_arch }}.zip
 
   upload-ios-artifacts:
-    # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
-    # to create the fat iOS binaries for both x86_64 and arm64
-    runs-on: macos-12
+    # NB: this job run on GitHub MacOS ephemeral runner so that it can access AWS credentials
+    runs-on: ubuntu-22.04
     needs: build
     # NB: Only upload release build, if we need it, we could also turn on nightly here
     environment: ${{ ((inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
@@ -288,26 +289,20 @@ jobs:
         with:
           name: pytorch-ios-build-artifacts-arm64
 
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: pytorch-ios-build-artifacts-x86_64
-
-      - name: Unzip arm64 and x86_64 artifacts
+      - name: Unzip artifacts
         shell: bash
         run: |
           set -eux
 
-          for ARCH in "arm64" "x86_64"; do
-            TMP_DIR="${RUNNER_TEMP}/${ARCH}"
-            mkdir -p "${TMP_DIR}"
+          ARCH="arm64"
+          TMP_DIR="${RUNNER_TEMP}/${ARCH}"
+          mkdir -p "${TMP_DIR}"
 
-            cp "${ARCH}.zip" "${TMP_DIR}"
+          cp "${ARCH}.zip" "${TMP_DIR}"
 
-            pushd "${TMP_DIR}"
-            unzip -o "${ARCH}.zip"
-            popd
-          done
+          pushd "${TMP_DIR}"
+          unzip -o "${ARCH}.zip"
+          popd
 
       - name: Prepare the artifact
         env:
@@ -323,7 +318,7 @@ jobs:
           # Prepare all the sub directories
           mkdir -p "${DEST_DIR}"/install/lib
 
-          # Copy header and share files, arm64 or x86_64 both work
+          # Copy header and share files
           cp -R install/include "${DEST_DIR}"/install
           cp -R install/share "${DEST_DIR}"/install
           # The last dash is important to copy only files under src
@@ -346,11 +341,7 @@ jobs:
           popd
 
           for LIB in "${LIBRARIES[@]}"; do
-            FROM_LIBS=("${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${RUNNER_TEMP}"/x86_64/install/lib/"${LIB}")
-            # Create a fat binary for both arm64 and x86_64
-            lipo -create "${FROM_LIBS[@]}" -o "${DEST_DIR}"/install/lib/"${LIB}"
-            # Print the info
-            lipo -i "${DEST_DIR}"/install/lib/"${LIB}"
+            cp "${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${DEST_DIR}"/install/lib/"${LIB}"
           done
 
           BUILD_LITE_INTERPRETER=1
