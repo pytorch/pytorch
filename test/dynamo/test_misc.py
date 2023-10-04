@@ -1983,6 +1983,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             pass
 
         class MyClass1(metaclass=ExampleMeta):
+            coeff = 4  # Force the constant guard to test source in guards
+
             @classmethod
             def add(cls, x):
                 return x + 1
@@ -1991,7 +1993,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             @classmethod
             def add(cls, x):
                 torch._dynamo.graph_break()
-                return x + super().add(x)
+                return x + super().add(x) + super().coeff
 
         def fn(x, obj):
             return x + obj.add(x)
