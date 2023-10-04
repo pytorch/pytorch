@@ -586,11 +586,16 @@ class SizeVariable(TupleVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
         if isinstance(index, slice):
             return SizeVariable(self.items[index]).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
 

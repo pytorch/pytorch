@@ -528,11 +528,8 @@ class GraphModuleSerializer:
     def serialize_input(self, arg) -> Argument:
         import torch._inductor.ir as inductor_ir
         inductor_tensor_buffers = (
-            inductor_ir.InputBuffer,
-            inductor_ir.ComputedBuffer,
-            inductor_ir.ConcatKernel,
-            inductor_ir.ExternKernelOut,
-            inductor_ir.MultiOutput,
+            inductor_ir.Buffer,
+            inductor_ir.ReinterpretView,
         )
 
         if isinstance(arg, torch.fx.Node):
@@ -560,8 +557,9 @@ class GraphModuleSerializer:
             # This is a special branch for handling buffers (representing tensor arguments)
             # for inductor's ExternalFallbackNode
             # export_extern_kernel_node() is using this function to serialize arguments
-            assert arg.name is not None, "Input buffer must have valid name"
-            return Argument.create(as_tensor=TensorArgument(name=arg.name))
+            arg_name = arg.get_name()
+            assert arg_name is not None, "Buffer must have valid name"
+            return Argument.create(as_tensor=TensorArgument(name=arg_name))
         elif isinstance(arg, bool):
             return Argument.create(as_bool=arg)
         elif isinstance(arg, str):
@@ -624,17 +622,17 @@ class GraphModuleSerializer:
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             elif all(isinstance(a, inductor_tensor_buffers) for a in arg):
-                # list of tensors
+                # list of inductor buffers
                 return Argument.create(
-                    as_tensors=[TensorArgument(name=a.name) for a in arg],
+                    as_tensors=[TensorArgument(name=a.get_name()) for a in arg],
                 )
             elif all(isinstance(a, (*inductor_tensor_buffers, type(None))) for a in arg):
-                # list of optional tensors
+                # list of inductor buffers as optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
                         return OptionalTensorArgument.create(as_none=())
                     elif isinstance(a, inductor_tensor_buffers):
-                        return OptionalTensorArgument.create(as_tensor=a.name)
+                        return OptionalTensorArgument.create(as_tensor=a.get_name())
                     else:
                         raise SerializeError(f"Unsupported list/tuple argument: {a}")
                 return Argument.create(

@@ -1181,21 +1181,17 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
 
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_spec"],
         )
 
 
 def export_aot_inductor(model, example_inputs, eager_forward):
-    module, exported, output_spec = AOTInductorModelCache.load(
-        model, example_inputs, eager_forward
-    )
+    module, exported = AOTInductorModelCache.load(model, example_inputs, eager_forward)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1203,7 +1199,7 @@ def export_aot_inductor(model, example_inputs, eager_forward):
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
         output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, output_spec)
+        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
 
     return opt_aot_inductor
 

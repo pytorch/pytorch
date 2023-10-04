@@ -161,11 +161,9 @@ C10_DEFINE_REGISTRY_WITHOUT_WARNING(
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
-    tensorpipe::Error error;
-    std::string result;
     char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
     if (ifnameEnv != nullptr) {
-      std::tie(error, result) =
+      auto [error, result] =
           tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
       if (error) {
         LOG(WARNING) << "Failed to look up the IP address for interface "
@@ -173,15 +171,13 @@ const std::string& TensorPipeAgent::guessAddress() {
                      << kDefaultUvAddress;
         return kDefaultUvAddress;
       }
-    } else {
-      std::tie(error, result) =
-          tensorpipe::transport::uv::lookupAddrForHostname();
-      if (error) {
-        LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                     << error.what() << "), defaulting to "
-                     << kDefaultUvAddress;
-        return kDefaultUvAddress;
-      }
+      return result;
+    }
+    auto [error, result] = tensorpipe::transport::uv::lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      return kDefaultUvAddress;
     }
     return result;
   }();
@@ -1226,8 +1222,8 @@ const std::string& TensorPipeAgent::findWorkerURL(
 
 void TensorPipeAgent::updateGroupMembership(
     const WorkerInfo& workerInfo,
-    const std::vector<c10::Device> devices,
-    const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    const std::vector<c10::Device>& devices,
+    const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps,
     bool isJoin) {
   std::string name = workerInfo.name_;
   worker_id_t id = workerInfo.id_;
