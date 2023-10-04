@@ -12,6 +12,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
+from ..guards import make_dupe_guard
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor, iter_contains
 from .base import MutableLocal, VariableTracker
