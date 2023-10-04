@@ -882,6 +882,29 @@ def enum_repr(value, local):
     return local_name
 
 
+def iter_contains(items, search, tx, options):
+    from .variables import BuiltinVariable, ConstantVariable
+
+    if search.is_python_constant():
+        result = any(
+            x.as_python_constant() == search.as_python_constant() for x in items
+        )
+        return ConstantVariable.create(result, **options)
+
+    result = None
+    for x in items:
+        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+        if result is None:
+            result = check
+        else:
+            result = BuiltinVariable(operator.or_).call_function(
+                tx, [check, result], {}
+            )
+    if result is None:
+        result = ConstantVariable.create(None)
+    return result
+
+
 def dict_param_key_ids(value):
     return {
         id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))

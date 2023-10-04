@@ -16,6 +16,7 @@ from .dicts import (
     CustomizedDictVariable,
     DataClassVariable,
     DefaultDictVariable,
+    SetVariable,
 )
 from .functions import (
     NestedUserFunctionVariable,
@@ -29,7 +30,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    SetVariable,
     SliceVariable,
     TupleVariable,
 )
