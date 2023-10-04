@@ -748,7 +748,9 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()), fallback=8192)
+    x_size_product = V.graph.sizevars.size_hint(
+        sympy_product(x.get_size()), fallback=8192
+    )
     if x_size_product > 0:
         # maybe realize input before broadcasting it
         x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
