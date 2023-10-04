@@ -3984,6 +3984,8 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, int):
                 return output
+            elif isinstance(output, torch.SymInt):
+                return output.node.expr
             else:
                 assert (
                     output is None
