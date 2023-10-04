@@ -604,14 +604,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         and sample.kwargs.get("padding") == 1,
         reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
     ),
-    skip_torchlib_forward_compatibility(
-        "nn.functional.nll_loss",
-        matcher=lambda sample: isinstance(sample.kwargs.get("reduction"), str),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "string in reduction kwarg"
-        ),
-        github_issue="https://github.com/microsoft/onnxscript/issues/726",
-    ),
     xfail(
         "nonzero",
         matcher=lambda sample: len(sample.input.shape) == 0
