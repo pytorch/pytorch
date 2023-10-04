@@ -315,7 +315,7 @@ class TensorVariable(VariableTracker):
                 dyn_length = self.call_method(
                     tx, "size", [ConstantVariable.create(0)], {}
                 )
-                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values prouced through
+                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
                 # symbolic_shapes, but that end up as int/sympy.Integer
                 assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
                 if isinstance(dyn_length, SymNodeVariable):
@@ -498,9 +498,9 @@ class TensorVariable(VariableTracker):
                 )
             # We don't check that the tensor is on CPU when force is False, as this
             # allows us to execute NumPy code on CUDA.
-            # We don't check that requires_grad=False as we are curently doing an
+            # We don't check that requires_grad=False as we are currently doing an
             # unconditional detach.
-            # TODO: We may want to avoid detching if `requires_grad=True`
+            # TODO: We may want to avoid detaching if `requires_grad=True`
             #       and `force=False` to allow computing gradients.
             force = "force" in kwargs and kwargs["force"].as_python_constant()
             proxy = tx.output.create_proxy(

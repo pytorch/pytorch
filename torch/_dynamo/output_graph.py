@@ -1198,7 +1198,7 @@ class SubgraphTracer(fx.Tracer):
         # to new Proxy objects that wrap inputs to this subgraph.
         #
         # This dict serves two purposes:
-        # - Proxies are associatd with VariableTrackers. If we see
+        # - Proxies are associated with VariableTrackers. If we see
         # the same VariableTracker twice (and it is a free variable),
         # then we want to use the same Proxy in the current subgraph to
         # record the tracing.
@@ -1216,7 +1216,7 @@ class SubgraphTracer(fx.Tracer):
         self._orig_gm_firstlineno = None
         # Each SubgraphTracer is associated with a source target, which indicates
         # which operator this subgraph is attached to. We compute a source_fn_stack
-        # based on the source tareget. For the root tracer, it's set to [].
+        # based on the source target. For the root tracer, it's set to [].
         # This is useful for debugging and transforming the exported graph.
         if self.parent is None:
             self.source_fn_stack = []
