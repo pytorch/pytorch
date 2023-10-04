@@ -20,7 +20,7 @@ CUDA_CHANNEL              = nvidia
 INSTALL_CHANNEL          ?= pytorch
 
 PYTHON_VERSION           ?= 3.10
-PYTORCH_VERSION          ?= $(shell git describe --tags --always)
+PYTORCH_VERSION          ?= 2.1.0
 # Can be either official / dev
 BUILD_TYPE               ?= dev
 BUILD_PROGRESS           ?= auto
