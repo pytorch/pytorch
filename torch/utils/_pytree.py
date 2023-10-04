@@ -24,6 +24,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -46,7 +47,7 @@ DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 Context = Any
 PyTree = Any
 FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[List, Context], PyTree]
+UnflattenFunc = Callable[[Iterable, Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
@@ -97,7 +98,7 @@ def _register_pytree_node(
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
-    __register_cxx_pytree_node: bool = True,
+    _register_cxx_pytree_node: bool = True,
 ) -> None:
     """
     Args:
@@ -145,7 +146,7 @@ def _register_pytree_node(
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
-    if __register_cxx_pytree_node:
+    if _register_cxx_pytree_node:
         from ._cxx_pytree import register_pytree_node
 
         if register_pytree_node is not _register_pytree_node:
@@ -155,7 +156,7 @@ def _register_pytree_node(
                 unflatten_fn,
                 to_dumpable_context=to_dumpable_context,
                 from_dumpable_context=from_dumpable_context,
-                __register_python_pytree_node=False,
+                _register_python_pytree_node=False,
             )
 
 
@@ -163,7 +164,7 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
-def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
+def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
     return dict(zip(context, values))
 
 
@@ -171,7 +172,7 @@ def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None
 
 
-def _list_unflatten(values: List[Any], context: Context) -> List[Any]:
+def _list_unflatten(values: Iterable[Any], context: Context) -> List[Any]:
     return list(values)
 
 
@@ -179,7 +180,7 @@ def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
     return list(d), None
 
 
-def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
+def _tuple_unflatten(values: Iterable[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
 
@@ -187,7 +188,7 @@ def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
     return list(d), type(d)
 
 
-def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
+def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
 
@@ -210,7 +211,10 @@ def _odict_flatten(d: "OrderedDict[Any, Any]") -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
-def _odict_unflatten(values: List[Any], context: Context) -> "OrderedDict[Any, Any]":
+def _odict_unflatten(
+    values: Iterable[Any],
+    context: Context,
+) -> "OrderedDict[Any, Any]":
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
@@ -218,19 +222,19 @@ _register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     namedtuple,
@@ -238,13 +242,13 @@ _register_pytree_node(
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 
 
@@ -346,7 +350,7 @@ def tree_structure(pytree: PyTree) -> TreeSpec:
     return tree_flatten(pytree)[1]
 
 
-def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
+def tree_unflatten(values: Iterable[Any], spec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
@@ -355,6 +359,8 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
             f"tree_unflatten(values, spec): Expected `spec` to be instance of "
             f"TreeSpec but got item of type {type(spec)}.",
         )
+    if not isinstance(values, (list, tuple)):
+        values = list(values)
     if len(values) != spec.num_leaves:
         raise ValueError(
             f"tree_unflatten(values, spec): `values` has length {len(values)} "
