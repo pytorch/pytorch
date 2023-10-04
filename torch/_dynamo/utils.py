@@ -115,7 +115,7 @@ def cprofile_wrapper(func):
         try:
             gprof2dot_process = subprocess.Popen(
                 [
-                    "gprof2dot2",
+                    "gprof2dot",
                     "-f",
                     "pstats",
                     "--node-label=total-time-percentage",
