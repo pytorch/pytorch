@@ -1429,7 +1429,9 @@ class TritonKernel(Kernel):
             if dtype == torch.bool:
                 # Workaround for https://github.com/openai/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
-                line += ".to(tl.int1)"
+                # NOTE: Currently causes hangs on bool UTs for ROCm
+                if torch.version.hip is None:
+                    line += ".to(tl.int1)"
 
         if "tmp" in mask:
             # Masked loads must come after the mask is computed
