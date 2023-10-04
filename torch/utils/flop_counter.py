@@ -236,7 +236,7 @@ def convert_num_with_suffix(number, suffix):
 def convert_to_percent_str(num, denom):
     if denom == 0:
         return "0%"
-    return f"{num / denom * 100:.2f}"
+    return f"{num / denom:.2%}"
 
 
 class FlopCounterMode(TorchDispatchMode):
