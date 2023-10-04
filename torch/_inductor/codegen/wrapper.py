@@ -294,7 +294,6 @@ class WrapperCodeGen(CodeGen):
         self.comment = "#"
         self.namespace = ""
         self.none_str = "None"
-        self.optional_tensor_str = "None"
         self.size = "size()"
         self.stride = "stride()"
         self.last_seen_device_guard_index = None
@@ -962,7 +961,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def __init__(self):
         super().__init__()
-        from ..ir import OptionalTensor
 
         self.declare = "auto "
         self.ending = ";"
@@ -971,7 +969,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "at::Tensor()"
-        self.optional_tensor_str = repr(OptionalTensor())
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -1223,17 +1220,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         f'auto dim_{dim} = find_dynamic_dim("{dim}");'
                     )
                     self.prefix.writeline(f"dim_{dim}->set_value({dim});")
-
-            if not config.aot_inductor.abi_compatible:
-                self.wrapper_call.splice(
-                    """
-                    c10::optional<at::Scalar> optional_scalar;
-                    c10::optional<c10::string_view> optional_string;
-                    c10::optional<at::Layout> optional_layout;
-                    c10::optional<at::Tensor> optional_tensor;
-                    c10::List<c10::optional<at::Scalar>> optional_list;
-                    """
-                )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.aot_inductor.abi_compatible:
@@ -1920,7 +1906,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def val_to_arg_str(self, val):
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            return self.optional_tensor_str
+            # TODO: add abi-compatible support
+            return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
                 return "1" if val else "0"
