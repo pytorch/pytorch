@@ -76,7 +76,7 @@ def main(compiled_fwd, compiled_bwd):
                 print("RUNNING COMPILE")
                 torch._dynamo.config.capture_dynamic_output_shape_ops = True
                 torch._dynamo.config.capture_scalar_outputs = True
-                model = torch._dynamo.optimize("eager", nopython=True, dynamic=False)(model)
+                model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
                 res = run(model, optim)
         else:
             res = run(model, optim)
