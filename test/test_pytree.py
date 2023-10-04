@@ -4,8 +4,8 @@ import unittest
 from collections import namedtuple, OrderedDict
 
 import torch
+import torch.utils._cxx_pytree as cxx_pytree
 import torch.utils._pytree as py_pytree
-import torch.utils.pytree as cxx_pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -26,7 +26,13 @@ class GlobalDummyType:
 
 
 class TestGenericPytree(TestCase):
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_flatten_unflatten_leaf(self, pytree_impl):
         def run_test_with_leaf(leaf):
             values, treespec = pytree_impl.tree_flatten(leaf)
@@ -45,13 +51,19 @@ class TestGenericPytree(TestCase):
     @parametrize(
         "pytree_impl,gen_expected_fn",
         [
-            (
-                py_pytree,
-                lambda lst: py_pytree.TreeSpec(
-                    list, None, [py_pytree.LeafSpec() for _ in lst]
+            subtest(
+                (
+                    py_pytree,
+                    lambda lst: py_pytree.TreeSpec(
+                        list, None, [py_pytree.LeafSpec() for _ in lst]
+                    ),
                 ),
+                name="py",
             ),
-            (cxx_pytree, lambda lst: cxx_pytree.tree_structure([0] * len(lst))),
+            subtest(
+                (cxx_pytree, lambda lst: cxx_pytree.tree_structure([0] * len(lst))),
+                name="cxx",
+            ),
         ],
     )
     def test_flatten_unflatten_list(self, pytree_impl, gen_expected_fn):
@@ -73,13 +85,19 @@ class TestGenericPytree(TestCase):
     @parametrize(
         "pytree_impl,gen_expected_fn",
         [
-            (
-                py_pytree,
-                lambda tup: py_pytree.TreeSpec(
-                    tuple, None, [py_pytree.LeafSpec() for _ in tup]
+            subtest(
+                (
+                    py_pytree,
+                    lambda tup: py_pytree.TreeSpec(
+                        tuple, None, [py_pytree.LeafSpec() for _ in tup]
+                    ),
                 ),
+                name="py",
             ),
-            (cxx_pytree, lambda tup: cxx_pytree.tree_structure((0,) * len(tup))),
+            subtest(
+                (cxx_pytree, lambda tup: cxx_pytree.tree_structure((0,) * len(tup))),
+                name="cxx",
+            ),
         ],
     )
     def test_flatten_unflatten_tuple(self, pytree_impl, gen_expected_fn):
@@ -102,15 +120,23 @@ class TestGenericPytree(TestCase):
     @parametrize(
         "pytree_impl,gen_expected_fn",
         [
-            (
-                py_pytree,
-                lambda dct: py_pytree.TreeSpec(
-                    dict, list(dct.keys()), [py_pytree.LeafSpec() for _ in dct.values()]
+            subtest(
+                (
+                    py_pytree,
+                    lambda dct: py_pytree.TreeSpec(
+                        dict,
+                        list(dct.keys()),
+                        [py_pytree.LeafSpec() for _ in dct.values()],
+                    ),
                 ),
+                name="py",
             ),
-            (
-                cxx_pytree,
-                lambda dct: cxx_pytree.tree_structure(dict.fromkeys(dct, 0)),
+            subtest(
+                (
+                    cxx_pytree,
+                    lambda dct: cxx_pytree.tree_structure(dict.fromkeys(dct, 0)),
+                ),
+                name="cxx",
             ),
         ],
     )
@@ -135,17 +161,25 @@ class TestGenericPytree(TestCase):
     @parametrize(
         "pytree_impl,gen_expected_fn",
         [
-            (
-                py_pytree,
-                lambda odict: py_pytree.TreeSpec(
-                    OrderedDict,
-                    list(odict.keys()),
-                    [py_pytree.LeafSpec() for _ in odict.values()],
+            subtest(
+                (
+                    py_pytree,
+                    lambda odict: py_pytree.TreeSpec(
+                        OrderedDict,
+                        list(odict.keys()),
+                        [py_pytree.LeafSpec() for _ in odict.values()],
+                    ),
                 ),
+                name="py",
             ),
-            (
-                cxx_pytree,
-                lambda odict: cxx_pytree.tree_structure(OrderedDict.fromkeys(odict, 0)),
+            subtest(
+                (
+                    cxx_pytree,
+                    lambda odict: cxx_pytree.tree_structure(
+                        OrderedDict.fromkeys(odict, 0)
+                    ),
+                ),
+                name="cxx",
             ),
         ],
     )
@@ -168,7 +202,13 @@ class TestGenericPytree(TestCase):
         od["a"] = torch.tensor(3.14)
         run_test(od)
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_flatten_unflatten_namedtuple(self, pytree_impl):
         Point = namedtuple("Point", ["x", "y"])
 
@@ -198,21 +238,33 @@ class TestGenericPytree(TestCase):
             subtest(torch.min, name="min"),
         ],
     )
-    def test_flatten_unflatten_return_type(self, op):
-        for pytree_impl in (py_pytree, cxx_pytree):
-            x = torch.randn(3, 3)
-            expected = op(x, dim=0)
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_flatten_unflatten_return_type(self, pytree_impl, op):
+        x = torch.randn(3, 3)
+        expected = op(x, dim=0)
 
-            values, spec = pytree_impl.tree_flatten(expected)
-            # Check that values is actually List[Tensor] and not (ReturnType(...),)
-            for value in values:
-                self.assertTrue(isinstance(value, torch.Tensor))
-            result = pytree_impl.tree_unflatten(values, spec)
+        values, spec = pytree_impl.tree_flatten(expected)
+        # Check that values is actually List[Tensor] and not (ReturnType(...),)
+        for value in values:
+            self.assertTrue(isinstance(value, torch.Tensor))
+        result = pytree_impl.tree_unflatten(values, spec)
 
-            self.assertEqual(type(result), type(expected))
-            self.assertEqual(result, expected)
+        self.assertEqual(type(result), type(expected))
+        self.assertEqual(result, expected)
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_flatten_unflatten_nested(self, pytree_impl):
         def run_test(pytree):
             values, treespec = pytree_impl.tree_flatten(pytree)
@@ -234,7 +286,13 @@ class TestGenericPytree(TestCase):
         for case in cases:
             run_test(case)
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_treemap(self, pytree_impl):
         def run_test(pytree):
             def f(x):
@@ -262,13 +320,25 @@ class TestGenericPytree(TestCase):
         for case in cases:
             run_test(case)
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_tree_only(self, pytree_impl):
         self.assertEqual(
             pytree_impl.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"]
         )
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_tree_all_any(self, pytree_impl):
         self.assertTrue(pytree_impl.tree_all(lambda x: x % 2, [1, 3]))
         self.assertFalse(pytree_impl.tree_all(lambda x: x % 2, [0, 1]))
@@ -279,7 +349,13 @@ class TestGenericPytree(TestCase):
         self.assertTrue(pytree_impl.tree_any_only(int, lambda x: x % 2, [0, 1, "a"]))
         self.assertFalse(pytree_impl.tree_any_only(int, lambda x: x % 2, [0, 2, "a"]))
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_broadcast_to_and_flatten(self, pytree_impl):
         cases = [
             (1, (), []),
@@ -318,7 +394,13 @@ class TestGenericPytree(TestCase):
             result = pytree_impl._broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
-    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_pytree_serialize_bad_input(self, pytree_impl):
         with self.assertRaises(TypeError):
             pytree_impl.treespec_dumps("random_blurb")
@@ -653,6 +735,7 @@ class TestCxxPytree(TestCase):
 instantiate_parametrized_tests(TestGenericPytree)
 instantiate_parametrized_tests(TestPythonPytree)
 instantiate_parametrized_tests(TestCxxPytree)
+
 
 if __name__ == "__main__":
     run_tests()

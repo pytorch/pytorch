@@ -848,4 +848,5 @@ else:
         TreeSpec,
         treespec_dumps,
         treespec_loads,
+        treespec_pprint,
     )
