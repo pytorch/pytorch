@@ -1646,6 +1646,36 @@ class CppWrapperCodeGen(WrapperCodeGen):
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
             )
+
+            # NB, the return handle here represents a temporary tensor, which will be automatically
+            # released.
+            # Here's a sample usage in the cpp wrapper code:
+            # ```
+            # aoti_torch_addmm_out(
+            #     buf1,
+            #     arg1_1,
+            #     RAIIAtenTensorHandle(tmp_tensor_handle_0),
+            #     buf0,
+            #     1L,
+            #     1L));
+            # ```
+            # RAIIAtenTensorHandle(tmp_tensor_handle_0) will be released after the call to addmm_out.
+            # This could be problematic when it's used in a different pattern, for example:
+            # ````
+            # AtenTensorHandle tensor_args[] = {RAIIAtenTensorHandle(tmp_tensor_handle_2), buf5, buf6};
+            # aoti_torch_proxy_executor_call_function(..., tensor_args);
+            # ````
+            # RAIIAtenTensorHandle(tmp_tensor_handle_2) will be invalid when it's used in the latter
+            # kernel call.
+            #
+            # This is solved by updating the proxy_executor invocation to
+            # ```
+            # aoti_torch_proxy_executor_call_function(...,
+            #     std::vector<AtenTensorHandle>{
+            #         RAIIAtenTensorHandle(tmp_tensor_handle_2), buf5, buf6
+            #     }.data()
+            # );
+            # ```
             return f"RAIIAtenTensorHandle({tmp_name})"
         else:
             args = [name, size, stride, offset]
@@ -1683,16 +1713,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 torch.DeviceObjType,
             )
             inductor_tensor_buffers = (
-                ir.InputBuffer,
-                ir.ComputedBuffer,
-                ir.ConcatKernel,
-                ir.ExternKernelOut,
-                ir.MultiOutput,
+                ir.Buffer,
+                ir.ReinterpretView,
             )
 
             if isinstance(arg_type, torch.TensorType):
                 assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
-                new_tensor_args.append(f"{arg.name}.get()")
+                new_tensor_args.append(f"{arg.codegen_reference()}")
             elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
                 # int or SymInt
                 assert isinstance(arg, int)
@@ -1708,7 +1735,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
                 # List[Tensor]
                 if isinstance(arg_type.getElementType(), torch.TensorType):
-                    new_tensor_args.extend([f"{a.name}.get()" for a in arg])
+                    new_tensor_args.extend([f"{a.codegen_reference()}" for a in arg])
                 # List[Optional[Tensor]]
                 elif isinstance(
                     arg_type.getElementType(), torch.OptionalType
@@ -1716,7 +1743,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     arg_type.getElementType().getElementType(), torch.TensorType
                 ):
                     new_tensor_args.extend(
-                        [f"{a.name}.get()" for a in arg if a is not None]
+                        [f"{a.codegen_reference()}" for a in arg if a is not None]
                     )
                 # List [int] or List[SymInt]
                 elif isinstance(
@@ -1755,7 +1782,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
                 )
                 self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
-                new_tensor_args.append(f"{arg}.get()")
+                new_tensor_args.append(f"{arg}")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
             elif isinstance(return_type, torch.ListType) and isinstance(
@@ -1874,15 +1901,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             op_overload, raw_args, output_args
         )
 
-        tensor_args_var = f"tensor_args_var_{next(self.kernel_callsite_id)}"
         tensor_call_args_str = ", ".join(tensor_call_args)
-        self.writeline(
-            f"AtenTensorHandle {tensor_args_var}[] = {{{tensor_call_args_str}}};"
-        )
-
-        int_args_var = f"int_args_var_{next(self.kernel_callsite_id)}"
         int_call_args_str = ", ".join(int_call_args)
-        self.writeline(f"int64_t {int_args_var}[] = {{{int_call_args_str}}};")
 
         extern_kernel_node_index = len(V.graph.extern_kernel_nodes) - 1
 
@@ -1890,9 +1910,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
             f"{len(int_call_args)}, "
-            f"{int_args_var}, "
+            f"std::vector<int64_t>{{{int_call_args_str}}}.data(), "
             f"{len(tensor_call_args)}, "
-            f"{tensor_args_var});"
+            f"std::vector<AtenTensorHandle>{{{tensor_call_args_str}}}.data());"
         )
 
         self.extern_call_ops.add(cpp_kernel_key)
