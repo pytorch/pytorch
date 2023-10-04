@@ -131,7 +131,7 @@ def register_pytree_node(
         >>> register_pytree_node(
         ...     torch.Tensor,
         ...     flatten_func=lambda tensor: (
-        ...         (tensor.cpu().numpy(),),
+        ...         (tensor.cpu().detach().numpy(),),
         ...         {'dtype': tensor.dtype, 'device': tensor.device, 'requires_grad': tensor.requires_grad},
         ...     ),
         ...     unflatten_func=lambda children, metadata: torch.tensor(children[0], **metadata),
