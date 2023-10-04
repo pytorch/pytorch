@@ -1492,7 +1492,9 @@ def _allgather_orig_param_states(
         for numel, is_padding in zip(
             flat_param._numels_with_padding, flat_param._is_padding_mask
         ):
-            frozen = not is_padding and not fsdp_param_info.param_requires_grad[param_idx]
+            frozen = (
+                not is_padding and not fsdp_param_info.param_requires_grad[param_idx]
+            )
 
             if is_padding or frozen:
                 # This memory range is a padding or the param is frozen and does

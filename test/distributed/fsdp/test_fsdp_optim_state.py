@@ -1527,9 +1527,7 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
-    def test_save_load_without_0th_param_state(
-        self, state_dict_type: StateDictType
-    ):
+    def test_save_load_without_0th_param_state(self, state_dict_type: StateDictType):
         """
         Tests saving and loading an optim state dict for Adam optimizer (i.e.
         any optimizer with a "step" key in its state) when the first parameter
