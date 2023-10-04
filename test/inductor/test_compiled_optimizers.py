@@ -172,7 +172,11 @@ class CompiledOptimizerTests(TestCase):
     test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
-    test_adagrad = make_test(Adagrad, kernel_count=2, lr=0.01)
+
+    test_adagrad = make_test(Adagrad, lr=0.01)
+    test_adagrad_weight_decay = make_test(Adagrad, weight_decay=0.01, lr=0.01)
+    test_adagrad_lr_decay = make_test(Adagrad, lr_decay=0.01, lr=0.01)
+
     test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
     test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
     test_asgd_foreach = make_test(ASGD, kernel_count=2, lr=0.1, foreach=True)
