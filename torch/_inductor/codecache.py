@@ -891,7 +891,7 @@ class VecZVECTOR(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_ZVECTOR"
     _arch_flags = "-mvx -mzvector"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         return "vx"
