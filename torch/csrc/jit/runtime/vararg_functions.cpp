@@ -267,6 +267,9 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 }
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
+  if (num_inputs > stack.size()) {
+    TORCH_CHECK(false, "Invalid number of inputs: ", num_inputs);
+  }
   switch (num_inputs) {
     case 0:
       stack.emplace_back(c10::ivalue::Tuple::create());
