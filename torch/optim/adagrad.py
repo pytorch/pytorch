@@ -342,11 +342,11 @@ def _multi_tensor_adagrad(
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_state_sums = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_state_sums
-        ]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        for i in range(len(device_params)):
+            if torch.is_complex(device_params[i]):
+                device_params[i] = torch.view_as_real(device_params[i])
+                device_grads[i] = torch.view_as_real(device_grads[i])
+                device_state_sums[i] = torch.view_as_real(device_state_sums[i])
 
         # Update steps
         torch._foreach_add_(device_state_steps, 1)
