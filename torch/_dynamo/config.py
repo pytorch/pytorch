@@ -224,6 +224,10 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# Ask DDP to register Python hook for AccumuldateGrad. With Python hook,
+# Dynamo can trace the allreduce in DDP. Experimential flag.
+ddp_python_hook = False
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 

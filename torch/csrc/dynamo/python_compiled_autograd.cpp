@@ -1,6 +1,7 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -437,8 +438,18 @@ variable_list compiled_autograd(
       saved.debug_asserts();
 
       if (!call.post_hooks.empty()) {
-        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
+        THPObjectPtr pyinputs;
+        if (call.node->name() == "torch::autograd::AccumulateGrad") {
+          // Special handling to insert `variable.grad` to the argument.
+          // Otherwise, there is no way the post hook of AccumulateGrad
+          // can change the gradient.
+          std::vector<Variable> vec;
+          vec.emplace_back(saved.get_grad());
+          pyinputs = THPVariable_WrapList(vec);
+        } else {
+          pyinputs = THPVariable_WrapList(inputs);
+        }
         for (const auto hook : call.post_hooks) {
           pyoutputs = check(PyObject_CallMethod(
               py_compiler.get(),

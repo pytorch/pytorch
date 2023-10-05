@@ -182,6 +182,11 @@ if torch.distributed.is_available():
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
     }
 
+    FILENAME_INLINELIST |= {
+        _module_dir(torch) + "distributed/algorithms/ddp_comm_hooks/default_hooks.py",
+        _module_dir(torch) + "distributed/_composable/replicate.py",
+    }
+
 # Include optimizer code for tracing
 FILENAME_INLINELIST |= {
     inspect.getfile(obj)

@@ -629,6 +629,15 @@ class SwapSavedVariables {
         state.outputs.size() == state.output_grad_targets.size());
     state.outputs.emplace_back(src);
     state.output_grad_targets.emplace_back(arg.index());
+    gradient = src;
+  }
+
+  void record_grad(const at::Tensor& grad) {
+    gradient = grad;
+  }
+
+  at::Tensor& get_grad() {
+    return gradient;
   }
 
   SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
@@ -684,6 +693,10 @@ class SwapSavedVariables {
   StashedVars<SavedVariable> stashed_variables;
   StashedVars<at::Tensor> stashed_tensors;
   StashedVars<c10::SymInt> stashed_symints;
+
+  // This gradient allows us to later fetch the result of AccumulateGrad as
+  // AccumulateGrad is an inplace action.
+  at::Tensor gradient;
 };
 
 } // namespace torch::dynamo::autograd

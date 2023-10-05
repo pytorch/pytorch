@@ -80,15 +80,20 @@ variable_list AccumulateGrad::apply_with_saved(
   }
   TORCH_INTERNAL_ASSERT(!variable.grad_fn() && grads.size() == 1);
   at::Tensor variable_copy = variable;
-  at::Tensor grad_copy = variable.grad();
+  at::Tensor& grad_copy = variable.mutable_grad();
   saved.before(variable_copy);
   saved.before(grad_copy);
+  // saved.assign_mutable_grad() will record the symbolic gradient result.
+  // However,  AccumulateGrad may not call the `update_grad` lambda but simply
+  // calls `add_()`. So we also have to record the symbolic gradient result here
+  // to guarantee can retrieve it back later.
+  saved.record_grad(grad_copy);
   accumulateGrad(
       variable_copy,
       grad_copy,
       grads[0],
       0 /* num_expected_refs, 0 disables aliased reuse */,
-      [&saved, this](const at::Tensor& grad_update) {
+      [&saved, this, &grad_copy](const at::Tensor& grad_update) {
         saved.assign_mutable_grad(variable, grad_update);
       });
   saved.after(variable_copy);
