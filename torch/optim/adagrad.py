@@ -320,15 +320,8 @@ def _multi_tensor_adagrad(
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
     for ((device_params, device_grads, device_state_sums, device_state_steps), _) in grouped_tensorlists.values():
-
-        device_has_sparse_grad = False
-        for grad in device_grads:
-            if grad.is_sparse:
-                device_has_sparse_grad = True
-                break
-
-        if device_has_sparse_grad:
-            return _single_tensor_adagrad(
+        if has_sparse_grad:
+            _single_tensor_adagrad(
                 device_params,
                 device_grads,
                 device_state_sums,
@@ -341,6 +334,7 @@ def _multi_tensor_adagrad(
                 maximize=False,
                 differentiable=differentiable,
             )
+            continue
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
