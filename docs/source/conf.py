@@ -103,6 +103,9 @@ coverage_ignore_functions = [
     "zip_by_key",
     # torch.distributed.autograd
     "is_available",
+    # torch.distributed.checkpoint.state_dict
+    "gc_context",
+    "state_dict",
     # torch.distributed.elastic.events
     "construct_and_record_rdzv_event",
     "record_rdzv_event",
@@ -1192,6 +1195,7 @@ coverage_ignore_functions = [
     "init_reductions",
     "rebuild_cuda_tensor",
     "rebuild_event",
+    "rebuild_nested_tensor",
     "rebuild_storage_empty",
     "rebuild_storage_fd",
     "rebuild_storage_filename",
@@ -2024,10 +2028,12 @@ coverage_ignore_functions = [
     "get_suffix_str",
     "mm_flop",
     "normalize_tuple",
+    "register_flop_formula",
     "sdpa_backward_flop",
     "sdpa_backward_flop_count",
     "sdpa_flop",
     "sdpa_flop_count",
+    "shape_wrapper",
     "transpose_shape",
     # torch.utils.hipify.hipify_python
     "add_dim3",
@@ -2070,24 +2076,6 @@ coverage_ignore_functions = [
     "to_mkldnn",
     # torch.utils.mobile_optimizer
     "generate_mobile_module_lints",
-    # torch.utils.pytree
-    "broadcast_prefix",
-    "map_only",
-    "register_pytree_node",
-    "tree_all",
-    "tree_all_only",
-    "tree_any",
-    "tree_any_only",
-    "tree_flatten",
-    "tree_leaves",
-    "tree_map",
-    "tree_map_",
-    "tree_map_only",
-    "tree_map_only_",
-    "tree_structure",
-    "tree_unflatten",
-    "treespec_dumps",
-    "treespec_loads",
     # torch.utils.tensorboard.summary
     "audio",
     "compute_curve",
@@ -2613,6 +2601,8 @@ coverage_ignore_classes = [
     "LoadPlanner",
     "SavePlanner",
     "WriteItemType",
+    # torch.distributed.checkpoint.state_dict
+    "DistributedStateDictOptions",
     # torch.distributed.checkpoint.storage
     "WriteResult",
     # torch.distributed.collective_utils

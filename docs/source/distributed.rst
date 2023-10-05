@@ -988,3 +988,4 @@ Distributed components raise custom Exception types derived from `RuntimeError`:
 .. py:module:: torch.distributed.tensor.parallel.input_reshard
 .. py:module:: torch.distributed.tensor.parallel.style
 .. py:module:: torch.distributed.utils
+.. py:module:: torch.distributed.checkpoint.state_dict

@@ -87,4 +87,3 @@ torch.utils
 .. py:module:: torch.utils.tensorboard.writer
 .. py:module:: torch.utils.throughput_benchmark
 .. py:module:: torch.utils.weak
-.. py:module:: torch.utils.pytree
