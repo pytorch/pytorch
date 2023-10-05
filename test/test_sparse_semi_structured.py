@@ -178,23 +178,23 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
-    def test_mm_sparse_first_T(self, dtype, device, backend):
+    @dtypes(*semi_structured_supported_dtypes)
+    @parametrize("backend", semi_structured_supported_backends)
+    def test_mm_sparse_first_t(self, dtype, device, backend):
         """
-        Ensure torch.mm(A_sparse.t(), B) throws error
+        ensure torch.mm(a_sparse.t(), b) throws error
         """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
-        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A)
+        sparsesemistructuredtensor._force_cutlass = (backend == "cutlass")
+        a = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        a_sparse = to_sparse_semi_structured(a)
 
-        B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
+        b = torch.rand((128, 128), device=a_sparse.device).to(dtype)
 
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            r"arg0: SparseSemiStructuredTensor\(.*transposed=True",
+        with self.assertraisesregex(
+            notimplementederror,
+            r"arg0: sparsesemistructuredtensor\(.*transposed=true",
         ):
-            torch.mm(A_sparse.t(), B)
+            torch.mm(a_sparse.t(), b)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
@@ -273,6 +273,27 @@ class TestSparseSemiStructured(TestCase):
             with torch.inference_mode():
                 sparse_result = model(input)
         else:
+            sparse_result = model(input)
+
+        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_padding_linear(self, device, backend):
+        """
+        Test padding for inputs that aren't multiples of 8 
+        """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        input = torch.rand(1, 128, device=device).half()
+        model = nn.Linear(128, 128).to(device).half()
+        m, n = model.weight.shape
+        mask = rand_sparse_semi_structured_mask(m, n, device=device, dtype=torch.bool)
+        # set masked weight
+        model.weight = nn.Parameter(model.weight * mask)
+
+        dense_result = model(input)
+
+        model.weight = nn.Parameter(to_sparse_semi_structured(model.weight))
+        with torch.inference_mode():
             sparse_result = model(input)
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
