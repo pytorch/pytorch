@@ -320,7 +320,9 @@ def _multi_tensor_adagrad(
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
     for ((device_params, device_grads, device_state_sums, device_state_steps), _) in grouped_tensorlists.values():
-        if has_sparse_grad:
+        device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
+
+        if device_has_sparse_grad:
             _single_tensor_adagrad(
                 device_params,
                 device_grads,
