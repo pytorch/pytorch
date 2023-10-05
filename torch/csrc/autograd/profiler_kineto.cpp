@@ -100,7 +100,7 @@ auto parseArgData(
   std::vector<c10::IValue> concrete_inputs_list;
 
   for (const auto& i : c10::irange(input_shapes.size())) {
-    c10::visit(
+    std::visit(
         c10::overloaded(
             [&](const TensorMetadata& t) {
               shapes[i] = t.sizes_;
@@ -127,12 +127,12 @@ auto parseArgData(
     concrete_inputs_list.resize(input_shapes.size());
 
     for (const auto& i : c10::irange(input_shapes.size())) {
-      c10::visit(
+      std::visit(
           c10::overloaded(
               [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
               [&](const auto&) {}),
           input_shapes[i]);
-      c10::visit(
+      std::visit(
           c10::overloaded(
               [&](const c10::IValue& val) {
                 concrete_inputs_list[i] = val;

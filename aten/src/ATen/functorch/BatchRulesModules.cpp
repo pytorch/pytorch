@@ -391,6 +391,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BATCH(upsample_nearest2d);
   UPSAMPLE_BATCH(upsample_nearest3d);
   UPSAMPLE_BATCH(upsample_trilinear3d);
+  UPSAMPLE_BATCH(_upsample_bilinear2d_aa);
+  UPSAMPLE_BATCH(_upsample_bicubic2d_aa);
 
   UPSAMPLE_BACKWARD(upsample_bicubic2d_backward);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward);
@@ -399,6 +401,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BACKWARD(upsample_nearest2d_backward);
   UPSAMPLE_BACKWARD(upsample_nearest3d_backward);
   UPSAMPLE_BACKWARD(upsample_trilinear3d_backward);
+  UPSAMPLE_BACKWARD(_upsample_bilinear2d_aa_backward);
+  UPSAMPLE_BACKWARD(_upsample_bicubic2d_aa_backward);
+
   m.impl("one_hot", one_hot_decomposition_hack);
 }
 }}

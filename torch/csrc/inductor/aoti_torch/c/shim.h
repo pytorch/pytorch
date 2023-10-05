@@ -171,6 +171,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle* ret8 // returns new reference
 );
 
+// This function will create a new uninitialized tensor object
+// and its pointer is returned through *ret.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
@@ -214,7 +219,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_ints,
     int64_t* flatten_int_args,
     int num_tensors,
-    void** flatten_tensor_args);
+    AtenTensorHandle* flatten_tensor_args);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -2591,3 +2591,16 @@ class TestHelperModules:
             x = x * y
             x *= y
             return x
+
+    class ConvBnReLU2dAndLinearReLU(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv_bn_relu = TestHelperModules.ConvWithBNRelu(relu=True)
+            self.linear = torch.nn.Linear(3, 8, bias=False)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.conv_bn_relu(x)
+            permute_out = torch.permute(x, (0, 2, 3, 1))
+            linear_out = self.linear(permute_out)
+            return linear_out
