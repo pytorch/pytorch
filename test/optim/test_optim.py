@@ -1300,11 +1300,11 @@ class TestOptim(TestCase):
     def test_adadelta_complex(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 2e-2
-        for optimizer in [optim.Adadelta]:
-            self._test_complex_optimizer(lambda weight: optimizer([weight]))
-            self._test_complex_optimizer(lambda weight: optimizer([weight], rho=0.95))
+        for foreach in (False, True):
+            self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], foreach=foreach))
+            self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], rho=0.95, foreach=foreach))
             self._test_complex_optimizer(
-                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+                lambda weight: optim.Adadelta([weight], rho=0.95, weight_decay=1, foreach=foreach)
             )
 
     def test_nadam(self):
