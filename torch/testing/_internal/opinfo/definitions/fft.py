@@ -762,7 +762,8 @@ python_ref_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
+            DecorateInfo(skipIfTorchDynamo(), "TestCommon", "test_out_warning"),
         ],
     ),
     SpectralFuncPythonRefInfo(
