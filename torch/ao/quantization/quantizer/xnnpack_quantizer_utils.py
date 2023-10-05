@@ -223,12 +223,6 @@ def _annotate_conv(
             continue
         conv_node = n
 
-        if filter_fn and not filter_fn(conv_node):
-            continue
-
-        if _is_annotated([conv_node]):
-            continue
-
         input_qspec_map = {}
         input_act = conv_node.args[0]
         assert isinstance(input_act, Node)
@@ -245,6 +239,12 @@ def _annotate_conv(
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
             partition.append(bias)
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
+            continue
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -283,12 +283,6 @@ def _annotate_conv_relu(
             continue
         conv_node = maybe_conv_node
 
-        if filter_fn and any(not filter_fn(n) for n in partition):
-            continue
-
-        if _is_annotated(partition):
-            continue
-
         input_qspec_map = {}
         input_act = conv_node.args[0]
         assert isinstance(input_act, Node)
@@ -304,6 +298,12 @@ def _annotate_conv_relu(
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
             partition.append(bias)
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
+            continue
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map, _annotated=True
