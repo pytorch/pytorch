@@ -395,7 +395,7 @@ def _fused_sgd(
             momentum_buffer_list[i] = torch.empty_like(g)
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True)
-    for (device, dtype), (device_params, device_grads, device_momentum_buffer_list, indices) in grouped_tensors.items():
+    for (device, dtype), ((device_params, device_grads, device_momentum_buffer_list), indices) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
