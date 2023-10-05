@@ -11,7 +11,6 @@ from contextlib import nullcontext
 from enum import Enum
 from functools import partial
 from inspect import signature
-from torch._subclasses.fake_tensor import get_schema_info
 from typing import (
     Any,
     Callable,
@@ -45,6 +44,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
