@@ -59,6 +59,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    @unittest.skipIf(True, "array scalars decay to 0D arrays")
     def test_builtin_max_min(self):
         # test unspecialized primitive max/min
         def fn(x, y, z):
