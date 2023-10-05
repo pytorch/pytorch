@@ -1305,7 +1305,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
+        new_set = SetVariable(items, mutable_local=MutableLocal(), **options)
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
@@ -2325,7 +2325,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
-        # Detect inline GraphModule calls in order to propgate node metadata,
+        # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
