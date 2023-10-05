@@ -141,8 +141,7 @@ class _FunctionalAdam:
 
         for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
-                if torch.is_complex(param):
-                    has_complex = True
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization

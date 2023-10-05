@@ -90,8 +90,7 @@ class Adam(Optimizer):
         has_complex = False
         for p in group['params']:
             if p.grad is not None:
-                if torch.is_complex(p):
-                    has_complex = True
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
