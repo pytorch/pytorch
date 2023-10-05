@@ -323,7 +323,7 @@ def _multi_tensor_adagrad(
         device_has_sparse_grad = has_sparse_grad and any(grad.is_sparse for grad in device_grads)
 
         if device_has_sparse_grad:
-            _single_tensor_adagrad(
+            return _single_tensor_adagrad(
                 device_params,
                 device_grads,
                 device_state_sums,
@@ -336,7 +336,6 @@ def _multi_tensor_adagrad(
                 maximize=False,
                 differentiable=differentiable,
             )
-            continue
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
