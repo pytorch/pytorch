@@ -1594,11 +1594,7 @@ def is_flaky(
 
     # Consult the list of flaky failures from Dr.CI
     return any(
-        (
-            workflow_name == flaky["name"]
-            or job_name == flaky["name"]
-            or full_name == flaky["name"]
-        )
+        full_name == flaky["name"]
         for flaky in drci_classifications.get("FLAKY", [])
     )
 
