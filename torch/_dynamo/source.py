@@ -272,7 +272,7 @@ class ConvertIntSource(ChainedSource):
         # is essentially an if-else statement based on input: if the guard check succeed, dynamo uses the
         # cahced optimized code. if the guard check fails, dynamo re-compiles and install necessary guards in SHAPE_ENV
         # and propagate the guards to outer shape_env.
-        return f"{self.base.name()}.__int__()"
+        return f"create_symint_from_symbool_guardless({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)

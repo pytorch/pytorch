@@ -537,10 +537,19 @@ class GraphModule(torch.nn.Module):
             exp_graphs=[true_graph, true_graph, false_graph, false_graph],
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                [
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                ],
+                [
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                ],
             ],
         )
 
@@ -551,10 +560,23 @@ class GraphModule(torch.nn.Module):
             exp_graphs=[false_graph, false_graph, true_graph, true_graph],
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
-                ["Ne(s0, 4)"],
-                ["Ne(s0, 4)", "Ne(s0, 5)"],
-                ["Ne(s0, 4)", "Ne(s0, 5)", "Eq(s0, 3)"],
-                ["Ne(s0, 4)", "Ne(s0, 5)", "Eq(s0, 3)"],
+                ["Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)"],
+                [
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                ],
+                [
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                ],
+                [
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                ],
             ],
         )
 
