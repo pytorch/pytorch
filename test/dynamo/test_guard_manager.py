@@ -179,7 +179,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             lambda x: isinstance(x, list),
             lambda x: f"Expected tuple but got {type(x)}",
         )
-        guard_manager[0:1].add_lambda_guard(
+        guard_manager[slice(2)].add_lambda_guard(
             lambda x: x[0] == 1,
             lambda x: f"Expected int but got {type(x)}",
         )
