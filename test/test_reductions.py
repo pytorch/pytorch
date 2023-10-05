@@ -2827,15 +2827,14 @@ class TestReductions(TestCase):
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_warn_invalid_degrees_of_freedom(self, device, dtype):
-        correction = 20
-        _size = (10, correction)
-        tensor = make_tensor(_size, dtype=dtype, device=device)
-
-        def _assert_warning(func, tensor, correction):
+        def _assert_warning(_func, _tensor, _correction):
             with warnings.catch_warnings(record=True) as w:
-                func(tensor, dim=-1, correction=correction)
+                _func(_tensor, dim=-1, correction=_correction)
             self.assertIn('degrees of freedom is <= 0', str(w[0].message))
 
+        correction = 20
+        size = (10, correction)
+        tensor = make_tensor(size, dtype=dtype, device=device)
         for f in [torch.std, torch.var, torch.var_mean, torch.std_mean]:
             _assert_warning(f, tensor, correction)
 
