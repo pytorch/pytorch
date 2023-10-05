@@ -1426,12 +1426,11 @@ class TritonKernel(Kernel):
             dtype = V.graph.get_dtype(name)
             if dtype in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
-            if dtype == torch.bool:
+            if dtype == torch.bool and torch.version.hip is None::
                 # Workaround for https://github.com/openai/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
                 # NOTE: Currently causes hangs on bool UTs for ROCm
-                if torch.version.hip is None:
-                    line += ".to(tl.int1)"
+                line += ".to(tl.int1)"
 
         if "tmp" in mask:
             # Masked loads must come after the mask is computed
