@@ -9,6 +9,7 @@ import inspect
 import json
 import os
 import unittest
+from importlib import import_module
 
 
 class TestPublicBindings(TestCase):
@@ -220,6 +221,45 @@ class TestPublicBindings(TestCase):
         difference = torch_C_bindings.difference(torch_C_allowlist_superset)
         msg = f"torch._C had bindings that are not present in the allowlist:\n{difference}"
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
+
+    # AttributeError: module 'torch.distributed' has no attribute '_shard'
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
+    def test_modules_can_be_imported(self):
+        failure = []
+        succcess = []
+        for _, modname, _ in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
+            try:
+                # TODO: fix "torch/utils/model_dump/__main__.py"
+                # which calls sys.exit() when we try to import it
+                if "__main__" in modname:
+                    continue
+                import_module(modname)
+            except Exception:
+                # Some current failures are not ImportError
+                failure.append(modname)
+
+        self.assertExpectedInline("\n".join(failure), """\
+torch._inductor.codegen.cuda.cuda_kernel
+torch._inductor.codegen.cuda.cuda_template
+torch._inductor.codegen.cuda.gemm_template
+torch._inductor.triton_helpers
+torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity
+torch.backends._coreml.preprocess
+torch.contrib._tensorboard_vis
+torch.onnx._internal.fx._pass
+torch.onnx._internal.fx.analysis
+torch.onnx._internal.fx.diagnostics
+torch.onnx._internal.fx.fx_onnx_interpreter
+torch.onnx._internal.fx.fx_symbolic_graph_extractor
+torch.onnx._internal.fx.onnxfunction_dispatcher
+torch.onnx._internal.fx.op_validation
+torch.onnx._internal.fx.passes
+torch.onnx._internal.fx.type_utils
+torch.testing._internal.distributed.distributed_test
+torch.utils.benchmark.examples.blas_compare
+torch.utils.benchmark.examples.end_to_end
+torch.utils.tensorboard._caffe2_graph""")
+
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
