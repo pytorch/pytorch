@@ -237,8 +237,8 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
               "stride = ", strides_input[0], ", column stride = ",
               strides_input[1]);
   TORCH_CHECK(weight.layout() == Layout::Strided,
-              "_mixed_dtypes_linear: Expected inpu argument to be strided, but "
-              "got layout ", weight.layout());
+              "_mixed_dtypes_linear: Expected input argument to be strided, "
+              "but got layout ", weight.layout());
   TORCH_CHECK(weight.dim() == 2,
               "_mixed_dtypes_linear: Expected weight argument to be 2D tensor, "
               "got ", weight.dim(), " dims");

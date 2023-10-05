@@ -288,7 +288,7 @@ class TestFP8MatmulCuda(TestCase):
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-@unittest.skipIf(not _IS_SM8X, "mixed dtypes MM only supported on SM 8.x")
+@unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
