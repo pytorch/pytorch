@@ -317,7 +317,7 @@ def _all_to_all_single(
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
 
     if output_split_sizes is not None:
-        assert input.dim() >= 1, f"Expected input to have at least 1 dim but got {input.dim()} dim"
+        torch._check(input.dim() >= 1, lambda: f"Expected input to have at least 1 dim but got {input.dim()} dim")
         out_size = list(input.size())
         out_size[0] = sum(output_split_sizes)
         out_tensor = input.new_empty(out_size)

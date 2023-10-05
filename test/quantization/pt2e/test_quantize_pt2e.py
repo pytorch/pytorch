@@ -849,7 +849,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     bias=None,
                     output_activation=int16_qspec,
                 )
-                OP_TO_ANNOTATOR["conv2d"](model, quantization_config)
+                OP_TO_ANNOTATOR["conv"](model, quantization_config)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -1075,7 +1075,32 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
-    def test_xnnpack_quantizer_conv(self):
+    def test_xnnpack_quantizer_conv1d(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5),)
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv1d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            TestHelperModules.ConvWithBNRelu(dim=1, relu=False, bn=False),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
+    def test_xnnpack_quantizer_conv2d(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
@@ -1095,6 +1120,34 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         ]
         self._test_quantizer(
             TestHelperModules.ConvWithBNRelu(relu=False, bn=False),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
+    def test_xnnpack_quantizer_conv1d_with_conv2d(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv1d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            TestHelperModules.Conv1dWithConv2d(),
             example_inputs,
             quantizer,
             node_occurrence,

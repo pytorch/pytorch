@@ -541,7 +541,11 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 
     return [mk_out_tensor(t) for t in inputs]
 
-# TODO: think, this isn't actually dynamic?!
+# NB: We often say all_to_all has dynamic output size, but this is not
+# technically true: instead, what typically happens is you manually
+# communicate the output_split_sizes ahead of time (which is dynamic),
+# but then you pass those sizes explicitly, and the all to all itself
+# isn't dynamic, it just follows the specified output splits
 def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, rankset, group_size):
     if output_split_sizes is None:
         return input.new_empty(input.size())
