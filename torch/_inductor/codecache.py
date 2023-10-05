@@ -798,8 +798,7 @@ def get_include_and_linking_paths(
             sysconfig.get_config_var("LIBDIR")
         ]
 
-        # Unconditionally link with "c10" to use TORCH_CHECK. See PyTorch#108690
-        libs = ["c10"]
+        libs = []
 
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
@@ -896,6 +895,11 @@ def get_include_and_linking_paths(
             # and raise error together with instructions at compilation error later
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
+
+
+    # Unconditionally link with "c10" to use TORCH_CHECK. See PyTorch#108690
+    libs += ["c10"]
+
 
     # third party libs
     if config.is_fbcode():
