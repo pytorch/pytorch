@@ -1082,7 +1082,7 @@ void ProcessGroupNCCL::runHookLoop() {
             timeStarted, // timeStarted
             std::chrono::system_clock::now(), // timeFinished
             std::chrono::duration<float, std::milli>(
-                work.getDuration()) // activeDuration
+                work.getDuration().value()) // activeDuration
             ));
 
         lock.lock();
@@ -1585,19 +1585,19 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   return future_;
 }
 
-float ProcessGroupNCCL::WorkNCCL::getDuration() const {
-  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled")
+c10::optional<float> ProcessGroupNCCL::WorkNCCL::getDuration() const {
+  if (!timingEnabled_ || !((*ncclEndEvents_)[0].query())) {
+    return c10::optional<float>();
+  }
   TORCH_CHECK(
       ncclStartEvents_->size() == 1,
       "getDuration only works for single device per ProcessGroup.");
   TORCH_CHECK(
       ncclEndEvents_->size() == 1,
       "getDuration only works for single device per ProcessGroup.");
-  TORCH_CHECK(
-      (*ncclEndEvents_)[0].query(),
-      "getDuration can only be called after work is succeeded.")
   return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
 }
+
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
   return seq_;
 }
