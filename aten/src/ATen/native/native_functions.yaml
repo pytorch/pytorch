@@ -7130,7 +7130,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    CompositeImplicitAutogradNestedTensor: NestedTensor_unbind
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
