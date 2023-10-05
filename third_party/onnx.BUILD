@@ -80,6 +80,8 @@ cc_library(
         "onnx/defs/controlflow/*.h",
         "onnx/defs/reduction/*.h",
         "onnx/defs/tensor/*.h",
+        "onnx/defs/generator/*.h",
+        "onnx/defs/text/*.h",
         "onnx/shape_inference/*.h",
         "onnx/version_converter/adapters/*.h",
     ]) + [
