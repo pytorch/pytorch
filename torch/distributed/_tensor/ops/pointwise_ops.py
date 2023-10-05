@@ -350,6 +350,7 @@ pointwise_ops = [
     aten.trunc.out,
     aten.trunc_.default,
     aten.where.self,
+    aten.where.self_out,
     aten.xlogy.OutScalar_Self,
     aten.xlogy.OutScalar_Other,
     aten.xlogy.OutTensor,
