@@ -1238,7 +1238,7 @@ class BuiltinVariable(VariableTracker):
                 )
 
                 if name_var.value == "data":
-                    print("SET DATA?", obj.as_proxy().node.meta['example_value'].size(), val.as_proxy().node.meta['example_value'].size())
+                    log.warning("SET DATA? %s %s", obj.as_proxy().node.meta['example_value'].size(), val.as_proxy().node.meta['example_value'].size())
                     to_remove = []
                     for tf in tx.output.tracked_fakes:
                         if tf.source == obj.source:

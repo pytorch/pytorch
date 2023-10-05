@@ -1045,7 +1045,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-        gm.graph.print_tabular()
+        log.warning("%s", gm.graph)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -1075,8 +1075,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # breakpoint()
         gpu_id = int(os.environ.get("LOCAL_RANK", 0))
         if gpu_id == 0:
-            gm.graph.print_tabular()
-            print("DYNAMO OVER!!!")
+            log.warning("%s", gm.graph)
+            log.warning("DYNAMO OVER!!!")
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:
