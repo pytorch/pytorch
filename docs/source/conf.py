@@ -515,7 +515,7 @@ def coverage_post_process(app, exception):
     for _, modname, ispkg in pkgutil.walk_packages(
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
-        if ispkg and is_not_internal(modname):
+        if is_not_internal(modname):
             if modname not in modules:
                 missing.add(modname)
 
