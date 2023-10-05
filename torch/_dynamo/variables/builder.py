@@ -771,8 +771,9 @@ class VariableBuilder:
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
-            return SymNodeVariable.create(
-                self.tx, sym_node_proxy, new_symint == 1, source=new_source
+            return SymNodeVariable(
+                sym_node_proxy,
+                new_symint == 1,
             )
         elif isinstance(value, JITFunction):
             return TritonKernelVariable(
@@ -1497,7 +1498,7 @@ def wrap_fx_proxy_cls(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         elif istype(example_value, set):
-            return SetVariable(tx, unpacked, mutable_local=MutableLocal(), **options)
+            return SetVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
