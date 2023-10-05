@@ -1286,7 +1286,11 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(
+                        UserErrorType.DYNAMIC_CONTROL_FLOW,
+                        str(e),
+                        case_name="cond_operands",
+                    )
 
         if same_signature:
             flat_args_dynamic_dims = [

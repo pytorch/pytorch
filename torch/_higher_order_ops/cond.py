@@ -405,12 +405,3 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
         return ctx.wrap_tensors(cond_return)
-
-
-# TODO(voz): Make this automatic for keys, this is very ugly atm
-cond_op.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-cond_op.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-cond_op.fallthrough(DispatchKey.ADInplaceOrView)
-cond_op.fallthrough(DispatchKey.BackendSelect)
-cond_op.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-cond_op.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]

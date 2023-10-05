@@ -75,12 +75,6 @@ class OutDtypeOperator(HigherOrderOperator):
 
 
 out_dtype = OutDtypeOperator()
-out_dtype.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.ADInplaceOrView)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.BackendSelect)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     # NB: Long-term we should put the decomposition logic into

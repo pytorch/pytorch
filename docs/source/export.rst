@@ -64,8 +64,8 @@ serialized.
         Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
-following invariants. More specifications about the IR can be found here (coming
-soon!).
+following invariants. More specifications about the IR can be found
+:ref:`here <export.ir_spec>`.
 
 * **Soundness**: It is guaranteed to be a sound representation of the original
   program, and maintains the same calling conventions of the original program.
@@ -536,6 +536,7 @@ Read More
    :caption: Additional Links for Export Users
    :maxdepth: 1
 
+   export.ir_spec
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
