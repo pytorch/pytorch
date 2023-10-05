@@ -965,6 +965,7 @@ def _get_default_store():
 
 def _update_default_pg(pg):
     _world.default_pg = pg
+    torch._C._distributed_c10d._set_global_rank(pg.rank())
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     if group is None:
