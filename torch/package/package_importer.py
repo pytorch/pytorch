@@ -6,6 +6,7 @@ import io
 import linecache
 import os.path
 import types
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, cast, Dict, Iterable, List, Optional, Union
@@ -27,6 +28,12 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import _create_directory_from_file_list, Directory
 from .glob_group import GlobPattern
 from .importer import Importer
+
+try:
+    from _imp import _maybe_set_parent_attribute, _set_lazy_attributes
+except ImportError:
+    _maybe_set_parent_attribute = None
+    _set_lazy_attributes = None
 
 __all__ = ["PackageImporter"]
 
@@ -420,12 +427,26 @@ class PackageImporter(Importer):
         return _PackageResourceReader(self, fullname)
 
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
-        if not parent:
-            return
-        # Set the module as an attribute on its parent.
-        parent_module = self.modules[parent]
-        if parent_module.__loader__ is self:
-            setattr(parent_module, name.rpartition(".")[2], module)
+        if parent:
+            # Set the module as an attribute on its parent.
+            parent_module = self.modules[parent]
+            if parent_module.__loader__ is self:
+                child = name.rpartition(".")[2]
+                try:
+                    if _maybe_set_parent_attribute:
+                        _maybe_set_parent_attribute(parent_module, child, module, name)
+                    else:
+                        setattr(parent_module, child, module)
+                except Exception as e:
+                    msg = f"Cannot set an attribute on {parent!r} for child module {child!r}: {e!r}"
+                    warnings.warn(msg, ImportWarning)
+        # Set attributes to lazy submodules on the module.
+        if _set_lazy_attributes:
+            try:
+                _set_lazy_attributes(module, name)
+            except Exception as e:
+                msg = f"Cannot set lazy attributes on {name!r}: {e!r}"
+                warnings.warn(msg, ImportWarning)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
     def _do_find_and_load(self, name):
