@@ -231,7 +231,7 @@ class SizeVarAllocator:
     # Note - [On Statically Known]
     #
     # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
-    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
+    # operated by providing essentially a question, where the size hinted values were evaluated. If the condition was
     # true, we add a guard and return True, otherwise, False.
     #
     # def maybe_guard_foo(args):
