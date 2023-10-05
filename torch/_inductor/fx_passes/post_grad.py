@@ -10,7 +10,7 @@ from sympy import Expr
 import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -443,37 +443,6 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         )
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        KeywordArg("inp"),
-    ),
-    pass_number=2,
-)
-@register_lowering_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("inp"),
-        CallFunction(aten.mm, Arg(), Arg()),
-    ),
-    pass_number=2,
-)
-def addmm(match, mat1, mat2, inp):
-    if isinstance(inp, ir.TensorBox):
-        inp_shape = inp.get_size()
-        matched = len(inp_shape) <= 2
-        mm_shape = shape_of_mm(mat1, mat2)
-        for i, m in zip(inp_shape, mm_shape):
-            matched &= i == 1 or i == m
-    else:  # inp is a Number
-        matched = False
-    if matched:
-        return L[aten.addmm](inp, mat1, mat2)
-    else:
-        return L[aten.add](inp, L[aten.mm](mat1, mat2))
-
-
 def is_valid_splitwithsizes_cat(match):
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
@@ -789,20 +758,67 @@ def is_pointwise_use(use):
     return torch.Tag.pointwise in use.target.tags
 
 
-@register_graph_pattern(
-    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
-    pass_dict=pass_patterns[2],
-)
-def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
+def should_prefer_unfused_addmm(match):
+    inp = match.kwargs["inp"]
     if not inp.meta["val"].is_cuda:
-        return
+        return False
 
     output = match.output_node()
-    if not all(is_pointwise_use(use) for use in output.users):
-        return
+    return all(is_pointwise_use(use) for use in output.users)
 
+
+@register_graph_pattern(
+    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
+    pass_dict=pass_patterns[2],
+    extra_check=should_prefer_unfused_addmm,
+)
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def is_valid_addmm_fusion(match):
+    mat1, mat2 = match.args
+    inp = match.kwargs["inp"]
+
+    if not (
+        isinstance(inp, torch.fx.Node) and isinstance(inp.meta["val"], torch.Tensor)
+    ):
+        return False  # Input is a number
+
+    in_shape = inp.meta["val"].shape
+    mm_shape = mat1.meta["val"].shape[0], mat2.meta["val"].shape[1]
+    matched = is_expandable_to(in_shape, mm_shape)
+    if not matched:
+        return False  # Shape mismatch
+
+    return not should_prefer_unfused_addmm(match)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(aten.mm, Arg(), Arg()),
+        KeywordArg("inp"),
+    ),
+    pass_dict=pass_patterns[2],
+    extra_check=is_valid_addmm_fusion,
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        KeywordArg("inp"),
+        CallFunction(aten.mm, Arg(), Arg()),
+    ),
+    pass_dict=pass_patterns[2],
+    extra_check=is_valid_addmm_fusion,
+)
+def addmm(match, mat1, mat2, *, inp):
+    def repl(inp, mat1, mat2):
+        return aten.addmm(inp, mat1, mat2)
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, mat1, mat2])

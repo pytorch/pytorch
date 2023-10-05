@@ -96,9 +96,8 @@ def export__RC__(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    from typing import get_origin, get_args
 
-    def assoc_zip(combined_args, dynamic_shapes):
+    def tree_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, (tuple, list)):
             if not isinstance(dynamic_shapes, Sequence):
                 raise UserError(
@@ -112,7 +111,7 @@ def export__RC__(
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
                 )
             for i, shape in enumerate(dynamic_shapes):
-                yield from assoc_zip(combined_args[i], shape)
+                yield from tree_zip(combined_args[i], shape)
         elif isinstance(combined_args, dict):
             if not isinstance(dynamic_shapes, Mapping):
                 raise UserError(
@@ -126,7 +125,7 @@ def export__RC__(
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
                 )
             for k, shape in dynamic_shapes.items():
-                yield from assoc_zip(combined_args[k], shape)
+                yield from tree_zip(combined_args[k], shape)
         elif dataclasses.is_dataclass(combined_args):
             if not type(dynamic_shapes) == type(combined_args):
                 raise UserError(
@@ -135,7 +134,7 @@ def export__RC__(
                     f"got {dynamic_shapes} instead",
                 )
             for f in dataclasses.fields(combined_args):
-                yield from assoc_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
+                yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
         else:
@@ -188,11 +187,17 @@ def export__RC__(
                     "try None instead",
                 )
 
-    import inspect
-    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
-    combined_args = signature.bind(*args, **kwargs).arguments
+    if isinstance(f, ExportedProgram):
+        combined_args = {
+            k: args[i] if i < len(args) else kwargs[k]
+            for i, k in enumerate(dynamic_shapes)
+        }
+    else:
+        import inspect
+        signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+        combined_args = signature.bind(*args, **kwargs).arguments
 
-    for tensor, shape in assoc_zip(combined_args, dynamic_shapes):
+    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
     constraints = []

@@ -945,6 +945,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self.scheduler = scheduler
             self.snodes = nodes
 
+            self.node = None
+            self.users = None
+
             self.set_read_writes(
                 dependencies.ReadWrites.merge_list(
                     [prev_node_1.read_writes, prev_node_2.read_writes]
