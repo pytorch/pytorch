@@ -963,7 +963,7 @@ class PostProcess {
     const auto initial_size = out.size();
     auto pop = [](stack_t& stack, time_t t) {
       TORCH_INTERNAL_ASSERT(!stack.empty(), "Python replay stack is empty.");
-      c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+      std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
       stack.pop_back();
     };
 
@@ -1002,7 +1002,7 @@ class PostProcess {
     auto it = out.rbegin();
     for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
-          c10::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
+          std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
         const auto& tid_info =
             tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}})
@@ -1072,7 +1072,7 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {
-    c10::visit(id_visitor, i->extra_fields_);
+    std::visit(id_visitor, i->extra_fields_);
   }
 
   return out;
