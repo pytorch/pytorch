@@ -281,6 +281,7 @@ test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
   pytest test/inductor/test_torchinductor.py -k test_multi_gpu
+  pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
@@ -311,6 +312,8 @@ if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
+elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
@@ -465,6 +468,8 @@ test_dynamo_benchmark() {
   else
     if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+    elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"

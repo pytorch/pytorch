@@ -1,9 +1,12 @@
 import torch
-from torch._export import ExportedProgram
 from torch._guards import detect_fake_mode
 
 
-def lift_constant_tensor_pass(ep: ExportedProgram) -> ExportedProgram:
+def lift_constant_tensor_pass(ep):
+    """
+    Takes an ExportedProgram and returns the ExportedProgram modified in-place,
+    with the constant tensors as buffers.
+    """
     if len([node for node in ep.graph.nodes if node.op == "placeholder"]) == 0:
         return ep
 
