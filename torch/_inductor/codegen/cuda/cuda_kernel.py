@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Callable, Dict, List, Optional
 
 from ...autotune_process import CUDABenchmarkRequest
@@ -272,7 +270,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[Layout | Buffer],
+        input_nodes: List[Buffer],
         layout: Layout,
         make_kernel_render: Callable[[str], str],
         bmreq: CUDABenchmarkRequest,

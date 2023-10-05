@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -32,9 +33,19 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_torchinductor import copy_tests, requires_cuda, TestFailure
+        from .test_torchinductor import (
+            copy_tests,
+            requires_cuda,
+            requires_multigpu,
+            TestFailure,
+        )
     except ImportError:
-        from test_torchinductor import copy_tests, requires_cuda, TestFailure
+        from test_torchinductor import (
+            copy_tests,
+            requires_cuda,
+            requires_multigpu,
+            TestFailure,
+        )
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -67,6 +78,8 @@ class AOTInductorModelRunner:
             optimized = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[launcher],
+                # use a unique build directory to avoid test interference
+                build_directory=tempfile.mkdtemp(),
                 functions=["run"],
                 extra_ldflags=[so_path],
                 with_cuda=not is_cpu,
@@ -689,10 +702,11 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
-    @unittest.skipIf(
-        torch.cuda.device_count() < 2, "The test requires multiple devices"
-    )
+    @requires_multigpu()
     def test_non_default_cuda_device(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
         class Model(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()

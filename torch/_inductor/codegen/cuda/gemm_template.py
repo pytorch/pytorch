@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import copy
 import logging
 import re
@@ -23,7 +21,7 @@ GEMM_TEMPLATE = r"""
 {{template.globals().getvalue()}}
 {{instance_definition}}
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
-// Otherwise, compuates the Gemm kernel using the given workspace ptr.
+// Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
 {{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   try {
@@ -158,7 +156,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def __init__(
         self,
-        input_nodes: List[Layout | Buffer],
+        input_nodes: List[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
@@ -480,7 +478,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         kernel: CUDATemplateKernel,
         op: cutlass_gemm_op.GemmOperation,  # type: ignore[name-defined]
-        output_node: Optional[Layout | Buffer] = None,
+        output_node: Optional[Buffer] = None,
     ) -> str:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]

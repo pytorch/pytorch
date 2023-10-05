@@ -1176,14 +1176,11 @@ class WelfordReduction(Reduction):
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        # FIXME there's a bunch of dead code in this method, see https://github.com/pytorch/pytorch/issues/109963
-        # Most of the type-ignore comments below are due to this dead code
-
-        def const(idx, val):
+        def const(val):
             def inner_fn(idx):
                 return ops.constant(
                     val,
-                    dst_dtype,  # type: ignore[name-defined]
+                    dtype,
                 )
 
             return Pointwise.create(
@@ -1194,9 +1191,9 @@ class WelfordReduction(Reduction):
             )
 
         if reduction_numel == 0:
-            mean = const(0)  # type: ignore[call-arg]
-            m2 = const(0)  # type: ignore[call-arg]
-            weight = const(0)  # type: ignore[call-arg]
+            mean = const(0)
+            m2 = const(0)
+            weight = const(0)
             return mean, m2, weight
 
         if reduction_numel == 1:
@@ -1208,13 +1205,13 @@ class WelfordReduction(Reduction):
 
                 return Pointwise.create(
                     device=device,
-                    dtype=dst_dtype,  # type: ignore[name-defined]
+                    dtype=dtype,
                     inner_fn=inner_fn,
                     ranges=list(ranges),
                 )
 
             if reduction_type == "welford_reduce":
-                return copy(inner_fns[0]), const(0), const(1)  # type: ignore[call-arg]
+                return copy(inner_fns[0]), const(0), const(1)
             else:
                 return tuple(copy(fn) for fn in inner_fns)
 
@@ -4028,8 +4025,12 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, int):
                 return output
+            elif isinstance(output, torch.SymInt):
+                return output.node.expr
             else:
-                assert output is None, "FallbackKernel output type is not supported"
+                assert (
+                    output is None
+                ), f"FallbackKernel output type {type(output)} is not supported"
                 return None
 
         outputs = generate_output(example_output, [])
@@ -5962,7 +5963,7 @@ class InPlaceHint(ExternKernel):
     Wrap the input of your inplace op to enable this behavior.
 
     The design is based on two key decisions:
-    - this node is resposible for allocating the in/out buffer used by the collective.
+    - this node is responsible for allocating the in/out buffer used by the collective.
         This is controlled by the ``should_allocate`` method that returns True here and
         False for the collective node
     - The scheduler special-case this node and enable it to reuse its input.
@@ -6002,7 +6003,7 @@ class OutputBuffer(ExternKernel):
 class MultiOutputNoSizeAssert(MultiOutput):
     """
     Extract partial output from a multi-output OP.
-    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
+    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emitting this.
     """
 
     def __init__(self, layout, input, index):

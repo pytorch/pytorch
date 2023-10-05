@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -12,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
 
 import torch
 from torch import multiprocessing
@@ -313,7 +314,7 @@ class TuningProcessPool:
 
         results = {}
 
-        # Use a ThreadExecutorPool to spread the work across the subproccesses and
+        # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
         for choice, result in zip(choices, self.executor.map(self.target, choices)):
             results[choice] = result
@@ -337,9 +338,9 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
-        if isinstance(irnodes, (tuple, list)):
+        if isinstance(irnodes, collections.abc.Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result

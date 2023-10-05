@@ -281,6 +281,7 @@ test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
   pytest test/inductor/test_torchinductor.py -k test_multi_gpu
+  pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
