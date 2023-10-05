@@ -46,11 +46,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
-
 class TestStateDict(FSDPTest):
     """Tests state_dict and load_state_dict"""
 
