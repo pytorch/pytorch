@@ -4819,6 +4819,24 @@ try:
         )
         return list(map(TensorBox.create, result))
 
+    _c10d_functional = torch.ops._c10d_functional
+
+    @register_lowering(_c10d_functional.all_reduce)
+    def _allreduce(input, reduce_op, tag):
+        input = ir.TensorBox.create(
+            ir.InPlaceHint(
+                ir.FlexibleLayout(
+                    input.get_device(),
+                    input.get_dtype(),
+                    input.get_size()
+                ),
+                input,
+            )
+        )
+        return ir.TensorBox.create(
+            ir.FallbackKernel.create(_c10d_functional.all_reduce_.default, input, reduce_op, tag)
+        )
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"

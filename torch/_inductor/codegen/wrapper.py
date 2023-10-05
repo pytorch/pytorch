@@ -440,6 +440,12 @@ class WrapperCodeGen(CodeGen):
     def codegen_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
 
+    def codegen_tensor_copy(self, dst_ref, src_ref, comment=None):
+        line = f"{dst_ref}.copy_({src_ref})"
+        if comment is not None:
+            line += f"  # {comment}"
+        self.writeline(line)
+
     def generate_return(self, output_refs):
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
@@ -1354,6 +1360,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.header.splice(f"\n{kernel}\n")
 
+    def codegen_tensor_copy(self, dst_ref, src_ref, comment=None):
+        if config.aot_inductor.abi_compatible:
+            line = f"aoti_torch_tensor_copy_({src_ref}, {dst_ref});"
+            if comment is not None:
+                line += "  // no reuse"
+            self.writeline(line)
+        else:
+            raise NotImplementedError("NYI")
+
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
             for idx, output in enumerate(output_refs):
@@ -1672,6 +1687,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 torch.DeviceObjType,
             )
             inductor_tensor_buffers = (
+                ir.InPlaceHint,
                 ir.InputBuffer,
                 ir.ComputedBuffer,
                 ir.ConcatKernel,
@@ -1869,6 +1885,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{int_args_var}, "
             f"{len(tensor_call_args)}, "
             f"{tensor_args_var});"
+            f"  // {cpp_kernel_key}"
         )
 
         self.extern_call_ops.add(cpp_kernel_key)

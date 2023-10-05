@@ -562,6 +562,7 @@ if not torch._running_with_deploy():
 
     _c10_lib_impl = torch.library.Library("_c10d_functional", "IMPL")
     _c10_lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_", _all_reduce_meta, "Meta")
     _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
     _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
     _c10_lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")

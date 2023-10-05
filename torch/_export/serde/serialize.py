@@ -528,6 +528,7 @@ class GraphModuleSerializer:
     def serialize_input(self, arg) -> Argument:
         import torch._inductor.ir as inductor_ir
         inductor_tensor_buffers = (
+            inductor_ir.InPlaceHint,
             inductor_ir.InputBuffer,
             inductor_ir.ComputedBuffer,
             inductor_ir.ConcatKernel,

@@ -3788,22 +3788,23 @@ class FallbackKernel(ExternKernelAlloc):
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
 
-        assert (
-            not kernel._schema.is_mutable
-        ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
+        if not config.aot_inductor.abi_compatible:
+            assert (
+                not kernel._schema.is_mutable
+            ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
 
-        # These checks are here because ops that return aliasing tensors will
-        # return type Tensor& instead of Tensor, but codegen will always write
-        # type Tensor on the LHS.
-        def is_not_write(arg):
-            return arg.alias_info is None or not arg.alias_info.is_write
+            # These checks are here because ops that return aliasing tensors will
+            # return type Tensor& instead of Tensor, but codegen will always write
+            # type Tensor on the LHS.
+            def is_not_write(arg):
+                return arg.alias_info is None or not arg.alias_info.is_write
 
-        assert all(
-            is_not_write(x) for x in kernel._schema.arguments
-        ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
-        assert all(
-            is_not_write(x) for x in kernel._schema.returns
-        ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
+            assert all(
+                is_not_write(x) for x in kernel._schema.arguments
+            ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
+            assert all(
+                is_not_write(x) for x in kernel._schema.returns
+            ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
@@ -5944,9 +5945,9 @@ class InPlaceHint(ExternKernel):
 
     def codegen(self, wrapper):
         input_name = self.inputs[0].codegen_reference()
-        output_name = self.get_name()
+        output_name = self.codegen_reference()
         if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
+            wrapper.codegen_tensor_copy(output_name, input_name, "no reuse")
 
     def __init__(self, layout, input):
         input = self.realize_input(input)
