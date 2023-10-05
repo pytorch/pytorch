@@ -1262,7 +1262,7 @@ torch.cuda.synchronize()
     def test_grad_scaling_autocast_fused_optimizers(self):
         for optimizer_ctor, optimizer_kwargs, separate_unscale in list(product(
             (torch.optim.Adam, torch.optim.AdamW),
-            ({"fused": True, "amsgrad": False, "lr": 1.0}, {"fused": True, "amsgrad": True, "lr": 1.0}),
+            ({"fused": True, "amsgrad": False, "lr": 0.1}, {"fused": True, "amsgrad": True, "lr": 0.1}),
             (False, True),
         )) + list(product(
             (torch.optim.SGD,),

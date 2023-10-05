@@ -969,7 +969,7 @@ class TestOptim(TestCase):
                 dict(weight_decay=0., amsgrad=True, capturable=True, maximize=True),
                 dict(weight_decay=0., amsgrad=True, maximize=True),
             ),
-        )) + list(itertools.product(
+        )) + tuple(itertools.product(
             (optim.SGD,),
             [
                 {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
