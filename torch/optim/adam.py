@@ -87,8 +87,11 @@ class Adam(Optimizer):
         max_exp_avg_sqs,
         state_steps
     ):
+        has_complex = False
         for p in group['params']:
             if p.grad is not None:
+                if torch.is_complex(p):
+                    has_complex = True
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
@@ -126,6 +129,7 @@ class Adam(Optimizer):
                     raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True')
 
                 state_steps.append(state['step'])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -151,7 +155,7 @@ class Adam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            self._init_group(
+            has_complex = self._init_group(
                 group,
                 params_with_grad,
                 grads,
@@ -168,6 +172,7 @@ class Adam(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
                 amsgrad=group['amsgrad'],
+                has_complex=has_complex,
                 beta1=beta1,
                 beta2=beta2,
                 lr=group['lr'],
@@ -267,6 +272,7 @@ def adam(params: List[Tensor],
          found_inf: Optional[Tensor] = None,
          *,
          amsgrad: bool,
+         has_complex: bool = False,
          beta1: float,
          beta2: float,
          lr: Union[float, Tensor],
@@ -315,6 +321,7 @@ def adam(params: List[Tensor],
          max_exp_avg_sqs,
          state_steps,
          amsgrad=amsgrad,
+         has_complex=has_complex,
          beta1=beta1,
          beta2=beta2,
          lr=lr,
@@ -337,6 +344,7 @@ def _single_tensor_adam(params: List[Tensor],
                         found_inf: Optional[Tensor],
                         *,
                         amsgrad: bool,
+                        has_complex: bool,
                         beta1: float,
                         beta2: float,
                         lr: Union[float, Tensor],
@@ -448,6 +456,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        found_inf: Optional[Tensor],
                        *,
                        amsgrad: bool,
+                       has_complex: bool,
                        beta1: float,
                        beta2: float,
                        lr: Union[float, Tensor],
@@ -486,14 +495,15 @@ def _multi_tensor_adam(params: List[Tensor],
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        for i in range(len(device_params)):
-            if torch.is_complex(device_params[i]):
-                device_grads[i] = torch.view_as_real(device_grads[i])
-                device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
-                device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
-                if len(device_max_exp_avg_sqs) > 0:
-                    device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
-                device_params[i] = torch.view_as_real(device_params[i])
+        if has_complex:
+            for i in range(len(device_params)):
+                if torch.is_complex(device_params[i]):
+                    device_grads[i] = torch.view_as_real(device_grads[i])
+                    device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
+                    device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
+                    if len(device_max_exp_avg_sqs) > 0:
+                        device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
+                    device_params[i] = torch.view_as_real(device_params[i])
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
