@@ -17,6 +17,7 @@ from typing import (
     Callable,
     Dict,
     Generic,
+    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -408,7 +409,8 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
 
 
 class GlobalContextCheckpointState:
-    global_state: Dict[str, Tuple[Callable, ...]] = {}
+    # TODO set value type to Tuple[Callable, Unpack[Any]] when mypy supports Unpack.
+    global_state: Dict[str, Tuple[Any, ...]] = {}
 
     def __init__(self, global_states):
         self.global_state = global_states
@@ -447,7 +449,8 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
     }
 
     def __init__(self):
-        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
+        # TODO set value type to Tuple[Callable, Unpack[Any]] when mypy supports Unpack.
+        self.global_state: Dict[str, Tuple[Any, ...]] = {}
 
     def copy_graphstate(self):
         return GlobalContextCheckpointState(dict(self.global_state))
@@ -502,7 +505,7 @@ class GuardsSet:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
-    def update(self, *others: Set[Guard]):
+    def update(self, *others: Iterable[Guard]):
         for o in others:
             for g in o:
                 self.add(g, skip=1)

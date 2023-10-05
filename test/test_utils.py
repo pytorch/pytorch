@@ -42,7 +42,7 @@ HAS_CUDA = torch.cuda.is_available()
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class RandomDatasetMock(torch.utils.data.Dataset):
+class RandomDatasetMock(torch.utils.data.Dataset[torch.Tensor]):
 
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
@@ -487,37 +487,37 @@ class TestDataLoaderUtils(TestCase):
         # self.dataset is a Tensor here; technically not a valid input because
         # not a Dataset subclass, but needs to stay working so add ignore's
         # for type checking with mypy
-        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
-                                             batch_size=self.batch_size,
-                                             num_workers=0,
-                                             drop_last=False)
+        dataloader = DataLoader[torch.Tensor](self.dataset,  # type: ignore[arg-type]
+                                              batch_size=self.batch_size,
+                                              num_workers=0,
+                                              drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_single_drop(self):
-        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
-                                             batch_size=self.batch_size,
-                                             num_workers=0,
-                                             drop_last=True)
+        dataloader = DataLoader[torch.Tensor](self.dataset,  # type: ignore[arg-type]
+                                              batch_size=self.batch_size,
+                                              num_workers=0,
+                                              drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
-        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
-                                             batch_size=self.batch_size,
-                                             num_workers=2,
-                                             drop_last=False,
-                                             timeout=self.MAX_TIMEOUT_IN_SECOND)
+        dataloader = DataLoader[torch.Tensor](self.dataset,  # type: ignore[arg-type]
+                                              batch_size=self.batch_size,
+                                              num_workers=2,
+                                              drop_last=False,
+                                              timeout=self.MAX_TIMEOUT_IN_SECOND)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_multi_drop(self):
-        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
-                                             batch_size=self.batch_size,
-                                             num_workers=2,
-                                             drop_last=True,
-                                             timeout=self.MAX_TIMEOUT_IN_SECOND)
+        dataloader = DataLoader[torch.Tensor](self.dataset,  # type: ignore[arg-type]
+                                              batch_size=self.batch_size,
+                                              num_workers=2,
+                                              drop_last=True,
+                                              timeout=self.MAX_TIMEOUT_IN_SECOND)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -842,14 +842,14 @@ class TestExtensionUtils(TestCase):
         self.assertEqual(custom_backend_name, 'foo')
 
         with self.assertRaises(AttributeError):
-            torch.foo.is_available()
+            torch.foo.is_available()  # type: ignore[attr-defined]
 
         with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
             with torch.autocast(device_type=custom_backend_name):
                 pass
         torch._register_device_module('foo', DummyXPUModule)
 
-        torch.foo.is_available()
+        torch.foo.is_available()  # type: ignore[attr-defined]
         with torch.autocast(device_type=custom_backend_name):
             pass
 

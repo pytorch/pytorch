@@ -1,6 +1,6 @@
 import collections
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
 
@@ -40,7 +40,7 @@ class AttributeMutation(MutableLocalBase):
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    def __init__(self, typ: MutableLocalSource, source: Source):
+    def __init__(self, typ: MutableLocalSource, source: Optional[Source]):
         super().__init__(typ)
         self.source = source
 
@@ -52,7 +52,7 @@ class AttributeMutationExisting(AttributeMutation):
 
 
 class AttributeMutationNew(AttributeMutation):
-    def __init__(self, source: Source, cls_source: Source):
+    def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
 
@@ -161,14 +161,14 @@ class SideEffects:
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
-        assert self.is_attribute_mutation(item)
+        assert isinstance(item.mutable_local, AttributeMutation)
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
 
     def load_attr(self, item, name, deleted_ok=False):
-        assert self.is_attribute_mutation(item)
+        assert isinstance(item.mutable_local, AttributeMutation)
         result = self.store_attr_mutations[item.mutable_local][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
@@ -203,14 +203,14 @@ class SideEffects:
         return isinstance(item.mutable_local, AttributeMutation)
 
     def has_pending_mutation(self, item):
-        return self.is_attribute_mutation(item) and bool(
+        return isinstance(item.mutable_local, AttributeMutation) and bool(
             self.store_attr_mutations.get(item.mutable_local)
         )
 
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
             return True
-        if self.is_attribute_mutation(item):
+        if isinstance(item.mutable_local, AttributeMutation):
             return item.mutable_local in self.store_attr_mutations
         return item.mutable_local.is_modified
 
@@ -305,7 +305,7 @@ class SideEffects:
                 live_new_objects.add(var.mutable_local)
             return var
 
-        def is_live(var: VariableTracker):
+        def is_live(var: Union[VariableTracker, MutableLocalBase]):
             if isinstance(var, AttributeMutationNew):
                 return var in live_new_objects
             if isinstance(var, VariableTracker):
@@ -345,7 +345,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -485,7 +485,7 @@ class SideEffects:
                         create_instruction("POP_TOP"),
                     ]
                 )
-            elif self.is_attribute_mutation(var):
+            elif isinstance(var.mutable_local, AttributeMutation):
                 for name, value in self.store_attr_mutations.get(
                     var.mutable_local, {}
                 ).items():

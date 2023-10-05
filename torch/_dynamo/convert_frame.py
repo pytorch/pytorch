@@ -478,8 +478,10 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal output
+        compile_context = CompileContext.get()
+        assert compile_context is not None
         for attempt in itertools.count():
-            CompileContext.get().attempt = attempt
+            compile_context.attempt = attempt
             try:
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
