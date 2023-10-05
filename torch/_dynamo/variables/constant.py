@@ -124,6 +124,7 @@ class ConstantVariable(VariableTracker):
                 UserErrorType.ANTI_PATTERN,
                 "Can't access members of type(obj) for a generated custom object. "
                 "Please use __class__ instead",
+                case_name="type_reflection_method",
             )
         member = getattr(self.value, name)
         if callable(member):
