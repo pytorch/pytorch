@@ -1094,6 +1094,20 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`,
           where :math:`(D_{out}, H_{out}, W_{out})=\text{output\_size}`.
 
+    Behavior:
+        - When the input shape is divisible by the output shape
+          (i.e., `H_in % H_out == 0` and `W_in % W_out == 0`),
+          the function divides the input into non-overlapping regions of size
+          `(H_in/H_out) x (W_in/W_out)` and computes the maximum value
+          in each region to produce the output.
+
+        - When the input shape is not divisible by the output shape, the
+          function adjusts the region sizes to ensure that each output element
+          corresponds to the maximum value over one or more input elements.
+          Specifically, it divides the input into regions of size
+          `ceil(H_in/H_out) x ceil(W_in/W_out)` and computes the maximum value in each region.
+
+
     Examples:
         >>> # target output size of 5x7x9
         >>> m = nn.AdaptiveMaxPool3d((5, 7, 9))
