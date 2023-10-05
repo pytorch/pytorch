@@ -270,9 +270,9 @@ def adam(params: List[Tensor],
          fused: Optional[bool] = None,
          grad_scale: Optional[Tensor] = None,
          found_inf: Optional[Tensor] = None,
+         has_complex: bool = False,
          *,
          amsgrad: bool,
-         has_complex: bool = False,
          beta1: float,
          beta2: float,
          lr: Union[float, Tensor],
@@ -495,15 +495,15 @@ def _multi_tensor_adam(params: List[Tensor],
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        if has_complex:
-            for i in range(len(device_params)):
-                if torch.is_complex(device_params[i]):
-                    device_grads[i] = torch.view_as_real(device_grads[i])
-                    device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
-                    device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
-                    if len(device_max_exp_avg_sqs) > 0:
-                        device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
-                    device_params[i] = torch.view_as_real(device_params[i])
+        # if has_complex:
+        for i in range(len(device_params)):
+            if torch.is_complex(device_params[i]):
+                device_grads[i] = torch.view_as_real(device_grads[i])
+                device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
+                device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
+                if len(device_max_exp_avg_sqs) > 0:
+                    device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
+                device_params[i] = torch.view_as_real(device_params[i])
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
