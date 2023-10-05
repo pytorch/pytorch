@@ -1340,6 +1340,16 @@ def method_to_operator(method):
     return op
 
 
+def create_symint_from_symbool_guardless(maybe_symbool):
+    if isinstance(maybe_symbool, bool):
+        return int(maybe_symbool)
+
+    int_sym = sympy.Piecewise((1, maybe_symbool.node.expr), (0, True))
+    return maybe_symbool.node.shape_env.create_symintnode(
+        int_sym, hint=int(maybe_symbool.node.require_hint())
+    )
+
+
 SYMPY_INTERP = {
     'Abs': operator.abs,
     'Eq': operator.eq,
@@ -1356,6 +1366,7 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'create_symint_from_symbool_guardless': create_symint_from_symbool_guardless,
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
@@ -2663,7 +2674,7 @@ class ShapeEnv:
                                           dynamic_dims: DimList[DimDynamic],
                                           constraint_dims: List[DimConstraint]
                                           ) -> List[sympy.Expr]:
-        assert all(isinstance(val, int) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
+        assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(tensor_size):
@@ -2722,7 +2733,7 @@ class ShapeEnv:
         # we may have an unnessary shape speciliazation for y.
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
-            if isinstance(maybe_sym, SymInt):
+            if is_symbolic(maybe_sym):
                 assert maybe_sym.node.shape_env is not self, \
                     "expect the symbol is created from an shape env other than current one."
                 return maybe_sym.node.require_hint()

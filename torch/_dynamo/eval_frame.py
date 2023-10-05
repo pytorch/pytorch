@@ -378,22 +378,24 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            any_arg_is_proxy = any(
-                isinstance(arg, torch.fx.Proxy)
-                for arg in itertools.chain(args, kwargs.values())
-            )
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()
-                and any_arg_is_proxy
             ):
-                if config.error_on_nested_fx_trace:
-                    raise RuntimeError(
-                        "Detected that you are using FX to symbolically trace "
-                        "a dynamo-optimized function. This is not supported at the moment."
-                    )
-                else:
-                    return fn(*args, **kwargs)
+                def _is_symbolic_tracing():
+                    return any(isinstance(arg, torch.fx.Proxy)
+                                for arg in itertools.chain(args, kwargs.values()))
+
+                # We support make_fx tracing "eager" dynamo compiled regions such as torch.cond.
+                if _is_symbolic_tracing() or innermost_fn(self.callback).compiler_name != "eager":
+                   if config.error_on_nested_fx_trace:
+                       raise RuntimeError(
+                           "Detected that you are using FX to symbolically trace "
+                           "a dynamo-optimized function. This is not supported at the moment."
+                       )
+                   else:
+                       return fn(*args, **kwargs)
+
 
             on_enter()
             prior = set_eval_frame(callback)
@@ -1292,7 +1294,11 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(
+                        UserErrorType.DYNAMIC_CONTROL_FLOW,
+                        str(e),
+                        case_name="cond_operands",
+                    )
 
         if same_signature:
             flat_args_dynamic_dims = [

@@ -4494,8 +4494,8 @@ def fn():
 
         gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in fns]
 
-        for gm in gms:
-            if compare_shape(x):
+        if compare_shape(x):
+            for gm in gms:
                 self.assertExpectedInline(
                     gm.code.strip(),
                     """\
@@ -4503,8 +4503,11 @@ def forward(self, x_1):
     sin = torch.ops.aten.sin.default(x_1);  x_1 = None
     return sin""",
                 )
-                self.assertExpectedInline(_get_guard_exprs(gm), """Eq(s0, 3)""")
-            else:
+            self.assertExpectedInline(_get_guard_exprs(gms[0]), """Eq(s0, 3)""")
+            for gm in gms[1:]:
+                self.assertExpectedInline(_get_guard_exprs(gm), """Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""")
+        else:
+            for gm in gms:
                 self.assertExpectedInline(
                     gm.code.strip(),
                     """\
@@ -4512,7 +4515,10 @@ def forward(self, x_1):
     cos = torch.ops.aten.cos.default(x_1);  x_1 = None
     return cos""",
                 )
-                self.assertExpectedInline(_get_guard_exprs(gm), """Ne(s0, 3)""")
+            self.assertExpectedInline(_get_guard_exprs(gms[0]), """Ne(s0, 3)""")
+            for gm in gms[1:]:
+                self.assertExpectedInline(_get_guard_exprs(gm), """Ne(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""")
+
 
     def test_not_dynamic_scope(self):
         def f(y):
