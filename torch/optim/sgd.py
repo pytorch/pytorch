@@ -149,17 +149,12 @@ SGD.__doc__ = r"""Implements stochastic gradient descent (optionally with moment
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
-        {maximize}
-        {foreach}
-        {differentiable}
-        fused (bool, optional): whether the fused implementation (CUDA only) is used.
-            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported. Since the fused implementation is usually significantly faster than
-            the for-loop implementation, we try to use it whenever possible (all parameters
-            are on CUDA and are of a supported type). Else, we attempt to use the foreach
-            implementation and lastly fall back to the for-loop implementation. (default: None)
+        {_maximize_doc}
+        {_foreach_doc}
+        {_differentiable_doc}
+        {_fused_doc}
 
-    """.format(maximize=_maximize_doc, foreach=_foreach_doc, differentiable=_differentiable_doc) + r"""
+    """ + r"""
 
     Example:
         >>> # xdoctest: +SKIP
