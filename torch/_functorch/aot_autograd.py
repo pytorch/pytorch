@@ -10,6 +10,7 @@ from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
+
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 import os
 import types
@@ -1083,8 +1084,11 @@ def run_functionalized_fw_and_collect_metadata(
                 new_arg = arg
             else:
                 new_arg = from_fun(f_arg)
-            if was_updated(arg, new_arg):
-                if was_metadata_updated(arg, new_arg):
+            if arg is not new_arg:
+                torch._sync(f_arg)
+                new_arg = torch._from_functional_tensor(f_arg)
+            if arg is not new_arg and False:
+                if StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage()):
                     mutates_data = False
                     mutates_metadata = True
                 else:
