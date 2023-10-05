@@ -962,8 +962,6 @@ def compile_fx(
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
-                # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
-                "triton.unique_kernel_names": True,
             }
         ), V.set_real_inputs(
             example_inputs_
