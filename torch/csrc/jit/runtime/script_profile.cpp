@@ -9,8 +9,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -173,5 +172,4 @@ ScriptProfile::~ScriptProfile() {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
