@@ -145,8 +145,10 @@ class RuntimeSchemaInfo:
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
     static_kwargkey: Optional[List[str]] = None
-    # TODO: make use of this field
-    needs_pytree: bool = True
+    # each op can decide if it wants to use pytree flatten/unflatten during operator
+    # eager execution, by default we don't need to do flatten/unflatten, only if the
+    # op indicate it needs to, this is to accelate eager performance.
+    needs_pytree: bool = False
 
 
 @dataclass
@@ -330,11 +332,9 @@ class OpInfo:
     mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
-    flat_kwargs_schema: List[object]
-    flat_local_args: List[object]
-    flat_local_kwargs: List[object]
-    args_tree_spec: TreeSpec
-    kwargs_tree_spec: TreeSpec
+    local_args: Sequence[object]
+    local_kwargs: Dict[str, object]
+    args_tree_spec: Optional[TreeSpec] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None
