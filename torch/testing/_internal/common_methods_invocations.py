@@ -4362,7 +4362,7 @@ def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwa
                     scale_factor=None,
                     mode=mode,
                     align_corners=False,
-                    antialiasing=aa,
+                    antialias=aa,
                 )
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
