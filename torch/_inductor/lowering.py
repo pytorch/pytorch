@@ -1553,7 +1553,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
         if torch._dynamo.config.suppress_errors:
             torch._dynamo.config.suppress_errors = False
             log.warning(
-                "A make_fallback error occured in suppress_errors config,"
+                "A make_fallback error occurred in suppress_errors config,"
                 " and suppress_errors is being disabled to surface it."
             )
         raise AssertionError(
@@ -1584,7 +1584,7 @@ def philox_rand_offset(shape):
 @register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
 def philox_rand(size, seed, offset, stride, device, dtype):
     # stride arg is optional and will be used in future for distributed random
-    # ops. Currently, its ununsed.
+    # ops. Currently, its unused.
     random_pos = ir.FixedLayout(
         device,
         dtype,
@@ -4602,7 +4602,7 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
-register_pointwise(aten.abs)
+abs = register_pointwise(aten.abs)
 bitwise_and = register_pointwise(aten.bitwise_and)
 bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
 bitwise_not = register_pointwise(
@@ -4686,6 +4686,7 @@ register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
+register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
@@ -4693,6 +4694,12 @@ register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_minimum.List, minimum)
+register_foreach_pointwise(aten._foreach_minimum.Scalar, minimum)
+register_foreach_pointwise(aten._foreach_clamp_min.List, maximum)
+register_foreach_pointwise(aten._foreach_clamp_min.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_clamp_max.List, minimum)
+register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)

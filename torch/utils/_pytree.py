@@ -1,15 +1,3 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
-from collections import namedtuple, OrderedDict
-import dataclasses
-import json
-import warnings
-
-
-T = TypeVar('T')
-S = TypeVar('S')
-U = TypeVar('U')
-R = TypeVar('R')
-
 """
 Contains utility functions for working with nested python data structures.
 
@@ -26,6 +14,32 @@ collection support for PyTorch APIs.
 This pytree implementation is not very performant due to Python overhead
 To improve the performance we can move parts of the implementation to C++.
 """
+
+import dataclasses
+import json
+import warnings
+from collections import deque, namedtuple, OrderedDict
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    overload,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
+
+
+T = TypeVar("T")
+S = TypeVar("S")
+U = TypeVar("U")
+R = TypeVar("R")
+
 
 DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 
@@ -226,6 +240,8 @@ class TreeSpec:
         repr_suffix: str = f'{children_specs_str}])'
         return repr_prefix + repr_suffix
 
+    def is_leaf(self) -> bool:
+        return isinstance(self, LeafSpec)
 
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
@@ -256,6 +272,13 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
 
     return result, TreeSpec(node_type, context, children_specs)
 
+def tree_leaves(pytree: PyTree) -> List[Any]:
+    """Get a list of leaves of a pytree."""
+    return tree_flatten(pytree)[0]
+
+def tree_structure(pytree: PyTree) -> TreeSpec:
+    """Get the TreeSpec for a pytree."""
+    return tree_flatten(pytree)[1]
 
 def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
@@ -289,6 +312,11 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 def tree_map(fn: Any, pytree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
+
+def tree_map_(fn: Any, pytree: PyTree) -> PyTree:
+    flat_args, _ = tree_flatten(pytree)
+    deque(map(fn, flat_args), maxlen=0)  # consume and exhaust the iterable
+    return pytree
 
 Type2 = Tuple[Type[T], Type[S]]
 Type3 = Tuple[Type[T], Type[S], Type[U]]
@@ -358,6 +386,21 @@ def tree_map_only(ty: Type3[T, S, U], fn: Fn3[T, S, U, Any], pytree: PyTree) -> 
 
 def tree_map_only(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
     return tree_map(map_only(ty)(fn), pytree)
+
+@overload
+def tree_map_only_(ty: Type[T], fn: Fn[T, Any], pytree: PyTree) -> PyTree:
+    ...
+
+@overload
+def tree_map_only_(ty: Type2[T, S], fn: Fn2[T, S, Any], pytree: PyTree) -> PyTree:
+    ...
+
+@overload
+def tree_map_only_(ty: Type3[T, S, U], fn: Fn3[T, S, U, Any], pytree: PyTree) -> PyTree:
+    ...
+
+def tree_map_only_(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
+    return tree_map_(map_only(ty)(fn), pytree)
 
 def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
     flat_args, _ = tree_flatten(pytree)
@@ -433,15 +476,16 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
     return result
 
 
-"""
-_TreeSpecSchema is the schema used to serialize the TreeSpec
-It contains the following fields:
-- type: A string name of the type. null for the case of a LeafSpec.
-- context: Any format which is json dumpable
-- children_spec: A list of children serialized specs.
-"""
 @dataclasses.dataclass
 class _TreeSpecSchema:
+    """
+    _TreeSpecSchema is the schema used to serialize the TreeSpec
+    It contains the following fields:
+    - type: A string name of the type. null for the case of a LeafSpec.
+    - context: Any format which is json dumpable
+    - children_spec: A list of children serialized specs.
+    """
+
     type: Optional[str]
     context: DumpableContext
     children_spec: List['_TreeSpecSchema']
@@ -517,6 +561,12 @@ _SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
 
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
+    if not isinstance(treespec, TreeSpec):
+        raise TypeError(
+            f"treespec_dumps(treespec, protocol): Expected `treespec` to be instance of "
+            f"TreeSpec but got item of type {type(treespec)}.",
+        )
+
     if protocol is None:
         protocol = DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL
 
