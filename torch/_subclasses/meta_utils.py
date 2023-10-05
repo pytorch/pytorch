@@ -406,9 +406,12 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
-                    )
+                    if not t.is_nested:
+                        # Nested tensor subclasses have special logic for
+                        # creating symbolic size/strides/storage_offset
+                        sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
+                            t, source
+                        )
 
                     def empty_create(inner_t, inner_src):
                         (

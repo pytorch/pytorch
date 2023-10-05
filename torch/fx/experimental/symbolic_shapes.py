@@ -2703,10 +2703,7 @@ class ShapeEnv:
         # The order of checking the guards matters. In this specific example:
         # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
         # we may have an unnessary shape speciliazation for y.
-        if ex.is_nested:
-            # For nested tensor subclasses, we rely on transform subclass logic
-            # to create symbolic sizes/strides/storage_offset.
-            return None, None, None
+        assert not ex.is_nested
 
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
