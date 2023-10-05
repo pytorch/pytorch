@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
@@ -1643,5 +1642,4 @@ bool hasGradientInfoForSchema(const FunctionSchema& schema) {
   return gradientInfoForSchema(schema).has_value();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

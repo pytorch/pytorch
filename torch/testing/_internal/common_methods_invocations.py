@@ -2909,6 +2909,7 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
         ((), {'dim': 0}),
         ((), {}),
         ((), {'dim': 0, 'keepdim': True}),
+        ((S, 0, S), {'dim': 0}),
     )
 
     for shape, kwargs in test_cases:
@@ -4350,6 +4351,10 @@ def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwar
     yield SampleInput(input_tensor, output_size=torch.Size([L, L]), align_corners=False, scale_factors=None)
     yield SampleInput(input_tensor, output_size=None, align_corners=False, scale_factors=[1.7, 0.9])
     yield SampleInput(input_tensor, output_size=None, align_corners=True, scale_factors=[0.8, 1.0])
+
+    yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scales_h=None, scales_w=None)
+    yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scales_h=1.7, scales_w=0.9)
+    yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=True, scales_h=1.7, scales_w=0.9)
 
 
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
@@ -7613,7 +7618,7 @@ def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwarg
     for mode, padding_mode, align_corners in itertools.product(modes, padding_modes, align_cornerss):
         yield SampleInput(
             _make_tensor((batch_size, num_channels, S, L)),
-            _make_tensor((batch_size, num_channels, M, 2)),
+            _make_tensor((batch_size, M + 3, M, 2)),
             mode,
             padding_mode,
             align_corners,
@@ -9916,21 +9921,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
-               DecorateInfo(
-                   unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
-                   'TestDecomp',
-                   'test_comprehensive',
-                   dtypes=(torch.bfloat16, torch.float16),
-               ),
-               DecorateInfo(
-                   unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
-                   'TestDecomp',
-                   'test_quick',
-                   dtypes=(torch.bfloat16, torch.float16),
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=5e-03, rtol=1e-03)}),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
@@ -12289,7 +12279,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
@@ -12993,7 +12983,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
            )),
     OpInfo(
         "nn.functional.soft_margin_loss",
