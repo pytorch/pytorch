@@ -704,6 +704,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     fp16_low_precision_list = [
         "nn.functional.batch_norm",
         "native_batch_norm",
+        "dot",
     ]
 
     @common_device_type.ops(

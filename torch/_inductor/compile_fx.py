@@ -903,12 +903,12 @@ def fw_compiler_freezing(
 
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.get()
-    assert tracing_context is not None
-    params_flat = tracing_context.params_flat
-    assert params_flat is not None
-    for i in range(len(params_flat)):
-        if i not in preserved_arg_indices:
-            params_flat[i] = None
+    if tracing_context is not None:
+        params_flat = tracing_context.params_flat
+        assert params_flat is not None
+        for i in range(len(params_flat)):
+            if i not in preserved_arg_indices:
+                params_flat[i] = None
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(

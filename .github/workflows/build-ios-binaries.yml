@@ -41,6 +41,7 @@ jobs:
     name: ios-build-test
     uses: ./.github/workflows/_ios-build-test.yml
     with:
+      trigger-event: ${{ github.event_name }}
       build-environment: ios-build-test
       sync-tag: ios-build-test
       test-matrix: |
@@ -68,3 +69,6 @@ jobs:
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
           }
         ]}
+    secrets:
+      AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID }}
+      AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY }}
