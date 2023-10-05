@@ -43,3 +43,6 @@ install_config_module(sys.modules[__name__])
 if typing.TYPE_CHECKING:
     def patch(*args, **kwargs):
         ...
+
+    def codegen_config():
+        ...

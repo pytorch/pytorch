@@ -10,17 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, OrderedDict, Union
 
 import sympy
 
@@ -31,13 +21,7 @@ import torch._logging
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    Guard,
-    GuardsCheckpointState,
-    Source,
-    TracingContext,
-)
+from torch._guards import Checkpointable, GuardsCheckpointState, Source, TracingContext
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
@@ -251,7 +235,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}  # type: ignore[assignment]
 
         # Used to maintain an alias between real values variable tracker for tensors we have seen.
         # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
@@ -447,7 +431,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.tracing_context.fake_mode.shape_env
 
     @property
-    def guards(self) -> Set[Guard]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self.tracing_context.guards_context.dynamo_guards
 
     @property
@@ -509,7 +493,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides),
+            dict(self.tensor_weakref_to_sizes_strides),  # type: ignore[arg-type]
         )
         self.timestamp += 1
         return state
@@ -599,7 +583,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def get_submodule(self, keys):
         assert keys
-        obj = self.nn_modules
+        obj: Any = self.nn_modules
         for k in keys.split("."):
             if isinstance(obj, dict):
                 obj = obj[k]
@@ -728,7 +712,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                self.nn_modules[name] = target
+                self.nn_modules[name] = target  # type: ignore[assignment]
                 if isinstance(target, torch.nn.Module):
 
                     def register_leaf_name(leaf_name):

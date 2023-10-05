@@ -61,6 +61,7 @@ from .source import (
     GlobalSource,
     GlobalWeakRefSource,
     LocalSource,
+    Source,
 )
 from .utils import (
     counters,
@@ -133,7 +134,7 @@ def _step_logger():
 class BlockStackEntry:
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: ContextWrappingVariable = None
+    with_context: Optional[ContextWrappingVariable] = None
 
     def can_restore(self):
         return self.with_context is not None
@@ -146,6 +147,7 @@ class BlockStackEntry:
             return ReenterWith(self.stack_index)
 
     def exit(self, tx):
+        assert self.with_context is not None
         return self.with_context.exit(tx)
 
 
@@ -455,6 +457,7 @@ def break_graph_if_unsupported(*, push):
             cleanup: List[Instruction] = []
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
+                assert b.with_context is not None
                 self.output.add_output_instructions(
                     [
                         *b.with_context.reconstruct(cg),
@@ -763,7 +766,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert val is None or isinstance(
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
-        self.stack.append(val)
+        self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: List[VariableTracker]):
         for val in vals:
@@ -825,7 +828,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def get_global_source(self, name):
         if self.output.global_scope is self.f_globals:
-            source = GlobalSource(name)
+            source: Source = GlobalSource(name)
         else:
             if "__name__" in self.f_globals:
                 source = AttrSource(
@@ -873,7 +876,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = inst.argval
         source = self.get_global_source(name)
         if name not in self.symbolic_globals:
-            self.symbolic_globals[name] = object()  # sentinel object
+            self.symbolic_globals[name] = object()  # type: ignore[assignment] # sentinel object
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
@@ -1141,7 +1144,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
-            kwargsvars = ConstDictVariable({}, dict)
+            kwargsvars: VariableTracker = ConstDictVariable({}, dict)
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -1171,10 +1174,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ) and argsvars.has_unpack_var_sequence(self):
             argsvars = TupleVariable(argsvars.unpack_var_sequence(self))
 
-        if not isinstance(argsvars, BaseListVariable) or not isinstance(
+        assert isinstance(argsvars, BaseListVariable) and isinstance(
             kwargsvars, ConstDictVariable
-        ):
-            unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
+        ), f"non-static call {typestr(argsvars)} {typestr(kwargsvars)} not implemented"
 
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
@@ -1479,7 +1481,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
-            options = VariableTracker.propagate(self)
+            options = VariableTracker.propagate(self)  # type: ignore[arg-type]
             val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
@@ -1780,8 +1782,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def setup_or_before_with(self, inst):
         state = self.copy_graphstate()
         ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
-            unimplemented(f"{inst.opname} {ctx}")
+        assert isinstance(ctx, ContextWrappingVariable), f"{inst.opname} {ctx}"
 
         if isinstance(ctx, GenericContextWrappingVariable):
             # Save the checkpoint to restore if there is
@@ -2502,7 +2503,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         unimplemented("cant resume while inlining")
 
     def RETURN_VALUE(self, inst):
-        self.symbolic_result = self.pop()
+        self.symbolic_result = self.pop()  # type: ignore[assignment]
         self.instruction_pointer = None
 
 

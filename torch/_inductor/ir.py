@@ -306,6 +306,9 @@ class IRNode:
         """
         raise NotImplementedError(f"realize NYI on {type(self)}")
 
+    # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
+    # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
+    # the code dynamically check for defined attributes.
     get_device: Callable[[], torch.device]
     get_dtype: Callable[[], torch.dtype]
     get_name: Callable[[], str]

@@ -81,6 +81,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self):
         return self.get_code().co_filename
 
+    def get_globals(self):
+        raise NotImplementedError(f"get_globals() not implemented by {type(self)}")
+
     def get_name(self):
         return self.get_code().co_name
 
