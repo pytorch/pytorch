@@ -4505,7 +4505,10 @@ def forward(self, x_1):
                 )
             self.assertExpectedInline(_get_guard_exprs(gms[0]), """Eq(s0, 3)""")
             for gm in gms[1:]:
-                self.assertExpectedInline(_get_guard_exprs(gm), """Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""")
+                self.assertExpectedInline(
+                    _get_guard_exprs(gm),
+                    """Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""",
+                )
         else:
             for gm in gms:
                 self.assertExpectedInline(
@@ -4517,8 +4520,10 @@ def forward(self, x_1):
                 )
             self.assertExpectedInline(_get_guard_exprs(gms[0]), """Ne(s0, 3)""")
             for gm in gms[1:]:
-                self.assertExpectedInline(_get_guard_exprs(gm), """Ne(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""")
-
+                self.assertExpectedInline(
+                    _get_guard_exprs(gm),
+                    """Ne(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""",
+                )
 
     def test_not_dynamic_scope(self):
         def f(y):
