@@ -55,7 +55,16 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import DefaultsSource, LocalSource, TypeSource
+from .source import (
+    AttrSource,
+    DefaultsSource,
+    DefaultsSource,
+    GetItemSource,
+    GlobalSource,
+    LocalSource,
+    NNModuleSource,
+    TypeSource,
+)
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -78,6 +87,7 @@ TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 dict_version = torch._C._dynamo.guards.dict_version
+RootGuardManager = torch._C._dynamo.guards.RootGuardManager
 
 
 # For user stack printing
@@ -192,6 +202,7 @@ class GuardBuilder(GuardBuilderBase):
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
+        root_guard_mananger: RootGuardManager,
         check_fn_manager: CheckFunctionManager,
         *,
         local: bool,
@@ -206,6 +217,7 @@ class GuardBuilder(GuardBuilderBase):
             scope = {"L" if local else "G": dict()}
         self.scope: Dict[str, Dict[str, object]] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
+        self.root_guard_mananger = root_guard_mananger
         for (
             name,
             package_module,
@@ -277,6 +289,43 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
+    def build_guard_manager(self, guard: Guard):
+        # eval_frame calls check_fn with f_locals dict, which is then later
+        # wrapped up into a "L" dict.
+        # So,
+
+        root_guard_mananger = self.root_guard_mananger
+        if not self.local:
+            root_guard_mananger = root_guard_mananger.globals_dict_manager(self.scope)
+
+        # TODO(janimesh) - This should probably to guards object itself with a
+        # member function - get_guard_manager. Need to figure out where to put
+        # root_guard manager.
+        def build(source):
+            if isinstance(source, LocalSource):
+                return root_guard_mananger.dict_get_item_manager(source.local_name)
+            elif isinstance(source, GlobalSource):
+                assert not self.local
+                return root_guard_mananger.dict_get_item_manager(source.global_name)
+            elif isinstance(source, NNModuleSource):
+                return build(source.base)
+            elif isinstance(source, AttrSource):
+                return getattr(build(source.base), source.member)
+            elif isinstance(source, GetItemSource) and not source.index_is_slice:
+                return build(source.base)[source.index]
+            elif isinstance(source, DefaultsSource):
+                if not source.is_kw:
+                    return build(source.base).__defaults__[source.idx_key]
+                else:
+                    return build(source.base).__kwdefaults__[str(source.idx_key)]
+            else:
+                raise AssertionError(
+                    f"missing guard manager builder {source} - {source.name()}"
+                )
+
+        mgr = build(guard.originating_source)
+        print(mgr)
+
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -309,6 +358,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
+        self.build_guard_manager(guard)
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
@@ -359,6 +409,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
     def EQUALS_MATCH(self, guard: Guard):
+        self.build_guard_manager(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
@@ -983,11 +1034,13 @@ class CheckFunctionManager:
             assert builder is not None
             return builder.arg_ref(source.name())
 
+        self.root_guard_mananger = RootGuardManager()
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
             combine_scopes(output_graph.global_scope, output_graph.local_scope),
+            self.root_guard_mananger,
             self,
             local=True,
         )
@@ -996,6 +1049,7 @@ class CheckFunctionManager:
             source_ref,
             self.lookup_weakrefs,
             output_graph.global_scope,
+            self.root_guard_mananger,
             self,
             local=False,
         )
