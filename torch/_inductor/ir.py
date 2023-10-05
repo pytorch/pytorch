@@ -6262,26 +6262,16 @@ def maybe_free_unbacked_symbols(s):
 
 
 class AllToAllSingle(OutOfPlaceCollectiveKernel):
-    """
-    NOTE: Difference of AllToAllSingle compared to other OutOfPlaceCollectiveKernel:
-
-    1. `create_output_buffers` is not called, because we rely on the underlying
-    `fun_col_impl._all_to_all_single` kernel to do the output buffer allocation.
-    2. `fun_col_impl._register_tensor_work` is not emitted, because the underlying
-    `fun_col_impl._all_to_all_single` kernel already calls it.
-    3. `c10d._find_or_create_pg_by_ranks_and_tag` is not emitted, because the underlying
-    `fun_col_impl._all_to_all_single` kernel already calls it.
-    """
-
     def __init__(
         self,
         layout,
         inputs,
+        outputs,
         constant_args,
         output_split_sizes,
         input_split_sizes,
     ):
-        super().__init__(layout, inputs, [], constant_args)
+        super().__init__(layout, inputs, outputs, constant_args)
         self.output_split_sizes = output_split_sizes
         self.input_split_sizes = input_split_sizes
 
@@ -6293,19 +6283,6 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
             r |= free_unbacked_symbols(self.input_split_sizes)
         return r
 
-    # TODO: not sure if you need this or not
-    """
-    def should_emit_register_tensor_work(self):
-        return False
-
-    def should_emit_find_or_create_pg(self):
-        return False
-    """
-
-    def codegen_output(self, wrapper, output_name, input_names):
-        input_names = [t.codegen_reference() for t in self.original_inputs]
-        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
-
     @classmethod
     def create(
         cls,
@@ -6316,48 +6293,35 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         ranks: List[int],
         group_size: int,
     ):
-        x_realized = cls.realize_input(x)
+        inputs = [cls.realize_input(x)]
 
-        new_size = x_realized.get_size()
-        output_shape_first_dim_s = None
-        if output_split_sizes is not None:
-            output_shape_first_dim_s = (
-                V.graph.current_node.meta["val"].size()[0].node.expr
-            )
-            new_size[0] = output_shape_first_dim_s
+        def compute_size(new_size):
+            if output_split_sizes is not None:
+                new_size[0] = sum(output_split_sizes)
 
-        layout = FlexibleLayout(
-            device=x_realized.get_device(),
-            dtype=x_realized.get_dtype(),
-            size=new_size,
-        )
+        outputs = cls.create_output_buffers(inputs, compute_size)
 
-        coll = AllToAllSingle(
+        layout = MultiOutputLayout(inputs[0].get_device())
+
+        packed = AllToAllSingle(
             layout=layout,
-            inputs=[x_realized],
+            inputs=inputs,
+            outputs=outputs,
             constant_args=[tag, ranks, group_size],
             output_split_sizes=output_split_sizes,
             input_split_sizes=input_split_sizes,
         )
-
-        return MultiOutputNoSizeAssert(
-            layout,
-            coll,
-            "",
-        )
-
-    def codegen_input(self, wrapper, output_name, input_names):
-        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
+        return cls.create_output_nodes(packed, outputs)[0]
 
     def codegen_collective(self, wrapper, output_name, input_names):
         tag, ranks, group_size = self.constant_args
 
+        # TODO: might be necessary to do some pretty printing on
+        # split sizes
         wrapper.writeline(
-            f"{output_name} = fun_col_impl._all_to_all_single("
-            f"input={output_name}_inputs[0], "
+            f"{output_name}_work = dist.all_to_all_single("
+            f"{output_name}[0], {output_name}_inputs[0], "
             f"output_split_sizes={self.output_split_sizes}, "
             f"input_split_sizes={self.input_split_sizes}, "
-            f"tag='{tag}', "
-            f"ranks={ranks}, "
-            f"group_size={group_size})",
+            f"group={output_name}_pg, async_op=True)"
         )

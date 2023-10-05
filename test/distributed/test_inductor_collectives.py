@@ -309,7 +309,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("fun_col_impl._all_to_all_single") \
+                .check("all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
@@ -347,7 +347,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("fun_col_impl._all_to_all_single") \
+                .check("all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
@@ -392,7 +392,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("fun_col_impl._all_to_all_single") \
+                .check("all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
@@ -424,7 +424,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("fun_col_impl._all_to_all_single") \
+                .check("all_to_all_single") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
