@@ -1,5 +1,8 @@
 import pathlib
 import sys
+import torch
+
+print(torch.cuda.is_available())
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(REPO_ROOT))
