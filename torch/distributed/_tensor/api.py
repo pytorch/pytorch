@@ -329,10 +329,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             grad_placements (List[:class:`Placement`], optional): the placements describes
                 the future layout of any gradient layout of the Tensor returned from this
                 function.
-                `to_local` converts DTensor to local tensor and after that the returned local
-                tensor might not be used as the original DTensor layout later, this argument
-                is the hint that user can give to autograd in case the gradient layout of
-                the returned tensor does not match the original DTensor layout.
+                `to_local` converts DTensor to local tensor and the returned local tensor
+                might not be used as the original DTensor layout later in the code. This
+                argument is the hint that user can give to autograd in case the gradient
+                layout of the returned tensor does not match the original DTensor layout.
                 If not specified, we will assume the gradient layout remains the same
                 as the original DTensor and use that for gradient computation.
 
