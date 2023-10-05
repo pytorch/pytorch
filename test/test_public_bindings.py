@@ -257,7 +257,6 @@ torch.utils.benchmark.examples.blas_compare
 torch.utils.benchmark.examples.end_to_end
 torch.utils.tensorboard._caffe2_graph""")
 
-
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     def test_correct_module_names(self):
