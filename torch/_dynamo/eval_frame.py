@@ -111,7 +111,7 @@ def _reset_guarded_backend_cache():
 
 
 @contextlib.contextmanager
-def backend_cache_wrapper(callback: CompilerFn):
+def backend_cache_wrapper(callback: DynamoCallback):
     _maybe_init_guarded_backend_cache()
 
     # callback is False for RunOnlyContext. RunOnlyContext is used
@@ -347,12 +347,12 @@ class _TorchDynamoContext:
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward  # type: ignore[assignment]
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined, assignment]
 
             return new_mod
         assert callable(fn)
@@ -825,7 +825,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
-    guards: Set[_guards.Guard]
+    guards: torch._guards.GuardsSet
     # NB: Do not add new fields without overriding __iter__; people are
     # destructuring so it is BC-breaking
 
@@ -1116,7 +1116,7 @@ def export(
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
 
-        def guard_export_print(guards: Set[_guards.Guard]):
+        def guard_export_print(guards: torch._guards.GuardsSet):
             nonlocal out_guards
             assert (
                 out_guards is None
@@ -1453,7 +1453,7 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            opt.step.hooked = True
+            opt.step.hooked = True  # type: ignore[attr-defined]
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

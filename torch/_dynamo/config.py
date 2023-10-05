@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import tempfile
+import typing
 from os.path import abspath, dirname
 
 import torch
@@ -352,3 +353,11 @@ _experimental_support_context_fn_in_torch_utils_checkpoint = False
 from .config_utils import install_config_module
 
 install_config_module(sys.modules[__name__])
+
+if typing.TYPE_CHECKING:
+
+    def patch(*args, **kwargs):
+        ...
+
+    def codegen_config():
+        ...

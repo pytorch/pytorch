@@ -9,14 +9,14 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 
 from torch._dynamo.testing import rand_strided
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_float_dtype, ShapeType
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
@@ -486,9 +486,7 @@ def backend_accuracy_fails(
 # values should be.  These all coincide with factory functions, e.g., torch.empty
 
 
-def _stride_or_default(
-    stride: Optional[Sequence[int]], *, shape: Sequence[int]
-) -> Sequence[int]:
+def _stride_or_default(stride: Optional[ShapeType], *, shape: ShapeType) -> ShapeType:
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 
