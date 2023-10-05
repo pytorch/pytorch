@@ -164,7 +164,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
-    float getDuration() const override;
+    c10::optional<float> getDuration() const override;
 
     uint64_t getSequencenumber() const override;
 
