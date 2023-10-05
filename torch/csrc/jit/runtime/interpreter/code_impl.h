@@ -14,6 +14,8 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
+C10_DECLARE_bool(torch_jit_enable_expanded_stacks);
+
 namespace torch::jit {
 
 std::ostream& operator<<(std::ostream& out, Instruction inst);
@@ -58,15 +60,26 @@ struct WithCurrentNode {
   Node* old_value_;
 };
 
+struct NodeSourceInfo {
+  const char* func_name_;
+  const char* file_name_;
+  size_t line_;
+  NodeSourceInfo() : func_name_(nullptr), file_name_(nullptr), line_(0) {}
+};
+
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
+
+  const c10::unique_t node_stack_attr_symbol_ =
+      static_cast<c10::unique_t>(attr::node_stack_idx);
+  // Expanded inlined stacks as pointers to values in inlined call stack.
+  std::vector<std::vector<NodeSourceInfo>> expanded_node_stacks_;
 
   // same length as instructions.
   // what node in the graph cause this
   // instruction to be emitted?
   std::vector<Node*> instructions_source_;
-
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
 #ifndef NDEBUG
@@ -212,12 +225,61 @@ struct CodeImpl {
     return instructions_source_;
   }
 
+  NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
+    NodeSourceInfo nodeSource;
+    SourceRange r = range;
+    if (range.source()) {
+      if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (r.source()) {
+      auto lineno = r.source()->lineno_for_offset(r.start());
+      nodeSource.line_ = r.source()->lineno_to_source_lineno(lineno);
+      if (r.source()->filename()) {
+        nodeSource.file_name_ = r.source()->filename().value().c_str();
+      }
+    }
+    return nodeSource;
+  }
+
+  void expandInlinedNodeStack(
+      const InlinedCallStackPtr& cs,
+      std::vector<NodeSourceInfo>* expandedstack) {
+    auto nodeSourceInfo = getSourceInfoFromSourceRange(cs->source_range());
+    nodeSourceInfo.func_name_ = cs->function_name().c_str();
+    expandedstack->emplace_back(nodeSourceInfo);
+
+    if (cs->callee()) {
+      expandInlinedNodeStack(cs->callee().value(), expandedstack);
+    }
+  }
+
+  void getNodeStack(
+      const Node* node,
+      std::vector<NodeSourceInfo>* expandedstack) {
+    if (current_node_->callstack()) {
+      expandInlinedNodeStack(current_node_->callstack().value(), expandedstack);
+    }
+    auto nodeSourceInfo = getSourceInfoFromSourceRange(node->sourceRange());
+    expandedstack->emplace_back(nodeSourceInfo);
+  }
+
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
         safe_narrow_cast<uint16_t, uint64_t>(N));
     instructions_source_.emplace_back(current_node_);
+
+    if (FLAGS_torch_jit_enable_expanded_stacks &&
+        !current_node_->hasAttribute(attr::node_stack_idx)) {
+      std::vector<NodeSourceInfo> expandedStack;
+      getNodeStack(current_node_, &expandedStack);
+      auto insertIdx = expanded_node_stacks_.size();
+      expanded_node_stacks_.emplace_back(expandedStack);
+      current_node_->i_(attr::node_stack_idx, insertIdx);
+    }
 
     // check that we didn't accidentally emit nodes out of topological order
     if (op == OP) {
