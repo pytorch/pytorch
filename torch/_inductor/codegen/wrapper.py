@@ -1116,7 +1116,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():
-            # assign inputs and outpus in both cases so the later codegen can be simplified
+            # assign inputs and outputs in both cases so the later codegen can be simplified
             if V.graph.aot_mode:
                 if config.aot_inductor.abi_compatible:
                     self.prefix.splice(
