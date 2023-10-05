@@ -11,6 +11,20 @@ import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 import contextlib
+import logging
+import sys
+import traceback
+
+torch_log = logging.getLogger("torch")
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    torch_log.error("Uncaught exception\n%s", ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+
+sys.excepthook = handle_exception
 
 def init():
     torch.manual_seed(0)
