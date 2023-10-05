@@ -2557,18 +2557,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
 
-    def GET_YIELD_FROM_ITER(self, inst):
-        tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
-            return self.GET_ITER(inst)
-
-    def YIELD_FROM(self, inst):
-        tos = self.stack[-1]
-        if isinstance(tos, ConstantVariable) and tos.value is None:
-            self.pop()
-            return
-        return self.FOR_ITER(inst)
-
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]

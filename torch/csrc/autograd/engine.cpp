@@ -849,8 +849,8 @@ void validate_outputs(
         grad = metadata.reduce_grad(grad);
       }
       // else {
-      //   const auto message = metadata.incompatible_shape_error_message(i, grad);
-      //   TORCH_CHECK(false, format_error(message.str()));
+      //   const auto message = metadata.incompatible_shape_error_message(i,
+      //   grad); TORCH_CHECK(false, format_error(message.str()));
       // }
     }
 
