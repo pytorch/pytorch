@@ -13,7 +13,6 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import pickle
 from typing import (
     Any,
     Callable,
@@ -110,6 +109,7 @@ def register_pytree_node(
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> # Registry a Python type with lambda functions
         >>> register_pytree_node(
         ...     set,
@@ -118,27 +118,30 @@ def register_pytree_node(
         ...     namespace='set',
         ... )
 
+        >>> # xdoctest: +SKIP
         >>> # Register a Python type into a namespace
         >>> import torch
         >>> register_pytree_node(
         ...     torch.Tensor,
         ...     flatten_func=lambda tensor: (
-        ...         (tensor.cpu().numpy(),),
-        ...         dict(dtype=tensor.dtype, device=tensor.device, requires_grad=tensor.requires_grad),
+        ...         (tensor.cpu().detach().numpy(),),
+        ...         {'dtype': tensor.dtype, 'device': tensor.device, 'requires_grad': tensor.requires_grad},
         ...     ),
         ...     unflatten_func=lambda children, metadata: torch.tensor(children[0], **metadata),
         ...     namespace='torch2numpy',
         ... )
 
-        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> tree = {'weight': torch.ones(size=(1, 2)).cuda(), 'bias': torch.zeros(size=(2,))}
         >>> tree
         {'weight': tensor([[1., 1.]], device='cuda:0'), 'bias': tensor([0., 0.])}
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # Flatten without specifying the namespace
         >>> tree_flatten(tree)  # `torch.Tensor`s are leaf nodes  # xdoctest: +SKIP
         ([tensor([0., 0.]), tensor([[1., 1.]], device='cuda:0')], PyTreeSpec({'bias': *, 'weight': *}))
 
+        >>> # xdoctest: +SKIP
         >>> # Flatten with the namespace
         >>> tree_flatten(tree, namespace='torch2numpy')  # xdoctest: +SKIP
         (
@@ -152,6 +155,7 @@ def register_pytree_node(
             )
         )
 
+        >>> # xdoctest: +SKIP
         >>> # Register the same type with a different namespace for different behaviors
         >>> def tensor2flatparam(tensor):
         ...     return [torch.nn.Parameter(tensor.reshape(-1))], tensor.shape, None
@@ -166,6 +170,7 @@ def register_pytree_node(
         ...     namespace='tensor2flatparam',
         ... )
 
+        >>> # xdoctest: +SKIP
         >>> # Flatten with the new namespace
         >>> tree_flatten(tree, namespace='tensor2flatparam')  # xdoctest: +SKIP
         (
@@ -182,8 +187,19 @@ def register_pytree_node(
             )
         )
     """
+    from ._pytree import _register_pytree_node
+
+    _register_pytree_node(
+        cls,
+        flatten_func,
+        unflatten_func,
+    )
+
     optree.register_pytree_node(
-        cls, flatten_func, _reverse_args(unflatten_func), namespace=namespace
+        cls,
+        flatten_func,
+        _reverse_args(unflatten_func),
+        namespace=namespace,
     )
 
 
@@ -235,7 +251,11 @@ def tree_flatten(
         A pair ``(leaves, treespec)`` where the first element is a list of leaf values and the
         second element is a treespec representing the structure of the pytree.
     """
-    return optree.tree_flatten(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    return optree.tree_flatten(  # type: ignore[return-value]
+        tree,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )
 
 
 def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
@@ -262,7 +282,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
             f"tree_unflatten(values, spec): Expected `spec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return optree.tree_unflatten(treespec, leaves)
+    return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
 def tree_leaves(
@@ -334,7 +354,11 @@ def tree_structure(
     Returns:
         A treespec object representing the structure of the pytree.
     """
-    return optree.tree_structure(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    return optree.tree_structure(  # type: ignore[return-value]
+        tree,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )
 
 
 def tree_map(
@@ -382,7 +406,11 @@ def tree_map(
         is the tuple of values at corresponding nodes in ``rests``.
     """
     return optree.tree_map(
-        func, tree, *rests, none_is_leaf=none_is_leaf, namespace=namespace
+        func,
+        tree,
+        *rests,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
     )
 
 
@@ -416,7 +444,11 @@ def tree_map_(
         in ``tree`` and ``xs`` is the tuple of values at values at corresponding nodes in ``rests``.
     """
     return optree.tree_map_(
-        func, tree, *rests, none_is_leaf=none_is_leaf, namespace=namespace
+        func,
+        tree,
+        *rests,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
     )
 
 
@@ -704,7 +736,10 @@ def broadcast_prefix(
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
     """
     return optree.broadcast_prefix(
-        prefix_tree, full_tree, none_is_leaf=none_is_leaf, namespace=namespace
+        prefix_tree,
+        full_tree,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
     )
 
 
@@ -727,39 +762,50 @@ def _broadcast_to_and_flatten(
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(
-            tree, full_tree, none_is_leaf=none_is_leaf, namespace=namespace
+            tree,
+            full_tree,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
         )
     except ValueError:
         return None
 
 
-def treespec_dumps(treespec: PyTreeSpec) -> bytes:
-    """Serialize a treespec to bytes."""
+def treespec_dumps(treespec: PyTreeSpec) -> str:
+    """Serialize a treespec to a JSON string."""
     if not isinstance(treespec, PyTreeSpec):
         raise TypeError(
             f"treespec_dumps(spec): Expected `spec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return pickle.dumps(treespec)
+    from ._pytree import (
+        tree_structure as _tree_structure,
+        treespec_dumps as _treespec_dumps,
+    )
+
+    orig_treespec = _tree_structure(tree_unflatten([0] * treespec.num_leaves, treespec))
+    return _treespec_dumps(orig_treespec)
 
 
-def treespec_loads(serialized: bytes) -> PyTreeSpec:
-    """Deserialize a treespec from bytes."""
-    treespec = pickle.loads(serialized)
-    if not isinstance(treespec, PyTreeSpec):
-        raise TypeError(
-            f"treespec_loads(serialized): Expected to return an instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
+def treespec_loads(serialized: str) -> PyTreeSpec:
+    """Deserialize a treespec from a JSON string."""
+    from ._pytree import (
+        tree_unflatten as _tree_unflatten,
+        treespec_loads as _treespec_loads,
+    )
+
+    orig_treespec = _treespec_loads(serialized)
+    dummy_tree = _tree_unflatten([0] * orig_treespec.num_leaves, orig_treespec)
+    treespec = tree_structure(dummy_tree)
     return treespec
 
 
-class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
+class PyTreeLeafSpecMeta(type(PyTreeSpec)):  # type: ignore[misc]
     def __instancecheck__(self, instance: object) -> bool:
-        return isinstance(instance, optree.PyTreeSpec) and instance.is_leaf()
+        return isinstance(instance, PyTreeSpec) and instance.is_leaf()
 
 
-class PyTreeLeafSpec(optree.PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
+class PyTreeLeafSpec(PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
     def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
         return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
 

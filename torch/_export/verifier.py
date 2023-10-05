@@ -12,7 +12,7 @@ from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
 PRESERVED_META_KEYS: Set[str] = {
     "val",
     "stack_trace",
-    "source_fn",
+    "source_fn_stack",
 }
 
 

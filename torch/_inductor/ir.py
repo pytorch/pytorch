@@ -44,6 +44,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
@@ -211,44 +212,12 @@ def ir_node_to_tensor(x, guard_shape=True):
     return t
 
 
-class OptionalAttr:
-    def __init__(self):
-        self.name = "optional_attr"
-
-    def __repr__(self):
-        return self.name
-
-
-class OptionalString(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_string"
-
-
-class OptionalList(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_list"
-
-
-class OptionalScalar(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_scalar"
-
-
-class OptionalLayout(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_layout"
-
-
-class OptionalTensor(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_tensor"
-
-
-default_value_map = {"Optional[Layout]": OptionalLayout}
-
-
-def may_convert_to_optional(optional_value, value):
-    return optional_value if not value and V.graph.cpp_wrapper else value
+def may_convert_to_optional(value):
+    if isinstance(value, list) and not value and V.graph.cpp_wrapper:
+        # [None] makes sure the cpp wrapper codegen will generate something like
+        # {c10::nullopt} instead of {}
+        return [None]
+    return value
 
 
 def get_device_type(x):
@@ -2266,6 +2235,25 @@ class AliasedLayout(Layout):
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
 
+class NoneLayout(IRNode):
+    # This is janky, I figured out what fields to populate by just running
+    # the model I was interested in and adding properties/methods as needed.
+    # This doesn't inherit from Layout because Layout assumes you have stuff
+    # like sizes, but I don't really have anything here.
+    #
+    # If you have an ir.Node with NoneLayout, you probably need to setup
+    # dependencies manually in scheduler
+
+    def __init__(self):
+        self.device = torch.device("cpu")
+
+    def storage_size(self):
+        return 0
+
+    def as_fixed(self):
+        return self
+
+
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
         super().__init__(
@@ -2305,6 +2293,10 @@ class MutationLayout(Layout):
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
+        # NOTE: We must realize users of `dst` before we realize `src`, since
+        # realization order determines scheduling order. Otherwise, src's
+        # mutation would be scheduled before the existing users of dst!
+        V.graph.mark_buffer_mutated(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -2370,6 +2362,9 @@ class Buffer(IRNode):
 
     def get_stride(self):
         return list(self.layout.stride)
+
+    def get_offset(self):
+        return self.layout.offset
 
     def get_layout(self):
         return self.layout
@@ -2438,6 +2433,30 @@ class Buffer(IRNode):
 
     def get_reads(self):
         return self.get_read_writes().reads
+
+    def get_unbacked_symbol_defs(self):
+        """
+        Returns the unbacked symbols which are defined by this IR node,
+        because this is a data-dependent IR node, or item()
+        """
+        return set()
+
+    def get_unbacked_symbol_uses(self):
+        """
+        Returns the unbacked symbols which are required to be in scope in
+        order to successfully perform codegen for this buffer.  For example,
+        a buffer that corresponds to an extern kernel call that takes i0 as
+        an argument would return {i0} here.  This is used to generate necessary
+        dependencies that ensure we actually bind i0 in codegen before you
+        try to use it.
+
+        Note that this is NOT transitive; in particular, if this buffer takes
+        in as input another buffer with dynamic shape (e.g., (i0,)), we will
+        not report it here, because you will already have a dependency
+        on that buffer, which will eventually have a dependency on i0 if
+        necessary.
+        """
+        return set()
 
     def realize(self):
         pass
@@ -2510,6 +2529,30 @@ class ComputedBuffer(Buffer):
                     self.get_store_function(),
                     self.data.get_size(),
                 )
+
+    def get_unbacked_symbol_uses(self):
+        # Ordinarily, we'd like to just peek at the arguments list,
+        # but ComputedBuffers have no argument list.
+        #
+        # Morally, this logic needs to be synchronized with the
+        # KernelArgs.size calls, which are responsible for making symbols make
+        # there way as kernel arguments (and it is precisely passing in one of
+        # those symbols that establishes a dependency).  However, we haven't
+        # started codegen yet so we can't directly reuse that logic.
+        #
+        # For now, I'm just yoloing with the size of the buffer.  Not sure if
+        # it is enough.
+        #
+        # One thing you might wonder is if this is enough for a ComputedBuffer
+        # denoting a reduction over i0.  Empirically, it is enough, but for an
+        # unusual reason: we only need accurate dependencies for item() call,
+        # but it's impossible to end up with a reduction over i0 from an
+        # item() call without a regular non-reduction buffer first.
+        return (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
 
     def make_loader(self):
         # Inline constants and index_expressions
@@ -3060,6 +3103,11 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
+        # TODO: Unconditionally do this, not just when example_output has
+        # unbacked symbols
+        if maybe_free_unbacked_symbols(example_output):
+            example_output = V.graph.current_node.meta["val"]
+
         return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
     @classmethod
@@ -3226,16 +3274,7 @@ class ExternKernel(InputsKernel):
             hasattr(self, "kwargs_default_value")
             and arg_name in self.kwargs_default_value
         ):
-            default_value = self.kwargs_default_value.get(arg_name).get("value")
-            if default_value is None:
-                arg_type = self.kwargs_default_value.get(arg_name).get("type")
-                # TODO: extend the support here
-                assert (
-                    str(arg_type) in default_value_map
-                ), f"unsupported default_value arg_type: {str(arg_type)}"
-                return default_value_map[str(arg_type)]()
-            else:
-                return default_value
+            return self.kwargs_default_value.get(arg_name).get("value")
         raise AssertionError(
             f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
         )
@@ -3304,6 +3343,16 @@ class ExternKernel(InputsKernel):
 
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
+
+    def get_unbacked_symbol_uses(self):
+        # NB: It's not necessary to check regular inputs as we automatically
+        # have dependencies on them
+        r = set()
+        for arg in self.constant_args:
+            r |= maybe_free_unbacked_symbols(arg)
+        for arg in self.kwargs.values():
+            r |= maybe_free_unbacked_symbols(arg)
+        return r
 
     def __str__(self):
         kernel_name = getattr(self, "kernel", None)
@@ -3590,17 +3639,30 @@ class DeviceCopy(ExternKernelOut):
             wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
-class DynamicScalar(IRNode):
+class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
-
-    This is not yet implemented.  The one model (so far) that calls this
-    (fastNLP_Bert) does not actually use the result.  So we expect this
-    node to get dead code eliminated.
     """
 
     def get_reads(self):
         return ()
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, sym, data):
+        super().__init__(None, NoneLayout(), [data])
+        self.sym = sym
+
+    def get_unbacked_symbol_defs(self):
+        return {self.sym}
+
+    def codegen(self, wrapper):
+        (data,) = (t.codegen_reference() for t in self.inputs)
+        wrapper.writeline(f"{self.sym} = {data}.item()")
+        # No one should ever use this buffer, but for uniformity
+        # define the variable and assign it None
+        wrapper.writeline(f"{self.get_name()} = None")
 
 
 @dataclasses.dataclass
@@ -3629,26 +3691,44 @@ class FallbackKernel(ExternKernelAlloc):
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
-        self.outputs = []
+        self.outputs: Sequence[Any] = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
 
-        op_overload_packet = (
-            kernel._overloadpacket
-            if isinstance(kernel, torch._ops.OpOverload)
-            else kernel
-        )
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
+        assert isinstance(
+            kernel,
+            (
+                torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
+                torch._ops.HigherOrderOperator,
+            ),
+        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if (
-            getattr(torch.ops.aten, op_overload_packet.__name__, None)
-            is op_overload_packet
-        ):
-            self.kernel = (
-                f"at::{op_overload_packet.__name__}"
-                if V.graph.cpp_wrapper
-                else f"aten.{kernel.__name__}"
+        if kernel.__module__ == "torch._ops.aten":
+            op_base_name = (
+                kernel.__name__.split(".")[0]
+                if isinstance(kernel, torch._ops.OpOverload)
+                else kernel.__name__
             )
+            if V.graph.cpp_wrapper:
+                if isinstance(kernel, torch._ops.OpOverload):
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.kernel = (
+                        f"at::_ops::{kernel.__name__.replace('.default', '')}::call"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+                else:
+                    self.kernel = f"at::{op_base_name}"
+            else:
+                self.kernel = f"aten.{op_base_name}"
+
             if schema is not None:
                 self.args_default_value = [
                     {"type": x.real_type, "value": x.default_value}
@@ -3720,16 +3800,7 @@ class FallbackKernel(ExternKernelAlloc):
         assert pos < len(
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        v = self.args_default_value[pos]["value"]
-        if v is None:
-            arg_type = self.args_default_value[pos]["type"]
-            # TODO: extend the support here
-            assert (
-                str(arg_type) in default_value_map
-            ), f"unsupported default_value arg_type: {str(arg_type)}"
-            return default_value_map[str(arg_type)]()
-        else:
-            return v
+        return self.args_default_value[pos]["value"]
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -3782,6 +3853,7 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):
+        assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
@@ -3790,12 +3862,43 @@ class FallbackKernel(ExternKernelAlloc):
         serializer = GraphModuleSerializer(None, None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
-        # TODO: only single output is supported
-        output_arguments = [
-            export_schema.Argument.create(
-                as_tensor=export_schema.TensorArgument(name=self.get_name())
-            )
-        ]
+        # serialize_outputs
+        def handle_single_output(return_type, output):
+            if isinstance(return_type, torch.TensorType):
+                # For single Tensor
+                out = output
+                if isinstance(output, (list, tuple)):
+                    assert len(output) == 1
+                    out = output[0]
+                return export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=out.get_name())
+                )
+            elif isinstance(return_type, torch.ListType) and isinstance(
+                return_type.getElementType(), torch.TensorType
+            ):
+                # For single TensorList
+                return export_schema.Argument.create(
+                    as_tensors=[
+                        export_schema.TensorArgument(name=out.get_name())
+                        for out in output
+                    ]
+                )
+            else:
+                raise RuntimeError("Unsupported return type")
+
+        target = self.op_overload
+        returns = target._schema.returns
+        if len(returns) == 1:
+            return_type = returns[0].real_type
+            output_arguments = [handle_single_output(return_type, self.outputs)]
+        else:
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            assert isinstance(self.outputs, tuple)
+            assert len(returns) == len(self.outputs)
+            output_arguments = [
+                handle_single_output(return_schema.real_type, output)
+                for return_schema, output in zip(returns, self.outputs)
+            ]
 
         node = ExternKernelNode(
             name=self.get_name(),
@@ -3813,6 +3916,8 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
+            self.codegen_comment(wrapper)
+
             exported_args = None
             args = None
             if config.is_fbcode():
@@ -3879,12 +3984,20 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, int):
                 return output
+            elif isinstance(output, torch.SymInt):
+                return output.node.expr
             else:
-                assert output is None, "FallbackKernel output type is not supported"
+                assert (
+                    output is None
+                ), f"FallbackKernel output type {type(output)} is not supported"
                 return None
 
-        packed.outputs = generate_output(example_output, [])
-        return packed.outputs
+        outputs = generate_output(example_output, [])
+        if isinstance(outputs, (list, tuple)):
+            packed.outputs = outputs
+        else:
+            packed.outputs = [outputs]
+        return outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3912,12 +4025,45 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
+    def get_unbacked_symbol_defs(self):
+        # This kernel defines all unbacked symbols... that it didn't get in as
+        # arguments!
+        defs = (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
+        return defs - self.get_unbacked_symbol_uses()
+
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
-        self.codegen_size_asserts(wrapper)
+        # NB: If it is possible for other ir node types to return unbacked
+        # symints, we also have to add this logic there too.  Don't forget to
+        # update get_unbacked_symbol_defs too.
+        symbols_to_define = self.get_unbacked_symbol_defs()
+        for i, s in enumerate(self.get_size()):
+            if s in symbols_to_define:
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                )
+                symbols_to_define.remove(s)
+        for i, s in enumerate(self.get_stride()):
+            if s in symbols_to_define:
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                )
+                symbols_to_define.remove(s)
+        if (s := self.get_offset()) in symbols_to_define:
+            wrapper.writeline(
+                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+            )
+            symbols_to_define.remove(s)
+        assert (
+            not symbols_to_define
+        ), f"unbacked symint {s} not written out, check comment above"
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
@@ -4178,18 +4324,16 @@ class ConvolutionUnary(ExternKernelAlloc):
         dilation_: List[int],
         groups: int,
         attr,
-        scalars,
+        scalars: Optional[List[Any]],
         algorithm,
     ):
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             attr,
-            may_convert_to_optional(optional_list, scalars),
-            may_convert_to_optional(optional_string, algorithm),
+            may_convert_to_optional(scalars),
+            algorithm,
         ]
         return ConvolutionUnary(
             layout=kernel_layout,
@@ -4272,15 +4416,12 @@ class ConvolutionBinary(ExternKernelAlloc):
         )
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
-        optional_scalar = OptionalScalar()
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            may_convert_to_optional(optional_scalar, binary_alpha),
-            may_convert_to_optional(optional_string, unary_attr),
-            may_convert_to_optional(optional_list, unary_scalars),
-            may_convert_to_optional(optional_string, unary_algorithm),
+            binary_alpha,
+            unary_attr,
+            may_convert_to_optional(unary_scalars),
+            unary_algorithm,
         ]
         return ConvolutionBinary(
             layout=kernel_layout,
@@ -4367,15 +4508,12 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
-        optional_scalar = OptionalScalar()
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            may_convert_to_optional(optional_scalar, binary_alpha),
-            may_convert_to_optional(optional_string, unary_attr),
-            may_convert_to_optional(optional_list, unary_scalars),
-            may_convert_to_optional(optional_string, unary_algorithm),
+            binary_alpha,
+            unary_attr,
+            may_convert_to_optional(unary_scalars),
+            unary_algorithm,
         ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
@@ -4620,7 +4758,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         dilation_: List[int],
         groups_: int,
         attr,
-        scalars,
+        scalars: Optional[List[Any]],
         algorithm,
     ):
         transposed = True
@@ -4641,12 +4779,10 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             transposed,
             output_padding_,
         )
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             attr,
-            may_convert_to_optional(optional_list, scalars),
-            may_convert_to_optional(optional_string, algorithm),
+            may_convert_to_optional(scalars),
+            algorithm,
         ]
         return ConvolutionTransposeUnary(
             layout=kernel_layout,
@@ -4657,18 +4793,18 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
 
 class MkldnnRnnLayer(ExternKernelAlloc):
     def __init__(
-        self, layout, inputs, constant_args=(), kernel="aten.mkldnn_rnn_layer"
+        self,
+        layout,
+        inputs,
+        constant_args=(),
     ):
         super().__init__(
             layout,
             inputs,
             constant_args,
-        )
-        self.kernel = kernel
-
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+            None,
+            kernel="aten.mkldnn_rnn_layer",
+            cpp_kernel="at::mkldnn_rnn_layer",
         )
 
     @classmethod
@@ -4755,7 +4891,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                     output_stride,
                 ),
                 packed,
-                indices + [(list, i)],
+                indices + [(tuple, i)],
             )
             for i, (output_size, output_stride) in enumerate(
                 zip(output_sizes, output_strides)
@@ -5331,6 +5467,10 @@ class StorageBox(MutableBox):
         return (
             (sum(read.index != 0 for read in self.data.get_reads()) > 1)
             if isinstance(self.data, Pointwise)
+            and all(
+                not isinstance(read, dependencies.StarDep)
+                for read in self.data.get_reads()
+            )
             else True
         )
 
@@ -5778,7 +5918,7 @@ class InPlaceHint(ExternKernel):
     Wrap the input of your inplace op to enable this behavior.
 
     The design is based on two key decisions:
-    - this node is resposible for allocating the in/out buffer used by the collective.
+    - this node is responsible for allocating the in/out buffer used by the collective.
         This is controlled by the ``should_allocate`` method that returns True here and
         False for the collective node
     - The scheduler special-case this node and enable it to reuse its input.
@@ -5818,7 +5958,7 @@ class OutputBuffer(ExternKernel):
 class MultiOutputNoSizeAssert(MultiOutput):
     """
     Extract partial output from a multi-output OP.
-    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
+    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emitting this.
     """
 
     def __init__(self, layout, input, index):
@@ -6055,3 +6195,22 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
+
+
+# NB: recursive structure here reflects val_to_arg_str, avoid
+# calling free_unbacked_symbols on "exotic" types that don't get pexpr
+# treatment
+def maybe_free_unbacked_symbols(s):
+    if isinstance(s, (SymTypes, sympy.Expr)):
+        # This branch should be impossible in return position
+        return free_unbacked_symbols(s)
+    elif isinstance(s, (tuple, list)):
+        r = set()
+        for t in s:
+            r |= maybe_free_unbacked_symbols(t)
+        return r
+    elif isinstance(s, torch.Tensor):
+        # This branch is impossible in constant-args position
+        return free_unbacked_symbols(s)
+    else:
+        return set()

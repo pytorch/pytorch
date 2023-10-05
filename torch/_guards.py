@@ -175,9 +175,12 @@ class Guard:
 
     stack = None
     user_stack = None
+    _hash = None
 
     def __hash__(self):
-        return hash((self.name, self.source, id(self.create_fn)))
+        if self._hash is None:
+            self._hash = hash((self.name, self.source, id(self.create_fn)))
+        return self._hash
 
     def sort_key(self):
         return (
