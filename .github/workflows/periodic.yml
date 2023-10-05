@@ -118,6 +118,7 @@ jobs:
     if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * 1-5' || github.event.schedule == '45 4 * * 0,6'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
+      trigger-event: ${{ github.event_name }}
       build-environment: ios-build-test
       sync-tag: ios-build-test
       test-matrix: |

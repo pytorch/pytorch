@@ -239,6 +239,13 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
   });
 }
 
+AOTITorchError aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = new at::Tensor();
+    *ret = tensor_pointer_to_tensor_handle(out_tensor);
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_tensor_copy_(
     AtenTensorHandle src,
@@ -301,7 +308,7 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_ints,
     int64_t* flatten_int_args,
     int num_tensors,
-    void** flatten_tensor_args) {
+    AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
