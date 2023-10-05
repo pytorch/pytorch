@@ -6,7 +6,8 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/module.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct GradientPair {
   std::shared_ptr<Graph> forward;
   std::shared_ptr<Graph> backward;
@@ -15,4 +16,5 @@ struct GradientPair {
 TORCH_API c10::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema);
 TORCH_API bool hasGradientInfoForSchema(const FunctionSchema& schema);
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

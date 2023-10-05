@@ -158,27 +158,16 @@ class AbstractImplCtx:
 
         Example::
 
-            >>> # An operator with data-dependent output shape
-            >>> lib = torch.library.Library("mymodule", "FRAGMENT")
-            >>> lib.define("mymodule::custom_nonzero(Tensor x) -> Tensor")
-            >>>
-            >>> @torch.library.impl_abstract("mymodule::custom_nonzero")
+            >>> # Let's assume we've registered an operator,
+            >>> # mylibrary::custom_nonzero, with data-dependent output shape
+            >>> @torch.library.impl_abstract("mylibrary::custom_nonzero"):
             >>> def custom_nonzero_abstract(x):
-            >>>     # Number of nonzero-elements is data-dependent.
-            >>>     # Since we cannot peek at the data in an abstract impl,
-            >>>     # we use the ctx object to construct a new symint that
-            >>>     # represents the data-dependent size.
+            >>>     # Number of nonzero-elements is data-dependent
             >>>     ctx = torch.library.get_ctx()
             >>>     nnz = ctx.new_dynamic_size()
-            >>>     shape = [nnz, x.dim()]
-            >>>     result = x.new_empty(shape, dtype=torch.int64)
+            >>>     shape = [x.dim(), nnz]
+            >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
-            >>>
-            >>> @torch.library.impl(lib, "custom_nonzero", "CPU")
-            >>> def custom_nonzero_cpu(x):
-            >>>     x_np = x.numpy()
-            >>>     res = np.stack(np.nonzero(x_np), axis=1)
-            >>>     return torch.tensor(res, device=x.device)
 
         """
         if (

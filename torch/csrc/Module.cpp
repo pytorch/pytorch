@@ -1240,15 +1240,21 @@ void THCPGraph_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
-namespace torch::cuda {
+namespace torch {
+namespace cuda {
+
 void initModule(PyObject* module);
-} // namespace torch::cuda
+
+}
+} // namespace torch
 #endif
 
 #ifdef USE_ITT
-namespace torch::profiler {
+namespace torch {
+namespace profiler {
 void initIttBindings(PyObject* module);
-} // namespace torch::profiler
+} // namespace profiler
+} // namespace torch
 #endif
 
 static std::vector<PyMethodDef> methods;

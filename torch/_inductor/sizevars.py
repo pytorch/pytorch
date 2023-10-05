@@ -231,7 +231,7 @@ class SizeVarAllocator:
     # Note - [On Statically Known]
     #
     # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
-    # operated by providing essentially a question, where the size hinted values were evaluated. If the condition was
+    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
     # true, we add a guard and return True, otherwise, False.
     #
     # def maybe_guard_foo(args):
@@ -373,11 +373,8 @@ class SizeVarAllocator:
             free_symbols = expr.free_symbols
         return sympy_subs(expr, self.var_to_val)
 
-    def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
+    def size_hint(self, expr: Expr) -> int:
         out = self.symbolic_hint(expr)
-        if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
-            # Use the provided heuristic fallback hint
-            return fallback
         try:
             return int(out)
         except Exception:

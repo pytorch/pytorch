@@ -4,7 +4,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/custom_class.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void initPythonCustomClassBindings(PyObject* module);
 
@@ -17,4 +18,5 @@ struct ScriptClass {
   c10::StrongTypePtr class_type_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

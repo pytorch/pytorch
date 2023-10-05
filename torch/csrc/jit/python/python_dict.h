@@ -5,7 +5,8 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void initScriptDictBindings(PyObject* module);
 
@@ -123,4 +124,5 @@ class ScriptDict final {
   c10::impl::GenericDict dict_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -267,7 +267,7 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
     if enable is None:
         yield
     elif enable:
-        # Assume everything is dynamic by default
+        # Assume everything is dynamic by deafult
         with config.patch(assume_static_by_default=False):
             yield
     else:
@@ -712,7 +712,7 @@ def explain(f, *extra_args, **extra_kwargs):
             nopython=False,
             guard_export_fn=guard_export_print,
         )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
@@ -886,46 +886,44 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool)
-
-    def is_supported_type(val):
-        return isinstance(val, supported_types)
-
     def produce_matching(sources, candidates):
         source_types = " or ".join(
             [
-                desc
-                + " of types: ("
-                + ", ".join([str(type(val)) for val in vals])
-                + ")"
-                for desc, vals in sources.items()
+                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
+                for desc, args in sources.items()
             ]
         )
-        source_vals = [val for vals in sources.values() for val in vals]
+        source_args = [arg for args in sources.values() for arg in args]
         matched_elements_positions = []
-        dict_of_source_vals = {}
-        for i, val in enumerate(source_vals):
-            dict_of_source_vals[id(val)] = i
+        dict_of_source_args = dict()
+        for i, arg in enumerate(source_args):
+            dict_of_source_args[id(arg)] = i
 
-        for candidate_desc, candidate_vals in candidates.items():
-            for i, val in enumerate(candidate_vals):
-                if is_supported_type(val):
-                    if id(val) in dict_of_source_vals:
-                        matched_elements_positions.append(dict_of_source_vals[id(val)])
+        for candidate_desc, candidate_args in candidates.items():
+            for i, arg in enumerate(candidate_args):
+                # 1-element tensor arg can be unspec int/float
+                if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
+                    if id(arg) in dict_of_source_args:
+                        matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    elif id(arg.item()) in dict_of_source_args:
+                        matched_elements_positions.append(
+                            dict_of_source_args[id(arg.item())]
+                        )
                     else:
                         raise AssertionError(
-                            f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
+                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
                         )
                 else:
-                    raise AssertionError(
-                        f"{candidate_desc} #{i+1} is {val}, but only "
-                        f"the following types are supported: {supported_types}"
-                    )
+                    if id(arg) not in dict_of_source_args:
+                        raise AssertionError(
+                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                        )
+                    matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
     matched_input_elements_positions = produce_matching(
-        sources={"original inputs": flat_args},
+        sources={"original args": flat_args},
         candidates={"graph-captured input": graph_captured_input},
     )
 
@@ -935,9 +933,9 @@ def rewrite_signature(
     matched_output_elements_positions = produce_matching(
         sources={
             "graph-captured outputs": list(graph_captured_output),
-            "original inputs": flat_args,
+            "original args": flat_args,
         },
-        candidates={"original output": flat_results_traced},
+        candidates={"traced result": flat_results_traced},
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1208,7 +1206,7 @@ def export(
                 export=True,
                 export_constraints=constraints,
             )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
             except ConstraintViolationError as e:
@@ -1258,7 +1256,7 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        # This check need to happened before aten_graph
+        # This check need to happend before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx
         if same_signature:
             check_signature_rewritable(graph)
@@ -1286,11 +1284,7 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(
-                        UserErrorType.DYNAMIC_CONTROL_FLOW,
-                        str(e),
-                        case_name="cond_operands",
-                    )
+                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
         if same_signature:
             flat_args_dynamic_dims = [

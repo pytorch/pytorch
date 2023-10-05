@@ -36,12 +36,8 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 if TEST_NUMBA:
-    try:
-        import numba.cuda
-        TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except Exception as e:
-        TEST_NUMBA_CUDA = False
-        TEST_NUMBA = False
+    import numba.cuda
+    TEST_NUMBA_CUDA = numba.cuda.is_available()
 else:
     TEST_NUMBA_CUDA = False
 

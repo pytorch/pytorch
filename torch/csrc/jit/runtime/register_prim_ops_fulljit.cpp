@@ -25,7 +25,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -870,4 +871,5 @@ static auto reg4 =
         .op("_test::get_first", &get_first);
 
 } // namespace
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

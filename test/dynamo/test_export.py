@@ -2183,7 +2183,7 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
-    def test_dataclass_input_output(self):
+    def test_dataclass_input(self):
         from dataclasses import dataclass
 
         @dataclass
@@ -2196,22 +2196,11 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "graph-captured input #1, of type .*Tensor.*, "
-            "is not among original inputs of types: .*Tensors",
+            "graph-captured input #0.*Tensor.*not among original args.*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
             )
-
-        def f(x, y):
-            return Tensors(x=x.sin(), y=y.cos())
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #1 is .*Tensors.*, "
-            "but only the following types are supported",
-        ):
-            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
     def test_none_out(self):
         def f(x, y):
@@ -2219,40 +2208,9 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "original output #1 is None, but only the following types are supported",
+            "traced result #0.*NoneType.*not among graph-captured outputs.*or original args.*Tensor.*Tensor",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
-
-    def test_primitive_constant_output(self):
-        def foo(x):
-            # return a constant of primitive type
-            y = 5
-            return y * x, y
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 5, but only the following types are supported",
-        ):
-            torch.export.export(foo, (torch.tensor(3),))
-
-        def bar(x, y):
-            return y * x, y
-
-        # new behavior
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 5, but only the following types are supported",
-        ):
-            torch.export.export(bar, (torch.tensor(3), 5))
-
-        def qux(x, y):
-            return y * x, y - 1
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 4, but only the following types are supported",
-        ):
-            torch.export.export(qux, (torch.tensor(3), 5))
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
@@ -3670,10 +3628,6 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
     return add_2""",
         )
 
-    @unittest.skipIf(
-        common_utils.TEST_WITH_ASAN,
-        "Times out with ASAN, see https://github.com/pytorch/pytorch/issues/110416",
-    )
     def test_retracibility(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):

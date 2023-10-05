@@ -15,10 +15,10 @@
 
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/nested/NestedTensorTransformerUtils.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <ATen/native/nested/cuda/NestedTensorTransformerUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
 namespace at {
@@ -220,8 +220,8 @@ std::tuple<
     Tensor,
     Tensor,
     Tensor,
-    c10::SymInt,
-    c10::SymInt,
+    int64_t,
+    int64_t,
     Tensor,
     Tensor,
     Tensor>

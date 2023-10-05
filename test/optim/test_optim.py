@@ -936,7 +936,6 @@ class TestOptim(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
     @largeTensorTest("72GB", "cuda")
-    @skipIfRocm
     def test_multi_tensor_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._multi_tensor_optimizer_configs:
             # note(crcrpar): H100 wasn't sufficient for Adamax, surprisingly
@@ -980,7 +979,6 @@ class TestOptim(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
     @largeTensorTest("64GB", "cuda")
-    @skipIfRocm
     def test_fused_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._fused_optimizer_configs:
             params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]

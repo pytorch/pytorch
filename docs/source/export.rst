@@ -64,8 +64,8 @@ serialized.
         Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
-following invariants. More specifications about the IR can be found
-:ref:`here <export.ir_spec>`.
+following invariants. More specifications about the IR can be found here (coming
+soon!).
 
 * **Soundness**: It is guaranteed to be a sound representation of the original
   program, and maintains the same calling conventions of the original program.
@@ -501,8 +501,7 @@ Graph breaks can also be encountered on data-dependent control flow (``if
 x.shape[0] > 2``) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators. Currently, we support :ref:`torch.cond <control_flow_cond>`
-to express if-else like control flow (more coming soon!).
+special control flow operators (coming soon!).
 
 Data-Dependent Accesses
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -536,11 +535,9 @@ Read More
    :caption: Additional Links for Export Users
    :maxdepth: 1
 
-   export.ir_spec
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
-   control_flow_cond
 
 .. toctree::
    :caption: Deep Dive for PyTorch Developers

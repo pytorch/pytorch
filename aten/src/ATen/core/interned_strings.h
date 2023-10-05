@@ -340,8 +340,7 @@ namespace c10 {
   _(attr, output_layouts)            \
   _(attr, allowzero)                 \
   _(attr, seen_none)                 \
-  _(attr, overload_name)             \
-  _(attr, node_stack_idx)
+  _(attr, overload_name)
 
 enum class _keys : unique_t {
     #define DEFINE_KEY(ns, s) ns##_##s,

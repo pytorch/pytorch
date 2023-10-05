@@ -1,18 +1,24 @@
-from abc import ABC
-from typing import Callable, Dict, List, Optional, Type
-
 import torch
+from torch.fx.graph import (
+    Node,
+)
 
+from .utils import (
+    all_node_args_have_no_tensors,
+)
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeConfig,
     ObservationType,
 )
-from torch.ao.quantization.utils import NodePattern, Pattern, QuantizerCls
-from torch.fx.graph import Node
+from torch.ao.quantization.utils import (
+    NodePattern,
+    Pattern,
+    QuantizerCls,
+)
 
-from .utils import all_node_args_have_no_tensors
-
+from abc import ABC
+from typing import Callable, Dict, List, Type, Optional
 
 __all__ = [
     "QuantizeHandler",
@@ -39,7 +45,7 @@ def _default_root_node_getter(node_pattern):
     return node_pattern
 
 # Base Pattern Handler
-class QuantizeHandler(ABC):  # noqa: B024
+class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns
     """
     def __init__(

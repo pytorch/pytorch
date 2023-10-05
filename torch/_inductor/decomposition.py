@@ -2,11 +2,9 @@ import functools
 import logging
 import math
 import typing
-from typing import Optional
 
 import torch
 import torch._decomp as decomp
-import torch._prims_common as utils
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -71,9 +69,7 @@ decomps_to_exclude = [
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
-    aten.glu,  # inductor lowers this directly
-    aten.split.Tensor,  # inductor lowers this directly
-    aten.unbind,  # inductor lowers this directly
+    aten.glu,  # has lowering in inductor
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -182,10 +178,6 @@ def round_dec(x, decimals=0):
 @register_decomposition([aten.bmm])
 @pw_cast_for_opmath
 def bmm(self, batch2):
-    if config.coordinate_descent_tuning:
-        if self.shape[1] == 1:
-            out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
-            return out
     if self.device.type == "cpu":
         if self.size(1) == 1 and batch2.size(-1) == 1:
             return torch.sum(
@@ -202,9 +194,6 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
-            return alpha * out + beta * self
-        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
-            out = (mat1.T * mat2).sum(dim=0, keepdim=True)
             return alpha * out + beta * self
     return NotImplemented
 
@@ -247,7 +236,7 @@ def cat(tensors, dim=0):
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
-    # when no 'filtering' has occurred, we raise to prevent infinite recursion (no more decomposition needed)
+    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 
@@ -314,34 +303,24 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
-def get_like_layout(
-    tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
-) -> torch.memory_format:
-    # TODO: _to_copy tensor to stride permutation
-    if memory_format in (torch.preserve_format, None):
-        return utils.suggest_memory_format(tensor)
-    else:
-        return memory_format
-
-
 @register_decomposition(aten.rand_like)
-def rand_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
+def rand_like(self, *, dtype=None, device=None, **kwargs):
     return torch.rand(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
 
 
 @register_decomposition(aten.randn_like)
-def randn_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
+def randn_like(self, *, dtype=None, device=None, **kwargs):
     return torch.randn(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
 
 
 @register_decomposition(aten.full_like)
@@ -363,11 +342,11 @@ def full_like(
         layout=layout or self.layout,
         device=device or self.device,
         requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
 
 
 @register_decomposition(aten.randint_like.default)
-def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **kwargs):
+def randint_like(self, high, *, dtype=None, device=None, **kwargs):
     return aten.randint.low(
         0,
         high,
@@ -375,13 +354,11 @@ def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **k
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
 
 
 @register_decomposition(aten.randint_like.low_dtype)
-def randint_like_low(
-    self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs
-):
+def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
     return aten.randint.low(
         low,
         high,
@@ -389,7 +366,7 @@ def randint_like_low(
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
 
 
 @register_decomposition(aten.randint.default)

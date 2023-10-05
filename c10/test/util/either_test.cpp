@@ -8,7 +8,6 @@
 #include <sstream>
 #include <vector>
 
-// NOLINTBEGIN(*)
 using c10::either;
 using c10::make_left;
 using c10::make_right;
@@ -1251,4 +1250,3 @@ TEST(EitherTestDestructor, RightDestructorIsCalledAfterMoveAssignment) {
       std::move(temp2);
   var1 = std::move(var2);
 }
-// NOLINTEND(*)

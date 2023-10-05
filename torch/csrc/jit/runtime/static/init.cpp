@@ -7,7 +7,8 @@
 // This number is a heuristic determined with pytorch/benchmark
 #define DEFAULT_FUSION_SIZE 4
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void initStaticModuleBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -142,4 +143,5 @@ void initStaticModuleBindings(PyObject* module) {
           py::arg("min_size") = DEFAULT_FUSION_SIZE);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

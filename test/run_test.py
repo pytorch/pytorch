@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
+from torch.utils import cpp_extension
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -648,11 +649,9 @@ def run_test_with_subprocess(test_module, test_directory, options):
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
         try:
-            from torch.utils import cpp_extension
-
             cpp_extension.verify_ninja_availability()
         except RuntimeError:
-            print_to_stderr(CPP_EXTENSIONS_ERROR)
+            print(CPP_EXTENSIONS_ERROR)
             return 1
 
     # Wipe the build folder, if it exists already
@@ -1415,9 +1414,7 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
-        print_to_stderr(
-            "::warning:: Failed to find test times file. Using round robin sharding."
-        )
+        print("::warning:: Failed to find test times file. Using round robin sharding.")
         return {}
 
     with open(path) as f:
@@ -1425,16 +1422,16 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     build_environment = os.environ.get("BUILD_ENVIRONMENT")
     test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(build_environment, {}):
-        print_to_stderr("Found test times from artifacts")
+        print("Found test times from artifacts")
         return test_times_file[build_environment][test_config]
     elif test_config in test_times_file["default"]:
-        print_to_stderr(
+        print(
             f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
             f" and {test_config} test config. Using default build env and {test_config} test config instead."
         )
         return test_times_file["default"][test_config]
     else:
-        print_to_stderr(
+        print(
             f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
             f" and {test_config} test config. Using default build env and default test config instead."
         )
@@ -1614,7 +1611,7 @@ def check_pip_packages() -> None:
     installed_packages = [i.key for i in pkg_resources.working_set]
     for package in packages:
         if package not in installed_packages:
-            print_to_stderr(
+            print(
                 f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
             )
             sys.exit(1)
@@ -1702,7 +1699,7 @@ def main():
     ]
 
     for test_batch in test_batches:
-        print_to_stderr(test_batch)
+        print(test_batch)
 
     if options.dry_run:
         return
@@ -1722,10 +1719,10 @@ def main():
         start_time = time.time()
         for test_batch in test_batches:
             elapsed_time = time.time() - start_time
-            print_to_stderr(
+            print(
                 f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
             )
-            print_to_stderr(
+            print(
                 f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
             )
             metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
@@ -1759,7 +1756,7 @@ def main():
                 test_stats = aggregated_heuristics.get_test_stats(test)
                 test_stats["num_total_tests"] = num_tests
 
-                print_to_stderr("Emiting td_test_failure_stats")
+                print("Emiting td_test_failure_stats")
                 emit_metric("td_test_failure_stats", test_stats)
 
     if len(all_failures):

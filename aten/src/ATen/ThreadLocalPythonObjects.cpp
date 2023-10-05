@@ -4,7 +4,8 @@
 
 #include <utility>
 
-namespace at::impl {
+namespace at {
+namespace impl {
 
 static thread_local ThreadLocalPythonObjects py_objects;
 
@@ -31,4 +32,5 @@ const ThreadLocalPythonObjects& ThreadLocalPythonObjects::get_state() {
 }
 
 
-} // namespace at::impl
+}
+}

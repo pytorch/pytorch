@@ -15,6 +15,8 @@ def get_disabled_issues() -> List[str]:
     return issue_numbers
 
 
+IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
+
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 
@@ -88,7 +90,7 @@ def get_disabled_tests(
         # remove re-enabled tests and condense even further by getting rid of pr_num
         disabled_test_from_issues = dict()
         for test_name, (pr_num, link, platforms) in the_response.items():
-            if pr_num not in get_disabled_issues():
+            if pr_num not in IGNORE_DISABLED_ISSUES:
                 disabled_test_from_issues[test_name] = (
                     link,
                     platforms,

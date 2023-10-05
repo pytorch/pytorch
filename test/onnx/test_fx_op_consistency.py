@@ -25,7 +25,7 @@ Note:
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Collection, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import onnx_test_common
 
@@ -161,62 +161,6 @@ COMPLEX_TESTED_OPS = frozenset(
         "stft",
     ]
 )
-
-
-# NOTE: For ATen signature modifications that will break ONNX export,
-# use **xfail_torchlib_forward_compatibility** and **skip_torchlib_forward_compatibility** instead of xfail or skip
-# to make the signal apparent for maintainers.
-def xfail_torchlib_forward_compatibility(
-    op_name: str,
-    variant_name: str = "",
-    *,
-    reason: str,
-    github_issue: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], bool]] = None,
-    enabled_if: bool = True,
-):
-    """Prefer using this (xfail) over skip when possible.
-
-    Only skip when the test is not failing consistently.
-    """
-    return xfail(
-        op_name,
-        variant_name=variant_name,
-        reason=f"{reason}. GitHub Issue: {github_issue}",
-        opsets=opsets,
-        dtypes=dtypes,
-        matcher=matcher,
-        enabled_if=enabled_if,
-    )
-
-
-def skip_torchlib_forward_compatibility(
-    op_name: str,
-    variant_name: str = "",
-    *,
-    reason: str,
-    github_issue: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
-    enabled_if: bool = True,
-):
-    """Prefer using xfail_torchlib_forward_compatibility over this (skip) when possible.
-
-    Only skip when the test is not failing consistently.
-    """
-    return skip(
-        op_name,
-        variant_name=variant_name,
-        reason=f"{reason}. GitHub Issue: {github_issue}",
-        opsets=opsets,
-        dtypes=dtypes,
-        matcher=matcher,
-        enabled_if=enabled_if,
-    )
-
 
 # fmt: off
 # Turn off black formatting to keep the list compact
@@ -597,20 +541,27 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
     ),
-    skip_torchlib_forward_compatibility(
+    skip(
         "nn.functional.embedding_bag",
         matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "'padding_idx' overload for _embedding_bag and _embedding_bag_forward_only. "
-            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided"
+        reason=(
+            "Torchlib does not support 'padding_idx' overload for _embedding_bag and _embedding_bag_forward_only. "
+            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided. "
+            "See https://github.com/microsoft/onnxscript/issues/1056 for details."
         ),
-        github_issue="https://github.com/microsoft/onnxscript/issues/1056",
     ),
     skip(
         "nn.functional.max_pool3d",
         matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
         and sample.kwargs.get("padding") == 1,
         reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
+    ),
+    skip(
+        "nn.functional.nll_loss",
+        matcher=lambda sample: isinstance(sample.kwargs.get("reduction"), str),
+        reason=onnx_test_common.reason_onnx_script_does_not_support(
+            "string in reduction kwarg: https://github.com/microsoft/onnxscript/issues/726"
+        ),
     ),
     xfail(
         "nonzero",

@@ -3,7 +3,9 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/runtime/interpreter/can_emit_inline.h>
 
-namespace torch::jit::interpreter {
+namespace torch {
+namespace jit {
+namespace interpreter {
 
 namespace {
 
@@ -211,4 +213,6 @@ PreprocessGraph::PreprocessGraph(Graph& g) : graph(g.copy()) {
   insertLastUses(*graph);
   can_emit_inline = std::move(CanEmitInline(*graph.get()).can_emit_inline_);
 }
-} // namespace torch::jit::interpreter
+} // namespace interpreter
+} // namespace jit
+} // namespace torch

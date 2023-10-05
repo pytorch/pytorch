@@ -22,7 +22,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Def;
 struct Property;
@@ -348,4 +349,5 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using CompilationUnit = ::torch::jit::CompilationUnit;
 } // namespace script
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

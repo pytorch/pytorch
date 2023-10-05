@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <ATen/ATen.h>
 #include <cmath>
 #include <type_traits>
 #include <vector>

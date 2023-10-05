@@ -32,7 +32,8 @@
 // modules and their methods into flattened graphs which don't have any
 // function calls.
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -121,7 +122,6 @@ struct TORCH_API Module : public Object {
   void register_buffer(const std::string& name, at::Tensor v) {
     bool is_param = false;
     bool is_buffer = true;
-    std::lock_guard<std::mutex> lock(*register_mutex_);
     type()->addOrCheckAttribute(name, TensorType::get(), is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
@@ -130,7 +130,6 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
-    std::lock_guard<std::mutex> lock(*register_mutex_);
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
@@ -322,9 +321,6 @@ struct TORCH_API Module : public Object {
 
   // Map of function names to the traced inputs that they have been traced with
   c10::Dict<std::string, c10::impl::GenericList> traced_inputs_;
-
-  // Mutex to keep registring buffer or parameter thread safe.
-  std::shared_ptr<std::mutex> register_mutex_ = std::make_shared<std::mutex>();
 };
 
 // C++ equivalent api of `torch.jit.freeze`. See documentation there for
@@ -680,4 +676,5 @@ using Module = ::torch::jit::Module;
 using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 } // namespace script
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

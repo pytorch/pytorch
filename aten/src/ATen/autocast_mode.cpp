@@ -5,7 +5,8 @@
 #include <ATen/CachedTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
 
-namespace at::autocast {
+namespace at {
+namespace autocast {
 
 bool is_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
@@ -517,4 +518,5 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 }
 
 } // namespace
-} // namespace at::autocast
+} // namespace autocast
+} // namespace at

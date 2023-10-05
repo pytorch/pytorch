@@ -6,7 +6,8 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static UpgradersMap upgradersMap;
 
@@ -83,4 +84,5 @@ void test_only_remove_upgraders(
   upgradersMap.test_only_remove_content(content);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -2909,7 +2909,6 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
         ((), {'dim': 0}),
         ((), {}),
         ((), {'dim': 0, 'keepdim': True}),
-        ((S, 0, S), {'dim': 0}),
     )
 
     for shape, kwargs in test_cases:
@@ -4299,7 +4298,7 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
-            low=0 if dtype == torch.uint8 else None,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
             high=256 if dtype == torch.uint8 else None,
         )
         # provide few samples for a more close to typical image processing usage
@@ -4317,17 +4316,30 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
 
     for align_corners in align_corners_options:
         for rank in ranks_for_mode[mode]:
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(S, rank, False), None, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(L, rank, False), None, mode, align_corners)
+            yield SampleInput(
+                make_arg(shape(D, rank)),
+                shape(S, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=align_corners,
+            )
+            yield SampleInput(
+                make_arg(shape(D, rank)),
+                shape(L, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=align_corners,
+            )
             for recompute_scale_factor in [False, True]:
-                yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 1.7, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
-                yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 0.6, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
+                for scale_factor in [1.7, 0.6]:
+                    yield SampleInput(
+                        make_arg(shape(D, rank)),
+                        size=None,
+                        scale_factor=scale_factor,
+                        mode=mode,
+                        align_corners=align_corners,
+                        recompute_scale_factor=recompute_scale_factor,
+                    )
 
 def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs)
@@ -4386,7 +4398,7 @@ def reference_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
-            low=0 if dtype == torch.uint8 else None,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
             high=256 if dtype == torch.uint8 else None,
         )
         # provide a single sample for more typical image processing usage
@@ -7676,7 +7688,7 @@ def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwarg
     for mode, padding_mode, align_corners in itertools.product(modes, padding_modes, align_cornerss):
         yield SampleInput(
             _make_tensor((batch_size, num_channels, S, L)),
-            _make_tensor((batch_size, M + 3, M, 2)),
+            _make_tensor((batch_size, num_channels, M, 2)),
             mode,
             padding_mode,
             align_corners,
@@ -12337,7 +12349,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:

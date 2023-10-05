@@ -194,7 +194,7 @@ class FindMappedPositions : public MaxInfoSpanningTree::Propagator {
       TensorView* reference,
       int64_t reference_pos);
 
-  ~FindMappedPositions() override = default;
+  ~FindMappedPositions() = default;
 
   virtual void propagateC2P(TensorView* from, TensorView* to) override;
   virtual void propagateP2C(TensorView* from, TensorView* to) override;

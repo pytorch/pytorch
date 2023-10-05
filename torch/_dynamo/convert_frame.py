@@ -57,7 +57,6 @@ from .utils import (
     CleanupManager,
     CompilationMetrics,
     counters,
-    cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
@@ -130,7 +129,6 @@ def wrap_convert_context(fn):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
         prior_deterministic = torch.are_deterministic_algorithms_enabled()
-        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
@@ -143,9 +141,7 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
-            torch.use_deterministic_algorithms(
-                prior_deterministic, warn_only=prior_warn_only
-            )
+            torch.use_deterministic_algorithms(prior_deterministic)
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
@@ -406,13 +402,6 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
-def maybe_cprofile(func):
-    if config.cprofile:
-        return cprofile_wrapper(func)
-    return func
-
-
-@maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],

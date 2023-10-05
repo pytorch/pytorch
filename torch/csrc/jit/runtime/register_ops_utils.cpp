@@ -4,7 +4,8 @@
 
 #include <c10/util/irange.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
@@ -392,4 +393,5 @@ void listSetItem(Stack& stack) {
 
   push(stack, std::move(list));
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

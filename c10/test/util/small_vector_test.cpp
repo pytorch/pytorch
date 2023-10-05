@@ -13,10 +13,9 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
 #include <gtest/gtest.h>
-#include <cstdarg>
+#include <stdarg.h>
 #include <list>
 
-// NOLINTBEGIN(*arrays, bugprone-forwarding-reference-overload)
 using c10::SmallVector;
 using c10::SmallVectorImpl;
 
@@ -46,14 +45,14 @@ class Constructable {
     ++numConstructorCalls;
   }
 
-  Constructable(const Constructable& src)
-      : constructed(true), value(src.value) {
+  Constructable(const Constructable& src) : constructed(true) {
+    value = src.value;
     ++numConstructorCalls;
     ++numCopyConstructorCalls;
   }
 
-  Constructable(Constructable&& src) noexcept
-      : constructed(true), value(src.value) {
+  Constructable(Constructable&& src) : constructed(true) {
+    value = src.value;
     src.value = 0;
     ++numConstructorCalls;
     ++numMoveConstructorCalls;
@@ -73,7 +72,7 @@ class Constructable {
     return *this;
   }
 
-  Constructable& operator=(Constructable&& src) noexcept {
+  Constructable& operator=(Constructable&& src) {
     EXPECT_TRUE(constructed);
     value = src.value;
     src.value = 0;
@@ -143,10 +142,13 @@ int Constructable::numCopyAssignmentCalls;
 int Constructable::numMoveAssignmentCalls;
 
 struct NonCopyable {
-  NonCopyable() = default;
-  NonCopyable(NonCopyable&&) noexcept = default;
-  NonCopyable& operator=(NonCopyable&&) noexcept = default;
+  NonCopyable() {}
+  NonCopyable(NonCopyable&&) {}
+  NonCopyable& operator=(NonCopyable&&) {
+    return *this;
+  }
 
+ private:
   NonCopyable(const NonCopyable&) = delete;
   NonCopyable& operator=(const NonCopyable&) = delete;
 };
@@ -838,7 +840,7 @@ TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
   SCOPED_TRACE("MoveAssignTest-DualVectorTypes");
 
   // Set up our vector with four elements.
-  for (int I = 0; I < 4; ++I)
+  for (unsigned I = 0; I < 4; ++I)
     this->otherVector.push_back(Constructable(I));
 
   const Constructable* OrigDataPtr = this->otherVector.data();
@@ -874,7 +876,6 @@ TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
 }
 
 struct notassignable {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   int& x;
   notassignable(int& x) : x(x) {}
 };
@@ -884,16 +885,16 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
   SmallVector<notassignable, 2> vec;
   vec.push_back(notassignable(x));
   x = 42;
-  EXPECT_EQ(x, vec.pop_back_val().x);
+  EXPECT_EQ(42, vec.pop_back_val().x);
 }
 
 struct MovedFrom {
   bool hasValue;
   MovedFrom() : hasValue(true) {}
-  MovedFrom(MovedFrom&& m) noexcept : hasValue(m.hasValue) {
+  MovedFrom(MovedFrom&& m) : hasValue(m.hasValue) {
     m.hasValue = false;
   }
-  MovedFrom& operator=(MovedFrom&& m) noexcept {
+  MovedFrom& operator=(MovedFrom&& m) {
     hasValue = m.hasValue;
     m.hasValue = false;
     return *this;
@@ -919,13 +920,14 @@ template <int I>
 struct EmplaceableArg {
   EmplaceableArgState State;
   EmplaceableArg() : State(EAS_Defaulted) {}
-  EmplaceableArg(EmplaceableArg&& X) noexcept
+  EmplaceableArg(EmplaceableArg&& X)
       : State(X.State == EAS_Arg ? EAS_RValue : EAS_Failure) {}
   EmplaceableArg(EmplaceableArg& X)
       : State(X.State == EAS_Arg ? EAS_LValue : EAS_Failure) {}
 
   explicit EmplaceableArg(bool) : State(EAS_Arg) {}
 
+ private:
   EmplaceableArg& operator=(EmplaceableArg&&) = delete;
   EmplaceableArg& operator=(const EmplaceableArg&) = delete;
 };
@@ -965,12 +967,13 @@ struct Emplaceable {
         A3(std::forward<A3Ty>(A3)),
         State(ES_Emplaced) {}
 
-  Emplaceable(Emplaceable&&) noexcept : State(ES_Moved) {}
-  Emplaceable& operator=(Emplaceable&&) noexcept {
+  Emplaceable(Emplaceable&&) : State(ES_Moved) {}
+  Emplaceable& operator=(Emplaceable&&) {
     State = ES_Moved;
     return *this;
   }
 
+ private:
   Emplaceable(const Emplaceable&) = delete;
   Emplaceable& operator=(const Emplaceable&) = delete;
 };
@@ -1037,7 +1040,6 @@ TEST(SmallVectorTest, EmplaceBack) {
   }
   {
     SmallVector<Emplaceable, 3> V;
-    // NOLINTNEXTLINE(bugprone-use-after-move)
     Emplaceable& back = V.emplace_back(std::move(A0), A1, std::move(A2), A3);
     EXPECT_TRUE(&back == &V.back());
     EXPECT_TRUE(V.size() == 1);
@@ -1443,4 +1445,3 @@ TYPED_TEST(SmallVectorInternalReferenceInvalidationTest, EmplaceBack) {
 }
 
 } // end namespace
-// NOLINTEND(*arrays, bugprone-forwarding-reference-overload)

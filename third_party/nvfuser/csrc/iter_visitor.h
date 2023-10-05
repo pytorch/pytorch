@@ -161,7 +161,8 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  protected:
-  virtual ~BackwardVisitor() override = default;
+  // NOLINTNEXTLINE(modernize-use-override)
+  virtual ~BackwardVisitor() = default;
 
   BackwardVisitor(bool must_cover_all_expr_outputs = true)
       : must_cover_all_expr_outputs_(must_cover_all_expr_outputs) {}

@@ -80,30 +80,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
-namespace at:: native {
-
-template <typename func_t>
-void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f) {
-
-  for (int arg = 0; arg < iter.ntensors(); arg++) {
-    TORCH_INTERNAL_ASSERT(
-      iter.device(arg).is_cuda(),
-      "argument ", arg, ": expected a CUDA device but found ", iter.device(arg));
-  }
-
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_kernel_nocast(sub_iter, f);
-    }
-    return;
-  }
-
-  gpu_kernel_impl_nocast(iter, f);
-}
+namespace at { namespace native {
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
@@ -333,4 +310,4 @@ void gpu_kernel_multiple_outputs(TensorIteratorBase& iter, const func_t& f) {
   gpu_kernel_multiple_outputs_impl(iter, f);
 }
 
-} //namespace at::native
+}} //namespace at::native

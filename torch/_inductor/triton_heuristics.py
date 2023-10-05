@@ -326,7 +326,6 @@ class CachingAutotuner(KernelInterface):
                     bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
                                 stream, bin.cu_function, None, None, None,
                                 {', '.join(call_args)})
-                return bin
             """.lstrip(),
             scope,
         )
@@ -1064,7 +1063,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
                 # halve the XBLOCK/RBLOCK compared to outer_config
-                # TODO: this may only be beneficial when each iteration of the reduction
+                # TODO: this may only be beneficial when each iteration of the reduciton
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
                 triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],

@@ -20,7 +20,6 @@ configure_file(
 # torch/utils/hipify/cuda_to_hip_mappings.py for new files
 # and headers you add
 set(C10_CUDA_SRCS
-    CUDAAllocatorConfig.cpp
     CUDACachingAllocator.cpp
     CUDADeviceAssertionHost.cpp
     CUDAException.cpp
@@ -33,7 +32,6 @@ set(C10_CUDA_SRCS
     driver_api.cpp
 )
 set(C10_CUDA_HEADERS
-    CUDAAllocatorConfig.h
     CUDACachingAllocator.h
     CUDADeviceAssertionHost.h
     CUDAException.h

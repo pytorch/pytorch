@@ -5,7 +5,9 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace torch::jit::logging {
+namespace torch {
+namespace jit {
+namespace logging {
 
 // TODO: multi-scale histogram for this thing
 
@@ -66,4 +68,6 @@ void recordDurationSince(const std::string& name, const JITTimePoint& tp) {
   logging::getLogger()->addStatValue(name, seconds);
 }
 
-} // namespace torch::jit::logging
+} // namespace logging
+} // namespace jit
+} // namespace torch

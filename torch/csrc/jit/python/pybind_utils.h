@@ -53,7 +53,8 @@
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using ResolutionCallback = std::function<py::object(std::string)>;
 
@@ -1110,4 +1111,5 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     bool is_overload,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

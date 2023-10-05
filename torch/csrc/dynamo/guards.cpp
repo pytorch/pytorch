@@ -5,7 +5,6 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_symnode.h>
 #include <torch/extension.h>
 #include <sstream>
 
@@ -31,8 +30,8 @@ class TensorCheck {
       const LocalState& state,
       PyTypeObject* pt,
       const at::Tensor& v,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+      std::vector<std::optional<int64_t>> dynamic_dims_sizes,
+      std::vector<std::optional<int64_t>> dynamic_dims_strides)
       : pytype(pt),
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
@@ -147,8 +146,8 @@ class TensorCheck {
   at::DeviceIndex device_index_;
   bool requires_grad_;
   // NB: These are unset if dynamic shapes is enabled.
-  std::vector<std::optional<c10::SymInt>> sizes_;
-  std::vector<std::optional<c10::SymInt>> strides_;
+  std::vector<std::optional<int64_t>> sizes_;
+  std::vector<std::optional<int64_t>> strides_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
 };
@@ -179,27 +178,23 @@ static PyObject* TensorGuards_new(
   return (PyObject*)self;
 }
 
-static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
-    const c10::SymIntArrayRef& intArray) {
-  std::vector<std::optional<c10::SymInt>> optVec(intArray.size());
+static std::vector<std::optional<int64_t>> wrapIntegersInOptional(
+    const c10::IntArrayRef& intArray) {
+  std::vector<std::optional<int64_t>> optVec(intArray.size());
   std::transform(
-      intArray.begin(), intArray.end(), optVec.begin(), [](c10::SymInt value) {
+      intArray.begin(), intArray.end(), optVec.begin(), [](int64_t value) {
         return std::make_optional(value);
       });
   return optVec;
 }
 
-static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
-    PyObject* pyList) {
-  std::vector<std::optional<c10::SymInt>> vec;
+static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
+  std::vector<std::optional<int64_t>> vec;
   Py_ssize_t size = PyList_Size(pyList);
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* item = PyList_GetItem(pyList, i);
-    auto handle = py::handle(item);
     if (item == Py_None) {
       vec.emplace_back(std::nullopt);
-    } else if (torch::is_symint(handle)) {
-      vec.emplace_back(py::cast<c10::SymInt>(handle));
     } else {
       int64_t value = PyLong_AsLongLong(item);
       if (value == -1 && PyErr_Occurred()) {
@@ -208,20 +203,20 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
             "Size or stride list item is not a valid integer.");
         TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
       }
-      vec.emplace_back(c10::SymInt(value));
+      vec.emplace_back(value);
     }
   }
   return vec;
 }
 
-static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
+static std::vector<std::vector<std::optional<int64_t>>> get_dynamic_dims(
     PyObject* dynamic_dims_py) {
-  std::vector<std::vector<std::optional<c10::SymInt>>> per_tensor_dynamic_dims;
+  std::vector<std::vector<std::optional<int64_t>>> per_tensor_dynamic_dims;
   if (dynamic_dims_py != Py_None) {
     Py_ssize_t size = PyList_Size(dynamic_dims_py);
     for (Py_ssize_t i = 0; i < size; i++) {
       PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
-      std::vector<std::optional<c10::SymInt>> vec = pyListToVecOptInt(py_list);
+      std::vector<std::optional<int64_t>> vec = pyListToVecOptInt(py_list);
       per_tensor_dynamic_dims.push_back(std::move(vec));
     }
   }
@@ -252,9 +247,9 @@ static int TensorGuards_init(
 
   // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
   // an optimization to avoid invoking .size()/.stride() in python needlessly
-  std::vector<std::vector<std::optional<c10::SymInt>>>
+  std::vector<std::vector<std::optional<int64_t>>>
       per_tensor_dynamic_dims_sizes = get_dynamic_dims(dynamic_dims_sizes_py);
-  std::vector<std::vector<std::optional<c10::SymInt>>>
+  std::vector<std::vector<std::optional<int64_t>>>
       per_tensor_dynamic_dims_strides =
           get_dynamic_dims(dynamic_dims_strides_py);
 
@@ -270,15 +265,14 @@ static int TensorGuards_init(
       return -1;
     }
     auto tensor = THPVariable_Unpack(item);
-    std::vector<std::optional<c10::SymInt>> tensor_dims_size =
+    std::vector<std::optional<int64_t>> tensor_dims_size =
         per_tensor_dynamic_dims_sizes.empty()
-        ? wrapIntegersInOptional(tensor.sym_sizes())
+        ? wrapIntegersInOptional(tensor.sizes())
         : per_tensor_dynamic_dims_sizes[i];
-    std::vector<std::optional<c10::SymInt>> tensor_dims_stride =
+    std::vector<std::optional<int64_t>> tensor_dims_stride =
         per_tensor_dynamic_dims_strides.empty()
-        ? wrapIntegersInOptional(tensor.sym_strides())
+        ? wrapIntegersInOptional(tensor.strides())
         : per_tensor_dynamic_dims_strides[i];
-
     checks.emplace_back(
         state,
         Py_TYPE(item),
@@ -439,7 +433,6 @@ struct GlobalStateGuard {
     _grad_mode = at::GradMode::is_enabled();
     _torch_function = torch::torch_function_enabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
-    _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
     _allow_tf32 = ctx.allowTF32CuBLAS();
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
@@ -452,8 +445,6 @@ struct GlobalStateGuard {
     return (_grad_mode == at::GradMode::is_enabled() &&
             _torch_function == torch::torch_function_enabled() &&
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-            _deterministic_algorithms_warn_only ==
-                ctx.deterministicAlgorithmsWarnOnly() &&
             _allow_tf32 == ctx.allowTF32CuBLAS() &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
@@ -464,7 +455,6 @@ struct GlobalStateGuard {
   bool _grad_mode;
   bool _torch_function;
   bool _deterministic_algorithms;
-  bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
   bool _allow_fp16_reduce;
   bool _allow_bf16_reduce;

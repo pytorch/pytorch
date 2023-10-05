@@ -1105,11 +1105,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
-    # There should probably be a better way to do this...
     for arg in args:
         if isinstance(arg, torch.Tensor):
-            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
-                arg = torch._from_functional_tensor(arg.elem)
+            if torch._is_functional_tensor(arg):
+                arg = torch._from_functional_tensor(arg)
             if isinstance(arg, torch._subclasses.FakeTensor):
                 return True
     return False

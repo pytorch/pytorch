@@ -1,13 +1,11 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <type_traits>
 
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
-#include <ATen/TensorOperators.h>
 #include <c10/util/Logging.h>
 #include <c10/util/bit_cast.h>
 
@@ -26,31 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_efficient_attention_forward.h>
-#include <ATen/ops/_efficient_attention_forward_native.h>
-#include <ATen/ops/_fill_mem_eff_dropout_mask_native.h>
-#include <ATen/ops/_flash_attention_forward.h>
-#include <ATen/ops/_flash_attention_forward_native.h>
-#include <ATen/ops/_fused_sdp_choice_native.h>
-#include <ATen/ops/_masked_softmax.h>
-#include <ATen/ops/_native_multi_head_attention_native.h>
-#include <ATen/ops/scaled_dot_product_attention_native.h>
-#include <ATen/ops/_scaled_dot_product_efficient_attention.h>
-#include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
-#include <ATen/ops/_softmax.h>
-#include <ATen/ops/_transform_bias_rescale_qkv.h>
-#include <ATen/ops/_triton_multi_head_attention_native.h>
-#include <ATen/ops/_triton_scaled_dot_attention.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#include <ATen/ops/linear.h>
-#include <ATen/ops/narrow_native.h>
 #include <ATen/ops/scalar_tensor.h>
-#include <ATen/ops/scaled_dot_product_attention.h>
-#include <ATen/ops/split_native.h>
-
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
@@ -668,7 +642,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,

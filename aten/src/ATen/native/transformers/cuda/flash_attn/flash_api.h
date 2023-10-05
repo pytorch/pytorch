@@ -1,7 +1,7 @@
 #pragma once
 #include <cstddef>
 
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 
 namespace pytorch_flash {

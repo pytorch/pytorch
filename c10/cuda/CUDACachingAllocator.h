@@ -43,8 +43,6 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
-extern const size_t kLargeBuffer;
-
 struct Stat {
   int64_t current = 0;
   int64_t peak = 0;
@@ -189,6 +187,8 @@ enum struct RecordContext {
   ALLOC = 2, // additionally keep stacks for allocations in the trace history
   ALL = 3, // additionally record stacks for when something is freed
 };
+
+C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 // Size pretty-printer
 std::string format_size(uint64_t size);

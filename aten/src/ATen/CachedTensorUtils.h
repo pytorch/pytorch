@@ -2,7 +2,8 @@
 
 #include <ATen/ATen.h>
 
-namespace at::caching {
+namespace at {
+namespace caching {
 
 // Some systems (just cudagraphs currently) will persist a static tensor output
 // whose TensorImpl does not change across iterations. For these tensors caching
@@ -21,4 +22,5 @@ TORCH_API void set_cached_tensors_enabled(bool enable);
 // count of tensors with hooks.
 TORCH_API size_t adjusted_use_count(const at::Tensor& t);
 
-} // namespace at::caching
+} // namespace caching
+} // namespace at

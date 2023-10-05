@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <unordered_set>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -61,4 +62,5 @@ void ensure_c10_registerer_defined() {
   registerer();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

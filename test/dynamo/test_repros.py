@@ -30,7 +30,12 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._dynamo.testing import (
+    CompileCounter,
+    expectedFailureDynamic,
+    rand_strided,
+    same,
+)
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -1066,6 +1071,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    # https://github.com/pytorch/pytorch/issues/103620
+    @expectedFailureDynamic
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
@@ -1075,7 +1082,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertLessEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.op_count, 4)
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     # NB: When you remove the expectedFailure, don't forget to

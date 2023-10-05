@@ -6,7 +6,8 @@
 
 namespace py = pybind11;
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 inline c10::optional<Module> as_module(py::handle obj) {
   static py::handle ScriptModule =
@@ -32,4 +33,5 @@ inline c10::optional<Object> as_object(py::handle obj) {
   return c10::nullopt;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

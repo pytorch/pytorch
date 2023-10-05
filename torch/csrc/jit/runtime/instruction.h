@@ -4,7 +4,8 @@
 #include <typeinfo>
 #include <unordered_set>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 // instruction look like:
 // op_code X, N
 // meaning of X, N depend on the op:
@@ -97,4 +98,5 @@ char const* toString(OpCode op);
 OpCode parseOpCode(const char* str);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

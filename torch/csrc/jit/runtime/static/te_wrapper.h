@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 class TEWrapper {
  public:
@@ -41,4 +42,5 @@ std::shared_ptr<TEWrapper> createSignedLog1p();
 std::shared_ptr<TEWrapper> createClamp();
 std::shared_ptr<TEWrapper> createClampNanToNum();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

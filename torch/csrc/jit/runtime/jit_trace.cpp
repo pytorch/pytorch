@@ -17,7 +17,9 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+
+namespace jit {
 
 namespace {
 
@@ -313,4 +315,5 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
   return td.traced_graph_;
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

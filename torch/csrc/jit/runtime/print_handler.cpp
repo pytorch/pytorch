@@ -4,7 +4,8 @@
 #include <iostream>
 #include <string>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -24,4 +25,5 @@ void setPrintHandler(PrintHandler ph) {
   print_handler.store(ph);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

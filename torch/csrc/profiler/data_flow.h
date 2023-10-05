@@ -6,6 +6,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/strong_type.h>
+#include <c10/util/variant.h>
 
 namespace torch {
 namespace profiler {

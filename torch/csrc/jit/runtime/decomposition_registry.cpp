@@ -17,7 +17,8 @@
 #include <memory>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 std::mutex lock;
 
@@ -212,4 +213,5 @@ Function* GetDecompositionExecutor(const char* schema_literal) {
   return GetDecompositionExecutor(schema);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

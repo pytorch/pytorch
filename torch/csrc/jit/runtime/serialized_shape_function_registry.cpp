@@ -13,7 +13,8 @@
 
 // clang-format off
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 
 std::string shape_funcs = ""
@@ -3331,4 +3332,5 @@ const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings(
 
 // clang-format on
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

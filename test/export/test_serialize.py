@@ -105,8 +105,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        # split.Tensor gets decomposed to split_with_sizes by the core ATen decomposition table
-        self.assertEqual(node.target, "torch.ops.aten.split_with_sizes.default")
+        self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
         # tensor([[0, 1],

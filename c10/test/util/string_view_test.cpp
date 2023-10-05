@@ -2,7 +2,6 @@
 
 #include <gmock/gmock.h>
 
-// NOLINTBEGIN(modernize*, readability*, bugprone-string-constructor)
 using c10::string_view;
 
 namespace {
@@ -51,9 +50,9 @@ static_assert(
 } // namespace test_typedefs
 
 namespace test_default_constructor {
-static_assert(string_view().empty());
+static_assert(string_view().size() == 0, "");
 static_assert(string_view().data() == nullptr, "");
-static_assert(string_view() == string_view(""));
+static_assert(string_view() == string_view(""), "");
 } // namespace test_default_constructor
 
 namespace test_constchar_constructor {
@@ -1666,4 +1665,3 @@ TEST(StringViewTest, testHash) {
 } // namespace test_hash
 
 } // namespace
-// NOLINTEND(modernize*, readability*, bugprone-string-constructor)

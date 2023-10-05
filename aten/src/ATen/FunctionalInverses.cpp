@@ -6,7 +6,8 @@
 #include <ATen/WrapDimUtilsMulti.h>
 
 #include <utility>
-namespace at::functionalization {
+namespace at {
+namespace functionalization {
 
 // This logic is similar to autograd code for view backwards calls.
 // We can't easily share it though, because (eventually) these functions
@@ -347,4 +348,5 @@ Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-} // namespace at::functionalization
+} // functionalization
+} // at

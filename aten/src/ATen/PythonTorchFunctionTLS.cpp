@@ -1,7 +1,8 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <c10/core/TensorImpl.h>
 
-namespace at::impl {
+namespace at {
+namespace impl {
 
 static thread_local PythonTorchFunctionTLS pythonTorchFunctionState;
 
@@ -46,4 +47,5 @@ bool torch_function_mode_enabled() {
          PythonTorchFunctionTLS::stack_len() > 0;
 }
 
-} // namespace at::impl
+} // namespace impl
+} // namespace at

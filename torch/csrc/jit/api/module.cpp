@@ -504,9 +504,9 @@ Module optimize_for_inference(
   } else {
     frozen_mod = module;
   }
-  if (auto method = frozen_mod.find_method("forward")) {
-    optimize_for_inference(frozen_mod.get_method("forward").graph());
-  }
+
+  optimize_for_inference(frozen_mod.get_method("forward").graph());
+
   for (const auto& method : other_methods) {
     optimize_for_inference(frozen_mod.get_method(method).graph());
   }

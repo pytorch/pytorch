@@ -3,7 +3,8 @@
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 class StaticMethod : public torch::IMethod {
  public:
@@ -45,4 +46,5 @@ class StaticMethod : public torch::IMethod {
   std::string method_name_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
