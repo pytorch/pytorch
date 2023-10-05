@@ -92,8 +92,10 @@ class NestedTensor(torch.Tensor):
         self._strides = (ragged_size * D, D, 1)
         self._ragged_idx = 1
 
-        # TODO: error if values requires grad
-        self._values = values.detach() if values.requires_grad else values
+        if values.requires_grad:
+            raise ValueError("NestedTensor values cannot require grad, please "
+                             "detach before passing to NestedTensor constructor")
+        self._values = values
         self._offsets = offsets
         return
 
@@ -163,7 +165,7 @@ class ViewBufferFromNested(torch.autograd.Function):
 class ViewNestedFromBuffer(torch.autograd.Function):
     @staticmethod
     def forward(ctx, values: torch.Tensor, offsets: torch.Tensor):  # type: ignore[override]
-        return NestedTensor(values, offsets=offsets)
+        return NestedTensor(values.detach(), offsets=offsets)
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]

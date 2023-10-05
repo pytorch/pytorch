@@ -2991,33 +2991,38 @@ class ShapeEnv:
                 # Make sure to reuse this symbol for subsequent duck shaping
                 self.val_to_var[val] = sympy_expr
 
-            if positive:
-                # Add assertions for the newly created symbols
-                self._add_assertion(sympy_expr > 1)
-
-                # Apply default range, which assumes not zero-one
-                self.var_to_range[sympy_expr] = self._default_value_range()
-            else:
-                self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
-
-            # Small performance optimization: if we have a min-max constraint,
-            # we can proactively narrow to that range
-            if isinstance(constraint_dim, StrictMinMaxConstraint):
-                assert not duck
-                self.var_to_range[sympy_expr] &= constraint_dim.vr
-
-            vr = self.var_to_range[sympy_expr]
             if isinstance(val, int):
+                if positive:
+                    # Add assertions for the newly created symbols
+                    self._add_assertion(sympy_expr > 1)
+
+                    # Apply default range, which assumes not zero-one
+                    self.var_to_range[sympy_expr] = self._default_value_range()
+                else:
+                    self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
+
+                # Small performance optimization: if we have a min-max constraint,
+                # we can proactively narrow to that range
+                if isinstance(constraint_dim, StrictMinMaxConstraint):
+                    assert not duck
+                    self.var_to_range[sympy_expr] &= constraint_dim.vr
+
+                vr = self.var_to_range[sympy_expr]
+
                 if val not in vr:
                     raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
-            # Initialize default runtime range to match compile time range,
-            # for backed SymInts (this is allowed to diverge for unbacked)
-            self.runtime_var_to_range[sympy_expr] = vr
+                # Initialize default runtime range to match compile time range,
+                # for backed SymInts (this is allowed to diverge for unbacked)
+                self.runtime_var_to_range[sympy_expr] = vr
+
+                range_str = f"[{vr.lower}, {vr.upper}]"
+            else:
+                # Skip var_range logic for SingletonInt
+                range_str = ""
 
             r = sympy_expr
-
-            self.log.info("create_symbol %s = %s for %s [%s, %s]", sympy_expr, val, source.name(), vr.lower, vr.upper)
+            self.log.info("create_symbol %s = %s for %s %s", sympy_expr, val, source.name(), range_str)
             self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
@@ -3461,7 +3466,10 @@ class ShapeEnv:
             for symbol, sources in symbol_to_source.items():
                 r = self.runtime_var_to_range.get(symbol)
                 if r is None:
+                    if symbol not in self.var_to_range:
+                        continue
                     r = self.var_to_range[symbol]
+
                 assert sources
                 assert symbol.is_integer
                 g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
