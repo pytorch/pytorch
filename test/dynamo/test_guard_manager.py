@@ -171,6 +171,23 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(guard_manager.check(foo))
 
+    def test_item_slice_guard_manager(self):
+        foo = [1, 2, 3]
+
+        guard_manager = RootGuardManager()
+        guard_manager.add_lambda_guard(
+            lambda x: isinstance(x, list),
+            lambda x: f"Expected tuple but got {type(x)}",
+        )
+        guard_manager[0:1].add_lambda_guard(
+            lambda x: x[0] == 1,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+        foo[0] = 5
+        self.assertFalse(guard_manager.check(foo))
+
     def test_dict_guard_manager(self):
         foo = {
             "x": 1,
