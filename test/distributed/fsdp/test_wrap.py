@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from enum import auto, Enum
 from typing import Callable, Union
+from unittest.mock import Mock
 
 import torch
 import torch.nn as nn
