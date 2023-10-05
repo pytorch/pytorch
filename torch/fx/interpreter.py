@@ -11,6 +11,9 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
 from torch.hub import tqdm
+import logging
+
+log = logging.getLogger(__name__)
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -264,7 +267,7 @@ class Interpreter:
         assert not isinstance(target, str)
 
         # Execute the function and return the result
-        print("TARGET", target)
+        log.warning("TARGET %s", target)
         return target(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
