@@ -460,6 +460,17 @@ class TestAutoWrap(TestCase):
         )
         self._test_transformer_wrapping(auto_wrap_policy)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
+    def test_module_wrap_policy_callable(self):
+        """Tests the callable behavior of ``ModuleWrapPolicy``."""
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        mock_module = Mock()
+        recurse = False
+        wrap_policy = auto_wrap_policy(mock_module, recurse)
+        self._test_transformer_wrapping(wrap_policy)
+    
     def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, _Policy]):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
