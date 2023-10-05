@@ -45,12 +45,7 @@ void Backend::emitCollectiveEnd(const Work& work) {
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveEnd;
-  // FIXME change getDuration to return Optional<float>
-  try {
-    evt.duration_ms = work.getDuration();
-  } catch (std::exception& e) {
-    C10D_INFO("Duraction not available {}", e.what());
-  }
+  evt.duration_ms = work.getDuration();
   details::enqueue_c10d_event(std::move(evt));
 }
 
