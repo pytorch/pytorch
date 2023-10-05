@@ -320,7 +320,7 @@ static T dispatch_to(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.sym_numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
+    throw TypeError("only one element tensors can be converted to Python scalars");
   }
   return self.template item<T>();
 }
