@@ -41,11 +41,6 @@ PG_HOOK_TYPE = Callable[[dist.ProcessGroup, str], None]
 # This controls the number of internal failures we'll tolerate before giving up
 _MAX_INTERNAL_FAILURES = 10
 
-"""
-TODO:
-    hook timing
-
-"""
 logger = logging.getLogger(__name__)
 _cb_thread: Optional[threading.Thread] = None
 _start_callbacks: List[COLLECTIVE_HOOK_TYPE] = []
