@@ -318,7 +318,7 @@ def get_like_layout(
     tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
 ) -> torch.memory_format:
     # TODO: _to_copy tensor to stride permutation
-    if memory_format in (torch.preserve_format, None):
+    if memory_format is None or memory_format == torch.preserve_format:
         return utils.suggest_memory_format(tensor)
     else:
         return memory_format
@@ -326,7 +326,7 @@ def get_like_layout(
 
 @register_decomposition(aten.rand_like)
 def rand_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
-    return torch.rand(
+    return torch.rand(  # type: ignore[call-overload]
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
@@ -336,7 +336,7 @@ def rand_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
 
 @register_decomposition(aten.randn_like)
 def randn_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
-    return torch.randn(
+    return torch.randn(  # type: ignore[call-overload]
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
@@ -356,7 +356,7 @@ def full_like(
     requires_grad=False,
     memory_format=torch.preserve_format,
 ):
-    return torch.full(
+    return torch.full(  # type: ignore[call-overload]
         [*self.size()],
         fill_value,
         dtype=dtype or self.dtype,
@@ -368,7 +368,7 @@ def full_like(
 
 @register_decomposition(aten.randint_like.default)
 def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **kwargs):
-    return aten.randint.low(
+    return aten.randint.low(  # type: ignore[call-overload]
         0,
         high,
         [*self.size()],
@@ -382,7 +382,7 @@ def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **k
 def randint_like_low(
     self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs
 ):
-    return aten.randint.low(
+    return aten.randint.low(  # type: ignore[call-overload]
         low,
         high,
         [*self.size()],

@@ -147,7 +147,7 @@ def get_storage(t: torch.Tensor) -> int:
     return t.untyped_storage()._cdata
 
 
-def get_node_storage(node: torch.Tensor) -> Optional[int]:
+def get_node_storage(node: torch.fx.Node) -> Optional[int]:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):

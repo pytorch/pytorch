@@ -737,7 +737,7 @@ def compile_context(context: CompileContext):
 
 
 @contextmanager
-def tracing(context: TracingContext):
+def tracing(context: Optional[TracingContext]):
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.

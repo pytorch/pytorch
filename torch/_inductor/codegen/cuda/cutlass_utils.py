@@ -177,7 +177,7 @@ def gen_ops() -> List[Any]:
 
 
 def dtype_match(
-    torch_dtype: torch.dtype,
+    torch_dtype: Optional[torch.dtype],
     cutlass_dtype: "cutlass_library.DataType",  # type: ignore[name-defined]
 ) -> bool:
     # Import cutlass python scripts.
@@ -197,7 +197,9 @@ def dtype_match(
         return False
 
 
-def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
+def get_accumulator_dtype(
+    input_torch_dtypes: List[torch.dtype],
+) -> Optional[torch.dtype]:
     """
     Given a list of input torch dtypes, returns the inferred accumulator torch dtype.
     """
@@ -245,6 +247,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         return isinstance(number, (int, sympy.Integer))
 
     if is_static_int(size[-1]) and is_static_int(offset):
+        assert dtype is not None
         alignments = get_alignments(dtype)
         for alignment in alignments:
             if int(size[-1]) % alignment == 0 and int(offset) % alignment == 0:

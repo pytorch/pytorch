@@ -26,7 +26,9 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    Sequence,
     Set,
+    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -226,7 +228,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Sequence[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -238,22 +242,22 @@ def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy
 
 
 def convert_shape_to_symint(
-    lst: List[Union[int, sympy.Expr]]
-) -> List[Union[int, torch.SymInt]]:
+    lst: Sequence[Union[int, sympy.Expr]]
+) -> Tuple[Union[int, torch.SymInt], ...]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
     from .virtualized import V
 
-    return [
+    return tuple(
         i
         if isinstance(i, int)
         else int(i)
         if isinstance(i, sympy.Integer)
         else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
         for i in lst
-    ]
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -796,7 +800,7 @@ class DebugDirManager:
 
     def __init__(self):
         self.id = next(DebugDirManager.counter)
-        self.prev_debug_name = None
+        self.prev_debug_name = ""
 
     def __enter__(self):
         self.prev_debug_name = torch._dynamo.config.debug_dir_root

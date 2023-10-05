@@ -1831,13 +1831,13 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(
-        self, kernel_name: str, source_code: str, device: str = "cuda"
+        self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
         if config.compile_threads > 1:
-            device_interface = get_interface_for_device(device)
-            device = torch.device(device, device_interface.current_device())
+            device_interface = get_interface_for_device(device_str)
+            device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device
