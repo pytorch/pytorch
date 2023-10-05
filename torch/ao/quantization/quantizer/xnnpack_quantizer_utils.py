@@ -222,7 +222,6 @@ def _annotate_conv(
         ]:
             continue
         conv_node = n
-        partition = [conv_node]
 
         if filter_fn and not filter_fn(conv_node):
             continue
@@ -239,9 +238,13 @@ def _annotate_conv(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
+        # adding weight node to the partition as well
+        partition = [conv_node, conv_node.args[1]]
+
         bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            partition.append(bias)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -261,7 +264,7 @@ def _annotate_conv_relu(
 ) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     for n in gm.graph.nodes:
-        if n != "call_function" or n.target not in [
+        if n.op != "call_function" or n.target not in [
             torch.ops.aten.relu.default,
             torch.ops.aten.relu_.default,
         ]:
@@ -270,7 +273,7 @@ def _annotate_conv_relu(
         maybe_conv_node = n.args[0]
         if (
             not isinstance(maybe_conv_node, Node)
-            or maybe_conv_node != "call_function"
+            or maybe_conv_node.op != "call_function"
             or maybe_conv_node.target
             not in [
                 torch.ops.aten.conv1d.default,
@@ -279,7 +282,6 @@ def _annotate_conv_relu(
         ):
             continue
         conv_node = maybe_conv_node
-        partition = [relu_node, conv_node]
 
         if filter_fn and any(not filter_fn(n) for n in partition):
             continue
@@ -296,9 +298,12 @@ def _annotate_conv_relu(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
+        # adding weight node to the partition as well
+        partition = [relu_node, conv_node, conv_node.args[1]]
         bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            partition.append(bias)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map, _annotated=True
