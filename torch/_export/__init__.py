@@ -90,7 +90,7 @@ def export__RC__(
 
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
-    if dynamic_shapes is None:
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return export(f, args, kwargs)
 
     kwargs = kwargs if kwargs is not None else {}
@@ -525,11 +525,13 @@ def _export(
                         **kwargs,
                     )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using constrain_as_*(). {str(e)}")
+                f"Consider annotating your code using constrain_as_*(). {str(e)}",
+                case_name="constrain_as_size_example",
+            )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
     for name, param in gm_torch_level.named_parameters(remove_duplicate=False):
