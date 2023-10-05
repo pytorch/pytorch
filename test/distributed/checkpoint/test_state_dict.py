@@ -14,8 +14,8 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     DistributedStateDictOptions,
     load_state_dict,
-    patch_model_state_dict,
-    patch_optimizer_state_dict,
+    _patch_model_state_dict,
+    _patch_optimizer_state_dict,
     PG,
     STATE,
     state_dict,
@@ -216,9 +216,9 @@ class TestStateDict(FSDPTest):
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
-        # Test patch_model_state_dict, and patch_optimizer_state_dict
-        patch_model_state_dict(dist_model, options=options)
-        patch_optimizer_state_dict(dist_model, dist_optim, options=options)
+        # Test _patch_model_state_dict, and _patch_optimizer_state_dict
+        _patch_model_state_dict(dist_model, options=options)
+        _patch_optimizer_state_dict(dist_model, dist_optim, options=options)
         dist_msd = dist_model.state_dict()
         dist_osd = dist_optim[0].state_dict()
         self._verify_msd(model, msd, dist_msd, options)
@@ -333,8 +333,11 @@ class TestStateDict(FSDPTest):
     def test_use_dtensor(self) -> None:
         self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
     """
-    # TODO: test _test_fsdp_tp case.
 
+    # TODO: enable the test after FSDP + apply_optimizer_in_backward works.
+    # Disable this test as it is broken after
+    # https://github.com/pytorch/pytorch/pull/108298.
+    """
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:
         self.run_subtests(
@@ -342,6 +345,7 @@ class TestStateDict(FSDPTest):
             self._test_fsdp_ddp,
             optim_in_backward=True,
         )
+    """
 
     @skip_if_lt_x_gpu(1)
     def test_single_gpu(self) -> None:

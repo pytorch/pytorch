@@ -289,7 +289,7 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
+    "nanogpt",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [

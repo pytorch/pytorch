@@ -481,43 +481,54 @@ def state_dict(
     options: Optional[DistributedStateDictOptions] = None,
 ) -> Tuple[Dict[str, ValueType], OptimizerStateType]:
     """
-        Return the model state_dict and optimizers state_dict.
+    Return the model state_dict and optimizers state_dict.
 
-        ``state_dict`` is a function that can process any module
-        that is parallelized by FSDP/fully_shard, DDP/replicate,
-        tensor_parallel/parallelize_module,
-        and any combination of these parallelisms. The main functions of
-        ``state_dict`` are:
-                1. Creating a model and optimizer state_dict that can be resharded with
-                   different workers and/or different parallelisms.
-                2. Eliminating the need for users to call parallelism-specific
-                        state_dict APIs.
-                3. Sanity checking the result state_dict.
-        The keys of the result state_dict are the canonical FQNs (Fully Qualified Names).
-        A canonical FQN refers to the FQN based on a parameter's position in an
-        nn.Module hierarchy. More specifically, a canonical FQN to a parameter is the
-        FQN returned by ``module.named_parameters()`` or ``module.named_buffers()``
-        when module is not distributed by any parallelisms. Since the optimizer
-        internally uses parameter IDs to represent a parameter, a conversion will
-        happen to convert the parameter IDs to the canonical FQNs. The value of the
-        result state_dict will be either ShardedTensor, DTensor if the value is
-        sharded across ranks or Tensor, scalar values if the value is duplicated
-        because of DDP/replicate.
+    ``state_dict`` is a function that can process any module
+    that is parallelized by FSDP/fully_shard, DDP/replicate,
+    tensor_parallel/parallelize_module,
+    and any combination of these parallelisms. The main functions of
+    ``state_dict`` are:
+            1. Creating a model and optimizer state_dict that can be resharded with
+               different workers and/or different parallelisms.
+            2. Eliminating the need for users to call parallelism-specific
+                    state_dict APIs.
+            3. Sanity checking the result state_dict.
+    The keys of the result state_dict are the canonical FQNs (Fully Qualified Names).
+    A canonical FQN refers to the FQN based on a parameter's position in an
+    nn.Module hierarchy. More specifically, a canonical FQN to a parameter is the
+    FQN returned by ``module.named_parameters()`` or ``module.named_buffers()``
+    when module is not distributed by any parallelisms. Since the optimizer
+    internally uses parameter IDs to represent a parameter, a conversion will
+    happen to convert the parameter IDs to the canonical FQNs. The value of the
+    result state_dict will be either ShardedTensor, DTensor if the value is
+    sharded across ranks or Tensor, scalar values if the value is duplicated
+    because of DDP/replicate.
 
-        ``state_dict`` can also process a module that is not parallelized.
-        In such a case, ``state_dict`` only performs one function --
-        converting the optimizer parameter IDs to the canonical FQNs.
+    ``state_dict`` can also process a module that is not parallelized.
+    In such a case, ``state_dict`` only performs one function --
+    converting the optimizer parameter IDs to the canonical FQNs.
 
     Example:
-        model = fully_shard(model)
-        _apply_optimizer_in_backward(
-            torch.optim.Adam, model.parameters(), {"lr": 1e-3}
-        )
-        optimizers = _get_in_backward_optimizers(model)
-        model_state_dict, optim_state_dict = state_dict(model, optimizers)
-        load_state_dict(
-            model, optimizers, model_state_dict, optim_state_dict
-        )
+
+        import torch
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        from torch.distributed.checkpoint.state_dict import state_dict
+
+        fsdp_model = FSDP(copy.deepcopy(model))
+        fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        ddp_model = DDP(copy.deepcopy(model))
+        ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+
+        ddp_state_dict, ddp_optim_state_dict = state_dict(ddp_model, ddp_optim)
+        fsdp_state_dict, fsdp_optim_state_dict = state_dict(fsdp_model, fsdp_optim)
+
+        # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
+        # the asserts will fail.
+        assert ddp_state_dict == fsdp_state_dict
+        assert ddp_optim_state == fsdp_optim_state_dict
+
 
     Args:
         model (nn.Module): the nn.Module to the model.
@@ -596,8 +607,9 @@ def load_state_dict(
 
 
 # TODO: correct the state_dict function signature.
+# TODO: this API is not yet fully tested. Make it private
 @no_type_check
-def patch_model_state_dict(
+def _patch_model_state_dict(
     model: nn.Module,
     *,
     options: Optional[DistributedStateDictOptions] = None,
@@ -608,11 +620,11 @@ def patch_model_state_dict(
     be a partial function to call ``state_dict``.
 
     Example:
-        model = fully_shard(model)
-        patch_model_state_dict(model)
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed.checkpoint.state_dict import patch_model_state_dict
 
-        state_dict = model.state_dict()
-        model.load_state_dict(state_dict)
+        model = fsdp(model)
+        patch_model_state_dict(model)
 
     Args:
         model (nn.Module): the nn.Module to the model.
@@ -654,8 +666,9 @@ def patch_model_state_dict(
 
 
 # TODO: correct the load_state_dict function signature.
+# TODO: this API is not yet fully tested. Make it private
 @no_type_check
-def patch_optimizer_state_dict(
+def _patch_optimizer_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
     *,
@@ -670,15 +683,11 @@ def patch_optimizer_state_dict(
     So users only need to call one of the state_dict() to get the full result.
 
     Example:
-        model = fully_shard(model)
-        _apply_optimizer_in_backward(
-            torch.optim.Adam, model.parameters(), {"lr": 1e-3}
-        )
-        optimizers = _get_in_backward_optimizers(model)
-        patch_optimizer_state_dict(model, optimizers)
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed.checkpoint.state_dict import patch_model_state_dict
 
-        state_dict = optimizers[0].state_dict()
-        optimizers[0].load_state_dict(state_dict)
+        model = fsdp(model)
+        patch_model_state_dict(model)
 
     Args:
         model (nn.Module): the nn.Module to the model.
