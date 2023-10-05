@@ -12,10 +12,10 @@ from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
-    DistributedStateDictOptions,
-    load_state_dict,
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
+    DistributedStateDictOptions,
+    load_state_dict,
     PG,
     STATE,
     state_dict,
