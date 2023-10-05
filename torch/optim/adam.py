@@ -373,14 +373,6 @@ def _single_tensor_adam(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        # if torch.is_complex(param):
-        #     grad = torch.view_as_real(grad)
-        #     exp_avg = torch.view_as_real(exp_avg)
-        #     exp_avg_sq = torch.view_as_real(exp_avg_sq)
-        #     if amsgrad:
-        #         max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
-        #     param = torch.view_as_real(param)
-
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
@@ -485,13 +477,6 @@ def _multi_tensor_adam(params: List[Tensor],
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
-
-        # Handle complex parameters
-        # device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        # device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
-        # device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        # device_max_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs]
-        # device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
