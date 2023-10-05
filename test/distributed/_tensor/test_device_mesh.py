@@ -154,7 +154,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
-        self.assertNotEqual(hash(mesh), hash(mesh2))
+        self.assertEqual(hash(mesh), hash(mesh2))
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
