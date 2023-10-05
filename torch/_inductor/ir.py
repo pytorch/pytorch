@@ -212,44 +212,12 @@ def ir_node_to_tensor(x, guard_shape=True):
     return t
 
 
-class OptionalAttr:
-    def __init__(self):
-        self.name = "optional_attr"
-
-    def __repr__(self):
-        return self.name
-
-
-class OptionalString(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_string"
-
-
-class OptionalList(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_list"
-
-
-class OptionalScalar(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_scalar"
-
-
-class OptionalLayout(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_layout"
-
-
-class OptionalTensor(OptionalAttr):
-    def __init__(self):
-        self.name = "optional_tensor"
-
-
-default_value_map = {"Optional[Layout]": OptionalLayout}
-
-
-def may_convert_to_optional(optional_value, value):
-    return optional_value if not value and V.graph.cpp_wrapper else value
+def may_convert_to_optional(value):
+    if isinstance(value, list) and not value and V.graph.cpp_wrapper:
+        # [None] makes sure the cpp wrapper codegen will generate something like
+        # {c10::nullopt} instead of {}
+        return [None]
+    return value
 
 
 def get_device_type(x):
@@ -3306,16 +3274,7 @@ class ExternKernel(InputsKernel):
             hasattr(self, "kwargs_default_value")
             and arg_name in self.kwargs_default_value
         ):
-            default_value = self.kwargs_default_value.get(arg_name).get("value")
-            if default_value is None:
-                arg_type = self.kwargs_default_value.get(arg_name).get("type")
-                # TODO: extend the support here
-                assert (
-                    str(arg_type) in default_value_map
-                ), f"unsupported default_value arg_type: {str(arg_type)}"
-                return default_value_map[str(arg_type)]()
-            else:
-                return default_value
+            return self.kwargs_default_value.get(arg_name).get("value")
         raise AssertionError(
             f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
         )
@@ -3737,21 +3696,39 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
-        op_overload_packet = (
-            kernel._overloadpacket
-            if isinstance(kernel, torch._ops.OpOverload)
-            else kernel
-        )
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
+        assert isinstance(
+            kernel,
+            (
+                torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
+                torch._ops.HigherOrderOperator,
+            ),
+        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if (
-            getattr(torch.ops.aten, op_overload_packet.__name__, None)
-            is op_overload_packet
-        ):
-            self.kernel = (
-                f"at::{op_overload_packet.__name__}"
-                if V.graph.cpp_wrapper
-                else f"aten.{kernel.__name__}"
+        if kernel.__module__ == "torch._ops.aten":
+            op_base_name = (
+                kernel.__name__.split(".")[0]
+                if isinstance(kernel, torch._ops.OpOverload)
+                else kernel.__name__
             )
+            if V.graph.cpp_wrapper:
+                if isinstance(kernel, torch._ops.OpOverload):
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.kernel = (
+                        f"at::_ops::{kernel.__name__.replace('.default', '')}::call"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+                else:
+                    self.kernel = f"at::{op_base_name}"
+            else:
+                self.kernel = f"aten.{op_base_name}"
+
             if schema is not None:
                 self.args_default_value = [
                     {"type": x.real_type, "value": x.default_value}
@@ -3823,16 +3800,7 @@ class FallbackKernel(ExternKernelAlloc):
         assert pos < len(
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        v = self.args_default_value[pos]["value"]
-        if v is None:
-            arg_type = self.args_default_value[pos]["type"]
-            # TODO: extend the support here
-            assert (
-                str(arg_type) in default_value_map
-            ), f"unsupported default_value arg_type: {str(arg_type)}"
-            return default_value_map[str(arg_type)]()
-        else:
-            return v
+        return self.args_default_value[pos]["value"]
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -3895,29 +3863,41 @@ class FallbackKernel(ExternKernelAlloc):
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
-        if isinstance(self.outputs, tuple):
-            # For tuple returns, e.g "-> (Tensor, Tensor)"
-            output_arguments = [
-                export_schema.Argument.create(
-                    as_tensor=export_schema.TensorArgument(name=output.get_name())
+        def handle_single_output(return_type, output):
+            if isinstance(return_type, torch.TensorType):
+                # For single Tensor
+                out = output
+                if isinstance(output, (list, tuple)):
+                    assert len(output) == 1
+                    out = output[0]
+                return export_schema.Argument.create(
+                    as_tensor=export_schema.TensorArgument(name=out.get_name())
                 )
-                for output in self.outputs
-            ]
-        elif isinstance(self.outputs, list):
-            # For list of tensor, e.g. "-> List[Tensor]"
-            output_arguments = [
-                export_schema.Argument.create(
+            elif isinstance(return_type, torch.ListType) and isinstance(
+                return_type.getElementType(), torch.TensorType
+            ):
+                # For single TensorList
+                return export_schema.Argument.create(
                     as_tensors=[
-                        export_schema.TensorArgument(name=output.get_name())
-                        for output in self.outputs
+                        export_schema.TensorArgument(name=out.get_name())
+                        for out in output
                     ]
                 )
-            ]
+            else:
+                raise RuntimeError("Unsupported return type")
+
+        target = self.op_overload
+        returns = target._schema.returns
+        if len(returns) == 1:
+            return_type = returns[0].real_type
+            output_arguments = [handle_single_output(return_type, self.outputs)]
         else:
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            assert isinstance(self.outputs, tuple)
+            assert len(returns) == len(self.outputs)
             output_arguments = [
-                export_schema.Argument.create(
-                    as_tensor=export_schema.TensorArgument(name=self.outputs.get_name())
-                )
+                handle_single_output(return_schema.real_type, output)
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -3936,6 +3916,8 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
+            self.codegen_comment(wrapper)
+
             exported_args = None
             args = None
             if config.is_fbcode():
@@ -4060,14 +4042,20 @@ class MultiOutput(ExternKernel):
         symbols_to_define = self.get_unbacked_symbol_defs()
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
-                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                )
                 symbols_to_define.remove(s)
         for i, s in enumerate(self.get_stride()):
             if s in symbols_to_define:
-                wrapper.writeline(f"{s} = {self.get_name()}.stride({i})")
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                )
                 symbols_to_define.remove(s)
         if (s := self.get_offset()) in symbols_to_define:
-            wrapper.writeline(f"{s} = {self.get_name()}.storage_offset()")
+            wrapper.writeline(
+                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+            )
             symbols_to_define.remove(s)
         assert (
             not symbols_to_define
@@ -4332,18 +4320,16 @@ class ConvolutionUnary(ExternKernelAlloc):
         dilation_: List[int],
         groups: int,
         attr,
-        scalars,
+        scalars: Optional[List[Any]],
         algorithm,
     ):
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             attr,
-            may_convert_to_optional(optional_list, scalars),
-            may_convert_to_optional(optional_string, algorithm),
+            may_convert_to_optional(scalars),
+            algorithm,
         ]
         return ConvolutionUnary(
             layout=kernel_layout,
@@ -4426,15 +4412,12 @@ class ConvolutionBinary(ExternKernelAlloc):
         )
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
-        optional_scalar = OptionalScalar()
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            may_convert_to_optional(optional_scalar, binary_alpha),
-            may_convert_to_optional(optional_string, unary_attr),
-            may_convert_to_optional(optional_list, unary_scalars),
-            may_convert_to_optional(optional_string, unary_algorithm),
+            binary_alpha,
+            unary_attr,
+            may_convert_to_optional(unary_scalars),
+            unary_algorithm,
         ]
         return ConvolutionBinary(
             layout=kernel_layout,
@@ -4521,15 +4504,12 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
-        optional_scalar = OptionalScalar()
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            may_convert_to_optional(optional_scalar, binary_alpha),
-            may_convert_to_optional(optional_string, unary_attr),
-            may_convert_to_optional(optional_list, unary_scalars),
-            may_convert_to_optional(optional_string, unary_algorithm),
+            binary_alpha,
+            unary_attr,
+            may_convert_to_optional(unary_scalars),
+            unary_algorithm,
         ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
@@ -4774,7 +4754,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         dilation_: List[int],
         groups_: int,
         attr,
-        scalars,
+        scalars: Optional[List[Any]],
         algorithm,
     ):
         transposed = True
@@ -4795,12 +4775,10 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             transposed,
             output_padding_,
         )
-        optional_string = OptionalString()
-        optional_list = OptionalList()
         constant_args = constant_args + [
             attr,
-            may_convert_to_optional(optional_list, scalars),
-            may_convert_to_optional(optional_string, algorithm),
+            may_convert_to_optional(scalars),
+            algorithm,
         ]
         return ConvolutionTransposeUnary(
             layout=kernel_layout,
