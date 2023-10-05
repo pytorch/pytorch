@@ -323,6 +323,7 @@ static inline bool isFloatingType(ScalarType t) {
 static inline bool isFloat8Type(ScalarType t) {
   return t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e5m2;
 }
+
 static inline bool isReducedFloatingType(ScalarType t) {
   return t == ScalarType::Half || t == ScalarType::BFloat16 || isFloat8Type(t);
 }
@@ -512,11 +513,26 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
     return ScalarType::Undefined;
   }
 
-  // Ignore the 5 bits types, since they are handled by the if statement
-  // above and do not participate in type promotion. The `5` value has to
-  // be consistent with the number of the unique `c10::bits*` types that
-  // exist.
-  const int NUM_PROMOTE_TYPES = static_cast<int>(ScalarType::NumOptions) - 5;
+  // Bits and Quantized are 7 dtypes already handled and not included
+  // in the promotion table below. Therefore every dtype above them
+  // needs to be shifted down to account for that.
+  static constexpr int shift_distance =
+      static_cast<int>(ScalarType::Float8_e5m2) -
+      static_cast<int>(ScalarType::QUInt4x2);
+  static constexpr int shift_threshold = static_cast<int>(ScalarType::Bits16);
+
+  if (static_cast<int>(a) > shift_threshold) {
+    a = static_cast<ScalarType>(static_cast<int>(a) - shift_distance);
+  }
+
+  if (static_cast<int>(b) > shift_threshold) {
+    b = static_cast<ScalarType>(static_cast<int>(b) - shift_distance);
+  }
+
+  // For the same reason the size of promotion table is decreased by 7
+  // comparing to the number of all dtypes.
+  static constexpr int NUM_PROMOTE_TYPES =
+      static_cast<int>(ScalarType::NumOptions) - shift_distance;
 
   // this matrix has to be consistent with
   // AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS undefined is used where we
