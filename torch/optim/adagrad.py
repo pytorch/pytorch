@@ -47,19 +47,6 @@ class Adagrad(Optimizer):
         )
         super().__init__(params, defaults)
 
-        for group in self.param_groups:
-            for p in group["params"]:
-                state = self.state[p]
-                state["step"] = torch.tensor(0.0)
-                init_value = (
-                    complex(initial_accumulator_value, initial_accumulator_value)
-                    if torch.is_complex(p)
-                    else initial_accumulator_value
-                )
-                state["sum"] = torch.full_like(
-                    p, init_value, memory_format=torch.preserve_format
-                )
-
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
@@ -84,14 +71,27 @@ class Adagrad(Optimizer):
     def _init_group(self, group, params_with_grad, grads, state_sums, state_steps):
         has_sparse_grad = False
         for p in group["params"]:
-            if p.grad is not None:
-                if p.grad.is_sparse:
-                    has_sparse_grad = True
-                params_with_grad.append(p)
-                grads.append(p.grad)
-                state = self.state[p]
-                state_sums.append(state["sum"])
-                state_steps.append(state["step"])
+            if p.grad is None:
+                continue
+            if p.grad.is_sparse:
+                has_sparse_grad = True
+
+            p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+            params_with_grad.append(p_real)
+            grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
+
+            state = self.state[p]
+
+            # Lazy state initialization
+            if len(state) == 0:
+                state["step"] = torch.tensor(0.0)
+                state["sum"] = torch.full_like(
+                    p_real,
+                    group["initial_accumulator_value"],
+                    memory_format=torch.preserve_format,
+                )
+            state_sums.append(state["sum"])
+            state_steps.append(state["step"])
 
         return has_sparse_grad
 
@@ -281,20 +281,12 @@ def _single_tensor_adagrad(
                 _make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr
             )
         else:
-            is_complex = torch.is_complex(param)
-            if is_complex:
-                grad = torch.view_as_real(grad)
-                state_sum = torch.view_as_real(state_sum)
-                param = torch.view_as_real(param)
             state_sum.addcmul_(grad, grad, value=1)
             if differentiable:
                 std = state_sum.sqrt() + eps
             else:
                 std = state_sum.sqrt().add_(eps)
             param.addcdiv_(grad, std, value=-clr)
-            if is_complex:
-                param = torch.view_as_complex(param)
-                state_sum = torch.view_as_complex(state_sum)
 
 
 def _multi_tensor_adagrad(
@@ -340,13 +332,6 @@ def _multi_tensor_adagrad(
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
-
-        # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_state_sums = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_state_sums
-        ]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # Update steps
         torch._foreach_add_(device_state_steps, 1)

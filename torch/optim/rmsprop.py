@@ -58,11 +58,12 @@ class RMSprop(Optimizer):
         for p in group["params"]:
             if p.grad is None:
                 continue
-            params_with_grad.append(p)
-
             if p.grad.is_sparse:
                 raise RuntimeError("RMSprop does not support sparse gradients")
-            grads.append(p.grad)
+
+            p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+            params_with_grad.append(p_real)
+            grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
             state = self.state[p]
 
@@ -70,15 +71,15 @@ class RMSprop(Optimizer):
             if len(state) == 0:
                 state["step"] = 0
                 state["square_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
                 if group["momentum"] > 0:
                     state["momentum_buffer"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p_real, memory_format=torch.preserve_format
                     )
                 if group["centered"]:
                     state["grad_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p_real, memory_format=torch.preserve_format
                     )
             square_avgs.append(state["square_avg"])
 
@@ -271,18 +272,10 @@ def _single_tensor_rmsprop(
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        is_complex_param = torch.is_complex(param)
-        if is_complex_param:
-            param = torch.view_as_real(param)
-            grad = torch.view_as_real(grad)
-            square_avg = torch.view_as_real(square_avg)
-
         square_avg.mul_(alpha).addcmul_(grad, grad, value=1 - alpha)
 
         if centered:
             grad_avg = grad_avgs[i]
-            if is_complex_param:
-                grad_avg = torch.view_as_real(grad_avg)
             grad_avg.lerp_(grad, 1 - alpha)
             avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_()
         else:
@@ -295,8 +288,6 @@ def _single_tensor_rmsprop(
 
         if momentum > 0:
             buf = momentum_buffer_list[i]
-            if is_complex_param:
-                buf = torch.view_as_real(buf)
             buf.mul_(momentum).addcdiv_(grad, avg)
             param.add_(buf, alpha=-lr)
         else:
@@ -338,20 +329,10 @@ def _multi_tensor_rmsprop(
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_square_avgs = _view_complex_as_real(grouped_square_avgs)
-
         torch._foreach_mul_(grouped_square_avgs, alpha)
         torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)
 
         if centered:
-            grouped_grad_avgs = _view_complex_as_real(grouped_grad_avgs)
             torch._foreach_lerp_(grouped_grad_avgs, grouped_grads, 1 - alpha)
             avg = torch._foreach_addcmul(grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1)
             torch._foreach_sqrt_(avg)
@@ -361,7 +342,6 @@ def _multi_tensor_rmsprop(
             torch._foreach_add_(avg, eps)
 
         if momentum > 0:
-            grouped_momentum_buffer_list = _view_complex_as_real(grouped_momentum_buffer_list)
             torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
             torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
             torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)

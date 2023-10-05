@@ -101,10 +101,12 @@ class AdamW(Optimizer):
         for p in group["params"]:
             if p.grad is None:
                 continue
-            params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("AdamW does not support sparse gradients")
-            grads.append(p.grad)
+
+            p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+            params_with_grad.append(p_real)
+            grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
             state = self.state[p]
 
@@ -119,16 +121,16 @@ class AdamW(Optimizer):
                 )
                 # Exponential moving average of gradient values
                 state["exp_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
                 # Exponential moving average of squared gradient values
                 state["exp_avg_sq"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
                 if amsgrad:
                     # Maintains max of all exp. moving avg. of sq. grad. values
                     state["max_exp_avg_sq"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p_real, memory_format=torch.preserve_format
                     )
 
             exp_avgs.append(state["exp_avg"])
@@ -394,14 +396,6 @@ def _single_tensor_adamw(
                 (param.is_cuda and step_t.is_cuda) or (param.is_xla and step_t.is_xla)
             ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
-        if torch.is_complex(param):
-            grad = torch.view_as_real(grad)
-            exp_avg = torch.view_as_real(exp_avg)
-            exp_avg_sq = torch.view_as_real(exp_avg_sq)
-            if amsgrad:
-                max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
-            param = torch.view_as_real(param)
-
         # update step
         step_t += 1
 
@@ -465,10 +459,6 @@ def _single_tensor_adamw(
 
             param.addcdiv_(exp_avg, denom, value=-step_size)
 
-        # Lastly, switch back to complex view
-        if amsgrad and torch.is_complex(params[i]):
-            max_exp_avg_sqs[i] = torch.view_as_complex(max_exp_avg_sqs[i])
-
 
 def _multi_tensor_adamw(
     params: List[Tensor],
@@ -518,16 +508,6 @@ def _multi_tensor_adamw(
     ), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
-
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
-        device_exp_avg_sqs = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs
-        ]
-        device_max_exp_avg_sqs = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs
-        ]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)

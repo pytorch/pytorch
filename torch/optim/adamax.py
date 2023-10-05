@@ -61,10 +61,12 @@ class Adamax(Optimizer):
         for p in group["params"]:
             if p.grad is None:
                 continue
-            params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adamax does not support sparse gradients")
-            grads.append(p.grad)
+
+            p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+            params_with_grad.append(p_real)
+            grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
             state = self.state[p]
 
@@ -72,10 +74,10 @@ class Adamax(Optimizer):
             if len(state) == 0:
                 state["step"] = torch.tensor(0.0)
                 state["exp_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
                 state["exp_inf"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
 
             exp_avgs.append(state["exp_avg"])
@@ -308,11 +310,6 @@ def _multi_tensor_adamax(
     for ((grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps), _) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
-
-        grouped_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_params]
-        grouped_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_grads]
-        grouped_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_avgs]
-        grouped_exp_infs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_infs]
 
         # Update steps
         torch._foreach_add_(grouped_state_steps, 1)

@@ -91,9 +91,9 @@ class Adam(Optimizer):
             if p.grad is not None:
                 p_real = torch.view_as_real(p) if torch.is_complex(p) else p
                 params_with_grad.append(p_real)
+                grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
                 if p.grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
                 state = self.state[p]
                 # Lazy state initialization

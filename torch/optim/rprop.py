@@ -41,36 +41,29 @@ class Rprop(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
 
-    def _init_group(self, group, params, grads, prevs, step_sizes):
+    def _init_group(self, group, params_with_grad, grads, prevs, step_sizes):
         for p in group["params"]:
             if p.grad is None:
                 continue
-            params.append(p)
-            grad = p.grad
-            if grad.is_sparse:
+            if p.grad.is_sparse:
                 raise RuntimeError("Rprop does not support sparse gradients")
 
-            grads.append(grad)
+            p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+            params_with_grad.append(p_real)
+            grad_real = torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad
+            grads.append(grad_real)
+
             state = self.state[p]
 
             # State initialization
             if len(state) == 0:
                 state["step"] = 0
                 state["prev"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
-                if p.dtype.is_complex:
-                    # Complex Number should be as if they are two independent real numbers.
-                    # Hence the step_size shouldn't be zero for imaginary part.
-                    state["step_size"] = (
-                        grad.new()
-                        .resize_as_(grad)
-                        .fill_(complex(group["lr"], group["lr"]))
-                    )
-                else:
-                    state["step_size"] = (
-                        grad.new().resize_as_(grad).fill_(group["lr"])
-                    )
+                state["step_size"] = (
+                    grad_real.new().resize_as_(grad_real).fill_(group["lr"])
+                )
 
             prevs.append(state["prev"])
             step_sizes.append(state["step_size"])
@@ -91,7 +84,7 @@ class Rprop(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params = []
+            params_with_grad = []
             grads = []
             prevs = []
             step_sizes = []
@@ -100,10 +93,10 @@ class Rprop(Optimizer):
             foreach = group["foreach"]
             maximize = group["maximize"]
 
-            self._init_group(group, params, grads, prevs, step_sizes)
+            self._init_group(group, params_with_grad, grads, prevs, step_sizes)
 
             rprop(
-                params,
+                params_with_grad,
                 grads,
                 prevs,
                 step_sizes,
@@ -235,11 +228,6 @@ def _single_tensor_rprop(
         prev = prevs[i]
         step_size = step_sizes[i]
 
-        if torch.is_complex(param):
-            grad = torch.view_as_real(grad)
-            prev = torch.view_as_real(prev)
-            param = torch.view_as_real(param)
-            step_size = torch.view_as_real(step_size)
         if differentiable:
             sign = grad.mul(prev.clone()).sign()
         else:
@@ -282,17 +270,6 @@ def _multi_tensor_rprop(
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
     for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes), _) in grouped_tensors.values():
-        # Handle complex params
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_prevs = _view_complex_as_real(grouped_prevs)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_step_sizes = _view_complex_as_real(grouped_step_sizes)
-
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
         if maximize:
             torch._foreach_neg_(signs)

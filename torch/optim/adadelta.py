@@ -52,10 +52,11 @@ class Adadelta(Optimizer):
         for p in group["params"]:
             if p.grad is None:
                 continue
-            params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adadelta does not support sparse gradients")
-            grads.append(p.grad)
+            p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+            params_with_grad.append(p_real)
+            grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
             state = self.state[p]
 
@@ -63,10 +64,10 @@ class Adadelta(Optimizer):
             if len(state) == 0:
                 state["step"] = 0
                 state["square_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
                 state["acc_delta"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                    p_real, memory_format=torch.preserve_format
                 )
 
             square_avgs.append(state["square_avg"])
@@ -238,11 +239,6 @@ def _single_tensor_adadelta(
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        if torch.is_complex(param):
-            square_avg = torch.view_as_real(square_avg)
-            acc_delta = torch.view_as_real(acc_delta)
-            grad = torch.view_as_real(grad)
-
         square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
         std = square_avg.add(eps).sqrt_()
         delta = acc_delta.add(eps).sqrt_()
@@ -251,8 +247,6 @@ def _single_tensor_adadelta(
         delta.div_(std).mul_(grad)
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
 
-        if torch.is_complex(param):
-            delta = torch.view_as_complex(delta)
         param.add_(delta, alpha=-lr)
 
 

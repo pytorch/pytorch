@@ -79,10 +79,12 @@ class ASGD(Optimizer):
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
         for p in group["params"]:
             if p.grad is not None:
-                params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError("ASGD does not support sparse gradients")
-                grads.append(p.grad)
+
+                p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+                params_with_grad.append(p_real)
+                grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
                 state = self.state[p]
                 # State initialization
@@ -91,7 +93,7 @@ class ASGD(Optimizer):
                     state["eta"] = torch.tensor(group["lr"], device=p.device)
                     state["mu"] = torch.ones((), device=p.device)
                     state["ax"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p_real, memory_format=torch.preserve_format
                     )
 
                 mus.append(state["mu"])
@@ -248,11 +250,6 @@ def _single_tensor_asgd(
         eta = etas[i]
         step_t = state_steps[i]
 
-        if torch.is_complex(param):
-            grad = torch.view_as_real(grad)
-            param = torch.view_as_real(param)
-            ax = torch.view_as_real(ax)
-
         # update step
         step_t += 1
         step = _get_value(step_t)
@@ -307,15 +304,6 @@ def _multi_tensor_asgd(
          grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
-
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_axs = _view_complex_as_real(grouped_axs)
 
         # update step
         torch._foreach_add_(grouped_state_steps, 1)
