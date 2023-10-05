@@ -155,7 +155,7 @@ def export__RC__(
 
     from collections import defaultdict
     symbols = defaultdict(list)
-    bounds = {}
+    bounds: Dict[str, Tuple[int, int]] = {}
 
     def check_same_bounds(dim):
         if dim.__name__ in symbols:
