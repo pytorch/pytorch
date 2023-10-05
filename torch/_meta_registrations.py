@@ -173,11 +173,6 @@ def linalg_matrix_exp(self):
     checkFloatingOrComplex(self, "linalg.matrix_exp")
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
-# @register_meta(aten.resize_storage.default)
-# def resize_storage(self, size):
-#     print("META FOR RESIZE", self, size)
-#     self._typed_storage()._resize_(size)
-#     return self
 
 @register_meta(
     [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]

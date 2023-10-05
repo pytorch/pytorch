@@ -21,7 +21,6 @@ from typing import Dict, NamedTuple, Optional, Union
 from unittest.mock import patch
 
 import torch
-import torch._dynamo
 import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
