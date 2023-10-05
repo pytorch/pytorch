@@ -560,6 +560,8 @@ class HFPretrainedConfigVariable(VariableTracker):
     Hack for HuggingFace PretrainedConfig
     """
 
+    _nonvar_fields = ["constant_attribute_tracker_EXPORT_ONLY"]
+
     @staticmethod
     def is_matching_cls(cls):
         try:
@@ -576,7 +578,7 @@ class HFPretrainedConfigVariable(VariableTracker):
     def __init__(self, obj, constant_attribute_tracker_EXPORT_ONLY={}, **kwargs):
         super().__init__(**kwargs)
         self.obj = obj
-        self.constant_attribute_tracker_EXPORT_ONLY = {}
+        self.constant_attribute_tracker_EXPORT_ONLY = constant_attribute_tracker_EXPORT_ONLY
         assert self.is_matching_cls(type(obj))
 
     def python_type(self):
