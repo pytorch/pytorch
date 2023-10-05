@@ -700,5 +700,6 @@ def _get_updated_range_constraints(
         return {}
     range_constraints = {
         k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
+        if k not in shape_env.replacements
     }
     return range_constraints
