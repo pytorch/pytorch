@@ -40,7 +40,7 @@ using at::DimnameList;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // generated forward declarations start here
 
@@ -76,4 +76,4 @@ void initSpecialFunctions(PyObject* module) {
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
