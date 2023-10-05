@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import collections
 import contextlib
 import dataclasses
 import functools
@@ -340,7 +339,7 @@ class TensorMeta:
     def from_irnodes(
         cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
-        if isinstance(irnodes, collections.abc.Sequence):
+        if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
