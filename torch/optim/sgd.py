@@ -3,9 +3,7 @@ from typing import List, Optional
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
-from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _fused_doc)
 
 __all__ = ['SGD', 'sgd']
 
@@ -395,7 +393,7 @@ def _fused_sgd(
     if is_first_step:
         for i, g in enumerate(grads):
             momentum_buffer_list[i] = torch.empty_like(g)
-    grouped_tensors = _group_tensors_by_device_and_dtype(
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True)
     for (device, dtype), (device_params, device_grads, device_momentum_buffer_list, indices) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
