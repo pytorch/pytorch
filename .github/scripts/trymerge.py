@@ -1588,9 +1588,17 @@ def is_flaky(
     if not head_job or not drci_classifications:
         return False
 
+    workflow_name = head_job.get("workflow_name", "")
+    job_name = head_job.get("name", "")
+    full_name = f"{workflow_name} / {job_name}"
+
     # Consult the list of flaky failures from Dr.CI
     return any(
-        head_job["name"] == flaky["name"]
+        (
+            workflow_name == flaky["name"]
+            or job_name == flaky["name"]
+            or full_name == flaky["name"]
+        )
         for flaky in drci_classifications.get("FLAKY", [])
     )
 
