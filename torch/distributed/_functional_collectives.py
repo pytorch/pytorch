@@ -508,27 +508,21 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 
     return [mk_out_tensor(t) for t in inputs]
 
-def _all_gather_into_tensor_native_meta(input, tag):
-    group_size = torch._C._distributed_c10d._resolve_pg_for_native_c10d_functional(
-        tag
-    ).size()
+def _all_gather_into_tensor_native_meta(input, group_size, tag):
     shape = list(input.size())
     shape[0] *= group_size
     return input.new_empty(shape)
 
-def _all_gather_into_tensor_coalesced_native_meta(inputs, tag):
-    return [_all_gather_into_tensor_native_meta(input, tag) for input in inputs]
+def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, tag):
+    return [_all_gather_into_tensor_native_meta(input, group_size, tag) for input in inputs]
 
-def _reduce_scatter_tensor_native_meta(input, tag):
-    group_size = torch._C._distributed_c10d._resolve_pg_for_native_c10d_functional(
-        tag
-    ).size()
+def _reduce_scatter_tensor_native_meta(input, group_size, tag):
     shape = list(input.size())
     shape[0] //= group_size
     return input.new_empty(shape)
 
-def _reduce_scatter_tensor_coalesced_native_meta(inputs, tag):
-    return [_reduce_scatter_tensor_native_meta(input, tag) for input in inputs]
+def _reduce_scatter_tensor_coalesced_native_meta(inputs, group_size, tag):
+    return [_reduce_scatter_tensor_native_meta(input, group_size, tag) for input in inputs]
 
 
 def _register_ops():

@@ -119,6 +119,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         input = torch.full((10, 10), float(self.rank), device=self.device)
         output = torch.ops._c10d_functional.all_gather_into_tensor(
             input,
+            self.world_size,
             "default",
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
@@ -141,6 +142,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         ]
         outputs = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
             inputs,
+            self.world_size,
             "default",
         )
         for i, output in enumerate(outputs):
@@ -161,6 +163,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         output = torch.ops._c10d_functional.reduce_scatter_tensor(
             input,
             "avg",
+            self.world_size,
             "default",
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
@@ -174,6 +177,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         outputs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
             inputs,
             "avg",
+            self.world_size,
             "default",
         )
         for i, output in enumerate(outputs):

@@ -806,18 +806,16 @@ This class does not support ``__members__`` property.)");
   // now, they operate on a pg registry dedicated to native c10d_functional.
   // Later, we'll unify the tag -> pg mapping across Python and C++, and
   // spanning both functional and non-functional collectives.
-  module
-      .def(
-          "_register_pg_for_native_c10d_functional",
-          &::c10d_functional::register_process_group,
-          py::arg("tag"),
-          py::arg("pg"));
+  module.def(
+      "_register_pg_for_native_c10d_functional",
+      &::c10d_functional::register_process_group,
+      py::arg("tag"),
+      py::arg("pg"));
 
-  module
-      .def(
-          "_resolve_pg_for_native_c10d_functional",
-          &::c10d_functional::resolve_process_group,
-          py::arg("tag"));
+  module.def(
+      "_resolve_pg_for_native_c10d_functional",
+      &::c10d_functional::resolve_process_group,
+      py::arg("tag"));
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
