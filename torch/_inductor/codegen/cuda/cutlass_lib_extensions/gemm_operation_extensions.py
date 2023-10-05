@@ -1,8 +1,8 @@
 # To be imported only after cutlass_utils.try_import_cutlass() has been called.
 import enum
 
-from cutlass_library import *  # type: ignore[import]  # noqa: F401, F403
-from cutlass_gemm_operation import *  # type: ignore[import]  # noqa: F401, F403
+from cutlass_library.library import *  # type: ignore[import]  # noqa: F401, F403
+from cutlass_library.gemm_operation import *  # type: ignore[import]  # noqa: F401, F403
 
 
 # copied / modified from original at
@@ -23,69 +23,69 @@ class EmitGemmUniversal3xInstanceWithEVT:
             "cutlass/epilogue/collective/collective_builder.hpp",
         ]
         self.builtin_epilogue_functor_template = """
-    ${epilogue_functor}<
-      ${element_c},
-      ${epilogue_vector_length},
-      ${element_accumulator},
-      ${element_epilogue}
-    >
-"""
+        ${epilogue_functor}<
+          ${element_c},
+          ${epilogue_vector_length},
+          ${element_accumulator},
+          ${element_epilogue}
+        >
+    """
         self.gemm_template = """
-using EpilogueScheduleType = ${epilogue_schedule};
-static_assert(cute::is_same_v<EpilogueScheduleType, cutlass::epilogue::TmaWarpSpecialized> ||
-         cute::is_same_v<EpilogueScheduleType, cutlass::epilogue::TmaWarpSpecializedCooperative>,
-        "Epilogue visitor trees are currently only supported by the TMA warp-specialized epilogue");
-static constexpr auto RoundStyle = cutlass::FloatRoundStyle::round_to_nearest;
-using ElementAcc = ${element_accumulator};
-using ElementD = ${element_d};
-${epilogue_functor};
-using ${operation_name}_epilogue =
-  typename cutlass::epilogue::collective::CollectiveBuilder<
-    ${arch}, ${opcode_class},
-    cute::Shape<cute::_${tile_shape_m}, cute::_${tile_shape_n}, cute::_${tile_shape_k}>,
-    cute::Shape<cute::_${cluster_m},cute::_${cluster_n},cute::_${cluster_k}>,
-    cutlass::epilogue::collective::EpilogueTileAuto,
-    ${element_accumulator}, ${element_epilogue},
-    ${element_c}, ${layout_c}, ${align_c},
-    ${element_d}, ${layout_d}, ${align_d},
-    EpilogueScheduleType,
-    ${operation_name}_epilogue_functor
-  >::CollectiveOp;
+    using EpilogueScheduleType = ${epilogue_schedule};
+    static_assert(cute::is_same_v<EpilogueScheduleType, cutlass::epilogue::TmaWarpSpecialized> ||
+             cute::is_same_v<EpilogueScheduleType, cutlass::epilogue::TmaWarpSpecializedCooperative>,
+            "Epilogue visitor trees are currently only supported by the TMA warp-specialized epilogue");
+    static constexpr auto RoundStyle = cutlass::FloatRoundStyle::round_to_nearest;
+    using ElementAcc = ${element_accumulator};
+    using ElementD = ${element_d};
+    ${epilogue_functor};
+    using ${operation_name}_epilogue =
+      typename cutlass::epilogue::collective::CollectiveBuilder<
+        ${arch}, ${opcode_class},
+        cute::Shape<cute::_${tile_shape_m}, cute::_${tile_shape_n}, cute::_${tile_shape_k}>,
+        cute::Shape<cute::_${cluster_m},cute::_${cluster_n},cute::_${cluster_k}>,
+        cutlass::epilogue::collective::EpilogueTileAuto,
+        ${element_accumulator}, ${element_epilogue},
+        ${element_c}, ${layout_c}, ${align_c},
+        ${element_d}, ${layout_d}, ${align_d},
+        EpilogueScheduleType,
+        ${operation_name}_epilogue_functor
+      >::CollectiveOp;
 
-using ${operation_name}_mainloop =
-  typename cutlass::gemm::collective::CollectiveBuilder<
-    ${arch}, ${opcode_class},
-    ${element_a}, ${layout_a}, ${align_a},
-    ${element_b}, ${layout_b}, ${align_b},
-    ${element_accumulator},
-    cute::Shape<cute::_${tile_shape_m}, cute::_${tile_shape_n}, cute::_${tile_shape_k}>,
-    cute::Shape<cute::_${cluster_m},cute::_${cluster_n},cute::_${cluster_k}>,
-    ${stages},
-  ${kernel_schedule}
-  >::CollectiveOp;
+    using ${operation_name}_mainloop =
+      typename cutlass::gemm::collective::CollectiveBuilder<
+        ${arch}, ${opcode_class},
+        ${element_a}, ${layout_a}, ${align_a},
+        ${element_b}, ${layout_b}, ${align_b},
+        ${element_accumulator},
+        cute::Shape<cute::_${tile_shape_m}, cute::_${tile_shape_n}, cute::_${tile_shape_k}>,
+        cute::Shape<cute::_${cluster_m},cute::_${cluster_n},cute::_${cluster_k}>,
+        ${stages},
+      ${kernel_schedule}
+      >::CollectiveOp;
 
-// Gemm operator ${operation_name}
-using ${operation_name}_base = cutlass::gemm::kernel::GemmUniversal<
-    cute::Shape<int,int,int,int>,
-    ${operation_name}_mainloop,
-    ${operation_name}_epilogue,
-    ${tile_scheduler}>;
+    // Gemm operator ${operation_name}
+    using ${operation_name}_base = cutlass::gemm::kernel::GemmUniversal<
+        cute::Shape<int,int,int,int>,
+        ${operation_name}_mainloop,
+        ${operation_name}_epilogue,
+        ${tile_scheduler}>;
 
-// Define named type
-struct ${operation_name} :
-  public ${operation_name}_base { };
+    // Define named type
+    struct ${operation_name} :
+      public ${operation_name}_base { };
 
-"""
+    """
 
     #
     def instance_template(self):
         return """
-${compile_guard_start}
-  using GemmKernel = cutlass::gemm::device::GemmUniversalAdapter<${operation_name}>;
-  manifest.append(
-    new ${gemm_kind}<GemmKernel>("${operation_name}"));
-${compile_guard_end}
-"""
+    ${compile_guard_start}
+      using GemmKernel = cutlass::gemm::device::GemmUniversalAdapter<${operation_name}>;
+      manifest.append(
+        new ${gemm_kind}<GemmKernel>("${operation_name}"));
+    ${compile_guard_end}
+    """
 
     #
     def emit(self, operation):
@@ -139,9 +139,7 @@ ${compile_guard_end}
             "element_d": DataTypeTag[operation.D.element],  # type: ignore[name-defined]
             "layout_d": LayoutTag[instance_layout_D],  # type: ignore[name-defined]
             "element_accumulator": DataTypeTag[operation.accumulator_type()],  # type: ignore[name-defined]
-            "opcode_class": OpcodeClassTag[  # type: ignore[name-defined]
-                operation.tile_description.math_instruction.opcode_class
-            ],
+            "opcode_class": OpcodeClassTag[operation.tile_description.math_instruction.opcode_class],  # type: ignore[name-defined]
             "arch": "cutlass::arch::Sm%d" % operation.arch,
             "tile_shape_m": str(operation.tile_description.tile_shape[0]),
             "tile_shape_n": str(operation.tile_description.tile_shape[1]),
