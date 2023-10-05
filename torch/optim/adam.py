@@ -89,10 +89,11 @@ class Adam(Optimizer):
     ):
         for p in group['params']:
             if p.grad is not None:
-                params_with_grad.append(p)
+                p_real = torch.view_as_real(p) if torch.is_complex(p) else p
+                params_with_grad.append(p_real)
                 if p.grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                grads.append(p.grad)
+                grads.append(torch.view_as_real(p.grad) if torch.is_complex(p) else p.grad)
 
                 state = self.state[p]
                 # Lazy state initialization
@@ -106,12 +107,12 @@ class Adam(Optimizer):
                         else torch.tensor(0.)
                     )
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['exp_avg'] = torch.zeros_like(p_real, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['exp_avg_sq'] = torch.zeros_like(p_real, memory_format=torch.preserve_format)
                     if group['amsgrad']:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        state['max_exp_avg_sq'] = torch.zeros_like(p_real, memory_format=torch.preserve_format)
 
                 exp_avgs.append(state['exp_avg'])
                 exp_avg_sqs.append(state['exp_avg_sq'])
@@ -372,13 +373,13 @@ def _single_tensor_adam(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        if torch.is_complex(param):
-            grad = torch.view_as_real(grad)
-            exp_avg = torch.view_as_real(exp_avg)
-            exp_avg_sq = torch.view_as_real(exp_avg_sq)
-            if amsgrad:
-                max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
-            param = torch.view_as_real(param)
+        # if torch.is_complex(param):
+        #     grad = torch.view_as_real(grad)
+        #     exp_avg = torch.view_as_real(exp_avg)
+        #     exp_avg_sq = torch.view_as_real(exp_avg_sq)
+        #     if amsgrad:
+        #         max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
+        #     param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - beta1)
@@ -486,11 +487,11 @@ def _multi_tensor_adam(params: List[Tensor],
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
-        device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        device_max_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        # device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
+        # device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
+        # device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
+        # device_max_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs]
+        # device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
