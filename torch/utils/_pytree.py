@@ -147,10 +147,10 @@ def _register_pytree_node(
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
     if _register_cxx_pytree_node:
-        from ._cxx_pytree import register_pytree_node
+        from ._cxx_pytree import register_pytree_node as maybe_cxx_register_pytree_node
 
-        if register_pytree_node is not _register_pytree_node:
-            register_pytree_node(
+        if maybe_cxx_register_pytree_node is not _register_pytree_node:
+            maybe_cxx_register_pytree_node(
                 typ,
                 flatten_fn,
                 unflatten_fn,
