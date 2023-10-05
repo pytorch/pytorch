@@ -1298,7 +1298,7 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
-        # Handles https://github.com/pytorch/pytorch/issues/69698
+        # Handles https://github.com/pytorch/pytorch/issues/110606
         self.rel_tol = 2e-2
         for foreach in (False, True):
             self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], foreach=foreach))
