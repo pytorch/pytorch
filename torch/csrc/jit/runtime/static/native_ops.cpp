@@ -22,7 +22,8 @@ namespace {
 constexpr auto createBorrowedIValue =
     c10::MaybeOwnedTraits<c10::IValue>::createBorrow;
 } // namespace
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -1535,4 +1536,5 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

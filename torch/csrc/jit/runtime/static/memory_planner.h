@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // A StorageGroup represents a collection of tensors that share backing storage.
 class StorageGroup {
@@ -295,4 +296,5 @@ class StandardMemoryPlanner : public MemoryPlanner {
   std::vector<StorageGroup> managed_tensors_{};
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

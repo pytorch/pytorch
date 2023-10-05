@@ -10,8 +10,8 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -354,4 +354,5 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   return pr;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

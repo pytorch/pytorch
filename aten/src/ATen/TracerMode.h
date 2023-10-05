@@ -108,10 +108,12 @@
 //   guard is essentially no-op when the master `setTracingState()` switch is
 //   off.
 
+namespace at {
 // TODO: move this from `at::` to `jit::torch::` after
 // `aten/src/ATen/cpp_custom_type_hack.h` is removed.
 
-namespace at::tracer::impl {
+namespace tracer {
+namespace impl {
 
 static inline bool is_dispatch_enabled() {
   return c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Tracer) &&
@@ -129,4 +131,6 @@ struct NoTracerDispatchMode {
   c10::impl::ExcludeDispatchKeyGuard guard_{at::DispatchKey::Tracer};
 };
 
-} // namespace at::tracer::impl
+} // namespace impl
+} // namespace tracer
+} // namespace at

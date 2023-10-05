@@ -20,8 +20,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
-from .allowed_functions import is_allowed
-
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -469,11 +467,6 @@ class GuardBuilder(GuardBuilderBase):
             # to override it. LSTMs change the module state in every invocation,
             # leading to recompilations.
             log.warning("Skipping nn module guard on LSTMs")
-            return
-
-        # Dynamo does not trace inside the inbuilt torch nn modules. Skip
-        # guarding on those. More rationale at https://github.com/pytorch/pytorch/issues/110048
-        if is_allowed(val.__class__):
             return
         try:
             g = torch._C._dynamo.guards.nn_module_guard(val)

@@ -11,7 +11,8 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap({
     {"logspace_0_8", R"SCRIPT(
@@ -149,4 +150,5 @@ std::unordered_map<std::string, std::string> get_upgraders_entry_map() {
   return kUpgradersEntryMap;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

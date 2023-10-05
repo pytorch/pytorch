@@ -53,7 +53,8 @@ C10_DEFINE_bool(
     false,
     "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -2322,4 +2323,5 @@ const MemoryPlanner* StaticRuntime::get_memory_planner() const {
   return block_->get_memory_planner();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

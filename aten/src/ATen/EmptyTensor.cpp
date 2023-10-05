@@ -6,7 +6,8 @@
 
 #include <limits>
 
-namespace at::detail {
+namespace at {
+namespace detail {
 namespace {
 c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
@@ -440,4 +441,4 @@ TensorBase empty_strided_symint_meta(
       options.pinned_memory_opt());
 }
 
-} // namespace at::detail
+}} // namespace at::detail

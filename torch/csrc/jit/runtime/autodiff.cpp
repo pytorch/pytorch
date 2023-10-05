@@ -16,7 +16,8 @@
 #include <algorithm>
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
@@ -867,4 +868,5 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   UpdateDifferentiableGraphRequiresGrad(grad_desc.f, false);
   return grad_desc;
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

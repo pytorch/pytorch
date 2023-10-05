@@ -10,7 +10,8 @@
 #include <torch/csrc/jit/runtime/decomposition_registry_util.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 const std::string decomp_funcs =
     R"(def var_decomposition(input: Tensor,
@@ -103,4 +104,5 @@ const OperatorMap<std::string>& GetDecompositionMapping() {
   return decomposition_mapping;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

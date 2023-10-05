@@ -7,7 +7,8 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <iterator>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -512,4 +513,5 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   VLOG(1) << "managed_bytes: " << managed_bytes_;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

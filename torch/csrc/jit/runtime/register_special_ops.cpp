@@ -18,7 +18,8 @@
 #include <regex>
 #include <sstream>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -462,4 +463,5 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
 });
 } // namespace
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

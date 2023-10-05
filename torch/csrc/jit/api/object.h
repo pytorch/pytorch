@@ -7,7 +7,8 @@
 
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -195,4 +196,5 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using Object = ::torch::jit::Object;
 } // namespace script
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

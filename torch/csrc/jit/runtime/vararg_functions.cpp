@@ -5,7 +5,8 @@
 #include <ATen/core/class_type.h>
 #include <c10/util/irange.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 static constexpr int defaultPrecision = 6;
@@ -423,4 +424,5 @@ void dequantize(Stack& stack) {
   }
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

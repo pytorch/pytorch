@@ -3,7 +3,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void initPythonIRBindings(PyObject* module);
 
@@ -47,4 +48,5 @@ struct ConcretePythonOp : public PythonOp {
   void lint_python() const override;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

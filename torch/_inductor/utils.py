@@ -306,7 +306,7 @@ def print_performance(
     fn, args=(), times=10, repeat=10, baseline=1.0, device: str = "cuda"
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
-    took = torch.median(timings) / times
+    took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
 
@@ -517,7 +517,6 @@ def has_incompatible_cudagraph_ops(gm):
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
         "run_with_rng_state",
-        "aten._local_scalar_dense",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(

@@ -10,7 +10,9 @@
 #include <tuple>
 #include <vector>
 
-namespace torch::jit::python {
+namespace torch {
+namespace jit {
+namespace python {
 
 struct IODescriptor {
   struct VariableMetadata {
@@ -116,4 +118,6 @@ PyObject* unflatten(
     at::ArrayRef<autograd::Variable> vars,
     const IODescriptor& structure);
 
-} // namespace torch::jit::python
+} // namespace python
+} // namespace jit
+} // namespace torch

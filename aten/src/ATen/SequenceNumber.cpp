@@ -1,6 +1,7 @@
 #include <ATen/SequenceNumber.h>
 
-namespace at::sequence_number {
+namespace at {
+namespace sequence_number {
 
 namespace {
 thread_local uint64_t sequence_nr_ = 0;
@@ -14,4 +15,5 @@ uint64_t get_and_increment() {
   return sequence_nr_++;
 }
 
-} // namespace at::sequence_number
+} // namespace sequence_number
+} // namespace at

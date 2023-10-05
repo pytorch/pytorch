@@ -244,7 +244,8 @@ uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
 
 template class THPPointer<THPStorage>;
 
-namespace torch::gdb {
+namespace torch {
+namespace gdb {
 /* ~~~ misc debugging utilities ~~~
  *
  * torch::gdb::* functions are NOT meant to be called by general pytorch code,
@@ -318,9 +319,11 @@ std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
   return ss.str();
 }
 
-} // namespace torch::gdb
+} // namespace gdb
+} // namespace torch
 
-namespace pybind11::detail {
+namespace pybind11 {
+namespace detail {
 
 bool type_caster<at::Tensor>::load(handle src, bool) {
   PyObject* obj = src.ptr();
@@ -434,4 +437,5 @@ handle type_caster<at::ArrayRef<c10::SymNode>>::cast(
   return t.release();
 }
 
-} // namespace pybind11::detail
+} // namespace detail
+} // namespace pybind11

@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/python/pybind.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 void initJitScriptBindings(PyObject* module);
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -23,7 +23,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Node;
 using ::c10::Argument;
@@ -322,4 +323,5 @@ c10::optional<Operator> OperatorGenerator(
       alias_analysis));
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -1313,7 +1313,7 @@ class CppKernel(Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy_symbol(f"x{n}") for n in range(len(self.ranges))]
+            self.itervars = [sympy_symbol(f"i{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],
@@ -1321,9 +1321,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
-        return V.graph.sizevars.size_hint(
-            sympy_product(self.call_ranges), fallback=8192
-        )
+        return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
@@ -1421,7 +1419,7 @@ class CppKernel(Kernel):
         par = 1
         depth = 0
         for expr in ranges:
-            hint = V.graph.sizevars.size_hint(expr, fallback=8192)
+            hint = V.graph.sizevars.size_hint(expr)
             if par >= 2 * threads or par == threads:
                 break
             if seq // threads < config.cpp.min_chunk_size:

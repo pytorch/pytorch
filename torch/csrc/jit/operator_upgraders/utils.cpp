@@ -8,7 +8,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 c10::optional<UpgraderEntry> findUpgrader(
     const std::vector<UpgraderEntry>& upgraders_for_schema,
@@ -94,4 +95,5 @@ std::vector<UpgraderRange> getUpgradersRangeForOp(const std::string& name) {
   return output;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -11,7 +11,8 @@
 
 C10_DECLARE_bool(torch_jit_enable_new_executor);
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct GraphExecutorState;
 struct Code;
 
@@ -139,4 +140,5 @@ GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op);
 // with less plumbing.
 } // namespace detail
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

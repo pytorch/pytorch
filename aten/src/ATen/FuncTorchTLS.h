@@ -3,7 +3,8 @@
 #include <c10/macros/Macros.h>
 #include <memory>
 
-namespace at::functorch {
+namespace at {
+namespace functorch {
 
 // NOTE [functorch TLS in pytorch/pytorch]
 //
@@ -43,4 +44,5 @@ TORCH_API void setFuncTorchTLS(
 // get a mutable reference to the functorch tls
 TORCH_API std::unique_ptr<FuncTorchTLSBase>& functorchTLSAccessor();
 
-} // namespace at::functorch
+} // namespace functorch
+} // namespace at

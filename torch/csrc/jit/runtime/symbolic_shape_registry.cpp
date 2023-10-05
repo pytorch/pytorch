@@ -11,7 +11,8 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 std::mutex lock;
 
@@ -445,4 +446,5 @@ void LintShapeComputeGraph(
   // TODO: other checks ? list ops which we don't symbolically optimize, etc ?
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

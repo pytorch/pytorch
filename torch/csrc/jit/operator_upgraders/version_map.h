@@ -4,7 +4,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct UpgraderEntry {
   int bumped_at_version;
@@ -30,4 +31,5 @@ TORCH_API void test_only_remove_entry(const std::string& op_name);
 
 TORCH_API void test_only_reset_flag();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

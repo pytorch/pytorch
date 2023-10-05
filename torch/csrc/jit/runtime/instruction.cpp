@@ -3,7 +3,8 @@
 #include <cstring>
 #include <iostream>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 static std::ostream& operator<<(std::ostream& out, OpCode op) {
   switch (op) {
 #define OP_STRING(x, _) \
@@ -92,4 +93,5 @@ bool isOpSupportedInMobile(OpCode op) {
   return false;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

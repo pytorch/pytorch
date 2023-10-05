@@ -1062,11 +1062,10 @@ size_t CachingAllocatorConfig::parseAllocatorConfig(
           CUDA_VERSION);
 #endif
     }
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         config[i] == get()->name(),
         "Allocator backend parsed at runtime != "
-        "allocator backend parsed at load time, "
-        "did you set PYTORCH_CUDA_ALLOC_CONF after loading PyTorch?");
+        "allocator backend parsed at load time");
   } else {
     TORCH_CHECK(false, "Error parsing backend value", "");
   }

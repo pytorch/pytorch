@@ -10,7 +10,6 @@
 using namespace c10;
 using namespace c10::impl;
 
-// NOLINTBEGIN(*conversion*, *multiplication*)
 static void checkData(
     const SizesAndStrides& sz,
     IntArrayRef sizes,
@@ -419,4 +418,3 @@ TEST(SizesAndStridesTest, MoveAssignmentSelf) {
   selfMove(big, big);
   checkBig(big);
 }
-// NOLINTEND(*conversion*, *multiplication*)
