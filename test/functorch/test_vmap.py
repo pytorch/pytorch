@@ -3512,7 +3512,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('sparse.mm', 'reduce'),  # sparse
         xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
-        skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
