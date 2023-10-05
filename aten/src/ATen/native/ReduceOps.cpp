@@ -1663,12 +1663,10 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
 }
 
 namespace {
-  static inline void warn_invalid_degrees_of_freedom(const char* fname, const TensorIterator iter, double correction) {
+  inline void warn_invalid_degrees_of_freedom(const char* fname, const TensorIterator& iter, double correction) {
     int64_t reducing_over_num_elements = iter.num_output_elements() == 0 ? 0 : iter.numel() / iter.num_output_elements();
     if (reducing_over_num_elements - correction <= 0) {
-      std::ostringstream ss;
-      ss << fname << "(): degrees of freedom is <= 0";
-      TORCH_WARN(ss.str());
+      TORCH_WARN(fname, "(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel).");
     }
   }
 } // namespace
