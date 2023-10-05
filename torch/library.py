@@ -211,10 +211,10 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>> from torch import Tensor
         >>>
         >>> # Example 1: an operator without data-dependent output shape
-        >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-        >>> lib.define("mylibrary::custom_linear(Tensor x, Tensor weight, Tensor bias) -> Tensor")
+        >>> lib = torch.library.Library("mylib", "FRAGMENT")
+        >>> lib.define("mylib::custom_linear(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
-        >>> @torch.library.impl_abstract("mylibrary::custom_linear")
+        >>> @torch.library.impl_abstract("mylib::custom_linear")
         >>> def custom_linear_abstract(x, weight):
         >>>     assert x.dim() == 2
         >>>     assert weight.dim() == 2
@@ -226,10 +226,10 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     return (x @ weight.t()) + bias
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> lib = torch.library.Library("mylibrary", "FRAGMENT")
-        >>> lib.define("mylibrary::custom_nonzero(Tensor x) -> Tensor")
+        >>> lib = torch.library.Library("mylib", "FRAGMENT")
+        >>> lib.define("mylib::custom_nonzero(Tensor x) -> Tensor")
         >>>
-        >>> @torch.library.impl_abstract("mylibrary::custom_nonzero")
+        >>> @torch.library.impl_abstract("mylib::custom_nonzero")
         >>> def custom_nonzero_abstract(x):
         >>>     # Number of nonzero-elements is data-dependent.
         >>>     # Since we cannot peek at the data in an abstract impl,
