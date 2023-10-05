@@ -511,6 +511,11 @@ class VariableBuilder:
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             }
 
+            # This is unusual - generally, we want to defer guards to function
+            # invocation time. However, partials is special because its a stored
+            # object with bound arguments - if the bound arguments change across
+            # a graph break or compile region, we must recompile.
+            self.tx.output.guards.update(guards)
             return FunctoolsPartialVariable(
                 func_obj, args, keywords, original=value, guards=guards
             )
