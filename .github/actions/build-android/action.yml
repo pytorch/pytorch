@@ -9,7 +9,7 @@ inputs:
   arch-for-build-env:
     description: |
       arch to pass to build environment.
-      This is currently different than the arch name we use elswhere, which
+      This is currently different than the arch name we use elsewhere, which
       should be fixed.
     required: true
   github-secret:
@@ -17,7 +17,7 @@ inputs:
     required: true
   build-environment:
     required: true
-    description: Top-level label for what's being built/tested.
+    description: Top-level label for what is being built/tested.
   docker-image:
     required: true
     description: Name of the base docker image to build with.
@@ -37,7 +37,7 @@ runs:
       shell: bash
       env:
         BRANCH: ${{ inputs.branch }}
-        BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-${{ inputs.arch-for-build-env }}-build"
+        BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-${{ inputs.arch-for-build-env }}-build
         AWS_DEFAULT_REGION: us-east-1
         PR_NUMBER: ${{ github.event.pull_request.number }}
         SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
