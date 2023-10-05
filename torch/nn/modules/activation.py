@@ -855,18 +855,21 @@ class Softshrink(Module):
         \end{cases}
 
     Args:
-        lambd: the :math:`\lambda` (must be no less than zero) value for the Softshrink formulation. Default: 0.5
+        lambd (float): The :math:`\lambda` (must be greater than or equal to zero) value for the Softshrink formulation. Default: 0.5
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
+
+    Supported Dtypes:
+        - Input tensor can have float32 or float64 data type.
 
     .. image:: ../scripts/activation_images/Softshrink.png
 
     Examples::
 
         >>> m = nn.Softshrink()
-        >>> input = torch.randn(2)
+        >>> input = torch.randn(2, dtype=torch.float32)  # You can specify dtype here
         >>> output = m(input)
     """
     __constants__ = ['lambd']
