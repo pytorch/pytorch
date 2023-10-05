@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -32,9 +33,19 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_torchinductor import copy_tests, requires_cuda, TestFailure
+        from .test_torchinductor import (
+            copy_tests,
+            requires_cuda,
+            requires_multigpu,
+            TestFailure,
+        )
     except ImportError:
-        from test_torchinductor import copy_tests, requires_cuda, TestFailure
+        from test_torchinductor import (
+            copy_tests,
+            requires_cuda,
+            requires_multigpu,
+            TestFailure,
+        )
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -43,7 +54,7 @@ except (unittest.SkipTest, ImportError) as e:
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(cls, model, example_inputs, options=None, constraints=None):
+    def compile(cls, model, example_inputs, options=None, constraints=None):
         # The exact API is subject to change
         so_path, exported = torch._export.aot_compile(
             model,
@@ -51,7 +62,10 @@ class AOTInductorModelRunner:
             options=options,
             constraints=constraints,
         )
+        return so_path, exported
 
+    @classmethod
+    def load(cls, so_path, example_inputs):
         is_cpu = all(x.device.type == "cpu" for x in example_inputs)
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind
@@ -67,12 +81,14 @@ class AOTInductorModelRunner:
             optimized = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[launcher],
+                # use a unique build directory to avoid test interference
+                build_directory=tempfile.mkdtemp(),
                 functions=["run"],
                 extra_ldflags=[so_path],
-                with_cuda=True,  # TODO: change this to not is_cpu
+                with_cuda=not is_cpu,
             ).run
 
-        return optimized, exported
+        return optimized
 
     @classmethod
     def run_compiled(cls, optimized, exported, example_inputs):
@@ -84,9 +100,10 @@ class AOTInductorModelRunner:
 
     @classmethod
     def run(cls, model, example_inputs, options=None, constraints=None):
-        optimized, exported = AOTInductorModelRunner.load(
+        so_path, exported = AOTInductorModelRunner.compile(
             model, example_inputs, options=options, constraints=constraints
         )
+        optimized = AOTInductorModelRunner.load(so_path, example_inputs)
         return AOTInductorModelRunner.run_compiled(optimized, exported, example_inputs)
 
     @classmethod
@@ -97,12 +114,13 @@ class AOTInductorModelRunner:
         options=None,
         constraints=None,
     ):
-        optimized, exported = AOTInductorModelRunner.load(
+        so_path, exported = AOTInductorModelRunner.compile(
             model,
             list_example_inputs[0],
             options=options,
             constraints=constraints,
         )
+        optimized = AOTInductorModelRunner.load(so_path, list_example_inputs[0])
         list_output_tensors = []
         for example_inputs in list_example_inputs:
             list_output_tensors.append(
@@ -394,6 +412,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.rand(6, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_inf(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        x = torch.randn(10, 10, device=self.device)
+        x[0][0] = float("Inf")
+        example_inputs = (
+            x,
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(
+            Model().to(self.device),
+            example_inputs,
+            options={"debug_check_inf_and_nan": True},
+        )
+
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_nan(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        x = torch.randn(10, 10, device=self.device)
+        x[0][0] = float("nan")
+        example_inputs = (
+            x,
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(
+            Model().to(self.device),
+            example_inputs,
+            options={"debug_check_inf_and_nan": True},
+        )
+
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -626,10 +688,70 @@ class AOTInductorTestsTemplate:
         ):
             self.check_model(Repro(), example_inputs)
 
-    @unittest.skipIf(
-        torch.cuda.device_count() < 2, "The test requires multiple devices"
-    )
+    def test_dynamic_cat(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x1, x2):
+                return torch.cat([x1, x2], dim=0)
+
+        a = torch.randn(2, 4, device=self.device)
+        b = torch.randn(3, 4, device=self.device)
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 10,
+            torch._export.dynamic_dim(b, 0) >= 1,
+            torch._export.dynamic_dim(b, 0) <= 20,
+        ]
+        example_inputs = (a, b)
+        self.check_model(Model(), example_inputs, constraints=constraints)
+
+    @requires_multigpu()
+    def test_replicate_on_devices(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, w1, w2):
+                super().__init__()
+                self.w1 = w1
+                self.w2 = w2
+
+            def forward(self, x, y):
+                a = x * self.w1
+                b = y * self.w2
+                return a + b
+
+        w1 = torch.randn(10, 10)
+        w2 = torch.randn(10, 10)
+        inputs = (torch.randn(10, 10), torch.randn(10, 10))
+        result_cpu = Model(w1, w2)(*inputs)
+
+        # Compile model with AOTInductor
+        with torch.cuda.device(0), config.patch(
+            "aot_inductor.abi_compatible", self.abi_compatible
+        ):
+            so_path, exported = AOTInductorModelRunner.compile(
+                model=Model(w1.cuda(0), w2.cuda(0)),
+                example_inputs=tuple(t.cuda(0) for t in inputs),
+            )
+
+        # Run model on cuda:N
+        for i in range(torch.cuda.device_count()):
+            with torch.cuda.device(i):
+                example_inputs = tuple(t.cuda(i) for t in inputs)
+                optimized = AOTInductorModelRunner.load(so_path, example_inputs)
+                result_cuda = AOTInductorModelRunner.run_compiled(
+                    optimized, exported, example_inputs
+                )
+            self.assertTrue(same(result_cpu, result_cuda.cpu()))
+
+    @requires_multigpu()
     def test_non_default_cuda_device(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
         class Model(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
@@ -675,6 +797,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,

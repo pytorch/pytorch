@@ -883,6 +883,9 @@ class SymNode:
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
+    def abs(self) -> "SymNode":  # noqa: F811
+        return self._abs()  # type: ignore[attr-defined]
+
     def add(self, other) -> "SymNode":  # noqa: F811
         return self._add(other)  # type: ignore[attr-defined]
 
@@ -1178,6 +1181,7 @@ magic_methods = {
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
     'sym_sqrt': lambda a: sympy.sqrt(a),
+    'abs': lambda a: sympy.Abs(a),
 }
 
 sizes_strides_methods = {
@@ -1302,6 +1306,7 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
     return True
 
 unary_magic_methods = {
+    'abs',
     'sym_float',
     'ceil',
     'floor',
@@ -1339,6 +1344,7 @@ def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
 
 SYMPY_INTERP = {
+    'Abs': operator.abs,
     'Eq': operator.eq,
     'Ne': operator.ne,
     'Gt': operator.gt,
@@ -2661,7 +2667,7 @@ class ShapeEnv:
                                           dynamic_dims: DimList[DimDynamic],
                                           constraint_dims: List[DimConstraint]
                                           ) -> List[sympy.Expr]:
-        assert all(isinstance(val, int) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
+        assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(tensor_size):
@@ -2720,7 +2726,7 @@ class ShapeEnv:
         # we may have an unnessary shape speciliazation for y.
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
-            if isinstance(maybe_sym, SymInt):
+            if is_symbolic(maybe_sym):
                 assert maybe_sym.node.shape_env is not self, \
                     "expect the symbol is created from an shape env other than current one."
                 return maybe_sym.node.require_hint()

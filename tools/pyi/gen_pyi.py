@@ -736,6 +736,13 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_replace": [
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_commit_update": [
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],

@@ -80,8 +80,6 @@ static void check(bool result) {
     check(nullptr);
 }
 
-static bool call_should_keep_graph(PyObject* graph);
-
 struct CacheNode {
   // A node in the shadow graph, we follow next edges until we reach the end of
   // the graph
@@ -124,12 +122,6 @@ struct CacheNode {
   CacheNode(const CacheNode&) = delete;
   CacheNode& operator=(const CacheNode&) = delete;
   CacheNode& operator=(CacheNode&&) = delete;
-
-  bool check_keep_graph(AutogradCompilerCall& call) {
-    bool cache_hit = compiled_fn.get() != nullptr;
-    return cache_hit &&
-        (call.keep_graph == call_should_keep_graph(compiled_fn.get()));
-  }
 
   bool check_dynamic_sizes(AutogradCompilerCall& call) {
     /*
@@ -295,29 +287,6 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
-static PyObject* call_keep_graph(PyObject* graph, bool keep_graph) {
-  PyObject* py_keep_graph = keep_graph ? Py_True : Py_False;
-  Py_INCREF(py_keep_graph);
-
-  if (PyObject_SetAttrString(graph, "keep_graph", py_keep_graph) == -1) {
-    Py_DECREF(py_keep_graph);
-    python_error err;
-    err.persist();
-    throw err;
-  }
-
-  Py_DECREF(py_keep_graph);
-  return graph;
-}
-
-static bool call_should_keep_graph(PyObject* graph) {
-  PyObject* py_keep_graph = PyObject_GetAttrString(graph, "keep_graph");
-  check(py_keep_graph);
-  bool result = PyObject_IsTrue(py_keep_graph) != 0;
-  Py_DECREF(py_keep_graph);
-  return result;
-}
-
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
   ~ClosingTHPObjectPtr() {
@@ -351,7 +320,6 @@ variable_list compiled_autograd(
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
-  compiler_call.keep_graph = graph_task.keep_graph_;
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
@@ -402,9 +370,7 @@ variable_list compiled_autograd(
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
-  // TODO(voz): Replace with a general cache check fn
-  if (!cache->check_dynamic_sizes(compiler_call) ||
-      !cache->check_keep_graph(compiler_call)) {
+  if (!cache->check_dynamic_sizes(compiler_call)) {
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
@@ -496,9 +462,7 @@ variable_list compiled_autograd(
       }
     }
 
-    PyObject* graph = check(call_end_capture(py_compiler, state.outputs));
-    cache->compiled_fn =
-        check(call_keep_graph(check(graph), graph_task.keep_graph_));
+    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
     cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
   } // End cache miss region

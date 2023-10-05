@@ -44,7 +44,6 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy = None
-        self.keep_graph = False
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
