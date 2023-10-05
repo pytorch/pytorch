@@ -422,6 +422,8 @@ class OutputAliasInfo:
     base_idx: Optional[int]
     # If it is a Tensor, what the dynamic dims are (otherwise is None)
     dynamic_dims: Optional[Set[int]]
+    # requires_grad
+    requires_grad: bool
 
 
 # This class tells us info about user inputs.
@@ -943,11 +945,10 @@ def run_functionalized_fw_and_collect_metadata(
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
+                requires_grad=isinstance(o, torch.Tensor) and o.requires_grad
             )
             output_info.append(out_info)
-            output_requires_grad_info.append(
-                isinstance(o, torch.Tensor) and o.requires_grad
-            )
+            output_requires_grad_info.append(out_info.requires_grad)
 
         # Our autograd.Function.forward returns both mutated inputs and outputs,
         # so we need grad info on all of them.
@@ -969,9 +970,10 @@ def run_functionalized_fw_and_collect_metadata(
             for o, info in zip(flat_f_outs, output_info)
             if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
             and issubclass(info.raw_type, torch.Tensor)
+            and info.requires_grad
         ]
         # intermediate bases are also included in the backward graph
-        f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
+        f_tangents = f_output_tangents + intermediate_bases
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
 
         metadata = ViewAndMutationMeta(
@@ -1237,7 +1239,7 @@ def fn_prepped_for_autograd(
 
         # Also return a boolean mask specifying which outputs to this function will be used as tangents
         mutated_inputs_grad_mask = [
-            meta.input_info[meta.mutated_inp_indices[i]].mutates_data
+            meta.input_info[meta.mutated_inp_indices[i]].mutates_data and False
             for (i, x) in enumerate(mutated_inputs_to_return)
         ]
 
@@ -1249,6 +1251,7 @@ def fn_prepped_for_autograd(
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, torch.Tensor)
+            and meta.output_info[i].requires_grad
             for (i, x) in enumerate(outs)
         ]
 
@@ -1287,6 +1290,7 @@ def create_joint(
         outs, tangent_mask = fn(*primals)
         assert len(tangent_mask) == len(outs)
         outs_to_grad = [o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent]
+        breakpoint()
         assert len(outs_to_grad) == len(tangents)
 
         # Get the inputs that need gradients
@@ -3106,6 +3110,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 and not CompiledFunction.metadata.requires_grad_info[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+            ctx._materialize_non_diff_grads = False
 
             functionalized_rng_runtime_epilogue(
                 CompiledFunction.metadata,
@@ -3159,6 +3164,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     for x, info in zip(out_tangents, out_info)
                     if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
                     and issubclass(info.raw_type, torch.Tensor)
+                    and info.requires_grad
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
                 flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
@@ -3178,7 +3184,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 mutated_inp_args = flat_args[:num_mutated_inps] if num_mutated_inps > 0 else []
                 user_tangents = flat_args[num_mutated_inps:]
                 assert len(user_tangents) == len(out_info)
-                filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor)]
+                filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor) and info.requires_grad]
                 flat_bw_args = tuple(mutated_inp_args) + tuple(filtered_user_tangents)
 
             contiguous_args = [
