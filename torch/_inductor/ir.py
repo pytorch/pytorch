@@ -5918,7 +5918,7 @@ class InPlaceHint(ExternKernel):
     Wrap the input of your inplace op to enable this behavior.
 
     The design is based on two key decisions:
-    - this node is resposible for allocating the in/out buffer used by the collective.
+    - this node is responsible for allocating the in/out buffer used by the collective.
         This is controlled by the ``should_allocate`` method that returns True here and
         False for the collective node
     - The scheduler special-case this node and enable it to reuse its input.
@@ -5958,7 +5958,7 @@ class OutputBuffer(ExternKernel):
 class MultiOutputNoSizeAssert(MultiOutput):
     """
     Extract partial output from a multi-output OP.
-    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
+    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emitting this.
     """
 
     def __init__(self, layout, input, index):
