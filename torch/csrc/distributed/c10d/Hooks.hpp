@@ -23,7 +23,6 @@ struct TORCH_API EventInfo {
   c10::optional<std::string> error_message;
 };
 
-// TODO do we want to expose something else here?
 TORCH_API bool dequeue_c10d_event(EventInfo& evt);
 TORCH_API void enqueue_c10d_event(EventInfo&& evt);
 
