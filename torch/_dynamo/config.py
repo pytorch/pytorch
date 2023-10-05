@@ -144,21 +144,8 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# If a PyTorch module is in this allowlist, torchdynamo will be allowed
-# to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-    torch.testing,
-    torch.ao.nn,
-    torch._refs,
-    torch._prims,
-    torch._decomp,
-    torch.utils._contextlib,
-    torch.utils._pytree,
-    torch.fx._pytree,
-    torch.sparse,
-}
+# legacy config, does nothing now!
+skipfiles_inline_module_allowlist = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -342,6 +329,8 @@ inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 # in the FX graph. This should incorrectly construct the divisible and replacement
 # lists, and incorrectly issue guards.
 inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
+
+add_runtime_assertions_for_inline_constraints = True
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
