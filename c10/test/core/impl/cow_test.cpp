@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <memory>
 
+// NOLINTBEGIN(clang-analyzer-cplusplus*)
 namespace c10::impl {
 namespace {
 
@@ -85,7 +86,7 @@ MATCHER(is_copy_on_write, "") {
 
 TEST(lazy_clone_storage_test, no_context) {
   StorageImpl original_storage(
-      {}, /*size_bytes=*/7, GetCPUAllocator(), /*resizable=*/false);
+      {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
   ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
   ASSERT_THAT(
       original_storage.data_ptr().get(),
@@ -170,3 +171,4 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
 
 } // namespace
 } // namespace c10::impl
+// NOLINTEND(clang-analyzer-cplusplus*)

@@ -1010,6 +1010,21 @@ class TestTracer(JitTestCase):
         self.assertEqual(out, out_state)
         self.assertNotEqual(out, out_ones)
 
+    @unittest.skipIf(not RUN_CUDA, "uses cuda")
+    def test_type_same_device(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dtype = torch.float16
+
+            def forward(self, x=None):
+                h = x.type(self.dtype)
+                return h
+
+        a = Model()
+        b = torch.jit.trace(a, example_inputs=(torch.ones([1], device=torch.device("cuda")),))
+        FileCheck().check_not("device").run(b.code)
+
     def test_export_no_reorder(self):
         def func(a, b):
             return a * b / (a - 2 * b) + b
