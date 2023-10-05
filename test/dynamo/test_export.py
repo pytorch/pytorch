@@ -3287,17 +3287,29 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["L['pred'].__int__() == 1"]
+        true_guard_code = ["create_symint_from_symbool_guardless(L['pred']) == 1"]
         false_guard_code = [
-            "Ne(L['pred'].__int__(), 1)",
-            "-9223372036854775808 <= L['pred'].__int__()",
+            "Ne(create_symint_from_symbool_guardless(L['pred']), 1)",
+            "-9223372036854775808 <= create_symint_from_symbool_guardless(L['pred'])",
         ]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            [["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"]],
+            [
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                [
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                ],
+                [
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                ],
+            ],
         )
 
     def test_invalid_input_global(self) -> None:
