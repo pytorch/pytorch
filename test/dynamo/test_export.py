@@ -3628,6 +3628,10 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
     return add_2""",
         )
 
+    @unittest.skipIf(
+        common_utils.TEST_WITH_ASAN,
+        "Times out with ASAN, see https://github.com/pytorch/pytorch/issues/110416",
+    )
     def test_retracibility(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):

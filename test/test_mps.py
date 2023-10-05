@@ -90,6 +90,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for aten::nextafter is not implemented on CPU
+        'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
@@ -560,7 +562,6 @@ def mps_ops_modifier(ops):
         'nanquantile': None,
         'nanmedian': None,
         'native_dropout_backward': None,
-        'nextafter': None,
         'normnuc': None,
         'nn.functional.fractional_max_pool2d': None,
         'nn.functional.fractional_max_pool3d': None,
