@@ -2260,6 +2260,7 @@ class TestCase(expecttest.TestCase):
     # Always use difflib to print diffs on multi line equality.
     # Undocumented feature in unittest
     _diffThreshold = sys.maxsize
+    maxDiff = sys.maxsize
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
