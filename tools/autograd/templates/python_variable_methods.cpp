@@ -60,7 +60,7 @@ using at::Tensor;
 using c10::Stream;
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
@@ -1294,4 +1294,4 @@ PyMethodDef variable_methods[] = {
   {NULL}
 };
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
