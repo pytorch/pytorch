@@ -157,6 +157,21 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard_manager.check(Foo(3, 4)))
         self.assertFalse(guard_manager.check("foo"))
 
+    def test_item_int_guard_manager(self):
+        foo = (1, 2, 3)
+
+        guard_manager = RootGuardManager()
+        guard_manager.add_lambda_guard(
+            lambda x: isinstance(x, tuple),
+            lambda x: f"Expected tuple but got {type(x)}",
+        )
+        guard_manager[0].add_lambda_guard(
+            lambda x: x == 1,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+
     def test_dict_guard_manager(self):
         foo = {
             "x": 1,
@@ -416,7 +431,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         class A:
             a = 4
 
-        class B:
+        class B(A):
             def mul(self, x):
                 super().mul(x)
 
@@ -432,7 +447,22 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
         )
         mro_manager.add_lambda_guard(
-            lambda x: len(x) == 2,
+            lambda x: len(x) == 3,
             lambda x: f"Expected length 2 but got {len(x)}",
         )
+
+        # type(foo).__mro__[0].a = 4
+        item_manager = mro_manager[1]
+        self.assertTrue(
+            isinstance(mro_manager.get_accessors()[0], GetItemGuardAccessor)
+        )
+        attr_manager = item_manager.a
+        self.assertTrue(
+            isinstance(item_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+        attr_manager.add_lambda_guard(
+            lambda x: x == 4,
+            lambda x: f"Expected value 4 but got {x}",
+        )
+
         self.assertTrue(guard_manager.check(f_locals))
