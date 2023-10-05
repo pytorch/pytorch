@@ -492,7 +492,7 @@ def _multi_tensor_adam(params: List[Tensor],
                 device_grads[i] = torch.view_as_real(device_grads[i])
                 device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
                 device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
-                if len(device_max_exp_avg_sqs) > 0:
+                if amsgrad:
                     device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
 
         # update steps
