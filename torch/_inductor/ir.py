@@ -208,7 +208,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     size = convert_shape_to_symint(size)
     stride = convert_shape_to_symint(stride)
     t = torch.empty_strided(
-        size=size, stride=stride, dtype=dtype, device=device  # type:ignore[arg-type]
+        size=size, stride=stride, dtype=dtype, device=device
     ).zero_()
     return t
 
