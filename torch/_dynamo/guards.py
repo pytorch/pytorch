@@ -43,7 +43,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_symbolic,
+    SYMPY_INTERP,
+)
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -150,7 +154,7 @@ def strip_function_call(name):
     "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
     "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
     """
-    # recursively find valid object name in fuction
+    # recursively find valid object name in function
     valid_name = re.compile("[A-Za-z_].*")
     curr = ""
     for char in name:
@@ -1021,7 +1025,7 @@ class CheckFunctionManager:
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         # TODO(janimesh) - Currently this information is stored as an attr on
-        # the check_fn itself to avoid changing CacehEntry datastrucutre in
+        # the check_fn itself to avoid changing CacehEntry datastructure in
         # eval_frame.c. In future, we should probably replace check_fn with a
         # queryable data structure such that this information is already present
         # in some form.
@@ -1108,7 +1112,7 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if isinstance(dim, int):
+                    if not is_symbolic(dim):
                         converted.append(dim)
                     else:
                         assert isinstance(dim, torch.SymInt)
@@ -1422,7 +1426,7 @@ def make_dupe_guard(obj_source, dupe_source):
         # so maybe we should do this refactor before we land this...
         # TODO(voz): Combine local and global guard builders.
         if ser_source_is_local == source_is_local:
-            # Note - this is a little agressive - these being duplicate input does not always matter.
+            # Note - this is a little aggressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
