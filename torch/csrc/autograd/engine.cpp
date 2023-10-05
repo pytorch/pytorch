@@ -823,7 +823,6 @@ void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-
   if (grads.size() != edges.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
@@ -848,11 +847,10 @@ void validate_outputs(
     if (!metadata.is_same_shape(grad)) {
       if (metadata.is_expandable_to_shape(grad)) {
         grad = metadata.reduce_grad(grad);
+      } else {
+        const auto message = metadata.incompatible_shape_error_message(i, grad);
+        TORCH_CHECK(false, format_error(message.str()));
       }
-      //  else {
-        // const auto message = metadata.incompatible_shape_error_message(i, grad);
-        // TORCH_CHECK(false, format_error(message.str()));
-      // }
     }
 
     bool input_is_complex =
