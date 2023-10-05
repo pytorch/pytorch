@@ -1,6 +1,5 @@
 import copy
 import dataclasses
-from enum import auto, Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
@@ -15,8 +14,9 @@ from torch.fx.passes.infra.pass_manager import PassManager
 
 
 __all__ = [
-    "ArgumentKind",
-    "ArgumentSpec",
+    "TensorArgument",
+    "ConstantArgument",
+    "SymIntArgument",
     "ExportBackwardSignature",
     "ExportedProgram",
     "ExportGraphSignature",
@@ -171,20 +171,22 @@ class ExportGraphSignature:
         )
 
 
-class ArgumentKind(Enum):
-    Tensor = auto()
-    SymInt = auto()
-    Constant = auto()
+@dataclasses.dataclass
+class TensorArgument:
+    name: str
 
 
 @dataclasses.dataclass
-class ArgumentSpec:
-    kind: ArgumentKind
-    value: Any
+class SymIntArgument:
+    name: str
 
-    def __post_init__(self):
-        if self.kind in (ArgumentKind.Tensor, ArgumentKind.SymInt):
-            assert isinstance(self.value, str)
+
+@dataclasses.dataclass
+class ConstantArgument:
+    value: Union[int, float, bool, None]
+
+
+ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
 
 
 @dataclasses.dataclass

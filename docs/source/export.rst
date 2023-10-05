@@ -575,7 +575,5 @@ API Reference
 
 .. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
-.. autoclass:: ArgumentKind
-.. autoclass:: ArgumentSpec
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
