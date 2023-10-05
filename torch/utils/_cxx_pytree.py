@@ -125,6 +125,7 @@ def register_pytree_node(
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> # Registry a Python type with lambda functions
         >>> register_pytree_node(
         ...     set,
@@ -133,6 +134,7 @@ def register_pytree_node(
         ...     namespace='set',
         ... )
 
+        >>> # xdoctest: +SKIP
         >>> # Register a Python type into a namespace
         >>> import torch
         >>> register_pytree_node(
@@ -145,15 +147,17 @@ def register_pytree_node(
         ...     namespace='torch2numpy',
         ... )
 
-        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> tree = {'weight': torch.ones(size=(1, 2)).cuda(), 'bias': torch.zeros(size=(2,))}
         >>> tree
         {'weight': tensor([[1., 1.]], device='cuda:0'), 'bias': tensor([0., 0.])}
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # Flatten without specifying the namespace
         >>> tree_flatten(tree)  # `torch.Tensor`s are leaf nodes  # xdoctest: +SKIP
         ([tensor([0., 0.]), tensor([[1., 1.]], device='cuda:0')], PyTreeSpec({'bias': *, 'weight': *}))
 
+        >>> # xdoctest: +SKIP
         >>> # Flatten with the namespace
         >>> tree_flatten(tree, namespace='torch2numpy')  # xdoctest: +SKIP
         (
@@ -167,6 +171,7 @@ def register_pytree_node(
             )
         )
 
+        >>> # xdoctest: +SKIP
         >>> # Register the same type with a different namespace for different behaviors
         >>> def tensor2flatparam(tensor):
         ...     return [torch.nn.Parameter(tensor.reshape(-1))], tensor.shape, None
@@ -181,6 +186,7 @@ def register_pytree_node(
         ...     namespace='tensor2flatparam',
         ... )
 
+        >>> # xdoctest: +SKIP
         >>> # Flatten with the new namespace
         >>> tree_flatten(tree, namespace='tensor2flatparam')  # xdoctest: +SKIP
         (

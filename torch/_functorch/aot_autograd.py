@@ -29,7 +29,7 @@ from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch.fx import immutable_collections, Interpreter
+from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
