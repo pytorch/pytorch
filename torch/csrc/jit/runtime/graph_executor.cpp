@@ -53,8 +53,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 EnableProfilingGuard::EnableProfilingGuard() {
   auto& executor_mode = getExecutorMode();
@@ -1062,5 +1061,4 @@ Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
   return fallback;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

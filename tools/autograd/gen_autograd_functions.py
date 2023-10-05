@@ -599,7 +599,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
             # as of https://github.com/pytorch/pytorch/pull/105504.
             if type == VectorCType(BaseCType(tensorT)):
-                assert is_output
+                assert (
+                    info.func.func.name.name.base.startswith("_foreach") and is_output
+                )
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
