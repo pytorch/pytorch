@@ -660,24 +660,26 @@ class NNModuleVariable(VariableTracker):
             # Only allow setattr on constant attributes
             assert len(args) == 2
             assert isinstance(args[1], variables.ConstantVariable)
+            assert tx.export
 
             fn = getattr(module, name).__func__
-            # If this is user defined setattr, we try to inline it.
-            if fn != torch.nn.Module.__setattr__:
-                source = None if self.source is None else AttrSource(self.source, name)
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=source, **options),
-                    [self] + list(args),
-                    kwargs,
-                )
-
-            if tx.export:
+            # we simulate only for default NNModule setattr, otherwise
+            # it is hard to know exact behaviour of setattr
+            if fn == torch.nn.Module.__setattr__:
                 # In export, we don't actually want to setattr on the module, instead
                 # track the mutation value and use that for future getattr calls.
                 self.constant_attribute_tracker_EXPORT_ONLY[args[0].value] = args[
                     1
                 ].value
                 return variables.ConstantVariable(None)
+            # If not default setattr, we simulate it
+            else:
+                source = None if self.source is None else AttrSource(self.source, name)
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(fn, source=source, **options),
+                    [self] + list(args),
+                    kwargs,
+                )
         else:
             return super().call_method(tx, name, args, kwargs)
 

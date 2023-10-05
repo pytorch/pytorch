@@ -1241,7 +1241,7 @@ class BuiltinVariable(VariableTracker):
 
             elif name_var.is_python_constant() and isinstance(
                 val, variables.ConstantVariable
-            ):
+            ) and tx.export:
                 return obj.call_method(tx, "__setattr__", [name_var, val], {})
 
             obj.convert_to_unspecialized(tx)
