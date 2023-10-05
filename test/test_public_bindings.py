@@ -224,7 +224,6 @@ class TestPublicBindings(TestCase):
 
     def test_modules_can_be_imported(self):
         failure = []
-        succcess = []
         for _, modname, _ in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             try:
                 # TODO: fix "torch/utils/model_dump/__main__.py"
