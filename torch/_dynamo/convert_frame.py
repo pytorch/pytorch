@@ -191,7 +191,11 @@ def has_tensor_in_frame(frame):
         ):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]
-        elif config.trace_numpy and np and (istype(obj, np.ndarray) or isinstance(obj, np.generic)):
+        elif (
+            config.trace_numpy
+            and np
+            and (istype(obj, np.ndarray) or isinstance(obj, np.generic))
+        ):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]
         elif istype(obj, (list, tuple)):
