@@ -592,6 +592,7 @@ def _fused_adam(
     found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
+    has_complex: bool, # Needed for consistency.
     beta1: float,
     beta2: float,
     lr: Union[float, Tensor],
