@@ -43,7 +43,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_symbolic,
+    SYMPY_INTERP,
+)
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -675,18 +679,6 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-        def _propagate_symbool_guard_to_outer_shape_env(guards):
-            out_shape_env_guard_exprs = [
-                guard_expr for guard_expr in guards if "__int__()" in guard_expr
-            ]
-
-            assert all(
-                eval(guard_expr, self.scope, SYMPY_INTERP)
-                for guard_expr in out_shape_env_guard_exprs
-            )
-
-        _propagate_symbool_guard_to_outer_shape_env(guards)
-
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
@@ -1120,7 +1112,7 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if isinstance(dim, int):
+                    if not is_symbolic(dim):
                         converted.append(dim)
                     else:
                         assert isinstance(dim, torch.SymInt)

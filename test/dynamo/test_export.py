@@ -3268,10 +3268,10 @@ def forward(self, x):
                         if "L['pred']" in code
                     ]
                     self.assertEqual(guard_code_on_predicate, exp_guard_code[i])
-                    outer_shape_env_guards = [
+                    outter_shape_env_guards = [
                         str(guard.expr) for guard in shape_env.guards
                     ]
-                    self.assertEqual(outer_shape_env_guards, exp_shape_env_guards[i])
+                    self.assertEqual(outter_shape_env_guards, exp_shape_env_guards[i])
 
         true_graph = """\
 class GraphModule(torch.nn.Module):
@@ -3287,17 +3287,18 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["L['pred'].__int__() == 1"]
+        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
         false_guard_code = [
-            "Ne(L['pred'].__int__(), 1)",
-            "-9223372036854775808 <= L['pred'].__int__()",
+            "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
+            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
         ]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            [["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"]],
+            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
+            [[], [], [], []],
         )
 
     def test_invalid_input_global(self) -> None:

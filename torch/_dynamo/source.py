@@ -247,32 +247,13 @@ class ConvertIntSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        # Note: reconstruct(codegen) is used when dynamo generates the opimized python byte code.
-        # To re-use all the infra we've built for SymInt, when dynamo sees a SymBool inputs,
-        # we make dynamo create graphs that take SymInt inputs instead.
-        #
-        # To provide the correct SymInt inputs for dynamo extracted graph, we additionally insert a
-        # cast_symbool_to_symint higher order operator call into the byte code.
-        # This is to ensure the conversion from SymBool to SymInt can be properly traced.
-        codegen.load_import_from(
-            "torch._higher_order_ops.cast_symbool_to_symint", "cast_symbool_to_symint"
-        )
-        return self.base.reconstruct(codegen) + create_call_function(1, True)
+        return self.base.reconstruct(codegen)
 
     def guard_source(self):
         return self.base.guard_source()
 
     def name(self):
-        # Note: When creating a guard, we use the `name()` function. Since we simulate SymBool inputs with SymInts in Dynamo,
-        # the guards produced are for the SymInts. However, these guards must be checked against the outer SymBool.
-        # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression
-        # generated for Dynamo's SymInt.
-
-        # Note: __int__() will install a guard on the outer shape_env. This is desirable because dynamo guard checking
-        # is essentially an if-else statement based on input: if the guard check succeed, dynamo uses the
-        # cahced optimized code. if the guard check fails, dynamo re-compiles and install necessary guards in SHAPE_ENV
-        # and propagate the guards to outer shape_env.
-        return f"{self.base.name()}.__int__()"
+        return f"cast_symbool_to_symint_guardless({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)

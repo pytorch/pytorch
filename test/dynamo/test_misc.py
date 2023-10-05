@@ -50,7 +50,6 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -73,9 +72,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
-    instantiate_parametrized_tests,
     IS_FBCODE,
-    parametrize,
     set_default_dtype,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -4465,55 +4462,6 @@ def fn():
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
 
-    @parametrize("x", [torch.ones(2, 3), torch.ones(3, 4)])
-    def test_make_fx_compiled_fn_symbolic_mode(self, x):
-        tracing_mode = "symbolic"
-
-        def fn(pred, x):
-            if pred:
-                return x.sin()
-            else:
-                return x.cos()
-
-        def compare_shape(x):
-            return x.shape[0] == 3
-
-        def symbool_fn_compiled(x):
-            sym_bool = compare_shape(x)
-            return torch.compile(backend="eager", fullgraph=True)(fn)(sym_bool, x)
-
-        def symbool_fn_not_compiled(x):
-            pred = compare_shape(x)
-            return fn(pred, x)
-
-        def _get_guard_exprs(gm):
-            return " ".join([str(guard_expr) for guard_expr, _ in gm.shape_env.guards])
-
-        # We'll check normal function once and compiled function twice.
-        fns = [symbool_fn_not_compiled, symbool_fn_compiled, symbool_fn_compiled]
-
-        gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in fns]
-
-        for gm in gms:
-            if compare_shape(x):
-                self.assertExpectedInline(
-                    gm.code.strip(),
-                    """\
-def forward(self, x_1):
-    sin = torch.ops.aten.sin.default(x_1);  x_1 = None
-    return sin""",
-                )
-                self.assertExpectedInline(_get_guard_exprs(gm), """Eq(s0, 3)""")
-            else:
-                self.assertExpectedInline(
-                    gm.code.strip(),
-                    """\
-def forward(self, x_1):
-    cos = torch.ops.aten.cos.default(x_1);  x_1 = None
-    return cos""",
-                )
-                self.assertExpectedInline(_get_guard_exprs(gm), """Ne(s0, 3)""")
-
     def test_not_dynamic_scope(self):
         def f(y):
             x = 1
@@ -7707,9 +7655,6 @@ ShapeEnv not equal: field values don't match:
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
-
-
-instantiate_parametrized_tests(MiscTests)
 
 
 class TestTracer(JitTestCase):
