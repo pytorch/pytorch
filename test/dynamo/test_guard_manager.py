@@ -10,6 +10,7 @@ RootGuardManager = guards.RootGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 GetDictItemGuardAccessor = guards.GetDictItemGuardAccessor
+TypeGuardAccessor = guards.TypeGuardAccessor
 NoTensorAliasingGuard = guards.NoTensorAliasingGuard
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
@@ -408,3 +409,30 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(global_pair))
         global_pair["y"] = "foo"
         self.assertFalse(guard_manager.check(global_pair))
+
+    def test_type(self):
+        guard_manager = RootGuardManager()
+
+        class A:
+            a = 4
+
+        class B:
+            def mul(self, x):
+                super().mul(x)
+
+        foo = B()
+        f_locals = {"foo": foo}
+
+        # len(type(foo).__mro__) == 2
+        foo_mgr = guard_manager.dict_get_item_manager("foo")
+        type_manager = foo_mgr.type_manager()
+        self.assertTrue(isinstance(foo_mgr.get_accessors()[0], TypeGuardAccessor))
+        mro_manager = type_manager.__mro__
+        self.assertTrue(
+            isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+        mro_manager.add_lambda_guard(
+            lambda x: len(x) == 2,
+            lambda x: f"Expected length 2 but got {len(x)}",
+        )
+        self.assertTrue(guard_manager.check(f_locals))

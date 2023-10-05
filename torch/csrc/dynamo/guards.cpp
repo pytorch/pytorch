@@ -1370,6 +1370,31 @@ class GlobalsGuardAccessor : public GuardAccessor {
   PyObject* _globals_dict;
 };
 
+/**
+ * Represent type() accessor.
+ */
+class TypeGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_accessor__, a unique string used as attribute name.
+  TypeGuardAccessor(RootGuardManager* root, py::str name)
+      : GuardAccessor(root, name) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+};
+
 void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
   // Adds tensor X is not tensor Y. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
@@ -1488,6 +1513,10 @@ PyObject* torch_c_dynamo_guards_init() {
       GlobalsGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
+  py::class_<
+      TypeGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1532,6 +1561,13 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "globals_dict_manager",
           &GuardManager::get_child_manager<GlobalsGuardAccessor>,
+          py::return_value_policy::reference)
+      .def(
+          "type_manager",
+          [](GuardManager& self) -> GuardManager* {
+            py::str unique_key("__type_accessor__");
+            return self.get_child_manager<TypeGuardAccessor>(unique_key);
+          },
           py::return_value_policy::reference);
 
   // Guard Manager
