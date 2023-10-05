@@ -246,7 +246,6 @@ dtensor_fails = {
     xfail("logdet"),
     xfail("logspace"),
     xfail("logsumexp"),
-    xfail("lt"),
     xfail("lu"),
     xfail("lu_solve"),
     xfail("lu_unpack"),
