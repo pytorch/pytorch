@@ -1342,9 +1342,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x + (a % b)
 
         args = [torch.randn(10), 4096, np.int64(8)]
+#        args = [torch.randn(10), 4096, np.array(8, dtype='int64')]
         correct = fn(*args)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, dynamic=True)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)

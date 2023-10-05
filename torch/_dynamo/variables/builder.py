@@ -521,6 +521,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif isinstance(value, np.generic):
+            # numpy array scalars: convert to 0D arrays
+            return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
             assert np
             return NumpyVariable(
@@ -1116,8 +1119,8 @@ class VariableBuilder:
 
         source = NumpyTensorSource(self.get_source())
 
+#        tensor_value = torch.as_tensor(value)
         from torch._numpy import _util
-
         try:
             tensor_value = _util._coerce_to_tensor(value)
         except NotImplementedError as e:
