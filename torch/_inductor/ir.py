@@ -11,6 +11,7 @@ from contextlib import nullcontext
 from enum import Enum
 from functools import partial
 from inspect import signature
+from torch._subclasses.fake_tensor import get_schema_info
 from typing import (
     Any,
     Callable,
@@ -3845,6 +3846,12 @@ class FallbackKernel(ExternKernelAlloc):
                     return device
             return devices[0]
         return None
+
+    def has_side_effects(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if isinstance(self.op_overload, torch._ops.OpOverload):
+            return get_schema_info(self.op_overload).is_mutable()
+        return False
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
