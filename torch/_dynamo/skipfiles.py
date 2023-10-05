@@ -8,7 +8,6 @@ import copyreg
 import dataclasses
 import enum
 import functools
-import glob
 import importlib
 import inspect
 import linecache
@@ -29,14 +28,13 @@ import types
 import typing
 import unittest
 import weakref
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 
-from . import comptime, external_utils, polyfill
 
 """
 A note on skipfiles:
@@ -145,71 +143,72 @@ def _module_dir(m: types.ModuleType):
     return _strip_init_py(m.__file__)
 
 
-# TODO(ybliang): Change to user *.__file__ rather than hard code string for this list.
 # Force inline functions in these files, even the files is in *_SKIPLIST.
 FILENAME_INLINELIST = {
-    torch.nn.Sequential.__init__.__code__.co_filename,
-    torch.set_rng_state.__code__.co_filename,
-    torch._inductor.test_operators.__file__,
-    torch.utils._content_store.__file__,
-    external_utils.__file__,
-    comptime.__file__,
-    polyfill.__file__,
-    torch.optim._functional.__file__,
-    torch.utils._foreach_utils.__file__,
-    _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
-    _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
-    _module_dir(torch) + "ao/quantization/pt2e/utils.py",
-    _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
-    _module_dir(torch) + "_dynamo/_trace_wrapped_higher_order_op.py",
-    _module_dir(torch) + "_export/constraints.py",
-    _module_dir(torch) + "_higher_order_ops/cond.py",
-    _module_dir(torch) + "_functorch/apis.py",
-    _module_dir(torch) + "_functorch/deprecated.py",
-    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
-    _module_dir(torch) + "distributed/tensor/parallel/style.py",
-    _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
-    _module_dir(torch) + "distributed/_tensor/api.py",
-    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
+    "torch.nn.modules.container",
+    "torch.random",
+    "torch._inductor.test_operators",
+    "torch.utils._content_store",
+    "torch._dynamo.external_utils",
+    "torch._dynamo.comptime",
+    "torch._dynamo.polyfill",
+    "torch.optim._functional",
+    "torch.utils._foreach_utils",
+    "torch.ao.quantization.pt2e.qat_utils",
+    "torch.ao.quantization.quantizer.xnnpack_quantizer",
+    "torch.ao.quantization.pt2e.representation.rewrite",
+    "torch.ao.quantization.pt2e.utils",
+    "torch.ao.quantization.pt2e.eval_utils",
+    "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._export.constraints",
+    "torch._export.db.examples",
+    "torch._export.wrappers",
+    "torch._higher_order_ops.cond",
+    "torch._functorch.apis",
+    "torch._functorch.deprecated",
+    "torch.distributed.tensor.parallel._utils",
+    "torch.distributed.tensor.parallel.style",
+    "torch.distributed.tensor.parallel._data_parallel_utils",
+    "torch.distributed._tensor.api",
+    "torch.distributed._tensor.device_mesh",
 }
+
 
 if torch.distributed.is_available():
     # Inline the checkpoint code from distributed
-    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
-
     FILENAME_INLINELIST |= {
-        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+        "torch.distributed.algorithms._checkpoint.checkpoint_wrapper"
     }
 
 # Include optimizer code for tracing
 FILENAME_INLINELIST |= {
-    inspect.getfile(obj)
-    for obj in torch.optim.__dict__.values()
-    if inspect.isclass(obj)
+    str(obj.__module__) for obj in torch.optim.__dict__.values() if inspect.isclass(obj)
 }
 
-# TODO (zhxchen17) Make exportdb importable here.
-FILENAME_INLINELIST |= set(
-    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
-) | {
-    _module_dir(torch) + "_export/wrappers.py",
-}
+
+@functools.lru_cache(None)
+def get_filename_inlinelist():
+    inlinelist = set()
+    for f in FILENAME_INLINELIST:
+        inlinelist.add(
+            _module_dir(torch) + f.lstrip("torch.").replace(".", "/") + ".py"
+        )
+    return inlinelist
 
 
 # Force inline functions under these modules, even the modules is in *_SKIPLIST.
 SUBMODULE_INLINELIST = {
-    torch.nn,
-    torch.distributions,
-    torch.testing,
-    torch.ao.nn,
-    torch._refs,
-    torch._prims,
-    torch._decomp,
-    torch.utils._contextlib,
-    torch.utils._pytree,
-    torch.fx._pytree,
-    torch.sparse,
+    "torch.nn",
+    "torch.distributions",
+    "torch.testing",
+    "torch.ao.nn",
+    "torch._refs",
+    "torch._prims",
+    "torch._decomp",
+    "torch.utils._contextlib",
+    "torch.utils._pytree",
+    "torch.fx._pytree",
+    "torch.sparse",
 }
 
 
@@ -263,7 +262,7 @@ def _check_verbose_inner(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
-    if filename in FILENAME_INLINELIST:
+    if filename in get_filename_inlinelist():
         return SkipResult(
             False,
             "inlined according skipfiles.FILENAME_INLINELIST",
