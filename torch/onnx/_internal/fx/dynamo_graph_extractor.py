@@ -40,7 +40,12 @@ class _PyTreeExtensionContext:
 
     def __enter__(self):
         for class_type, (flatten_func, unflatten_func) in self._extensions.items():
-            pytree._register_pytree_node(class_type, flatten_func, unflatten_func)
+            pytree._register_pytree_node(
+                class_type,
+                flatten_func,
+                unflatten_func,
+                _register_cxx_pytree_node=False,
+            )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
