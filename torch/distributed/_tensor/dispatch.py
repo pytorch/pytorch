@@ -17,7 +17,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     OutputSpecType,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta, Replicate
+from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
