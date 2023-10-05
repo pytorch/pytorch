@@ -283,6 +283,12 @@ class AOTInductorModelBase {
   int device_idx_;
 };
 
+// Codegen-ed classes can derive from this to keep pointers to loaded kernels.
+class AOTInductorModelKernelsBase {
+ public:
+  virtual ~AOTInductorModelKernelsBase() = default;
+};
+
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
   AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
@@ -303,6 +309,9 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::optional<std::string> cubin_dir) {
     return std::make_unique<AOTInductorModel>(constants, cubin_dir);
   }
+
+ private:
+  std::unique_ptr<AOTInductorModelKernelsBase> kernels_;
 };
 
 #ifdef USE_CUDA

@@ -5,6 +5,8 @@ import unittest
 
 import torch
 import torch._dynamo.config as dynamo_config
+import torch.backends.cuda
+import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
@@ -12,6 +14,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -981,6 +984,51 @@ class CudaReproTests(TestCase):
         res = opt_fn(x, y, z)
 
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "flash attention not supported"
+    )
+    def test_flash_attention_dynamic(self):
+        class Model(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+
+                self.q = nn.Linear(1024, 1024)
+                self.k = nn.Linear(1024, 1024)
+                self.v = nn.Linear(1024, 1024)
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.size()
+
+                queries = self.q(x).view(batch_size, seq_len, 8, 128).transpose(2, 1)
+                keys = self.k(x).view(batch_size, seq_len, 8, 128).transpose(2, 1)
+                values = self.v(x).view(batch_size, seq_len, 8, 128).transpose(2, 1)
+
+                attn = F.scaled_dot_product_attention(
+                    queries,
+                    keys,
+                    values,
+                )
+
+                return attn
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+        model = Model().cuda().half()
+        model = torch.compile(model, backend=cnts, dynamic=True)
+
+        with torch.backends.cuda.sdp_kernel(
+            enable_flash=True, enable_math=False, enable_mem_efficient=False
+        ):
+            input1 = torch.rand(5, 512, 1024, device="cuda", dtype=torch.float16)
+            input2 = torch.rand(5, 513, 1024, device="cuda", dtype=torch.float16)
+            input3 = torch.rand(5, 514, 1024, device="cuda", dtype=torch.float16)
+
+            out1 = model(input1)
+            out2 = model(input2)
+            out3 = model(input3)
+
+        self.assertEqual(cnts.frame_count, 1)
 
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_no_fallback_cudagraph(self):
