@@ -1318,7 +1318,7 @@ class GetDictItemGuardAccessor : public GuardAccessor {
  */
 class GetItemGuardAccessor : public GuardAccessor {
  public:
-  GetItemGuardAccessor(RootGuardManager* root, py::str name)
+  GetItemGuardAccessor(RootGuardManager* root, py::object name)
       : GuardAccessor(root, name), _attr_name(name.ptr()) {}
 
   // NB: Intentional duplication between check_nopybind and
