@@ -115,9 +115,9 @@ def _ext_chunk_dtensor(
     device_mesh: DeviceMesh,
 ) -> torch.Tensor:
     # TODO: Address composability issue and remove the assertion.
-    assert (
-        _extensions is None
-    ), "Currently does not support composability when _use_dtensor = True"
+    # assert (
+    #     _extensions is None
+    # ), "Currently does not support composability when _use_dtensor = True"
     return _create_chunk_dtensor(
         tensor,
         rank,

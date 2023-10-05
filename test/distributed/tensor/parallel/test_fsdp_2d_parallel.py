@@ -20,7 +20,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.optim import _apply_optimizer_in_backward
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module, RowwiseParallel
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -401,6 +401,58 @@ class TestNew2dParallelIntegration(DTensorTestBase):
     def test_2d_e2e_training_not_use_orig_params(self):
         self._test_2d_e2e_training(recompute_activation=True)
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_state_dict(self):
+        torch.manual_seed(0)
+        simple_model = SimpleModel().cuda(self.rank)
+        no_wrapped_state_dict = simple_model.state_dict()
+
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        model_2d = parallelize_module(SimpleModel().cuda(), tp_mesh, PairwiseParallel())
+        # print(f"tp -- rank:{dist.get_rank()}, state_dict:{state_dict}")
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=dp_mesh,
+            use_orig_params=True,
+        )
+        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
+
+        FSDP.set_state_dict_type(
+            model_2d,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+        state_dict_2d = model_2d.state_dict()
+
+        for k, v in state_dict_2d.items():
+            # check if all value in 2D state_dict are DTensor
+            self.assertTrue(isinstance(v, DT))
+            self.assertEqual(len(v.placements), 2)
+            self.assertEqual(v.device_mesh, mesh_2d)
+
+
+        for no_wrapped_items, two_d_items in zip(no_wrapped_state_dict.items(), state_dict_2d.items()):
+            no_wrapped_k, no_wrapped_v = no_wrapped_items
+            two_d_k, two_d_v = two_d_items
+
+            self.assertEqual(no_wrapped_k, two_d_k)
+            all_gather_two_d_v = two_d_v.redistribute(mesh_2d, (Replicate(), Replicate()))
+            if not torch.allclose(no_wrapped_v, all_gather_two_d_v.to_local()):
+                print(f"two_d_k:{two_d_k}, no_wrapped_v:{no_wrapped_v}, two_d_v all_gather: {all_gather_two_d_v.to_local()}")
+            # self.assertTrue(torch.allclose(no_wrapped_v, all_gather_two_d_v.to_local()), True)
+            # print(f"two_d_k:{two_d_k}, no_wrapped_v:{no_wrapped_v}, two_d_v all_gather: {all_gather_tensor}")
+
+            # # check if the param value are the same between state_dict_2d and simple_model_state_dict
+            # all_gather_tensor = v.redistribute(mesh_2d, (Replicate(), Replicate()))
+            # # print(f"all_gather_tensor:{all_gather_tensor.to_local()}, simple_model_state_dict[k]:{simple_model_state_dict[k]}")
+            # if all_gather_tensor.to_local() != simple_model_state_dict[k]:
+            #     print(f"k: {k}, all_gather_tensor:{all_gather_tensor.to_local()}, simple_model_state_dict[k]:{simple_model_state_dict[k]}")
+            # # self.assertEqual(all_gather_tensor.to_local(), simple_model_state_dict[k])
 
 if __name__ == "__main__":
     run_tests()

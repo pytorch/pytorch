@@ -15,6 +15,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed._tensor.device_mesh import mesh_resources
 from torch.distributed.fsdp._debug_utils import SimpleProfiler
 
 
@@ -174,21 +175,61 @@ def _create_chunk_dtensor(
     Shard a tensor to chunks along the first dimension. The local rank will gets its
     corresponding chunk as the local tensor to create a DTensor.
     """
-    inner_dim = device_mesh.ndim - 1
-    shard_placement = DShard(0)
-    tensor_list, _ = shard_placement._split_tensor(
-        tensor,
-        device_mesh.size(dim=inner_dim),
-        with_padding=False,
-        contiguous=True,
-    )
-    # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
-    # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
-    # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    local_tensor = tensor_list[rank].clone().detach()
+    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
 
-    # FSDP placements: [Shard(0)]
-    # HSDP placements: [Replicate(), Shard(0)]
-    placements = [Replicate() for _ in range(device_mesh.ndim)]
-    placements[-1] = shard_placement  # type: ignore[call-overload]
-    return DTensor.from_local(local_tensor, device_mesh, placements)
+    if not parent_mesh:
+        inner_dim = device_mesh.ndim - 1
+        shard_placement = DShard(0)
+        tensor_list, _ = shard_placement._split_tensor(
+            tensor,
+            device_mesh.size(dim=inner_dim),
+            with_padding=False,
+            contiguous=True,
+        )
+        # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
+        # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
+        # We need to explicitly call .detach() to return a new tensor detached from the current graph.
+        local_tensor = tensor_list[rank].clone().detach()
+
+        # FSDP placements: (Shard(0))
+        # HSDP placements: (Replicate(), Shard(0))
+        placements = [Replicate() for _ in range(device_mesh.ndim)]
+        placements[-1] = shard_placement  # type: ignore[call-overload]
+        return DTensor.from_local(local_tensor, device_mesh, placements)
+
+    else:
+        if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
+            shard_placement = DShard(0)
+            tensor_list, _ = shard_placement._split_tensor(
+                tensor,
+                device_mesh.size(dim=0),
+                with_padding=False,
+                contiguous=True,
+            )
+            local_tensor = tensor_list[rank].clone().detach()
+
+            # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
+            # TP is the inner dimension and FSDP is the outer dimension.
+            # Therefore, shard placements for tensor is (Shard(0), Replicate())
+            placements = [Replicate() for _ in range(parent_mesh.ndim)]
+            placements[0] = shard_placement  # type: ignore[call-overload]
+            return DTensor.from_local(local_tensor, parent_mesh, placements)
+
+        else:
+            dt_placements = tensor.placements
+            assert len(dt_placements) == 1, "we currently do not support 3D composition"
+            dt_placements = tensor.placements[0]
+
+            local_tensor = tensor.to_local()
+            shard_placement = DShard(0)
+            tensor_list, _ = shard_placement._split_tensor(
+                local_tensor,
+                device_mesh.size(dim=0),
+                with_padding=False,
+                contiguous=True,
+            )
+            local_tensor = tensor_list[rank].clone().detach()
+
+            placements = [DShard(0) for _ in range(parent_mesh.ndim)]
+            placements[1] = dt_placements
+            return DTensor.from_local(local_tensor, parent_mesh, placements)
