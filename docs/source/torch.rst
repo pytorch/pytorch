@@ -722,7 +722,7 @@ Control Flow
 ------------
 .. autosummary::
     :toctree: generated
-    :nosignatures
+    :nosignatures:
 
 .. warning::
     This feature is a prototype and may have compatibility breaking changes in the future.
