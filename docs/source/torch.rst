@@ -718,6 +718,17 @@ Export Path
     export
     generated/exportdb/index
 
+Control Flow
+------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+    cond
+
 Optimizations
 -------------
 .. autosummary::
