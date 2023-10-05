@@ -34,6 +34,7 @@ struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
   TORCH_API friend bool operator==(
       const SGDOptions& lhs,
       const SGDOptions& rhs);
+  ~SGDOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -48,6 +49,7 @@ struct TORCH_API SGDParamState
   TORCH_API friend bool operator==(
       const SGDParamState& lhs,
       const SGDParamState& rhs);
+  ~SGDParamState() override = default;
 };
 
 class TORCH_API SGD : public Optimizer {
