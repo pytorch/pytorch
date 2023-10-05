@@ -1087,6 +1087,9 @@ TestEnvironment.def_flag("TEST_WITH_TSAN", env_var="PYTORCH_TEST_WITH_TSAN")
 TestEnvironment.def_flag("TEST_WITH_UBSAN", env_var="PYTORCH_TEST_WITH_UBSAN")
 TestEnvironment.def_flag("TEST_WITH_ROCM", env_var="PYTORCH_TEST_WITH_ROCM")
 
+# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+# See #64427
+TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TestEnvironment.def_flag("TEST_WITH_SLOW", env_var="PYTORCH_TEST_WITH_SLOW")
 
