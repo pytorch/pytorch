@@ -642,9 +642,24 @@ class FunctoolsPartialVariable(VariableTracker):
 
 
 class TritonKernelVariable(VariableTracker):
-    def __init__(self, kernel, grid, **kwargs):
+    def __init__(self, kernel, kernel_idx, grid, **kwargs):
         super().__init__(**kwargs)
-        self.kernel = kernel
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            add_kernel_to_table,
+            get_kernel_from_table,
+        )
+
+        if kernel is None:
+            assert kernel_idx is not None
+            self.kernel = get_kernel_from_table(kernel_idx)
+            self.kernel_idx = kernel_idx
+        else:
+            # TODO(oulgen): If kernel idx is not None and we had dedup,
+            # we should assert that kernel and idx matches
+            self.kernel = kernel
+            self.kernel_idx = add_kernel_to_table(kernel)
+
         self.grid = grid
 
     def call_function(
@@ -677,7 +692,6 @@ class TritonKernelVariable(VariableTracker):
             unimplemented(f"grid for the triton kernel is {type(grid)}")
 
         from torch._higher_order_ops.triton_kernel_wrap import (
-            prepare_triton_kernel_for_graph_node,
             triton_kernel_wrapper_mutation,
         )
 
@@ -686,11 +700,10 @@ class TritonKernelVariable(VariableTracker):
         # parameters of the wrapper function
         tx.output.create_proxy(
             "call_function",
-            prepare_triton_kernel_for_graph_node(
-                triton_kernel_wrapper_mutation, self.kernel
-            ),
+            triton_kernel_wrapper_mutation,
             (),
             {
+                "kernel_idx": self.kernel_idx,
                 "grid": grid,
                 "kwargs": meta.as_proxy(),
             },
@@ -716,9 +729,11 @@ class TritonKernelVariable(VariableTracker):
                     "Triton kernels should be called with only a single grid"
                 )
 
-            grid = args[0]
             return TritonKernelVariable(
-                self.kernel, grid, **VariableTracker.propagate(self)
+                kernel=self.kernel,
+                kernel_idx=self.kernel_idx,
+                grid=args[0],
+                **VariableTracker.propagate(self),
             )
 
         # Bail out to parent's implementation

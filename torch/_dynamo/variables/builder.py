@@ -778,6 +778,7 @@ class VariableBuilder:
         elif isinstance(value, JITFunction):
             return TritonKernelVariable(
                 value,
+                None,  # No kernel idx provided
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
