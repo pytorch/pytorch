@@ -90,7 +90,7 @@ def export__RC__(
 
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
-    if dynamic_shapes is None:
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return export(f, args, kwargs)
 
     kwargs = kwargs if kwargs is not None else {}
@@ -732,10 +732,11 @@ def _export(
         (args, kwargs),
     )
 
-    if len(range_constraints) > 0 or len(equality_constraints) > 0:
-        exported_program = exported_program._transform(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-        )
+    if torch._dynamo.config.add_runtime_assertions_for_inline_constraints:
+        if len(range_constraints) > 0 or len(equality_constraints) > 0:
+            exported_program = exported_program._transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+            )
     exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())

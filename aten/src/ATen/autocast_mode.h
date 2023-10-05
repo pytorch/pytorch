@@ -8,8 +8,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace at {
-namespace autocast {
+namespace at::autocast {
 
 TORCH_API bool is_enabled();
 TORCH_API void set_enabled(bool enabled);
@@ -537,8 +536,7 @@ wouldn't try to get clever about it Therefore, for the moment, this is all
 copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 ********************************************************************************************************************/
 
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast
 
 #define ADD_NS(RAW_OP) at::RAW_OP
 

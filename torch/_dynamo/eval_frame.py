@@ -869,7 +869,6 @@ def check_signature_rewritable(graph):
             "like its value to be embedded as an exported constant, wrap its access "
             "in a function marked with @assume_constant_result.\n\n"
             + "\n\n".join(input_errors),
-            case_name="assume_constant_result",
         )
 
 
