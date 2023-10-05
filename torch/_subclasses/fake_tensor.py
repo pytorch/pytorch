@@ -1000,6 +1000,7 @@ class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
+    ignore_meta_when_merging_devices: bool = False
 
     # This memorizes the unbacked SymInt representing the number of nonzero
     # elements in this tensor.  This is helpful if you do something like
@@ -1171,8 +1172,8 @@ class FakeTensor(torch.Tensor):
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
-    @staticmethod
-    def _find_common_device(func, args, kwargs) -> Tuple[torch.device, bool]:
+    @classmethod
+    def _find_common_device(cls, func, args, kwargs) -> Tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
 
         # cpu - zero-dim tensors can be called in cuda kernels,
@@ -1212,6 +1213,16 @@ class FakeTensor(torch.Tensor):
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
+
+            if cls.ignore_meta_when_merging_devices:
+                # If this option is set, we want to find non-meta common devices
+                # if possible, under the assumption that the metatensors are
+                # intended to be later placed on a matching device.
+                if common_device.type == "meta" and t.device.type != "meta":
+                    common_device = t.device
+                    return
+                elif common_device.type != "meta" and t.device.type == "meta":
+                    return
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
