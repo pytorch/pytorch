@@ -1664,9 +1664,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if isinstance(arg_type, torch.TensorType):
                 assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
                 new_tensor_args.append(f"{arg.codegen_reference()}")
-            elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
-                # int or SymInt
-                assert isinstance(arg, int)
+            elif isinstance(arg_type, torch.IntType):
+                # int
+                new_int_args.append(str(arg))
+            elif isinstance(arg_type, torch.SymIntType):
+                # SymInt
                 new_int_args.append(str(arg))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
