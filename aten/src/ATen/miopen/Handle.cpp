@@ -33,7 +33,7 @@ using MIOpenPoolType = at::cuda::DeviceThreadHandlePool<miopenHandle_t, createMI
 } // namespace
 
 miopenHandle_t getMiopenHandle() {
-  int device;
+  int device = -1;
   HIP_CHECK(hipGetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized

@@ -206,24 +206,26 @@ class CUDAAllocator : public Allocator {
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
   virtual bool initialized() = 0;
-  virtual void setMemoryFraction(double fraction, int device) = 0;
+  virtual void setMemoryFraction(double fraction, DeviceIndex device) = 0;
   virtual void emptyCache() = 0;
-  virtual void cacheInfo(int dev_id, size_t* largestBlock) = 0;
+  virtual void cacheInfo(DeviceIndex dev_id, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
-  virtual DeviceStats getDeviceStats(int device) = 0;
-  virtual void resetAccumulatedStats(int device) = 0;
-  virtual void resetPeakStats(int device) = 0;
+  virtual DeviceStats getDeviceStats(DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(DeviceIndex device) = 0;
+  virtual void resetPeakStats(DeviceIndex device) = 0;
   virtual SnapshotInfo snapshot() = 0;
   virtual void beginAllocateStreamToPool(
-      int device,
+      DeviceIndex device,
       cudaStream_t stream,
       MempoolId_t mempool_id) = 0;
-  virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
-  virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
+  virtual void endAllocateStreamToPool(
+      DeviceIndex device,
+      cudaStream_t stream) = 0;
+  virtual void releasePool(DeviceIndex device, MempoolId_t mempool_id) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
-      int device,
+      DeviceIndex device,
       MempoolId_t mempool_id,
       const std::unordered_set<void*>& expected_live_allocations) {
     TORCH_CHECK(
@@ -247,7 +249,7 @@ class CUDAAllocator : public Allocator {
       RecordContext when) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
-  virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
+  virtual void enablePeerAccess(DeviceIndex dev, DeviceIndex dev_to_access) = 0;
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
@@ -269,10 +271,10 @@ class CUDAAllocator : public Allocator {
       cudaStream_t stream,
       bool p2p_enabled) = 0;
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
-      int device,
+      DeviceIndex device,
       MempoolId_t id) = 0;
   virtual CheckpointDelta setCheckpointPoolState(
-      int device,
+      DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
@@ -305,7 +307,7 @@ inline void init(int device_count) {
   return get()->init(device_count);
 }
 
-inline void setMemoryFraction(double fraction, int device) {
+inline void setMemoryFraction(double fraction, DeviceIndex device) {
   return get()->setMemoryFraction(fraction, device);
 }
 
@@ -313,7 +315,7 @@ inline void emptyCache() {
   return get()->emptyCache();
 }
 
-inline void cacheInfo(int dev_id, size_t* largestBlock) {
+inline void cacheInfo(DeviceIndex dev_id, size_t* largestBlock) {
   return get()->cacheInfo(dev_id, largestBlock);
 }
 
@@ -325,15 +327,15 @@ inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
   return get()->recordStream(dataPtr, stream);
 }
 
-inline DeviceStats getDeviceStats(int device) {
+inline DeviceStats getDeviceStats(DeviceIndex device) {
   return get()->getDeviceStats(device);
 }
 
-inline void resetAccumulatedStats(int device) {
+inline void resetAccumulatedStats(DeviceIndex device) {
   return get()->resetAccumulatedStats(device);
 }
 
-inline void resetPeakStats(int device) {
+inline void resetPeakStats(DeviceIndex device) {
   return get()->resetPeakStats(device);
 }
 
@@ -342,26 +344,26 @@ inline SnapshotInfo snapshot() {
 }
 
 inline std::shared_ptr<AllocatorState> getCheckpointState(
-    int device,
+    DeviceIndex device,
     MempoolId_t id) {
   return get()->getCheckpointState(device, id);
 }
 
 inline CheckpointDelta setCheckpointPoolState(
-    int device,
+    DeviceIndex device,
     std::shared_ptr<AllocatorState> pps) {
   return get()->setCheckpointPoolState(device, pps);
 }
 
 // CUDAGraph interactions
 inline void beginAllocateStreamToPool(
-    int device,
+    DeviceIndex device,
     cudaStream_t stream,
     MempoolId_t mempool_id) {
   return get()->beginAllocateStreamToPool(device, stream, mempool_id);
 }
 
-inline void endAllocateStreamToPool(int device, cudaStream_t stream) {
+inline void endAllocateStreamToPool(DeviceIndex device, cudaStream_t stream) {
   return get()->endAllocateStreamToPool(device, stream);
 }
 
@@ -379,7 +381,7 @@ inline bool isHistoryEnabled() {
 }
 
 inline bool checkPoolLiveAllocations(
-    int device,
+    DeviceIndex device,
     MempoolId_t mempool_id,
     const std::unordered_set<void*>& expected_live_allocations) {
   return get()->checkPoolLiveAllocations(
@@ -390,7 +392,7 @@ inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   return get()->attachOutOfMemoryObserver(observer);
 }
 
-inline void releasePool(int device, MempoolId_t mempool_id) {
+inline void releasePool(DeviceIndex device, MempoolId_t mempool_id) {
   return get()->releasePool(device, mempool_id);
 }
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
@@ -414,7 +416,7 @@ inline cudaError_t memcpyAsync(
       dst, dstDevice, src, srcDevice, count, stream, p2p_enabled);
 }
 
-inline void enablePeerAccess(int dev, int dev_to_access) {
+inline void enablePeerAccess(DeviceIndex dev, DeviceIndex dev_to_access) {
   return get()->enablePeerAccess(dev, dev_to_access);
 }
 

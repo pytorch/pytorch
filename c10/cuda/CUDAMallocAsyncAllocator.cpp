@@ -31,17 +31,13 @@ namespace {
 // General helpers
 
 struct UsageStream {
-  cudaStream_t stream;
-  int device;
+  cudaStream_t stream{nullptr};
+  DeviceIndex device{-1};
   UsageStream() = default;
-  UsageStream(cudaStream_t s, int d) : stream(s), device(d) {}
+  UsageStream(cudaStream_t s, DeviceIndex d) : stream(s), device(d) {}
   UsageStream(const UsageStream& us) = default;
-  UsageStream(const UsageStream&& us) : stream(us.stream), device(us.device) {}
-  UsageStream& operator=(UsageStream other) {
-    stream = other.stream;
-    device = other.device;
-    return *this;
-  }
+  UsageStream(UsageStream&& us) noexcept = default;
+  UsageStream& operator=(const UsageStream& other) = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -146,7 +142,7 @@ bool capture_underway = false;
 // Implementation functions
 
 // Assumes the caller holds general_mutex
-inline void lazy_init_device(int device) {
+inline void lazy_init_device(DeviceIndex device) {
   if (!devs_initialized_flags[device]) {
     CUDAGuard g(device);
 
@@ -316,7 +312,11 @@ void freeAsync(void* ptr) {
 
 // Symmetric with NativeCachingAllocator::malloc for now,
 // although I don't think we absolutely need the symmetry.
-void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
+void mallocAsync(
+    void** devPtr,
+    DeviceIndex device,
+    size_t size,
+    cudaStream_t stream) {
   TORCH_INTERNAL_ASSERT(
       0 <= device && device < device_count,
       "Invalid device index ",
@@ -410,7 +410,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
-    int device = 0;
+    DeviceIndex device = -1;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
@@ -445,12 +445,12 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return !devs_initialized_flags.empty();
   }
 
-  static inline void assertValidDevice(int device) {
+  static inline void assertValidDevice(DeviceIndex device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");
   }
 
-  void setMemoryFraction(double fraction, int device) override {
+  void setMemoryFraction(double fraction, DeviceIndex device) override {
     TORCH_INTERNAL_ASSERT(
         0 <= fraction && fraction <= 1,
         "invalid fraction:",
@@ -496,7 +496,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
-  void cacheInfo(int device, size_t* maxWorkspaceGuess) override {
+  void cacheInfo(DeviceIndex device, size_t* maxWorkspaceGuess) override {
     // The only consumer of cacheInfo is getMaxWorkspaceSize in Conv_v7.cpp.
     // Afaict, the role of cacheInfo is to give getMaxWorkspaceSize a reasonable
     // maximum workspace size to use for an upcoming cudnnFind call.
@@ -632,8 +632,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
-  std::shared_ptr<AllocatorState> getCheckpointState(int device, MempoolId_t id)
-      override {
+  std::shared_ptr<AllocatorState> getCheckpointState(
+      DeviceIndex device,
+      MempoolId_t id) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support getCheckpointState. "
@@ -641,7 +642,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   CheckpointDelta setCheckpointPoolState(
-      int device,
+      DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) override {
     TORCH_CHECK(
         false,
@@ -651,7 +652,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
-  DeviceStats getDeviceStats(int device) override {
+  DeviceStats getDeviceStats(DeviceIndex device) override {
     assertValidDevice(device);
 
     // Memory currently reserved by the mempool
@@ -715,13 +716,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return stats;
   }
 
-  void resetAccumulatedStats(int device) override {
+  void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     TORCH_WARN_ONCE(
         "For backend:cudaMallocAsync, resetAccumulatedStats has no effect.");
   }
 
-  void resetPeakStats(int device) override {
+  void resetPeakStats(DeviceIndex device) override {
     assertValidDevice(device);
 
     CUDAGuard g(device);
@@ -752,7 +753,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   // CUDAGraph interactions
   void beginAllocateStreamToPool(
-      int device,
+      DeviceIndex device,
       cudaStream_t stream,
       MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
@@ -764,7 +765,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void endAllocateStreamToPool(int device, cudaStream_t) override {
+  void endAllocateStreamToPool(DeviceIndex device, cudaStream_t) override {
     assertValidDevice(device);
 
     std::lock_guard<std::mutex> lk(general_mutex);
@@ -798,7 +799,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = false;
   }
 
-  void releasePool(int device, MempoolId_t mempool_id) override {
+  void releasePool(DeviceIndex device, MempoolId_t mempool_id) override {
     // Q: Do we need to do anything special here, like clear long-lived
     //    pointers created during the original capture (for example,
     //    tensors intended as the graph's I/O surface) that might still
@@ -817,7 +818,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    DeviceIndex device = -1;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
@@ -828,7 +829,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    DeviceIndex device = -1;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, stream);
@@ -837,7 +838,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void raw_delete(void* ptr) override {
     freeAsync(ptr);
   }
-  void enablePeerAccess(int dev, int dev_to_access) override {
+  void enablePeerAccess(DeviceIndex dev, DeviceIndex dev_to_access) override {
     // Double-checks allocator backend hasn't changed, which would definitely be
     // an error. cudaMallocAsync pools are unaffected by
     // cudaDeviceEnablePeerAccess. We need pool-specific enablement. See
@@ -847,6 +848,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev_to_access));
     cudaMemAccessDesc desc = {};
     desc.location.type = cudaMemLocationTypeDevice;
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     desc.location.id = dev;
     desc.flags = cudaMemAccessFlagsProtReadWrite;
     C10_CUDA_CHECK(cudaMemPoolSetAccess(mempool, &desc, 1 /* numDescs */));
