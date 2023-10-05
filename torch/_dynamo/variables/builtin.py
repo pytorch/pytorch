@@ -652,6 +652,7 @@ class BuiltinVariable(VariableTracker):
                     UserErrorType.STANDARD_LIBRARY,
                     "Calling round() on symbolic value is not supported. "
                     "You can use floor() to implement this functionality",
+                    case_name="dynamic_shape_round",
                 )
         return super().call_function(tx, args, kwargs)
 
@@ -816,7 +817,6 @@ class BuiltinVariable(VariableTracker):
         if obj is None:
             if cls is SetVariable:
                 return cls(
-                    tx,
                     [],
                     mutable_local=MutableLocal(),
                 )
@@ -834,7 +834,6 @@ class BuiltinVariable(VariableTracker):
                     guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             if cls is SetVariable:
                 return cls(
-                    tx,
                     list(obj.unpack_var_sequence(tx)),
                     mutable_local=MutableLocal(),
                     guards=guards,

@@ -137,23 +137,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
   }
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override {
-    stream << std::boolalpha << "torch::nn::BatchNorm" << D << "d("
-           << this->options.num_features() << ", "
-           << "eps=" << this->options.eps() << ", "
-           << "momentum=";
-
-    if (this->options.momentum().has_value()) {
-      stream << this->options.momentum().value();
-    } else {
-      stream << "None";
-    }
-
-    stream << ", "
-           << "affine=" << this->options.affine() << ", "
-           << "track_running_stats=" << this->options.track_running_stats()
-           << ")";
-  }
+  void pretty_print(std::ostream& stream) const override;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm1d

@@ -204,6 +204,32 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allgather_contiguous_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.emb = torch.nn.Embedding(4, 4)
+
+            def forward(self, x, world_size, tag, ranks, group_size):
+                y = self.emb(x)
+                last_dim = y.dim() - 1
+                y = y.transpose_(0, last_dim).contiguous()
+                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                out = y.transpose_(0, last_dim).contiguous()
+                return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model = Model().cuda()
+            model_compiled = torch.compile(model)
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            out = model_compiled(inp, self.world_size, **self.get_world_trs())
+            correct = model(inp, self.world_size, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allgather_into_tensor_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
