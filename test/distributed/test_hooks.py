@@ -126,7 +126,7 @@ class CollectiveHooks:
         def check_op(idx, coll_name):
             self.assertEqual(default_pg_name, starts[idx].pg_name)
             self.assertEqual(self.backend_name, starts[idx].backend)
-            self.assertGreaterEqual(starts[idx].sequence_number, 0)
+            self.assertEqual(starts[idx].sequence_number, idx + 1)
             self.assertGreaterEqual(starts[idx].timestamp, 0)
             self.assertEqual(coll_name, starts[idx].operation)
             self.assertEqual(starts[idx].error_message, None)
@@ -170,7 +170,7 @@ class CollectiveHooks:
         tensor2 = torch.ones([2, 3]).cuda(self.rank) * self.rank
         if self.rank == 2:
             time.sleep(10)
-        dist.all_reduce(tensor2)
+        dist.all_reduce(tensor2, async_op=True)
 
         with cv:
             cv.wait(20)
@@ -182,12 +182,16 @@ class CollectiveHooks:
         def check_op(idx, coll_name, end_fail=False):
             self.assertEqual(default_pg_name, starts[idx].pg_name)
             self.assertEqual(self.backend_name, starts[idx].backend)
-            self.assertGreaterEqual(starts[idx].sequence_number, 0)
+            self.assertEqual(starts[idx].sequence_number, idx + 1)
             self.assertGreaterEqual(starts[idx].timestamp, 0)
             self.assertEqual(coll_name, starts[idx].operation)
             self.assertEqual(starts[idx].error_message, None)
             if end_fail:
-                self.assertIsNotNone(ends[idx].error_message, None)
+                self.assertIsNotNone(ends[idx].error_message)
+                self.assertRegex(
+                    ends[idx].error_message,
+                    "Watchdog caught collective operation timeout",
+                )
             else:
                 self.assertIsNone(ends[idx].error_message)
 
@@ -237,6 +241,11 @@ class GlooHooks(MultiProcessTestCase, CollectiveHooks):
     @with_comms
     def test_collective_hooks(self):
         self._collective_hooks()
+
+    @with_comms(timeout=timedelta(seconds=5))
+    def test_collective_timeout(self):
+        pass  # Gloo currently doesn't report timeouts correctly
+        # self._test_failure()
 
 
 class NcclHooks(MultiProcessTestCase, CollectiveHooks):
