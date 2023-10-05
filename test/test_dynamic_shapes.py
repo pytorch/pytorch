@@ -784,8 +784,7 @@ class TestSymNumberMagicMethods(TestCase):
             j1 + 3
 
         self.assertFalse(j1 == 3)
-        with self.assertRaisesRegex(RuntimeError, "indeterminate"):
-            self.assertFalse(3 >= j2)
+        self.assertFalse(3 >= j2)
 
         self.assertIs(j1 == j1, True)
         self.assertIs(j1 == j2, True)
