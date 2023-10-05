@@ -1119,10 +1119,9 @@ class VariableBuilder:
 
         source = NumpyTensorSource(self.get_source())
 
-#        tensor_value = torch.as_tensor(value)
         from torch._numpy import _util
         try:
-            tensor_value = _util._coerce_to_tensor(value)
+           tensor_value = _util._try_convert_to_tensor(value)
         except NotImplementedError as e:
             # failed to convert to tensor, graph break
             unimplemented(str(e))
