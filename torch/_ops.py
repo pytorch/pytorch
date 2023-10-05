@@ -10,7 +10,7 @@ import torch._C
 
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
-import os
+
 # Query `hasattr` only once.
 
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")

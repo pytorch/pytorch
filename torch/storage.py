@@ -947,7 +947,6 @@ class TypedStorage:
     # For internal use only, to avoid deprecation warning
     def _resize_(self, size):
         import os
-        import traceback
         gpu_id = int(os.environ.get("LOCAL_RANK", 0))
         if gpu_id == 0:
             global resize_count_and_loc

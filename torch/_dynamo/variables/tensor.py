@@ -19,7 +19,6 @@ import torch.random
 from torch._dynamo import compiled_autograd
 
 from torch._dynamo.variables.base import VariableTracker
-from torch._dynamo import compiled_autograd
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
@@ -40,7 +39,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker, MutableLocal
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 

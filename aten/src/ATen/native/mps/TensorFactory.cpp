@@ -138,8 +138,8 @@ Tensor& set_mps_(Tensor& result) {
   return result;
 }
 
-Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride, bool cross_device) {
-  checkSetStorage(result, storage, storage_offset, size, stride, cross_device);
+Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
   //std::cout << "set storage_mps " << storage_offset << " stride " << stride << std::endl;
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?

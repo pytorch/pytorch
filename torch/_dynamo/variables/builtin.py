@@ -1209,8 +1209,6 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        from .nn_module import FSDPManagedNNModuleVariable
-
         from .distributed import PlacementVariable
 
         if isinstance(
@@ -1222,7 +1220,11 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
-        elif isinstance(obj, variables.TensorVariable) and name_var.is_python_constant() and name_var.value == "zeroed_out":
+        elif (
+            isinstance(obj, variables.TensorVariable)
+            and name_var.is_python_constant()
+            and name_var.value == "zeroed_out"
+        ):
             obj.mutable_local = MutableLocal()
             return val.add_options(self, obj, name_var)
         elif (
@@ -1231,14 +1233,14 @@ class BuiltinVariable(VariableTracker):
         ):
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             if isinstance(obj, variables.TensorVariable):
-                from .builder import (
-                    VariableBuilder,
-                    wrap_fx_proxy,
-                    wrap_to_fake_tensor_and_record,
-                )
+                from .builder import wrap_fx_proxy
 
                 if name_var.value == "data":
-                    log.warning("SET DATA? %s %s", obj.as_proxy().node.meta['example_value'].size(), val.as_proxy().node.meta['example_value'].size())
+                    log.warning(
+                        "SET DATA? %s %s",
+                        obj.as_proxy().node.meta["example_value"].size(),
+                        val.as_proxy().node.meta["example_value"].size(),
+                    )
                     to_remove = []
                     for tf in tx.output.tracked_fakes:
                         if tf.source == obj.source:
@@ -1246,9 +1248,10 @@ class BuiltinVariable(VariableTracker):
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
-
-                    version = obj.as_proxy().node.meta['example_value']._version
-                    with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
+                    version = obj.as_proxy().node.meta["example_value"]._version
+                    with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(
+                        tx
+                    ), torch.no_grad():
                         out = wrap_fx_proxy(
                             tx,
                             tx.output.create_proxy(
@@ -1258,10 +1261,12 @@ class BuiltinVariable(VariableTracker):
                             ),
                         )
                     tx.output.create_proxy(
-                        "call_function", torch._C._autograd._unsafe_set_version_counter, (out.as_proxy(), 0), {}
+                        "call_function",
+                        torch._C._autograd._unsafe_set_version_counter,
+                        (out.as_proxy(), 0),
+                        {},
                     )
                     tx.replace_all(obj, out)
-
 
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
@@ -1508,7 +1513,7 @@ class BuiltinVariable(VariableTracker):
             return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, SetVariable):
-            if isinstance(right, ConstantVariable) and right.value == None:
+            if isinstance(right, ConstantVariable) and right.value is None:
                 return ConstantVariable(op(left._underlying_items, right.value))
 
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses

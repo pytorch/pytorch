@@ -30,7 +30,6 @@ from torch import Tensor
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
-    _no_dispatch_record_stream,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -856,9 +855,7 @@ class FlatParamHandle:
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
                 flat_param, self.rank, self.world_size
             )
-            if (
-                not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-            ):
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 allocated = flat_param._typed_storage()._size() > 0
                 if allocated:
                     flat_param._typed_storage()._resize_(0)
@@ -1161,7 +1158,9 @@ class FlatParamHandle:
                     dtype=unsharded_param_dtype,
                 )
                 flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
-                flat_param._full_param_padded = _free_storage(flat_param._full_param_padded)
+                flat_param._full_param_padded = _free_storage(
+                    flat_param._full_param_padded
+                )
 
                 if self._uses_param_mixed_precision:
                     # For parameter mixed precision, we maintain a full precision
@@ -1308,7 +1307,9 @@ class FlatParamHandle:
             # so we should free it here to ensure a new all-gather for the next
             # forward/backward computation to persist the modifications.
             if flat_param._full_param_padded.untyped_storage().size() > 0:
-                flat_param._full_param_padded =_free_storage(flat_param._full_param_padded)
+                flat_param._full_param_padded = _free_storage(
+                    flat_param._full_param_padded
+                )
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
         return unsharded_flat_param
@@ -2459,7 +2460,7 @@ class FlatParamHandle:
     def _check_storage_freed(tensor: Tensor):
         _p_assert(
             torch._same_storage_size(tensor, 0),
-            f"Expects storage to be freed but got storage with size > 0",
+            "Expects storage to be freed but got storage with size > 0",
         )
 
     @staticmethod

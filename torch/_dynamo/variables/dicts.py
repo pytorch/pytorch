@@ -274,7 +274,7 @@ def is_valid_global_ref_key(key):
     if istensor(key):
         return True
     else:
-        return isinstance(key, torch.nn.Module) or isinstance(key, tuple)
+        return isinstance(key, (torch.nn.Module, tuple))
 
 
 class DefaultDictVariable(ConstDictVariable):

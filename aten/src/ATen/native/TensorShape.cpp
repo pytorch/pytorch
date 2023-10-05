@@ -404,8 +404,8 @@ Tensor& resize_storage_meta_(Tensor& result, int64_t s) {
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
-Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride, bool cross_device) {
-  checkSetStorage(result, std::move(storage), storage_offset, size, stride, cross_device);
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, std::move(storage), storage_offset, size, stride);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ?
@@ -416,8 +416,8 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
-Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, bool cross_device) {
-  checkSetStorage(result, storage, storage_offset, size, stride, cross_device);
+Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
 
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {

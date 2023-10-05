@@ -219,9 +219,7 @@ class DeviceMesh:
         if rank_coords.size(0) > 0:
             ele = rank_coords[0].tolist()
 
-        self._coordinate_on_dim: Optional[List[int]] = (
-            ele
-        )
+        self._coordinate_on_dim: Optional[List[int]] = ele
         return _get_default_group()
 
     def _validate_mesh(self):

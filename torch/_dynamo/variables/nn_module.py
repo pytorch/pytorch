@@ -440,9 +440,25 @@ class NNModuleVariable(VariableTracker):
                 source = AttrSource(source, x)
             return source
 
-        named_embed = functools.partial(_named_embed, tx=tx, key=key, source_cls=NNModuleSource, source=self.source, options=options)
-        wrap_values = functools.partial(_wrap_values, tx=tx, key=key, source_cls=NNModuleSource, source=self.source, options=options)
-        get_kwargs = functools.partial(_get_kwargs, mod=module, name=name, args=args, kwargs=kwargs)
+        named_embed = functools.partial(
+            _named_embed,
+            tx=tx,
+            key=key,
+            source_cls=NNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        wrap_values = functools.partial(
+            _wrap_values,
+            tx=tx,
+            key=key,
+            source_cls=NNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        get_kwargs = functools.partial(
+            _get_kwargs, mod=module, name=name, args=args, kwargs=kwargs
+        )
 
         if name == "named_children":
             assert not (args or kwargs)
@@ -482,7 +498,7 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "_named_members":
             print("NAMED MEMBERS??")
-            assert False
+            raise AssertionError()
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -852,6 +868,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def as_python_constant(self):
         return self.value
+
 
 def _gen_source(source, name):
     name_split = name.split(".")

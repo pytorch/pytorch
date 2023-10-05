@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import (
     PythonKeyTracer,
     track_tensor_tree,
 )
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 

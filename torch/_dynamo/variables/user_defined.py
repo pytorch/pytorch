@@ -8,20 +8,18 @@ import random
 import threading
 import types
 from typing import Dict, List
-from torch._dynamo import compiled_autograd
 
 import torch._dynamo.config
 
 import torch.nn
 from torch._guards import TracingContext
-from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from .. import variables
+from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..allowed_functions import is_allowed
-from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource, GetItemSource
+from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -211,7 +209,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs, **options)
+                fn, args=rest_args, keywords=kwargs, **options
+            )
         return super().call_function(tx, args, kwargs)
 
     def const_getattr(self, tx, name):
@@ -516,9 +515,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and (
-                isinstance(self.value, torch.nn.Module)
-                or isinstance(
-                    self.value, torch.distributed.fsdp._flat_param.FlatParamHandle
+                isinstance(
+                    self.value,
+                    (
+                        torch.nn.Module,
+                        torch.distributed.fsdp._flat_param.FlatParamHandle,
+                    ),
                 )
             )
         ):
@@ -712,6 +714,7 @@ class RemovableHandleVariable(VariableTracker):
             return [codegen.create_load(self.user_code_variable_name)]
         return super().reconstruct(codegen)
 
+
 class RemovableHandleVariableTracker(UserDefinedObjectVariable):
     def __init__(self, value, name, value_type=None, **kwargs):
         super().__init__(value, value_type, **kwargs)
@@ -731,11 +734,9 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from .builder import wrap_fx_proxy
-
         options = VariableTracker.propagate(self)
         if name == "register_hook":
-           # see [On tensor.register_hook]
+            # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
 
@@ -790,7 +791,9 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
                     (self.as_proxy(),),
                     {},
                 )
-                new_self = AccumulateGradVariable(self.value, new_proxy, self.value_type, **options)
+                new_self = AccumulateGradVariable(
+                    self.value, new_proxy, self.value_type, **options
+                )
                 return tx.replace_all(self, new_self)
                 # return wrap_fx_proxy(
                 #     tx,
