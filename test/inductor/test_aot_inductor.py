@@ -806,7 +806,7 @@ class AOTInductorTestsTemplate:
             with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
                 src_code = cpp.read()
                 FileCheck().check_count(
-                    "triton_poi_fused_sin_0 == nullptr) {",
+                    "triton_poi_fused_sin_0 = loadKernel(",
                     1,
                     exactly=True,
                 ).run(src_code)
