@@ -802,8 +802,6 @@ def min_cut_rematerialization_partition(
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
-        # We can perform "memory fusion" into a cat, but cat cannot be a
-        # producer to a fusion
         if get_aten_target(b) == aten.cat:
             return True
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops

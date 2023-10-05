@@ -144,9 +144,6 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# Get a cprofile trace of Dynamo
-cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
-
 # legacy config, does nothing now!
 skipfiles_inline_module_allowlist = {}
 
