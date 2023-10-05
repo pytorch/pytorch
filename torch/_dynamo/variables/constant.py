@@ -104,7 +104,8 @@ class ConstantVariable(VariableTracker):
     def is_literal(obj):
         if type(obj) in (int, float, bool, type(None), str, Ellipsis.__class__):
             return True
-        if type(obj) in (list, tuple, set, frozenset):
+        # The structure within is_literal get routed to variables.BaseListVariable
+        if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
 
