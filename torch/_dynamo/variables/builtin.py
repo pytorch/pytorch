@@ -652,6 +652,7 @@ class BuiltinVariable(VariableTracker):
                     UserErrorType.STANDARD_LIBRARY,
                     "Calling round() on symbolic value is not supported. "
                     "You can use floor() to implement this functionality",
+                    case_name="dynamic_shape_round",
                 )
         return super().call_function(tx, args, kwargs)
 
@@ -1272,6 +1273,7 @@ class BuiltinVariable(VariableTracker):
             UserErrorType.ANTI_PATTERN,
             f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
+            case_name="type_reflection_method",
         )
 
     def call_reversed(self, tx, obj: VariableTracker):
