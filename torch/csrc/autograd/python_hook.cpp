@@ -99,6 +99,7 @@ PyFunctionTensorPreHook::PyFunctionTensorPreHook(
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -127,6 +128,7 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPreHook::~PyFunctionPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -149,6 +151,7 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPostHook::~PyFunctionPostHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -205,6 +208,7 @@ PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {

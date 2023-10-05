@@ -1,8 +1,9 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 
-namespace torch {
-namespace jit {
+#include <iostream>
+
+namespace torch::jit {
 
 void ArgumentSpecCreator::scan(
     const TypePtr& typ,
@@ -285,5 +286,4 @@ void ArgumentSpecCreator::specializeTypes(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

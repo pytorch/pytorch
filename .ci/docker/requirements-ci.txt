@@ -124,6 +124,19 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
+optree==0.9.1
+#Description: A library for tree manipulation
+#Pinned versions: 0.9.1
+#test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
+#test_pytree.py, test_ops.py, test_control_flow.py, test_modules.py,
+#common_utils.py, test_eager_transforms.py, test_python_dispatch.py,
+#test_expanded_weights.py, test_decomp.py, test_overrides.py, test_masked.py,
+#test_ops.py, test_prims.py, test_subclass.py, test_functionalization.py,
+#test_schema_check.py, test_profiler_tree.py, test_meta.py, test_torchxla_num_output.py,
+#test_utils.py, test_proxy_tensor.py, test_memory_profiler.py, test_view_ops.py,
+#test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
+#test_fake_tensor.py, test_mps.py
+
 pillow==9.3.0 ; python_version <= "3.8"
 pillow==9.5.0 ; python_version > "3.8"
 #Description:  Python Imaging Library fork

@@ -59,6 +59,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self.counter = 0
 
     def _assert_range_constraint(self, proxy, lower, upper, assert_msg):
         if lower > -math.inf:
@@ -72,6 +73,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         Inserts assert_async call_function nodes in the graph. This function is
         called **during** the interpreter-based pass.
         """
+        self.counter += 1
         cmp = super().call_operator(operator, (lower, upper), {}, self._create_dummy_node_metadata())
         cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, self._create_dummy_node_metadata())
         super().call_operator(
@@ -138,6 +140,11 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
     def call(self, graph_module):
         # Add runtime asserts for inline constraints
         val = super().call(graph_module)
+
+        # Sometimes this pass would return a wrong graph where we have mismatched
+        # node names in signature. Before we fix it, let's just skip it.
+        if self.counter == 0 and type(self) is _AddRuntimeAssertionsForInlineConstraintsPass:
+            return PassResult(graph_module, False)
 
         # Populate the stack trace with dummy vals to respect IR
         for node in val.graph_module.graph.nodes:

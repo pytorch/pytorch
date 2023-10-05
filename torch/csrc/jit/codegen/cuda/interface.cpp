@@ -177,6 +177,7 @@ bool isEnabled() {
 }
 
 bool setEnabled(bool is_enabled) {
+  TORCH_WARN("torch::jit::fuser::cuda::setEnabled() is deprecated");
   return nvfuser_enabler.setEnabled(is_enabled);
 }
 

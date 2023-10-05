@@ -139,23 +139,29 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& grad,
     const at::Scalar& base,
     const at::Tensor& exponent,
-    at::Tensor result);
+    const at::Tensor& result);
 at::Tensor angle_backward(const at::Tensor& grad, const at::Tensor& self);
 template <typename T>
-at::Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st);
-template <typename T>
-at::Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st);
-at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
+at::Tensor mul_tensor_backward(const Tensor& grad, T other, ScalarType self_st);
 template <typename T>
 at::Tensor div_tensor_self_backward(
-    Tensor grad,
+    const Tensor& grad,
+    T other,
+    ScalarType self_st);
+at::Tensor div_tensor_other_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& other);
+template <typename T>
+at::Tensor div_tensor_self_backward(
+    const Tensor& grad,
     T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
-    Tensor other,
+    const Tensor& other,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor mvlgamma_backward(
     const at::Tensor& grad,

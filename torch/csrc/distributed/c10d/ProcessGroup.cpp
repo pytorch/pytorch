@@ -165,4 +165,10 @@ void ProcessGroup::setGroupName(const std::string& name) {
   }
 }
 
+void ProcessGroup::enableCollectivesTiming() {
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->enableCollectivesTiming();
+  }
+}
+
 } // namespace c10d

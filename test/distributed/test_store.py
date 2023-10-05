@@ -12,6 +12,7 @@ from sys import platform
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
 from torch.distributed import DistNetworkError, DistError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
@@ -793,6 +794,38 @@ class TimeoutTest(TestCase):
             t.join()
         self.assertTrue(rank_res[0], "rank0")
         self.assertTrue(rank_res[1], "rank1")
+
+
+class InitPgWithUvStore(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        os.environ.pop("USE_LIBUV", None)
+        os.environ.pop("MASTER_ADDR", None)
+        os.environ.pop("MASTER_PORT", None)
+
+    def test_with_url_param(self):
+        port = common.find_free_port()
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=1")
+        self._run_test()
+
+    def test_with_env_var(self):
+        port = common.find_free_port()
+        os.environ["USE_LIBUV"] = "1"
+        os.environ["MASTER_ADDR"] = DEFAULT_HOSTNAME
+        os.environ["MASTER_PORT"] = str(port)
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method="env://")
+        self._run_test()
+
+    def _run_test(self):
+        pg = dist.group.WORLD
+        store = c10d._get_process_group_store(pg)
+        self.assertTrue(isinstance(store, dist.PrefixStore))
+        # c10d does multiple levels of wrapping
+        while isinstance(store, dist.PrefixStore):
+            store = store.underlying_store
+        self.assertTrue(isinstance(store, dist.TCPStore))
+        self.assertTrue(store.libuvBackend)
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     assert (
