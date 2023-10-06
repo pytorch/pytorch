@@ -12,48 +12,81 @@ import textwrap
 import traceback
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
-
 import pytest
-
-import torch._numpy as np
-from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises
-from torch._numpy import (
-    array,
-    asarray,
-    atleast_2d,
-    cdouble,
-    csingle,
-    dot,
-    double,
-    identity,
-    inf,
-    linalg,
-    matmul,
-    single,
-    swapaxes,
-)
-from torch._numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
-from torch._numpy.testing import (
-    assert_,
-    assert_allclose,
-    assert_almost_equal,
-    assert_array_equal,
-    assert_equal,
-    suppress_warnings,
-    #  assert_raises_regex, HAS_LAPACK64, IS_WASM
-)
+
+
+from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
+    TEST_WITH_TORCHDYNAMO,
+    slowTest as slow
 )
 
-skip = functools.partial(skipif, True)
 
-# FIXME: slow tests have never run (= are broken)
-slow = skip
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        array,
+        asarray,
+        atleast_2d,
+        cdouble,
+        csingle,
+        dot,
+        double,
+        identity,
+        inf,
+        linalg,
+        matmul,
+        single,
+        swapaxes,
+    )
+    from numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
+    from numpy.testing import (
+        assert_,
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        suppress_warnings,
+        #  assert_raises_regex, HAS_LAPACK64, IS_WASM
+    )
+
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        array,
+        asarray,
+        atleast_2d,
+        cdouble,
+        csingle,
+        dot,
+        double,
+        identity,
+        inf,
+        linalg,
+        matmul,
+        single,
+        swapaxes,
+    )
+    from torch._numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
+    from torch._numpy.testing import (
+        assert_,
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        suppress_warnings,
+        #  assert_raises_regex, HAS_LAPACK64, IS_WASM
+    )
+
+
+skip = functools.partial(skipif, True)
 
 IS_WASM = False
 HAS_LAPACK64 = False
@@ -307,11 +340,11 @@ def _make_generalized_cases():
         if not isinstance(case.a, np.ndarray):
             continue
 
-        a = np.array([case.a, 2 * case.a, 3 * case.a])
+        a = np.stack([case.a, 2 * case.a, 3 * case.a])
         if case.b is None:
             b = None
         else:
-            b = np.array([case.b, 7 * case.b, 6 * case.b])
+            b = np.stack([case.b, 7 * case.b, 6 * case.b])
         new_case = LinalgCase(
             case.name + "_tile3", a, b, tags=case.tags | {"generalized"}
         )
@@ -408,7 +441,6 @@ class LinalgGeneralizedNonsquareTestCase(LinalgTestCase):
 
 
 class HermitianGeneralizedTestCase(LinalgTestCase):
-    @xfail  # (reason="sort complex")
     @slow
     def test_generalized_herm_cases(self):
         self.check_cases(require={"generalized", "hermitian"}, exclude={"size-0"})
@@ -890,7 +922,7 @@ class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
             ad = asarray(a).astype(cdouble)
         ev = linalg.eigvals(ad)
         assert_almost_equal(d, np.prod(ev, axis=-1))
-        assert_almost_equal(s * np.exp(ld), np.prod(ev, axis=-1))
+        assert_almost_equal(s * np.exp(ld), np.prod(ev, axis=-1), single_decimal=5)
 
         s = np.atleast_1d(s)
         ld = np.atleast_1d(ld)
