@@ -720,12 +720,13 @@ Export Path
 
 Control Flow
 ------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
 
 .. warning::
     This feature is a prototype and may have compatibility breaking changes in the future.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
     cond
 
