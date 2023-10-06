@@ -2110,7 +2110,7 @@ def create_synthetic_base_metadata(
             raw_type=FunctionalTensor,
             dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
-            requires_grad=outer_args[outer_idx].requires_grad # ???
+            requires_grad=outer_args[outer_idx].requires_grad
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
         OutputAliasInfo(
@@ -2696,7 +2696,9 @@ def create_runtime_wrapper(
                     o_ = o.alias
                 else:
                     o_ = o
-                o_grad = runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i]
+                assert runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i] == runtime_metadata.output_info[i].requires_grad
+
+                o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
                     aliased_base_tensor = args[info.base_idx]
                     regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
@@ -3128,16 +3130,17 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # invariant: intermediate bases always require gradients, so we don't have to
             # consider marking them as non-differentiable.
             raw_returns_not_including_intermediate_bases = raw_returns[:num_mutated_inputs + num_outputs]
-            # a = CompiledFunction.metadata.requires_grad_info[:len(CompiledFunction.metadata.input_info)]
-            # b = [x.requires_grad for x in CompiledFunction.metadata.input_info]
-            # if a != b:
-            #     breakpoint()
-            #     print()
+
+            raw_returns_meta = (
+                [x for x in CompiledFunction.metadata.input_info if x.mutates_data or x.mutates_metadata]
+                + CompiledFunction.metadata.output_info
+            )
+
             fw_outs_not_requiring_grad = [
                 x
                 for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
                 if isinstance(x, torch.Tensor)
-                and not CompiledFunction.metadata.requires_grad_info[i]
+                and not raw_returns_meta[i].requires_grad
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
@@ -3439,7 +3442,7 @@ def create_aot_dispatcher_function(
             # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
             # Keeping .resize_() in the graph will require some work
             # Allowing it but keeping the graph functional will require some calling convention changes.
-            if len([x for x in fw_metadata.requires_grad_info[:fw_metadata.num_mutated_inputs] if x]) != 0:
+            if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
                 raise RuntimeError(f"""\
 Found an input that received a metadata mutation, through e.g. a call to `.resize_()` or `.transpose_()`.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
