@@ -1574,6 +1574,29 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.RAdam(None, lr=1e-2, weight_decay=-1)
 
+    def test_radam_complex(self):
+        for foreach in (False, True):
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam([param], lr=1e-1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    decoupled_weight_decay=True,
+                    foreach=foreach,
+                )
+            )
+
     def test_rmsprop(self):
         for foreach in (False, True):
             self._test_basic_cases(
@@ -2436,7 +2459,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):
