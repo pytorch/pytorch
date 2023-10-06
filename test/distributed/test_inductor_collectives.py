@@ -27,7 +27,7 @@ import torch._dynamo.logging
 def _tolist_with_constrain_as_size(tensor):
     lst = tensor.tolist()
     for elem in lst:
-        torch.export.constrain_as_size(elem)
+        torch._constrain_as_size(elem)
     return lst
 
 @requires_nccl()
