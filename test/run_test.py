@@ -292,6 +292,7 @@ ROCM_BLOCKLIST = [
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
+    "test_jit_cuda_fuser",
 ]
 
 # The tests inside these files should never be run in parallel with each other
