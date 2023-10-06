@@ -63,6 +63,7 @@ from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
 from .wrappers import _wrap_submodules
 
 
@@ -732,11 +733,10 @@ def _export(
         (args, kwargs),
     )
 
-    if torch._dynamo.config.add_runtime_assertions_for_inline_constraints:
-        if len(range_constraints) > 0 or len(equality_constraints) > 0:
-            exported_program = exported_program._transform(
-                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-            )
+    if len(range_constraints) > 0 or len(equality_constraints) > 0:
+        exported_program = exported_program._transform(
+            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+        )
     exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
@@ -821,6 +821,7 @@ def aot_compile(
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
+    remove_runtime_assertions: bool = False,
 ) -> Tuple[str, ExportedProgram]:
     """
     Note: this function is not stable yet
@@ -847,6 +848,10 @@ def aot_compile(
 
         options: A dictionary of options to control inductor
 
+        remove_runtime_assertions: Whether the runtime assertion fx nodes
+            (and the related fx nodes) inserted by export should be removed
+            from the graph before running _inductor.aot_compile.
+
     Returns:
         Path to the generated shared library, and the exported program
     """
@@ -864,6 +869,10 @@ def aot_compile(
         ep = export(f, args, kwargs, constraints)
     else:
         ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
+
+    if remove_runtime_assertions:
+        ep = ep._transform(_RemoveRuntimeAssertionsPass())
+
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
