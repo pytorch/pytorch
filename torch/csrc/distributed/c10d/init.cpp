@@ -2632,8 +2632,7 @@ Example::
         notion) is.  This mostly ensures that C++ log messages are prefixed with
         rank information.  This is not meant to be called manually; it is
         called by _update_default_pg.
-      )"
-  );
+      )");
 
   module.def(
       "_create_work_from_future",
