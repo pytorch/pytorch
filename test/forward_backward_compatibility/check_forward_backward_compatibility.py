@@ -266,7 +266,7 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
     ("aten::_scaled_dot_product_attention", datetime.date(2023, 8, 1)),
     ("aten::_chunk_grad_outputs_efficient_attention", datetime.date(2023, 8, 1)),
-    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 9, 30)),
+    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 10, 30)),
     ("aten::_flash_attention_forward", datetime.date(2023, 9, 30)),
     ("aten::_flash_attention_backward", datetime.date(2023, 9, 30)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
