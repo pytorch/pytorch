@@ -114,12 +114,41 @@ AOTITorchError aoti_torch_get_sizes(
   });
 }
 
+AOTITorchError aoti_torch_get_size(
+    AtenTensorHandle tensor,
+    int64_t d,
+    int64_t* ret_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_size = t->size(d);
+  });
+}
+
 AOTITorchError aoti_torch_get_strides(
     AtenTensorHandle tensor,
     int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_strides = const_cast<int64_t*>(t->strides().data());
+  });
+}
+
+AOTITorchError aoti_torch_get_stride(
+    AtenTensorHandle tensor,
+    int64_t d,
+    int64_t* ret_stride) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_stride = t->stride(d);
+  });
+}
+
+AOTITorchError aoti_torch_get_storage_offset(
+    AtenTensorHandle tensor,
+    int64_t* ret_storage_offset) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_storage_offset = t->storage_offset();
   });
 }
 
