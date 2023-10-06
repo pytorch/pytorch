@@ -7,7 +7,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
-#include <c10/util/variant.h>
 
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
@@ -150,7 +149,7 @@ auto parseArgData(
 struct MetadataBase {
   MetadataBase(const std::shared_ptr<Result>& result)
       : kineto_activity_{result->kineto_activity_} {
-    if (c10::holds_alternative<ExtraFields<EventType::Kineto>>(
+    if (std::holds_alternative<ExtraFields<EventType::Kineto>>(
             result->extra_fields_)) {
       // In order to add metadata we have to downcast from
       // `libkineto::ITraceActivity` to `libkineto::GenericTraceActivity`. We
@@ -743,20 +742,25 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
     return !i.jit_stack_.empty() ? i.jit_stack_ : python_stack_;
   };
 
-  using out_t = const c10::ArrayRef<std::string>;
-  return result_->visit(c10::overloaded(
-      [&](const ExtraFields<EventType::TorchOp>& i) -> out_t { return get(i); },
-      [&](const ExtraFields<EventType::Backend>& i) -> out_t { return get(i); },
-      [&](const auto&) -> out_t { return python_stack_; }));
+  auto const& extra_fields = result_->extra_fields_;
+  if (auto p = std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
+    return get(*p);
+  }
+  if (auto p = std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
+    return get(*p);
+  }
+  return python_stack_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
-  return result_->visit(c10::overloaded(
-      [](const ExtraFields<EventType::TorchOp>& e)
-          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
-      [](const ExtraFields<EventType::Backend>& e)
-          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
-      [](const auto&) -> const c10::ArrayRef<std::string> { return {}; }));
+  auto const& extra_fields = result_->extra_fields_;
+  if (auto p = std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
+    return p->jit_modules_;
+  }
+  if (auto p = std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
+    return p->jit_modules_;
+  }
+  return {};
 }
 
 uint64_t KinetoEvent::durationUs() const {
