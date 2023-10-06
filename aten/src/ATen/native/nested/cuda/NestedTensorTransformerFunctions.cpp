@@ -220,8 +220,8 @@ std::tuple<
     Tensor,
     Tensor,
     Tensor,
-    int64_t,
-    int64_t,
+    c10::SymInt,
+    c10::SymInt,
     Tensor,
     Tensor,
     Tensor>

@@ -6,9 +6,9 @@ import torch.utils._pytree as pytree
 
 @contextlib.contextmanager
 def set_autograd_fallback_mode(mode):
+    prev = torch._C._get_autograd_fallback_mode()
     try:
-        prev = torch._C._get_autograd_fallback_mode()
-        torch._C._set_autograd_fallback_mode("nothing")
+        torch._C._set_autograd_fallback_mode(mode)
         yield
     finally:
         torch._C._set_autograd_fallback_mode(prev)
@@ -70,8 +70,9 @@ def autograd_registration_check(op, args, kwargs):
     # constructing true in-place or out variants), but we defer that
     # responsibility to a different test (schema_check).
 
-    all_args = (args, kwargs)
-    if not pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, all_args):
+    flat_args = pytree.tree_leaves((args, kwargs))
+    all_tensors = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
+    if not any(t.requires_grad for t in all_tensors):
         raise RuntimeError(
             "autograd_registration_check: no inputs have requires_grad=True so "
             "we are unable to actually perform this test. Please pass inputs "
@@ -79,8 +80,6 @@ def autograd_registration_check(op, args, kwargs):
         )
 
     # Determine which AutogradBACKEND key to check
-    flat_args, _ = pytree.tree_flatten(all_args)
-    all_tensors = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
     all_device_types = {arg.device.type for arg in all_tensors}
     if not all_device_types.issubset(["cpu", "cuda"]):
         # Don't want to support other keys yet
@@ -106,7 +105,7 @@ def autograd_registration_check(op, args, kwargs):
     with set_autograd_fallback_mode("nothing"):
         all_outs = op(*args, **kwargs)
 
-    inp_ids = set({id(arg) for arg in flat_args})
+    inp_ids = {id(arg) for arg in flat_args}
 
     def not_an_input_and_requires_grad(tensor):
         if not tensor.requires_grad:
