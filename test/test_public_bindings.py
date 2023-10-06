@@ -253,8 +253,6 @@ torch.onnx._internal.fx.op_validation
 torch.onnx._internal.fx.passes
 torch.onnx._internal.fx.type_utils
 torch.testing._internal.distributed.distributed_test
-torch.utils.benchmark.examples.blas_compare
-torch.utils.benchmark.examples.end_to_end
 torch.utils.tensorboard._caffe2_graph""")
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
