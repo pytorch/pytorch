@@ -355,8 +355,10 @@ _experimental_support_context_fn_in_torch_utils_checkpoint = False
 import types
 
 
-def bytecode_src_hook(code: types.CodeType, new_code: types.CodeType):
-    bytecode_src_log = torch._logging.getArtifactLogger(__name__, "bytecode_src")
+def _bytecode_src_hook(code: types.CodeType, new_code: types.CodeType):
+    bytecode_src_log = torch._logging.getArtifactLogger(
+        "torch._dynamo.convert_frame", "bytecode_src"
+    )
     import logging
 
     if bytecode_src_log.isEnabledFor(logging.DEBUG):
@@ -384,7 +386,7 @@ def bytecode_src_hook(code: types.CodeType, new_code: types.CodeType):
             )
 
 
-output_bytecode_hooks = []
+output_bytecode_hooks = [_bytecode_src_hook]
 
 from .config_utils import install_config_module
 
