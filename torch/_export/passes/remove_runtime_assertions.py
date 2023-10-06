@@ -1,6 +1,3 @@
-import operator
-from typing import Optional
-
 import torch
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
