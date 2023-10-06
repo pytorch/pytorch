@@ -146,9 +146,6 @@ def export__RC__(
                     f"got {dynamic_shapes} instead",
                 )
 
-    from collections import defaultdict
-    symbols = defaultdict(list)
-
     def to_constraint(dim, tensor, i):
         constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
         if dim.min != 2:
@@ -157,10 +154,30 @@ def export__RC__(
             constraint = constraint <= dim.max
         return constraint
 
+    from collections import defaultdict
+    symbols = defaultdict(list)
+    bounds: Dict[str, Tuple[int, int]] = {}
+
+    def check_same_bounds(dim):
+        if dim.__name__ in symbols:
+            min_, max_ = bounds[dim.__name__]
+            if dim.min != min_ or dim.max != max_:
+                this_ = _Dim.readable(dim.__name__, min_, max_)
+                that_ = _Dim.readable(dim.__name__, dim.min, dim.max)
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Found different definitions {this_} and {that_} "
+                    f"for the same symbolic dimension {dim}!"
+                )
+
+        else:
+            bounds[dim.__name__] = (dim.min, dim.max)
+
     def update_symbols(tensor, shape):
         if isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
+                    check_same_bounds(dim)
                     symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
                     if dim is not None:
@@ -172,6 +189,7 @@ def export__RC__(
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
+                    check_same_bounds(dim)
                     symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
                     if dim is not None:
