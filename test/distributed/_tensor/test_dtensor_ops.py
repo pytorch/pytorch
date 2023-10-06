@@ -112,7 +112,6 @@ dtensor_fails = {
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     xfail("as_strided_scatter"),
-    xfail("baddbmm"),
     xfail("bernoulli"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
