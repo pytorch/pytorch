@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import enum
 import functools
+from collections import OrderedDict
 
 import torch
 import torch._dynamo
@@ -189,6 +191,32 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo[0] = 5
         self.assertFalse(guard_manager.check(foo))
 
+    def test_item_enum_guard_manager(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+        foo = {
+            MyEnum.FOO: 1,
+            MyEnum.BAR: 2,
+        }
+
+        guard_manager = RootGuardManager()
+        guard_manager.add_lambda_guard(
+            lambda x: isinstance(x, dict),
+            lambda x: f"Expected dict but got {type(x)}",
+        )
+        guard_manager[MyEnum.FOO].add_lambda_guard(
+            lambda x: x == 1,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+        guard_manager[MyEnum.BAR].add_lambda_guard(
+            lambda x: x == 2,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+        self.assertTrue(guard_manager.check(foo))
+        self.assertFalse(guard_manager.check("foo"))
+
     def test_dict_guard_manager(self):
         foo = {
             "x": 1,
@@ -227,6 +255,24 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check({"x": 3, "y": 4}))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_ordered_dict_guard_manager(self):
+        foo = OrderedDict([("x", 1), ("y", 2)])
+        guard_manager = RootGuardManager()
+        guard_manager.add_lambda_guard(
+            lambda x: isinstance(x, OrderedDict),
+            lambda x: f"Expected OrderedDict but got {type(x)}",
+        )
+        guard_manager.dict_get_item_manager("x").add_lambda_guard(
+            lambda x: x == 1,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+        guard_manager.dict_get_item_manager("y").add_lambda_guard(
+            lambda x: x == 2,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+        # self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
+        self.assertTrue(guard_manager.check(foo))
 
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
