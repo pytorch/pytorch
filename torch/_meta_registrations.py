@@ -3643,8 +3643,47 @@ def meta_relu_(self):
     return self
 
 
+def check_index_put_inputs(self, indices, values, accumulate=False):
+    torch._check(bool(indices), lambda: "at least one index must be provided")
+
+    # Most of the checks on the `indices` can be done by calling `meta_index_Tensor`.
+    # The result of that gives the expected shape for `values`
+    # which can be used to assert that `values` is of the correct shape
+    # It is possible for index_put to contain scalars in the set of indices so these
+    # are handled here since aten::index is the handler for advanced tensor indexing.
+    # Basic indexing is handled elsewhere.
+
+    indices_without_scalars: List[Optional[Tensor]] = []
+    expected_values_shape = self
+    for i, index in enumerate(indices):
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
+            )
+            if index.ndim != 0:
+                indices_without_scalars.append(index)
+            else:
+                expected_values_shape = expected_values_shape.index_select(
+                    dim=i, index=index
+                ).squeeze()
+        else:
+            indices_without_scalars.append(index)
+
+    import torch._refs as refs  # avoid import cycle in mypy
+
+    if len(indices_without_scalars) == 0:
+        list(refs._maybe_broadcast(expected_values_shape, values))
+    else:
+        expected_values_shape = meta_index_Tensor(
+            expected_values_shape, indices_without_scalars
+        )
+        list(refs._maybe_broadcast(expected_values_shape, values))
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    check_index_put_inputs(self, indices, values, accumulate)
     return torch.empty_like(self)
 
 
@@ -3677,6 +3716,7 @@ def meta_masked_scatter(self, mask, source):
 
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
+    check_index_put_inputs(self, indices, values, accumulate)
     return self
 
 
