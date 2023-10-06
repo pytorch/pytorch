@@ -60,7 +60,9 @@ def aot_compile(
     return lib_path
 
 
-def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
+def list_mode_options(
+    mode: Optional[str] = None, dynamic: Optional[bool] = None
+) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
@@ -73,7 +75,7 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options = {
+    mode_options: Dict[str, Dict[str, bool]] = {
         "default": {},
         # enable cudagraphs
         "reduce-overhead": {
@@ -90,10 +92,10 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
             "triton.cudagraphs": True,
         },
     }
-    return mode_options[mode] if mode else mode_options
+    return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
 
 
-def list_options() -> Dict[str, Any]:
+def list_options() -> List[str]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 

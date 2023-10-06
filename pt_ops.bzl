@@ -79,6 +79,11 @@ def pt_operator_library(
 
     not_include_all_overloads_closure_ops = kwargs.pop("not_include_all_overloads_closure_ops", False)
 
+    if False:
+        # TODO(nga): `yaml_option` is never `None`, but it is checked against `None` below.
+        #   Typechecker (`--unstable-typecheck`) catches it.
+        yaml_option = None
+
     fb_xplat_genrule(
         name = name,
         out = "model_operators.yaml",

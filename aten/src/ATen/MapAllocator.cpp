@@ -57,20 +57,20 @@ struct MapInfo {
   std::atomic<int> refcount;
 };
 
-const std::string unknown_filename = "filename not specified";
+constexpr const char* unknown_filename = "filename not specified";
 #ifdef _WIN32
-const std::string unknown_eventname = "eventname not specified";
+constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
-  : filename_(filename.empty() ? unknown_filename : std::move(filename))
+MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size)
+  : filename_(filename.empty() ? unknown_filename : filename)
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
   , event_(INVALID_HANDLE_VALUE) // to be filled later
-  , eventname_(filename.empty() ? unknown_eventname : (filename + "_event"))
+  , eventname_(filename.empty() ? unknown_eventname : (std::string(filename) + "_event"))
 #else
   , fd_(fd)
 #endif
@@ -359,8 +359,8 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-MapAllocator::MapAllocator(std::string filename, int flags, size_t size)
-  : MapAllocator(WITH_FD, std::move(filename), -1, flags, size)
+MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size)
+  : MapAllocator(WITH_FD, filename, -1, flags, size)
 {}
 
 #ifdef _WIN32
@@ -425,11 +425,11 @@ void MapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-MapAllocator::MapAllocator(std::string filename, int flags, size_t size) {
+MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
-MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size) {
+MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
@@ -574,8 +574,8 @@ RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const at::DataPtr& d
   return dptr.cast_context<RefcountedMapAllocator>(&deleteRefcountedMapAllocator);
 }
 
-at::DataPtr MapAllocator::makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* context = new MapAllocator(std::move(filename), flags, size);
+at::DataPtr MapAllocator::makeDataPtr(c10::string_view filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new MapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }

@@ -6,7 +6,6 @@
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
 
-#include <string>
 #include <utility>
 #include <vector>
 

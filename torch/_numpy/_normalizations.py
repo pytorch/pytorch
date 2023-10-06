@@ -200,6 +200,7 @@ def normalizer(_func=None, *, promote_scalar_result=False):
             sig = inspect.signature(func)
             params = sig.parameters
             first_param = next(iter(params.values()))
+
             # NumPy's API does not have positional args before variadic positional args
             if first_param.kind == inspect.Parameter.VAR_POSITIONAL:
                 args = [maybe_normalize(arg, first_param) for arg in args]
@@ -217,6 +218,7 @@ def normalizer(_func=None, *, promote_scalar_result=False):
                 name: maybe_normalize(arg, params[name]) if name in params else arg
                 for name, arg in kwds.items()
             }
+
             result = func(*args, **kwds)
 
             # keepdims

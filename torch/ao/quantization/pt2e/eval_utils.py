@@ -17,6 +17,10 @@ def _replace_dropout_for_eval(m: torch.fx.GraphModule):
     # Avoid circular dependencies
     from .utils import get_aten_graph_module
 
+    # Needed to ensure subgraph matches are self-contained
+    m.graph.eliminate_dead_code()
+    m.recompile()
+
     def dropout_train(x):
         return F.dropout(x, p=0.5, training=True)
 
@@ -39,9 +43,9 @@ def _replace_dropout_for_eval(m: torch.fx.GraphModule):
     m.recompile()
 
 
-# TODO: also support move_model_to_train
+# TODO: also support move_exported_model_to_train
 # TODO: also support standalone batchnorm
-def _move_model_to_eval(model: torch.fx.GraphModule):
+def _move_exported_model_to_eval(model: torch.fx.GraphModule):
     """
     Move an exported GraphModule to eval mode.
 

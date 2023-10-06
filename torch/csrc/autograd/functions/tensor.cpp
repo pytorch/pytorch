@@ -156,7 +156,11 @@ inline variable_list CopySlices::apply_impl(
   variable_list grad_inputs(num_outputs());
   for (const auto i : c10::irange(res.size())) {
     if (task_should_compute_output(i)) {
-      AT_ASSERT(res[i].defined());
+      if (!res[i].defined()) {
+        // If the output is not defined, treat it as if it was a zero tensor.
+        // This can happen if users define a custom Function.
+        continue;
+      }
       if (i == 0) {
         grad_slice.copy_(res[i]);
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)

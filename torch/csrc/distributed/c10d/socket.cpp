@@ -404,11 +404,34 @@ bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
 }
 
 bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
-  ::pollfd pfd{};
-  pfd.fd = hnd_;
-  pfd.events = POLLIN;
+  using Clock = std::chrono::steady_clock;
 
-  return pollFd(&pfd, 1, static_cast<int>(timeout.count())) > 0;
+  auto deadline = Clock::now() + timeout;
+  do {
+    ::pollfd pfd{};
+    pfd.fd = hnd_;
+    pfd.events = POLLIN;
+
+    int res = pollFd(&pfd, 1, static_cast<int>(timeout.count()));
+    if (res > 0) {
+      return true;
+    }
+    std::error_code err = getSocketError();
+
+    if (err == std::errc::operation_in_progress) {
+      bool timedout = Clock::now() >= deadline;
+      if (timedout) {
+        return false;
+      }
+      C10D_WARNING(
+          "pollFB for socket {} returned operation_in_progress before a timeout",
+          hnd_);
+    } else if (err != std::errc::interrupted) {
+      C10D_WARNING("While waitForInput, poolFD failed with {}.", err);
+      return false;
+    }
+  } while (Clock::now() < deadline);
+  return false;
 }
 
 namespace {

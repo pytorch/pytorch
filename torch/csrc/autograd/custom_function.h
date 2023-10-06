@@ -20,13 +20,13 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function,
+    const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
-    std::string hook_name);
+    const std::string& hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template <typename X, typename... Args>

@@ -782,7 +782,6 @@ class TensorExprTestOptions:
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
-        self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(False)
 
     def restore(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
@@ -793,7 +792,6 @@ class TensorExprTestOptions:
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
 
 def clone_inputs(args):
     inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []

@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import torch
+from torch.distributed._tensor.op_schema import RuntimeSchemaInfo
 
 from torch.distributed._tensor.ops.common_rules import (
     linear_pointwise_rule,
@@ -371,4 +372,6 @@ for op in linear_pointwise_ops:
 
 
 for op in pointwise_ops:
-    register_prop_rule(op)(pointwise_rule)
+    register_prop_rule(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_rule
+    )
