@@ -960,6 +960,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::SymBool:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
+    case IValue::Tag::Generator:
     case IValue::Tag::Uninitialized: {
       copy = *this;
     } break;
