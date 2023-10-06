@@ -28,3 +28,9 @@ def _disable_dynamo(fn=None, recursive=True):
         # decorator usage like @_disable_dynamo(recursive=False). The resulting
         # object expects the original decorated function as the arg.
         return functools.partial(_disable_dynamo, recursive=recursive)
+
+
+def dynamo_inline(fn):
+    assert callable(fn), "dynamo_inline expects a function"
+    torch._dynamo.skipfiles.FUNC_INLINELIST.add(fn.__module__ + "." + fn.__name__)
+    return fn
