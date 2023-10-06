@@ -1819,7 +1819,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m(*example_inputs)
         m.conv_bn_relu = convert_pt2e(m.conv_bn_relu, fold_quantize=True)
 
-        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=False))
+        quantizer = XNNPACKQuantizer().set_module_type(torch.nn.Linear, get_symmetric_quantization_config(is_per_channel=False))
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_pt2e(m, quantizer)
         m = convert_pt2e(m, fold_quantize=True)
@@ -1986,6 +1986,7 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             m = prepare_pt2e(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)
+            print("m:", m)
             self.assertEqual(
                 id(m.activation_post_process_3), id(m.activation_post_process_2)
             )

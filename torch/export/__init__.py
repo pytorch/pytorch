@@ -29,8 +29,6 @@ from torch.utils._pytree import (
 
 
 __all__ = [
-    "ArgumentKind",
-    "ArgumentSpec",
     "Constraint",
     "Dim",
     "ExportBackwardSignature",
@@ -50,8 +48,6 @@ __all__ = [
 
 
 from .exported_program import (
-    ArgumentKind,
-    ArgumentSpec,
     ExportBackwardSignature,
     ExportedProgram,
     ExportGraphSignature,
