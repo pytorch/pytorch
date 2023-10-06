@@ -172,9 +172,8 @@ class TestSparseSemiStructured(TestCase):
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_mm_sparse_first_NT(self, dense_input_shape, dtype, device, backend):
         """
-        Tests NN and NT for transpose ops
-        Ensure torch.mm(A_sparse, B) is correct for float16 and will throw error for int8
-        Ensure torch.mm(A_sparse, B.t()) is correct
+        Ensure torch.mm(A_sparse, B.t()) is correct for float16/bfloat16
+        and will throw an error for int8 + padding
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
