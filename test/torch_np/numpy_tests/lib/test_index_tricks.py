@@ -15,6 +15,9 @@ from torch.testing._internal.common_utils import (
 
 skip = functools.partial(skipIf, True)
 
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy import diag_indices, diag_indices_from, fill_diagonal, index_exp, s_

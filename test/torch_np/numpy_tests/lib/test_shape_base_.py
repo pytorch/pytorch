@@ -4,34 +4,58 @@ import functools
 import sys
 
 from unittest import expectedFailure as xfail, skipIf as skipif
-
-import torch._numpy as np
-
 from pytest import raises as assert_raises
-from torch._numpy import (
-    array_split,
-    column_stack,
-    dsplit,
-    dstack,
-    expand_dims,
-    hsplit,
-    kron,
-    put_along_axis,
-    split,
-    take_along_axis,
-    tile,
-    vsplit,
-)
 
-from torch._numpy.random import rand, randint
-
-from torch._numpy.testing import assert_, assert_array_equal, assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
+    TEST_WITH_TORCHDYNAMO
 )
+
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        array_split,
+        column_stack,
+        dsplit,
+        dstack,
+        expand_dims,
+        hsplit,
+        kron,
+        put_along_axis,
+        split,
+        take_along_axis,
+        tile,
+        vsplit,
+    )
+    from numpy.random import rand, randint
+
+    from numpy.testing import assert_, assert_array_equal, assert_equal
+
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        array_split,
+        column_stack,
+        dsplit,
+        dstack,
+        expand_dims,
+        hsplit,
+        kron,
+        put_along_axis,
+        split,
+        take_along_axis,
+        tile,
+        vsplit,
+    )
+    from torch._numpy.random import rand, randint
+    from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+
 
 skip = functools.partial(skipif, True)
 
