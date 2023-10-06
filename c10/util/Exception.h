@@ -538,16 +538,20 @@ namespace detail {
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
+
+namespace c10::detail {
+  static bool TORCH_RUNTIME_DEBUG = (std::getenv("TORCH_RUNTIME_DEBUG")!= nullptr);
+} // namespace c10::detail
 // This Macro is used to check conditions that are potentially expensive to
 // check and are only checked in debug mode. It is not recommended to use this
 // macro to check conditions that are cheap to check.
-#define TORCH_DEBUG_CHECK(cond, ...)                                 \
-  if (std::getenv("TORCH_DEBUG") && C10_UNLIKELY_OR_CONST(!(cond))) { \
-    ::c10::detail::torchCheckFail(                                   \
-        __func__,                                                    \
-        __FILE__,                                                    \
-        static_cast<uint32_t>(__LINE__),                             \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));                   \
+#define TORCH_DEBUG_CHECK(cond, ...)                                        \
+  if (c10::detail::TORCH_RUNTIME_DEBUG && C10_UNLIKELY_OR_CONST(!(cond))) { \
+    ::c10::detail::torchCheckFail(                                          \
+        __func__,                                                           \
+        __FILE__,                                                           \
+        static_cast<uint32_t>(__LINE__),                                    \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));                          \
   }
 #endif
 

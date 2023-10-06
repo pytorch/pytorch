@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_nn import TestCase
 from torch.testing._internal.common_utils import NOTEST_CPU, run_tests
 
 
@@ -20,15 +20,15 @@ def debug_mode(enable_debug_mode: bool):
     This context manager can be used to temporarily enable or disable debug mode
     Upon exiting the context manager, the previous state of the flag will be restored.
     """
-    previous_mode: bool = os.environ.get("TORCH_DEBUG", False)
+    previous_mode: bool = torch._C.get_runtime_debug()
     try:
-        os.environ["TORCH_DEBUG"] = str(enable_debug_mode)
+        torch._C.set_runtime_debug(enable_debug_mode)
         yield {}
     finally:
-        os.environ["TORCH_DEBUG"] = str(previous_mode)
+        torch._C.set_runtime_debug(previous_mode)
 
 
-class TestDebugMode(NNTestCase):
+class TestDebugMode(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 

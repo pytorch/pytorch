@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include "c10/util/Exception.h"
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -896,6 +897,28 @@ PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   Py_RETURN_TRUE;
 }
 
+PyObject* THPModule_setTorchRuntimeDebug(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "TORCH_RUNTIME_DEBUG expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  c10::detail::TORCH_RUNTIME_DEBUG = (arg == Py_True);
+  return Py_None;
+}
+
+PyObject* THPModule_getTorchRuntimeDebug(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "TORCH_RUNTIME_DEBUG expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  if (c10::detail::TORCH_RUNTIME_DEBUG){
+    Py_RETURN_TRUE;
+  };
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
@@ -1278,6 +1301,8 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
+    {"set_runtime_debug", THPModule_setTorchRuntimeDebug, METH_O, nullptr},
+    {"get_runtime_debug", THPModule_getTorchRuntimeDebug, METH_NOARGS, nullptr},
     {"_get_qengine", THPModule_qEngine, METH_NOARGS, nullptr},
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
     {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
