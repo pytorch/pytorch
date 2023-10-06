@@ -698,7 +698,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
 
-        example_inputs = torch.ones((1,), dtype=torch.int32, device="cuda") * 12
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
         self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
