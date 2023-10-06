@@ -2527,11 +2527,14 @@ class TestHelperModules:
             return x
 
     class ConvWithBNRelu(torch.nn.Module):
-        def __init__(self, relu, bn=True, bias=True):
+        def __init__(self, relu, dim=2, bn=True, bias=True):
             super().__init__()
-            self.conv = torch.nn.Conv2d(3, 3, 3, bias=bias)
+            convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
+            self.conv = convs[dim](3, 3, 3, bias=bias)
+
             if bn:
-                self.bn = torch.nn.BatchNorm2d(3)
+                self.bn = bns[dim](3)
             else:
                 self.bn = torch.nn.Identity()
             if relu:
@@ -2543,6 +2546,18 @@ class TestHelperModules:
             x = self.conv(x)
             x = self.bn(x)
             return self.relu(x)
+
+    class Conv1dWithConv2d(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1d = torch.nn.Conv1d(3, 3, 3)
+            self.conv2d = torch.nn.Conv2d(3, 3, 3)
+
+        def forward(self, x):
+            x = self.conv2d(x)
+            x = x.squeeze(0)
+            x = self.conv1d(x)
+            return x
 
     class Conv2dWithCat(torch.nn.Module):
         def __init__(self):

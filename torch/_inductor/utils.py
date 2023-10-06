@@ -306,7 +306,7 @@ def print_performance(
     fn, args=(), times=10, repeat=10, baseline=1.0, device: str = "cuda"
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
-    took = torch.median(timings)
+    took = torch.median(timings) / times
     print(f"{took/baseline:.6f}")
     return took
 
@@ -517,6 +517,7 @@ def has_incompatible_cudagraph_ops(gm):
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
         "run_with_rng_state",
+        "aten._local_scalar_dense",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -839,7 +840,7 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 @contextlib.contextmanager
 def override_lowering(aten_op, override_fn):
     """
-    Override the lowering of aten_op with overide_fn.
+    Override the lowering of aten_op with override_fn.
     The first argument of override_fn is the original lowering fn.
     """
     from torch._inductor import lowering
@@ -1131,6 +1132,7 @@ def try_find_schema(schemas, args, kwargs):
     return None
 
 
+@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1144,6 +1146,7 @@ def get_device_tflops(dtype):
         return get_max_simd_tflops(torch.float32)
 
 
+@functools.lru_cache(None)
 def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
@@ -1175,7 +1178,9 @@ class Placeholder(enum.Enum):
 
 # A utility function for easier AOTInductor testing
 aot_inductor_launcher = """
+#ifdef USE_CUDA
     #include <c10/cuda/CUDAStream.h>
+#endif // USE_CUDA
     #include <torch/csrc/inductor/aoti_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
@@ -1218,10 +1223,14 @@ aot_inductor_launcher = """
                 &num_outputs));
         std::vector<AtenTensorHandle> output_handles(num_outputs);
 
+#ifdef USE_CUDA
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+#else // !USE_CUDA
+        AOTInductorStreamHandle stream_handle = nullptr;
+#endif
 
         AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
