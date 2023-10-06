@@ -112,6 +112,8 @@ void torchInternalAssertFail(
   torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
 }
 
+TORCH_API bool TORCH_RUNTIME_DEBUG = (std::getenv("TORCH_RUNTIME_DEBUG") != nullptr);
+
 } // namespace detail
 
 namespace WarningUtils {

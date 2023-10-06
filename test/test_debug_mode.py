@@ -1,14 +1,10 @@
 # Owner(s): ["module: nn"]
 
 import contextlib
-import os
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import TestCase
 from torch.testing._internal.common_utils import NOTEST_CPU, run_tests
 
@@ -23,6 +19,7 @@ def debug_mode(enable_debug_mode: bool):
     previous_mode: bool = torch._C.get_runtime_debug()
     try:
         torch._C.set_runtime_debug(enable_debug_mode)
+        print(f"set mode to {torch._C.get_runtime_debug()}")
         yield {}
     finally:
         torch._C.set_runtime_debug(previous_mode)
@@ -46,7 +43,7 @@ class TestDebugMode(TestCase):
             with self.assertRaisesRegex(error_type, error_message):
                 e(x)
         with debug_mode(True):
-            debug_error_message = "Embedding index out of bounds, value: 10 at index 0, is out of bounds of size : \[10\]"
+            debug_error_message = r"IndexError embedding index out of bounds, value: 10 at index 0, is out of bounds of size : \[10\]"
             with self.assertRaisesRegex(RuntimeError, debug_error_message):
                 e(x)
 

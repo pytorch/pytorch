@@ -2,7 +2,6 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include "c10/util/Exception.h"
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -22,6 +21,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
@@ -907,13 +907,8 @@ PyObject* THPModule_setTorchRuntimeDebug(PyObject* _unused, PyObject* arg) {
   return Py_None;
 }
 
-PyObject* THPModule_getTorchRuntimeDebug(PyObject* _unused, PyObject* arg) {
-  THPUtils_assert(
-      PyBool_Check(arg),
-      "TORCH_RUNTIME_DEBUG expects a bool, "
-      "but got %s",
-      THPUtils_typename(arg));
-  if (c10::detail::TORCH_RUNTIME_DEBUG){
+PyObject* THPModule_getTorchRuntimeDebug(PyObject* _unused, PyObject* noargs) {
+  if (c10::detail::TORCH_RUNTIME_DEBUG) {
     Py_RETURN_TRUE;
   };
   Py_RETURN_FALSE;
