@@ -1779,8 +1779,8 @@ def batch_isend_irecv(p2p_op_list):
 
     Examples:
         >>> # xdoctest: +SKIP("no rank")
-        >>> send_tensor = torch.arange(2) + 2 * rank
-        >>> recv_tensor = torch.randn(2)
+        >>> send_tensor = torch.arange(2, dtype=torch.float32) + 2 * rank
+        >>> recv_tensor = torch.randn(2, dtype=torch.float32)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
         >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank - 1 + world_size)%world_size)
         >>> reqs = batch_isend_irecv([send_op, recv_op])
