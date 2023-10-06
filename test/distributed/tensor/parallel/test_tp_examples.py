@@ -47,7 +47,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 ).to_local()
             self.assertEqual(param_m2, param_m1)
 
-    def _test_mlp_magatron_e2e(self, is_seq_parallel=False, recompute_activation=False):
+    def _test_mlp_training_e2e(self, is_seq_parallel=False, recompute_activation=False):
         inp_size = [8, 10]
         # Ensure all tp ranks have same input.
         rng_seed = self.rank if is_seq_parallel else 0
@@ -108,7 +108,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
-    def _test_mlp_magatron_inference(self):
+    def _test_mlp_inference(self):
         inp_size = [8, 10]
         # Ensure all tp ranks have same input.
         torch.manual_seed(0)
@@ -133,13 +133,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("recompute_activation", [True, False])
-    def test_mlp_megatron_e2e(self, is_seq_parallel, recompute_activation):
-        self._test_mlp_magatron_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
+    def test_mlp_training(self, is_seq_parallel, recompute_activation):
+        self._test_mlp_training_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
 
     @with_comms
-    def test_mlp_megatron_inference(self):
+    def test_mlp_inference(self):
         with torch.inference_mode():
-            self._test_mlp_magatron_inference()
+            self._test_mlp_inference()
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
 
