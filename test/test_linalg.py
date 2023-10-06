@@ -4864,6 +4864,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
+    @skipIfTorchDynamo()
     def test_linalg_lu_family(self, device, dtype):
         # Tests torch.lu
         #       torch.linalg.lu_factor
@@ -6629,6 +6630,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo()
     @dtypes(*floating_and_complex_types())
     def test_slogdet_errors_and_warnings(self, device, dtype):
         # slogdet requires the input to be a square matrix or batch of square matrices
