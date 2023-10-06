@@ -247,12 +247,6 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         private_allowlist = set((
             "torch._inductor.codegen.cuda.cuda_kernel",
-            "torch._inductor.codegen.cuda.cuda_template",
-            "torch._inductor.codegen.cuda.gemm_template",
-            "torch._inductor.triton_helpers",
-            "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
-            "torch.backends._coreml.preprocess",
-            "torch.contrib._tensorboard_vis",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
             "torch.onnx._internal.fx.diagnostics",
@@ -262,8 +256,39 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.fx.op_validation",
             "torch.onnx._internal.fx.passes",
             "torch.onnx._internal.fx.type_utils",
+            "torch.testing._internal.common_distributed",
+            "torch.testing._internal.common_fsdp",
+            "torch.testing._internal.dist_utils",
+            "torch.testing._internal.distributed._shard.sharded_tensor",
+            "torch.testing._internal.distributed._shard.test_common",
+            "torch.testing._internal.distributed._tensor.common_dtensor",
+            "torch.testing._internal.distributed.ddp_under_dist_autograd_test",
             "torch.testing._internal.distributed.distributed_test",
+            "torch.testing._internal.distributed.distributed_utils",
+            "torch.testing._internal.distributed.fake_pg",
+            "torch.testing._internal.distributed.multi_threaded_pg",
+            "torch.testing._internal.distributed.nn.api.remote_module_test",
+            "torch.testing._internal.distributed.pipe_with_ddp_test",
+            "torch.testing._internal.distributed.rpc.dist_autograd_test",
+            "torch.testing._internal.distributed.rpc.dist_optimizer_test",
+            "torch.testing._internal.distributed.rpc.examples.parameter_server_test",
+            "torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test",
+            "torch.testing._internal.distributed.rpc.faulty_agent_rpc_test",
+            "torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture",
+            "torch.testing._internal.distributed.rpc.jit.dist_autograd_test",
+            "torch.testing._internal.distributed.rpc.jit.rpc_test",
+            "torch.testing._internal.distributed.rpc.jit.rpc_test_faulty",
+            "torch.testing._internal.distributed.rpc.rpc_agent_test_fixture",
+            "torch.testing._internal.distributed.rpc.rpc_test",
+            "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
+            "torch.testing._internal.distributed.rpc_utils",
             "torch.utils.tensorboard._caffe2_graph",
+            "torch._inductor.codegen.cuda.cuda_template",
+            "torch._inductor.codegen.cuda.gemm_template",
+            "torch._inductor.triton_helpers",
+            "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
+            "torch.backends._coreml.preprocess",
+            "torch.contrib._tensorboard_vis",
         ))
 
         # No new entries should be added to this list.
@@ -272,6 +297,19 @@ class TestPublicBindings(TestCase):
             "torch.distributed.elastic.rendezvous.etcd_rendezvous",
             "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
             "torch.distributed.elastic.rendezvous.etcd_store",
+            "torch.distributed.rendezvous",
+            "torch.distributed.rpc._testing.faulty_agent_backend_registry",
+            "torch.distributed.rpc._utils",
+            "torch.distributed.rpc.api",
+            "torch.distributed.rpc.backend_registry",
+            "torch.distributed.rpc.constants",
+            "torch.distributed.rpc.internal",
+            "torch.distributed.rpc.options",
+            "torch.distributed.rpc.rref_proxy",
+            "torch.distributed.rpc.server_process_global_profiler",
+            "torch.distributed.run",
+            "torch.distributed.tensor.parallel",
+            "torch.distributed.utils",
         ))
 
         print("Modules which failed to import")
@@ -288,7 +326,7 @@ class TestPublicBindings(TestCase):
 
             errors.append(f"{mod} failed to import with error {excep_type}")
 
-        self.assertFalse(errors, msg="\n".join(errors))
+        self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
