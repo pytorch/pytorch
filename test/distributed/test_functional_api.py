@@ -12,8 +12,9 @@ import torch.distributed._functional_collectives_impl as ft_c_impl
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
-from torch.testing import FileCheck
 from functorch import make_fx
+from torch.testing import FileCheck
+from torch.utils._triton import has_triton
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -458,6 +459,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(WORLD_SIZE)
     @requires_nccl()
     @with_comms()
