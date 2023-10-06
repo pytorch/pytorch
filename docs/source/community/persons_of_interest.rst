@@ -246,8 +246,8 @@ Model Compression & Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 -  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
 -  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
--  Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
 -  Supriya Rao (`supriyar <https://github.com/supriyar>`__)
+-  (emeritus) Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
 -  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 
 
@@ -323,9 +323,9 @@ TorchAudio
 
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
 -  Jeff Hwang (`hwangjeff <https://github.com/hwangjeff>`__)
--  Caroline Chen (`carolineechen <https://github.com/carolineechen>`__)
--  Xiaohui Zhang (`xiaohui-zhang <https://github.com/xiaohui-zhang>`__)
--  Zhaoheng Ni (`nateanl <https://github.com/nateanl>`__)
+-  (emeritus) Caroline Chen (`carolineechen <https://github.com/carolineechen>`__)
+-  (emeritus) Xiaohui Zhang (`xiaohui-zhang <https://github.com/xiaohui-zhang>`__)
+-  (emeritus) Zhaoheng Ni (`nateanl <https://github.com/nateanl>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
 

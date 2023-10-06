@@ -44,7 +44,7 @@ class ReduceScatterOp final : public Operator<Context> {
     }
   }
 
-  virtual ~ReduceScatterOp() {}
+  ~ReduceScatterOp() override {}
 
   bool RunOnDevice() override {
     std::call_once(once_, [&] { initialize(); });

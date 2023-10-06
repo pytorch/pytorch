@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <ATen/Context.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/mps/MPSEvent.h>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -26,32 +27,34 @@
 namespace at {
 namespace mps {
 
+typedef MPSEvent* mpsEvent_t;
+
 // TODO: Move the MPSGuardImpl to inherit from NoOpDeviceGuardImpl
 // https://github.com/pytorch/pytorch/issues/77170
 struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  static constexpr DeviceType static_type = DeviceType::MPS;
+  static constexpr c10::DeviceType static_type = c10::DeviceType::MPS;
 
   // constructor
   MPSGuardImpl() {}
-  explicit MPSGuardImpl(DeviceType t) {
-    TORCH_INTERNAL_ASSERT(t == DeviceType::MPS);
+  explicit MPSGuardImpl(c10::DeviceType t) {
+    TORCH_INTERNAL_ASSERT(t == c10::DeviceType::MPS);
   }
 
   // returns the type
-  DeviceType type() const override {
-    return DeviceType::MPS;
+  c10::DeviceType type() const override {
+    return c10::DeviceType::MPS;
   }
 
   Device exchangeDevice(Device d) const override {
-    return Device(DeviceType::MPS, 0);
+    return Device(c10::DeviceType::MPS, 0);
   }
 
   Device getDevice() const override {
-    return Device(DeviceType::MPS, 0);
+    return Device(c10::DeviceType::MPS, 0);
   }
 
   c10::optional<Device> uncheckedGetDevice() const noexcept {
-    return Device(DeviceType::MPS, 0);
+    return Device(c10::DeviceType::MPS, 0);
   }
 
   void setDevice(Device d) const override {
@@ -63,16 +66,16 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
   }
 
   Stream getStream(Device d) const noexcept override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
   Stream getDefaultStream(Device d) const override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
     if (at::hasMPS()) {

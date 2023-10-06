@@ -9,7 +9,7 @@ graph {
     name: "MatMul_0"
     op_type: "MatMul"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "input_1"
     type {

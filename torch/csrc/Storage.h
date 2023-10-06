@@ -8,6 +8,7 @@
 struct THPStorage {
   PyObject_HEAD;
   c10::MaybeOwned<c10::Storage> cdata;
+  bool is_hermetic;
 };
 
 TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);

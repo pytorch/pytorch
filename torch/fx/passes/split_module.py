@@ -320,8 +320,13 @@ def split_module(
         output_vals = tuple(
             partition.environment[orig_nodes[name]] for name in partition.outputs
         )
-        output_vals = output_vals[0] if len(output_vals) == 1 else output_vals  # type: ignore[assignment]
-        partition.graph.output(output_vals)
+
+        # skip output node generation if there are no output values
+        num_output_vals = len(output_vals)
+        if num_output_vals == 1:
+            partition.graph.output(output_vals[0])
+        elif num_output_vals > 1:
+            partition.graph.output(output_vals)
 
         if keep_original_order:
             # first get the attr nodes required by this partition
@@ -346,12 +351,14 @@ def split_module(
             partition.submod_name,
             tuple(base_mod_env[name] for name in partition.inputs),
         )
-        if len(partition.outputs) > 1:
+
+        num_outputs = len(partition.outputs)
+        if num_outputs > 1:
             # Unpack multiple return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)
             for i, output_name in enumerate(partition.outputs):
                 base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
-        else:
+        elif num_outputs == 1:
             base_mod_env[list(partition.outputs)[0]] = output_val
 
     for node in m.graph.nodes:

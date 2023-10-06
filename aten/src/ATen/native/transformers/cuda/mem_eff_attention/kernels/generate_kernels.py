@@ -8,12 +8,12 @@
 # Kernels are ordered (see `sort_index`), and when dispatching,
 # we select the first kernel in the list that supports the inputs
 
+import argparse
 import collections
 import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, TypeVar
-import argparse
 
 DTYPES = {
     "f32": "float",
@@ -303,7 +303,11 @@ T = TypeVar("T", FwdKernel, BwdKernel)
 
 
 def write_decl_impl(
-    kernels: List[T], family_name: str, impl_file: str, autogen_dir: Path, disable_def: str = None
+    kernels: List[T],
+    family_name: str,
+    impl_file: str,
+    autogen_dir: Path,
+    disable_def: str = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -324,6 +328,7 @@ def write_decl_impl(
     declarations = cpp_file_header + "#pragma once\n"
     # declarations += f"#ifndef {disable_def}\n"
     declarations += f"""#include {impl_file}\n"""
+    declarations += """using namespace PyTorchMemEffAttention;\n"""
 
     # Declaration of kernel functions
     for k in kernels:
@@ -365,6 +370,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
         impl_cu = cpp_file_header
         # impl_cu += f"#ifndef {disable_def}\n"
         impl_cu += f"""#include {impl_file}\n"""
+        impl_cu += """using namespace PyTorchMemEffAttention;\n"""
         for k in f_kernels:
             impl_cu += k.cpp_impl
         # impl_cu += f"#endif // {disable_def}\n"
@@ -380,22 +386,28 @@ def main(output_dir: Optional[str]) -> None:
         FwdKernel.get_all(),
         "cutlassF",
         impl_file="<ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>",
-        autogen_dir=output_dir
+        autogen_dir=output_dir,
     )
     write_decl_impl(
         BwdKernel.get_all(),
         "cutlassB",
         impl_file="<ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>",
-        autogen_dir=output_dir
+        autogen_dir=output_dir,
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog='generate_kernels',
-        description='Generate the mem-eff kernels template instantiations')
+        prog="generate_kernels",
+        description="Generate the mem-eff kernels template instantiations",
+    )
     # Set an optional output directory
-    parser.add_argument('-o', '--output_dir', required=False, help="Where to generate the kernels "
-                        " will default to <ATen/native/transformers/cuda/mem_eff_attention/kernels/> ")
+    parser.add_argument(
+        "-o",
+        "--output_dir",
+        required=False,
+        help="Where to generate the kernels "
+        " will default to <ATen/native/transformers/cuda/mem_eff_attention/kernels/> ",
+    )
     args = parser.parse_args()
     main(args.output_dir)

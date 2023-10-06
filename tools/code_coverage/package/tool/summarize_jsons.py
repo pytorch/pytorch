@@ -45,7 +45,7 @@ def transform_file_name(
                 return file_path[file_path.find(folder) :]
     # remove pytorch base folder path
     if platform == TestPlatform.OSS:
-        from package.oss.utils import get_pytorch_folder
+        from package.oss.utils import get_pytorch_folder  # type: ignore[import]
 
         pytorch_foler = get_pytorch_folder()
         assert file_path.startswith(pytorch_foler)

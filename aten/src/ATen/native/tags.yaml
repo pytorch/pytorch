@@ -33,6 +33,8 @@
   desc: |
           This tag indicates if an operator doesn't guarantee bitwise equivalence
           across different runs of an operator with identical inputs.
+
+# NOTE [Core ATen Ops]
 - tag: core
   desc: |
           Core aten ops is a subset of aten ops that remains after aten-to-aten decomposition and

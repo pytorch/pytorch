@@ -313,7 +313,7 @@ void max_pool3d_with_indices_out_cuda_template(
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
+    "max_pool3d: padding must either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);
@@ -443,7 +443,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
+    "max_pool3d: padding must either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);

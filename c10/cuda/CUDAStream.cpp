@@ -163,6 +163,13 @@ static void initGlobalStreamState() {
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(
       cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
+  // Note [HIP stream priorities]
+  // HIP stream priorities are 1=low, 0=default, -1=high which differs from CUDA
+  // which is 0=default, -1=high, -2=higher etc.
+  // Clamp leastPriority to 0 for HIP.
+#ifdef USE_ROCM
+  leastPriority = 0;
+#endif
   // greatestPriority is negative
   auto range = leastPriority - greatestPriority + 1;
   max_stream_priorities = range >= c10::cuda::max_compile_time_stream_priorities
@@ -291,6 +298,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
 }
 
 CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
+  initCUDAStreamsOnce();
   int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
 }

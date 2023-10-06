@@ -1,4 +1,3 @@
-# coding=utf-8
 r"""Dynamically quantized convolution modules."""
 
 import torch

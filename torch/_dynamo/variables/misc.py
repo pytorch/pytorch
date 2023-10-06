@@ -7,19 +7,19 @@ import types
 from typing import Dict, List
 
 import torch._C
+import torch._numpy as tnp
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
-from ..utils import (
-    check_constant_args,
-    HAS_NUMPY_TORCH_INTEROP,
-    identity,
-    proxy_args_kwargs,
-)
+from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
-from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -80,9 +80,11 @@ class SuperVariable(VariableTracker):
             ):
                 tx.output.guards.update(options.get("guards", set()))
                 tx.output.side_effects.store_attr(
-                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                    objvar,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
-                return variables.ConstantVariable(None)
+                return variables.ConstantVariable.create(None)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
@@ -106,6 +108,29 @@ class SuperVariable(VariableTracker):
             key = args[0].as_python_constant()
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
+            )
+        elif (
+            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
+            and isinstance(self.objvar, variables.CustomizedDictVariable)
+            and args
+            and variables.ConstDictVariable.is_valid_key(args[0])
+            and self.objvar.mutable_local
+        ):
+            assert not kwargs and len(args) == 2
+            k = variables.ConstDictVariable.get_key(args[0])
+
+            newval = collections.OrderedDict(self.objvar.items)
+            newval[k] = args[1]
+
+            new_rec_contains = self.objvar.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self.objvar,
+                self.objvar.modifed(newval, new_rec_contains, **options),
             )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -177,10 +202,20 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.ConstantVariable(None)
+        return variables.ConstantVariable.create(None)
 
 
 class ClosureVariable(UnknownVariable):
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
+        self.name = name
+
+    def reconstruct(self, codegen):
+        return [codegen.create_load_closure(self.name)]
+
+
+# closure variable created by an inlined function
+class InlinedClosureVariable(UnknownVariable):
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -265,7 +300,7 @@ class AutogradFunctionVariable(VariableTracker):
         if (
             requires_grad
             and torch.is_grad_enabled()
-            and torch._dynamo.config.capture_autograd_function
+            and config.capture_autograd_function
         ):
             # Note - this is the same check used in autograd/function.py, except inverted.
             # If we want to support functorch transforms here, we will need to enable this.
@@ -285,7 +320,7 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .torch import (
+            from .higher_order_ops import (
                 safe_or_raise_always_restore,
                 TorchHigherOrderOperatorVariable,
             )
@@ -317,7 +352,7 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable(
+            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
             )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
@@ -329,7 +364,7 @@ class AutogradFunctionVariable(VariableTracker):
                 tx,
                 graph_checkpoint,
                 checkpoint,
-                TorchHigherOrderOperatorVariable(
+                TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_bwd,
                     source=AttrSource(module_source, "backward"),
                 ),
@@ -338,7 +373,7 @@ class AutogradFunctionVariable(VariableTracker):
             # If fwd and backward are sound, we want apply in the graph.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
-            return TorchHigherOrderOperatorVariable(
+            return TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_apply
             ).call_function(tx, args, kwargs)
 
@@ -369,17 +404,41 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        if name not in ["backward", "forward"]:
-            unimplemented(f"Unsupported method: {name}")
-
         if name == "backward":
             with tx.strict_translation_mode():
-                return tx.inline_call(
-                    tx, UserFunctionVariable(self.fn_cls.backward), args, kwargs
+                if isinstance(self.fn_cls.backward, types.FunctionType):
+                    backward = UserFunctionVariable(self.fn_cls.backward)
+                elif isinstance(self.fn_cls.backward, types.MethodType):
+                    backward = UserMethodVariable(
+                        self.fn_cls.backward.__func__,
+                        variables.UserDefinedClassVariable(self.fn_cls),
+                    )
+                    args = [backward.obj] + args
+                else:
+                    unimplemented(
+                        f"backward is a non-function or method: {self.fn_cls.backward}"
+                    )
+
+                return tx.inline_call(tx, backward, args, kwargs)
+
+        elif name == "forward":
+            if isinstance(self.fn_cls.forward, types.FunctionType):
+                forward = UserFunctionVariable(self.fn_cls.forward)
+            elif isinstance(self.fn_cls.forward, types.MethodType):
+                forward = UserMethodVariable(
+                    self.fn_cls.forward.__func__,
+                    variables.UserDefinedClassVariable(self.fn_cls),
                 )
-        return tx.inline_call(
-            tx, UserFunctionVariable(self.fn_cls.forward), args, kwargs
-        )
+                args = [forward.obj] + args
+            else:
+                unimplemented(
+                    f"forward is a non-function or method: {self.fn_cls.forward}"
+                )
+
+            return tx.inline_call(tx, forward, args, kwargs)
+
+        else:
+            unimplemented(f"Unsupported method: {name}")
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
@@ -388,7 +447,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, value_type=None, inference=False, **kwargs):
+        saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
+        self._saved_tensors = saved_tensors
         self.inference = inference
 
     @staticmethod
@@ -432,7 +493,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self._saved_tensors.append(arg)
-        return variables.ConstantVariable(None, **options)
+        return variables.ConstantVariable.create(None, **options)
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
@@ -569,11 +630,60 @@ class GetAttrVariable(VariableTracker):
             and isinstance(self.obj, InspectSignatureVariable)
             and self.name == "parameters"
         ):
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+class MethodWrapperVariable(VariableTracker):
+    def __init__(self, method_wrapper, **kwargs):
+        super().__init__(**kwargs)
+        self.method_wrapper = method_wrapper
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if (
+            self.method_wrapper.__name__ == "__get__"
+            and isinstance(self.method_wrapper.__self__, types.GetSetDescriptorType)
+            and self.method_wrapper.__self__.__objclass__ is torch._C._TensorBase
+            and isinstance(args[0], variables.TensorVariable)
+        ):
+            assert len(args) == 1 and len(kwargs) == 0
+
+            return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
+
+        super().call_function(tx, args, kwargs)
+
+    def is_python_constant(self):
+        return True
+
+    def as_python_constant(self):
+        return self.method_wrapper
+
+
+class GetSetDescriptorVariable(VariableTracker):
+    def __init__(self, desc, **kwargs):
+        super().__init__(**kwargs)
+        self.desc = desc
+
+    def var_getattr(self, tx, name):
+        if name == "__get__" and self.source:
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
+                self.desc.__get__
+            )
+        else:
+            return super().var_getattr(tx, name)
+
+    def is_python_constant(self):
+        return True
+
+    def as_python_constant(self):
+        return self.desc
 
 
 class PythonModuleVariable(VariableTracker):
@@ -586,9 +696,10 @@ class PythonModuleVariable(VariableTracker):
 
 
 class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, reason, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.reason = reason
 
     def python_type(self):
         return type(self.value)
@@ -618,10 +729,15 @@ class SkipFilesVariable(VariableTracker):
             or len(args) == 1
             and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
         ):
+            if len(args) == 0:
+                args = dict(kwargs) if kwargs else None
+            else:
+                args = args[0]
+
             return BuiltinVariable.call_dict_helper(
                 tx,
                 collections.OrderedDict,
-                None if len(args) == 0 else args[0],
+                args,
                 **options,
             )
         elif (
@@ -673,6 +789,43 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif self.value is itertools.accumulate and not kwargs:
+            from .builtin import BuiltinVariable
+
+            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                seq = args[0].unpack_var_sequence(tx)
+
+                def func(tx, item, acc):
+                    return BuiltinVariable(sum).call_function(tx, [item, acc], {})
+
+            elif (
+                len(args) == 2
+                and args[0].has_unpack_var_sequence(tx)
+                and args[1].is_callable(tx)
+            ):
+                seq = args[0].unpack_var_sequence(tx)
+                func = args[1].call_function
+
+            else:
+                raise unimplemented("Unsupported arguments for itertools.accumulate")
+
+            items = []
+            acc = None
+            for item in seq:
+                if acc is None:
+                    acc = item
+                else:
+                    try:
+                        acc = func(tx, item, acc)
+                    except Exception:
+                        raise unimplemented(
+                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
+                        )
+                items.append(acc)
+
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
         elif (
             self.value is itertools.combinations
             and not kwargs
@@ -712,13 +865,24 @@ class SkipFilesVariable(VariableTracker):
             return variables.lists.DequeVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif self.value is functools.partial:
+            if not args:
+                unimplemented("functools.partial malformed")
+            # The first arg, a callable (the ctor below will assert on types)
+            fn = args[0]
+            rest_args = args[1:]
+            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # args and keywords
+            return variables.functions.FunctoolsPartialVariable(
+                fn, args=rest_args, keywords=kwargs, **options
+            )
         else:
             try:
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
             unimplemented(
-                f"call_function {self.value.__qualname__} in skip_files {path}"
+                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
             )
 
 
@@ -735,7 +899,7 @@ class TypingVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__" and len(args) == 1:
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.value[args[0].as_python_constant()],
                 **VariableTracker.propagate(self, args),
             )
@@ -748,9 +912,26 @@ class TypingVariable(VariableTracker):
         return self.value
 
 
+@functools.lru_cache(maxsize=1)
+def get_np_to_tnp_map():
+    from ..utils import NP_TO_TNP_MODULE
+
+    np_fn_to_tnp_fn = {}
+
+    for np_mod, tnp_mod in NP_TO_TNP_MODULE.items():
+        for fn_name, tnp_fn in tnp_mod.__dict__.items():
+            if callable(tnp_fn):
+                # some internal details do leak from tnp
+                # which are not part of numpy API.
+                if np_fn := getattr(np_mod, fn_name, None):
+                    np_fn_to_tnp_fn[np_fn] = tnp_fn
+
+    return np_fn_to_tnp_fn
+
+
 class NumpyVariable(VariableTracker):
     """
-    Wrapper around `numpy.*` for better error messages.
+    Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
     def __init__(self, value, **kwargs):
@@ -760,30 +941,35 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+        if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
-        import torch_np
 
-        from .builder import wrap_fx_proxy_cls
+        from ..utils import numpy_to_tensor_wrapper
+
         from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        # lookup method name in torch_np
-        if hasattr(torch_np, self.value.__name__):
-            func = getattr(torch_np, self.value.__name__)
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyNdarrayVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    func,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=None,
-                **options,
+        # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
+        if self.value.__name__ == "dtype":
+            unimplemented(
+                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
-        else:
-            unimplemented(f"Can't find numpy function {self.value} in torch_np")
+        else:  # We are dealing with a callable.
+            func = get_np_to_tnp_map().get(self.value)
+            if func is None:
+                unimplemented(
+                    f"Can't find numpy function {self.value} in torch._numpy. "
+                    " Please file an issue to request support for this function."
+                )
+
+            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
+            #  wrapped by NumpyNdarrayVariable which is wrong!
+            proxy = tx.output.create_proxy(
+                "call_function",
+                numpy_to_tensor_wrapper(func),
+                *proxy_args_kwargs(args, kwargs),
+            )
+            return NumpyNdarrayVariable.create(tx, proxy, **options)
 
     def call_method(
         self,
@@ -800,11 +986,27 @@ class NumpyVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def as_proxy(self):
+        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
+        #  into NumpyVariable for instances/objects and NumpyVariable for types.
+        if config.trace_numpy and isinstance(self.value, type):
+            # retrieve attribute str. E.g., "float32" if given np.float32
+
+            attr = self.value.__name__
+            # get tnp equivalent
+            tnp_dtype = tnp.dtype(attr)
+            # returning a string here because we are assuming all `dtype` kwargs for numpy
+            # functions can take an equivalent string and the behavior of the function would
+            # be the same as taking a numpy dtype.
+            return tnp_dtype.name
+
+        return super().as_proxy()
+
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
 class NullVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NullVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def __str__(self):
         return "NullVariable"

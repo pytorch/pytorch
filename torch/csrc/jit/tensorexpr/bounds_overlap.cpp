@@ -3,10 +3,12 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
+#include <iostream>
+
 namespace torch::jit::tensorexpr::analysis {
 
 // Returns true if the given expression is guaranteed to be positive.
-bool mustBePositive(ExprPtr e) {
+static bool mustBePositive(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val > 0;
@@ -15,7 +17,7 @@ bool mustBePositive(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be negative.
-bool mustBeNegative(ExprPtr e) {
+static bool mustBeNegative(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val < 0;
@@ -24,7 +26,7 @@ bool mustBeNegative(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be zero.
-bool mustBeZero(ExprPtr e) {
+static bool mustBeZero(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val == 0;

@@ -154,11 +154,11 @@ class UninitializedTensorMixin:
                 kwargs = {}
             return super().__torch_function__(func, types, args, kwargs)
         raise ValueError(
-            'Attempted to use an uninitialized parameter in {}. '
+            f'Attempted to use an uninitialized parameter in {func}. '
             'This error happens when you are using a `LazyModule` or '
-            'explicitly manipulating `torch.nn.parameter.{}` '
+            f'explicitly manipulating `torch.nn.parameter.{cls.__name__}` '
             'objects. When using LazyModules Call `forward` with a dummy batch '
-            'to initialize the parameters before calling torch functions'.format(func, cls.__name__))
+            'to initialize the parameters before calling torch functions')
 
 
 def is_lazy(param):

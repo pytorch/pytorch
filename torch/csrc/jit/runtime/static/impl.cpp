@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -52,8 +53,7 @@ C10_DEFINE_bool(
     false,
     "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -76,7 +76,7 @@ bool allArgsAreTensors(const Node* node) {
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-bool isUnsupportedOp(const Node* node) {
+static bool isUnsupportedOp(const Node* node) {
   auto kind = node->kind();
   if (kind != aten::__is__ && kind != aten::__isnot__) {
     return false;
@@ -759,6 +759,31 @@ size_t StaticModule::prepareStaticNodeInfos(
 
   return node_idx - node_start;
 }
+
+#ifdef FBCODE_CAFFE2
+thread_local SROperatorObserver* tlsOpObserver = nullptr;
+
+void SROperatorObserver::setCurrentThreadObserver(
+    SROperatorObserver* observer) {
+  tlsOpObserver = observer;
+}
+
+SROperatorObserver* SROperatorObserver::getCurrentThreadObserver() {
+  return tlsOpObserver;
+}
+
+void SROperatorObserver::onStart(const Node* node) {
+  if (tlsOpObserver != nullptr && tlsOpObserver->startCb != nullptr) {
+    tlsOpObserver->startCb(node);
+  }
+}
+
+void SROperatorObserver::onEnd(const Node* node) {
+  if (tlsOpObserver != nullptr && tlsOpObserver->endCb != nullptr) {
+    tlsOpObserver->endCb(node);
+  }
+}
+#endif // FBCODE_CAFFE2
 
 BlockInfo::BlockInfo(uint32_t input_idx, Block& block)
     : input_idx_(input_idx), block_(block) {}
@@ -1587,7 +1612,7 @@ float BlockRunner::benchmark_model(
       (static_cast<float>(main_runs) * static_cast<float>(args_list.size()));
 }
 
-bool display_ivalue(const IValue& iv) {
+static bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
     const auto dims = iv.toTensor().sizes();
@@ -1622,7 +1647,7 @@ bool display_ivalue(const IValue& iv) {
   return false;
 }
 
-void display_pnode_info(const ProcessedNode& pnode) {
+static void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const auto num_inputs = static_cast<uint32_t>(pnode.num_inputs());
   for (const auto i : c10::irange(num_inputs)) {
@@ -2052,6 +2077,9 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 }
 
 void ProcessedNode::run() {
+#ifdef FBCODE_CAFFE2
+  SROperatorObserver::onStart(node());
+#endif
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
@@ -2084,6 +2112,9 @@ void ProcessedNode::run() {
   } else {
     DCHECK(verify_no_memory_overlap());
   }
+#endif
+#ifdef FBCODE_CAFFE2
+  SROperatorObserver::onEnd(node());
 #endif
 }
 
@@ -2291,5 +2322,4 @@ const MemoryPlanner* StaticRuntime::get_memory_planner() const {
   return block_->get_memory_planner();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <memory>
 
 #include <ATen/core/function_schema.h>
@@ -21,6 +22,10 @@ struct THPVariable {
   // Hooks to be run on backwards pass (corresponds to Python attr
   // '_backwards_hooks', set by 'register_hook')
   PyObject* backward_hooks = nullptr;
+  // Hooks to be run in the backwards pass after accumulate grad,
+  // i.e., after the .grad has been set (corresponds to Python attr
+  // '_post_accumulate_grad_hooks', set by 'register_post_accumulate_grad_hook')
+  PyObject* post_accumulate_grad_hooks = nullptr;
 };
 
 TORCH_PYTHON_API void registerPythonTensorClass(
@@ -81,3 +86,30 @@ void pushPyOutToStack(
     torch::jit::Stack* stack,
     py::object out,
     const char* msg);
+
+inline PyObject* THPVariable_WrapList(
+    const torch::autograd::variable_list& inputs) {
+  PyObject* pyinput = PyList_New(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
+  }
+  return pyinput;
+}
+
+inline torch::autograd::variable_list THPVariable_UnpackList(
+    PyObject* pyresult) {
+  TORCH_CHECK(PyList_CheckExact(pyresult));
+  auto result_len = PyList_GET_SIZE(pyresult);
+  torch::autograd::variable_list result;
+  result.reserve(result_len);
+  for (const auto i : c10::irange(result_len)) {
+    PyObject* item = PyList_GET_ITEM(pyresult, i);
+    if (!Py_IsNone(item)) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(THPVariable_Check(item));
+      result.emplace_back(THPVariable_Unpack(item));
+    } else {
+      result.emplace_back();
+    }
+  }
+  return result;
+}

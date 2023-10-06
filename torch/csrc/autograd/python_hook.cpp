@@ -3,8 +3,10 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -28,22 +30,25 @@ namespace autograd {
 
 namespace {
 
-// This function is called in 3 different cases:
+// This function is called in 4 different cases:
 //   1) TensorPreHook
 //   2) PreHook
 //   3) PostHook
+//   4) TensorPostAccGradHook
 //
 // Depending on the case, args and res can hold different types of objects:
 //
 // args:
-// TensorPreHook    (Tensor,)
-// PreHook          ((Tensor, ...),)                (grad_outputs,)
-// PostHook         ((Tensor, ...), (Tensor, ...))  (grad_inputs, grad_outputs)
+// TensorPreHook   (Tensor,)
+// PreHook         ((Tensor, ...),)                (grad_outputs,)
+// PostHook        ((Tensor, ...), (Tensor, ...))  (grad_inputs, grad_outputs)
+// TensorPostAccGradHook  ((Tensor), ())                  (tensor,)
 //
 // res:
-// TensorPreHook    Tensor
-// PreHook          ((Tensor, ...),)                (grad_outputs,)
-// PostHook         ((Tensor, ...),)                (grad_inputs,)
+// TensorPreHook          Tensor
+// PreHook                ((Tensor, ...),)                (grad_outputs,)
+// PostHook               ((Tensor, ...),)                (grad_inputs,)
+// TensorPostAccGradHook  None
 //
 // This function returns True if any hook returned non-None value, and False
 // otherwise.
@@ -87,11 +92,14 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
 
 } // namespace
 
-PyFunctionTensorPreHook::PyFunctionTensorPreHook(PyObject* dict, int value_idx)
+PyFunctionTensorPreHook::PyFunctionTensorPreHook(
+    PyObject* dict,
+    size_t value_idx)
     : dict(dict), value_idx(value_idx) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -120,6 +128,7 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPreHook::~PyFunctionPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -142,6 +151,7 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPostHook::~PyFunctionPostHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -163,12 +173,66 @@ auto PyFunctionPostHook::operator()(
   return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
 
+void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
+  PyObject *key = nullptr, *value = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(dict, &pos, &key, &value)) {
+    Py_INCREF(value);
+    args.add_tensor_pre_hook(
+        c10::SafePyObject(value, getPyInterpreter()),
+        static_cast<int>(value_idx));
+  }
+}
+
+void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
+  PyObject *key = nullptr, *value = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(dict, &pos, &key, &value)) {
+    Py_INCREF(value);
+    args.add_pre_hook(c10::SafePyObject(value, getPyInterpreter()));
+  }
+}
+
+void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
+  PyObject *key = nullptr, *value = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(dict, &pos, &key, &value)) {
+    Py_INCREF(value);
+    args.add_post_hook(c10::SafePyObject(value, getPyInterpreter()));
+  }
+}
+
+PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
+    PyObject* dict)
+    : dict(dict) {
+  Py_INCREF(dict);
+}
+
+// NOLINTNEXTLINE(bugprone-exception-escape)
+PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
+}
+
+auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
+    -> void {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr tup(PyTuple_New(1));
+  PyTuple_SET_ITEM(tup.get(), 0, THPVariable_Wrap(tensor));
+  bool returned_none = !_call_hooks(dict, tup.get());
+  TORCH_CHECK(
+      returned_none, "Tensor post accumulate grad hooks should return None.");
+}
+
 } // namespace autograd
 } // namespace torch
 
 static PyObject* wrap_variables(const variable_list& c_variables) {
   size_t num_vars = c_variables.size();
-  THPObjectPtr tuple(PyTuple_New(num_vars));
+  THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(num_vars)));
   if (!tuple)
     throw python_error();
   for (const auto i : c10::irange(num_vars)) {

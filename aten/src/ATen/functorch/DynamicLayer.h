@@ -9,9 +9,6 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/function_schema.h>
 #include <c10/util/Optional.h>
-#include <c10/util/variant.h>
-#include <unordered_map>
-#include <mutex>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/VmapInterpreter.h>
@@ -21,8 +18,7 @@
 // Forward declared
 namespace c10 { struct AutogradMetaInterface; }
 
-namespace at {
-namespace functorch {
+namespace at::functorch  {
 
 // This file contains the implementation of functorch's interpreter stack.
 // See NOTE: [functorch interpreter stack] first before reading on.
@@ -125,5 +121,4 @@ TORCH_API bool getInplaceRequiresGradAllowed();
 TORCH_API DynamicLayer popDynamicLayer();
 TORCH_API int64_t pushDynamicLayer(DynamicLayer&& layer);
 
-}
-} // namespace at
+} // namespace at::functorch

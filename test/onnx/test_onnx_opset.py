@@ -250,11 +250,11 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             {"op_name": "Constant"},
             {"op_name": "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
             {"op_name": "Constant"},
+            {"op_name": "Constant"},
             {
                 "op_name": "Unsqueeze",
                 "attributes": [{"name": "axes", "i": 0, "type": 7}],
             },
-            {"op_name": "Constant"},
             {"op_name": "Constant"},
             {"op_name": "Slice", "attributes": []},
         ]
@@ -515,6 +515,23 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 opset_versions=[16],
                 training=torch.onnx.TrainingMode.EVAL,
             )
+
+    def test_flatten(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.flatten(x)
+
+        module = MyModule()
+
+        ops_0d = [{"op_name": "Constant"}, {"op_name": "Reshape"}]
+        ops_1d = [{"op_name": "Identity"}]
+        for shape in ([], [3]):
+            x = torch.randn(shape)
+            for opset_version in [9, 10]:
+                ops = {opset_version: (ops_0d if len(shape) == 0 else ops_1d)}
+                check_onnx_opsets_operator(
+                    module, x, ops, opset_versions=[opset_version]
+                )
 
 
 if __name__ == "__main__":

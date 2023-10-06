@@ -18,6 +18,10 @@
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
 #include <ATen/ops/stride_native.h>
+#include <ATen/ops/sym_numel_native.h>
+#include <ATen/ops/sym_size_native.h>
+#include <ATen/ops/sym_storage_offset_native.h>
+#include <ATen/ops/sym_stride_native.h>
 #endif
 
 #include <c10/util/irange.h>
@@ -47,6 +51,22 @@ int64_t size(const Tensor& self, int64_t dim) {
 
 int64_t stride(const Tensor& self, int64_t dim) {
   return self.stride(dim);
+}
+
+c10::SymInt sym_size(const Tensor& self, int64_t dim) {
+  return self.sym_size(dim);
+}
+
+c10::SymInt sym_stride(const Tensor& self, int64_t dim) {
+  return self.sym_stride(dim);
+}
+
+c10::SymInt sym_numel(const Tensor& self) {
+  return self.sym_numel();
+}
+
+c10::SymInt sym_storage_offset(const Tensor& self) {
+  return self.sym_storage_offset();
 }
 
 int64_t size(const Tensor& self, Dimname dim) {
@@ -86,7 +106,7 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-Tensor contiguous(const Tensor & self) {
+static Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
 }
 

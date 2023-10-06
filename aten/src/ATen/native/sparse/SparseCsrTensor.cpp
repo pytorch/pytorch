@@ -122,7 +122,7 @@ bool solve_arange(const Tensor& input, int64_t& start, int64_t& end, int64_t& st
   formats with support to batched and dense dimensions.
 */
 
-void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, const IntArrayRef size, const Layout& layout) {
+static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, const IntArrayRef size, const Layout& layout) {
   // Layout must be Sparse Compressed, 2.4
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{});
 
@@ -292,6 +292,14 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
       ") must match device of ", plain_indices_name," (=",
       plain_indices.device(),
       ")");
+
+  // Autograd Invariants
+  //
+  // These are internal asserts because users should not be able to
+  // create non-floating point dtype tensors with requires_grad flag
+  // set to true.
+  TORCH_INTERNAL_ASSERT(!compressed_indices.requires_grad());
+  TORCH_INTERNAL_ASSERT(!plain_indices.requires_grad());
 }
 
 void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
@@ -321,7 +329,7 @@ void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& 
 // of historical reasons (that ought to be removed in future) and does
 // not mean that the corresponding functionality would be CSR layout
 // only specific.
-SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
+static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
@@ -401,7 +409,7 @@ SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc);
 
-DimVector _estimate_sparse_compressed_tensor_size(
+static DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
     const Tensor& plain_indices,
     const Tensor& values,
@@ -716,12 +724,6 @@ int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->dense_dim();
 }
 
-bool _is_same_size_as_sparse_compressed(
-    const SparseCsrTensor& self,
-    const SparseCsrTensor& src) {
-  return self.sizes().equals(src.sizes());
-}
-
 const SparseCsrTensor& resize_as_sparse_compressed_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
@@ -894,7 +896,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     // Selecting sparse dimension
     TORCH_CHECK(
         n_batch == 0,
-        select_name, ": selecting sparse dimensions is not implemented for batched sparse compressed tensors.")
+        select_name, ": selecting sparse dimensions is not supported for batched sparse compressed tensors.")
     TORCH_INTERNAL_ASSERT(dim == 0 || dim == 1);
 
     DimVector blocksize{1, 1};

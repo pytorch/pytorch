@@ -228,9 +228,8 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-std::vector<std::vector<int64_t>> flattenList(
-    c10::List<c10::IValue> list,
-    std::string fn_name) {
+static std::vector<std::vector<int64_t>> flattenList(
+    const c10::List<c10::IValue>& list) {
   std::vector<std::vector<int64_t>> tensor_dims;
   for (const c10::IValue& input : list) {
     if (input.isTensor()) {
@@ -259,7 +258,7 @@ std::vector<std::vector<int64_t>> inputSizes(
     } else if (input.isList()) {
       std::vector<std::vector<int64_t>> tmp_sizes;
       if (flatten_list_enabled) {
-        tmp_sizes = flattenList(input.toList(), std::string(fn.name()));
+        tmp_sizes = flattenList(input.toList());
       }
       // Extend the current sizes array by the array returned from input sizes
       if (!tmp_sizes.empty()) {
@@ -280,14 +279,51 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
     if (t_idx > 0) {
       str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}[", str);
-    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
-      if (s_idx > 0) {
-        str = fmt::format("{}, ", str);
-      }
-      str = fmt::format("{}{}", str, shapes[t_idx][s_idx]);
+    str = fmt::format("{}{}", str, shapeToStr(shapes[t_idx]));
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string variantShapesToStr(const std::vector<shape>& shapes) {
+  std::string str("[");
+  for (const auto t_idx : c10::irange(shapes.size())) {
+    if (t_idx > 0) {
+      str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}]", str);
+    if (std::holds_alternative<std::vector<int64_t>>(shapes[t_idx])) {
+      const auto& shape = std::get<std::vector<int64_t>>(shapes[t_idx]);
+      str = fmt::format("{}{}", str, shapeToStr(shape));
+    } else if (std::holds_alternative<std::vector<std::vector<int64_t>>>(
+                   shapes[t_idx])) {
+      const auto& tensor_shape =
+          std::get<std::vector<std::vector<int64_t>>>(shapes[t_idx]);
+      if (tensor_shape.size() > TENSOR_LIST_DISPLAY_LENGTH_LIMIT) {
+        // skip if the tensor list is too long
+        str = fmt::format("{}[]", str);
+        continue;
+      }
+      str = fmt::format("{}[", str);
+      for (const auto s_idx : c10::irange(tensor_shape.size())) {
+        if (s_idx > 0) {
+          str = fmt::format("{}, ", str);
+        }
+        str = fmt::format("{}{}", str, shapeToStr(tensor_shape[s_idx]));
+      }
+      str = fmt::format("{}]", str);
+    }
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string shapeToStr(const std::vector<int64_t>& shape) {
+  std::string str("[");
+  for (const auto s_idx : c10::irange(shape.size())) {
+    if (s_idx > 0) {
+      str = fmt::format("{}, ", str);
+    }
+    str = fmt::format("{}{}", str, shape[s_idx]);
   }
   str = fmt::format("{}]", str);
   return str;
@@ -319,7 +355,7 @@ std::string strListToStr(const std::vector<std::string>& types) {
         types.begin(),
         types.end(),
         std::ostream_iterator<std::string>(oss, ", "),
-        [](std::string s) -> std::string { return "\"" + s + "\""; });
+        [](const std::string& s) -> std::string { return "\"" + s + "\""; });
     auto rc = oss.str();
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";

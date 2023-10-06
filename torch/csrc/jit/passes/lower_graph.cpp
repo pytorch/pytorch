@@ -21,7 +21,7 @@ struct Slot {
 // parameters/attributes with extra_ivalue input Slots that hold what value to
 // pass into the graph. Used for ONNX export to remove first-class modules
 // so it can deal purely with parameters and inputs
-std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
+static std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     const ModulePtr& self,
     Graph& g_,
     size_t self_offset = 0) {

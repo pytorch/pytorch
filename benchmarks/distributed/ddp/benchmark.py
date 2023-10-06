@@ -30,11 +30,11 @@ def allgather_object(obj):
     dist.all_gather_object(out, obj)
     return out
 
+
 def allgather_run(cmd):
     proc = subprocess.run(shlex.split(cmd), capture_output=True)
-    assert(proc.returncode == 0)
+    assert proc.returncode == 0
     return allgather_object(proc.stdout.decode("utf-8"))
-
 
 
 def allequal(iterator):
@@ -53,23 +53,20 @@ def benchmark_process_group(pg, benchmark, use_ddp_for_single_rank=True):
     model = benchmark.create_model()
     data = [(benchmark.generate_inputs(), benchmark.generate_target())]
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(
-        model.parameters(),
-        0.001,
-        momentum=0.9,
-        weight_decay=1e-4)
+    optimizer = optim.SGD(model.parameters(), 0.001, momentum=0.9, weight_decay=1e-4)
     if use_ddp_for_single_rank or pg.size() > 1:
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False,
             process_group=pg,
-            bucket_cap_mb=benchmark.bucket_size)
+            bucket_cap_mb=benchmark.bucket_size,
+        )
 
     measurements = []
     warmup_iterations = 5
     measured_iterations = 10
-    for (inputs, target) in (data * (warmup_iterations + measured_iterations)):
+    for inputs, target in data * (warmup_iterations + measured_iterations):
         start = time.time()
         output = model(*inputs)
         loss = criterion(output, target)
@@ -102,12 +99,12 @@ def sweep(benchmark):
     benchmarks = []
 
     def append_benchmark(prefix, ranks, opts=None):
-        prefix = "%4d GPUs -- %s" % (len(ranks), prefix)
+        prefix = f"{len(ranks):4} GPUs -- {prefix}"
         benchmarks.append((prefix, ranks, opts))
 
     def local_print(msg):
         if dist.get_rank() == 0:
-            print(msg, end='', flush=True)  # noqa: E999
+            print(msg, end="", flush=True)  # noqa: E999
 
     def print_header():
         local_print("\n")
@@ -181,7 +178,7 @@ class TorchvisionBenchmark(Benchmark):
         self.model = model
 
     def __str__(self):
-        return "{} with batch size {}".format(self.model, self.batch_size)
+        return f"{self.model} with batch size {self.batch_size}"
 
     def create_model(self):
         return torchvision.models.__dict__[self.model]().to(self.device)
@@ -194,7 +191,7 @@ class TorchvisionBenchmark(Benchmark):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='PyTorch distributed benchmark suite')
+    parser = argparse.ArgumentParser(description="PyTorch distributed benchmark suite")
     parser.add_argument("--rank", type=int, default=os.environ["RANK"])
     parser.add_argument("--world-size", type=int, required=True)
     parser.add_argument("--distributed-backend", type=str, default="nccl")
@@ -202,7 +199,9 @@ def main():
     parser.add_argument("--master-addr", type=str, required=True)
     parser.add_argument("--master-port", type=str, required=True)
     parser.add_argument("--model", type=str)
-    parser.add_argument("--json", type=str, metavar="PATH", help="Write file with benchmark results")
+    parser.add_argument(
+        "--json", type=str, metavar="PATH", help="Write file with benchmark results"
+    )
     args = parser.parse_args()
 
     num_gpus_per_node = torch.cuda.device_count()
@@ -212,7 +211,7 @@ def main():
     # metadata, like measurements. Not for benchmarking itself.
     dist.init_process_group(
         backend="gloo",
-        init_method="tcp://{}:{}".format(args.master_addr, args.master_port),
+        init_method=f"tcp://{args.master_addr}:{args.master_port}",
         rank=args.rank,
         world_size=args.world_size,
     )
@@ -227,10 +226,10 @@ def main():
         print("PyTorch distributed benchmark suite")
         print("-----------------------------------")
         print("")
-        print("* PyTorch version: {}".format(torch.__version__))
-        print("* CUDA version: {}".format(torch.version.cuda))
-        print("* Distributed backend: {}".format(args.distributed_backend))
-        print("* Maximum bucket size: {}MB".format(args.bucket_size))
+        print(f"* PyTorch version: {torch.__version__}")
+        print(f"* CUDA version: {torch.version.cuda}")
+        print(f"* Distributed backend: {args.distributed_backend}")
+        print(f"* Maximum bucket size: {args.bucket_size}MB")
         print("")
         print("--- nvidia-smi topo -m ---")
         print("")
@@ -239,7 +238,7 @@ def main():
         print("")
 
     torch.cuda.set_device(dist.get_rank() % 8)
-    device = torch.device('cuda:%d' % (dist.get_rank() % 8))
+    device = torch.device("cuda:%d" % (dist.get_rank() % 8))
 
     benchmarks = []
     if args.model:
@@ -248,7 +247,9 @@ def main():
                 device=device,
                 distributed_backend=args.distributed_backend,
                 bucket_size=args.bucket_size,
-                model=args.model))
+                model=args.model,
+            )
+        )
     else:
         for model in ["resnet50", "resnet101", "resnext50_32x4d", "resnext101_32x8d"]:
             benchmarks.append(
@@ -256,18 +257,22 @@ def main():
                     device=device,
                     distributed_backend=args.distributed_backend,
                     bucket_size=args.bucket_size,
-                    model=model))
+                    model=model,
+                )
+            )
 
     benchmark_results = []
     for benchmark in benchmarks:
         if args.rank == 0:
-            print("\nBenchmark: {}".format(str(benchmark)))
+            print(f"\nBenchmark: {str(benchmark)}")
         result = sweep(benchmark)
-        benchmark_results.append({
-            "model": benchmark.model,
-            "batch_size": benchmark.batch_size,
-            "result": result,
-        })
+        benchmark_results.append(
+            {
+                "model": benchmark.model,
+                "batch_size": benchmark.batch_size,
+                "result": result,
+            }
+        )
 
     # Write file with benchmark results if applicable
     if args.rank == 0 and args.json:
@@ -278,9 +283,9 @@ def main():
             "bucket_size": args.bucket_size,
             "benchmark_results": benchmark_results,
         }
-        with open(args.json, 'w') as f:
+        with open(args.json, "w") as f:
             json.dump(report, f)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,14 +1,13 @@
 #include <ATen/MapAllocator.h>
 
 #include <atomic>
-#include <string>
 #include <random>
+#include <string>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Unicode.h>
 
 /* stuff for mapped files */
@@ -17,9 +16,9 @@
 #endif
 
 #if defined(HAVE_MMAP)
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #endif
 
 #if !defined(_MSC_VER) || defined(HAVE_MMAP)
@@ -28,28 +27,29 @@
 #elif defined(_MSC_VER)
 #include <c10/util/win32-headers.h>
 #endif
+#include <fmt/format.h>
 
 namespace at {
 
 static constexpr int64_t map_alloc_alignment = 64;
 
-TORCH_API std::string NewProcessWideShmHandle()
-{
+std::string NewProcessWideShmHandle() {
   static std::atomic<uint64_t> counter{0};
   static std::random_device rd;
-  std::string handle = "/torch_";
 #ifdef _MSC_VER
-  handle += c10::guts::to_string(GetCurrentProcessId());
+  return fmt::format(
+      "/torch_{}_{}_{}",
+      GetCurrentProcessId(),
+      rd(),
+      counter.fetch_add(1, std::memory_order_relaxed));
 #else
-  handle += c10::guts::to_string(getpid());
+  return fmt::format(
+      "/torch_{}_{}_{}",
+      getpid(),
+      rd(),
+      counter.fetch_add(1, std::memory_order_relaxed));
 #endif
-  handle += "_";
-  handle += c10::guts::to_string(rd());
-  handle += "_";
-  handle += c10::guts::to_string(counter.fetch_add(1, std::memory_order_relaxed));
-  return handle;
 }
-
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
 namespace {
@@ -57,20 +57,20 @@ struct MapInfo {
   std::atomic<int> refcount;
 };
 
-const std::string unknown_filename = "filename not specified";
+constexpr const char* unknown_filename = "filename not specified";
 #ifdef _WIN32
-const std::string unknown_eventname = "eventname not specified";
+constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
-  : filename_(filename.empty() ? unknown_filename : std::move(filename))
+MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size)
+  : filename_(filename.empty() ? unknown_filename : filename)
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
   , event_(INVALID_HANDLE_VALUE) // to be filled later
-  , eventname_(filename.empty() ? unknown_eventname : (filename + "_event"))
+  , eventname_(filename.empty() ? unknown_eventname : (std::string(filename) + "_event"))
 #else
   , fd_(fd)
 #endif
@@ -359,8 +359,8 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-MapAllocator::MapAllocator(std::string filename, int flags, size_t size)
-  : MapAllocator(WITH_FD, std::move(filename), -1, flags, size)
+MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size)
+  : MapAllocator(WITH_FD, filename, -1, flags, size)
 {}
 
 #ifdef _WIN32
@@ -425,11 +425,11 @@ void MapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-MapAllocator::MapAllocator(std::string filename, int flags, size_t size) {
+MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
-MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size) {
+MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
@@ -574,8 +574,8 @@ RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const at::DataPtr& d
   return dptr.cast_context<RefcountedMapAllocator>(&deleteRefcountedMapAllocator);
 }
 
-at::DataPtr MapAllocator::makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* context = new MapAllocator(std::move(filename), flags, size);
+at::DataPtr MapAllocator::makeDataPtr(c10::string_view filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new MapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }

@@ -28,6 +28,8 @@ namespace api {
  */
 VkFormat vk_format(const at::ScalarType dtype) {
   switch (dtype) {
+    case c10::kBool:
+      return VK_FORMAT_R8G8B8A8_SINT;
     case kFloat:
 #ifdef USE_VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;

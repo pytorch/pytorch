@@ -31,29 +31,39 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
     }
   }
 
-  switch (v_dst.storage_type()) {
-    case api::StorageType::TEXTURE_3D:
-      return VK_KERNEL(nchw_to_image);
-    case api::StorageType::TEXTURE_2D:
-      return VK_KERNEL(nchw_to_image2d);
-    default:
-      TORCH_CHECK(false, "No kernel available!");
+  if (v_dst.dtype() == at::kFloat) {
+    switch (v_dst.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        return VK_KERNEL(nchw_to_image);
+      case api::StorageType::TEXTURE_2D:
+        return VK_KERNEL(nchw_to_image2d);
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+    }
+  } else if (v_dst.dtype() == at::kBool) {
+    switch (v_dst.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        return VK_KERNEL(nchw_to_image_bool);
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported dtype!");
   }
 }
 
 api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
-  if (v_src.is_quantized()) {
+  if (v_src.is_quantized() || v_src.dtype() == at::kBool) {
     auto plane_size =
         dim_at<Dim4D::Height>(v_src) * dim_at<Dim4D::Width>(v_src);
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         switch (v_src.dtype()) {
           case c10::ScalarType::QUInt8:
-            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
-                                       : VK_KERNEL(image_to_nchw_quantized);
           case c10::ScalarType::QInt8:
+          case at::kBool:
             return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
-                                       : VK_KERNEL(image_to_nchw_quantized);
+                                       : VK_KERNEL(image_to_nchw_uint);
           case c10::ScalarType::QInt32:
             return VK_KERNEL(image_to_nchw_int32);
           default:
@@ -70,13 +80,17 @@ api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
     }
   }
 
-  switch (v_src.storage_type()) {
-    case api::StorageType::TEXTURE_3D:
-      return VK_KERNEL(image_to_nchw);
-    case api::StorageType::TEXTURE_2D:
-      return VK_KERNEL(image2d_to_nchw);
-    default:
-      TORCH_CHECK(false, "No kernel available!");
+  if (v_src.dtype() == at::kFloat) {
+    switch (v_src.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        return VK_KERNEL(image_to_nchw);
+      case api::StorageType::TEXTURE_2D:
+        return VK_KERNEL(image2d_to_nchw);
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported dtype!");
   }
 }
 
@@ -161,13 +175,16 @@ void record_image_to_nchw_op(
   };
 
   if (v_src.dtype() == c10::ScalarType::QUInt8 ||
-      v_src.dtype() == c10::ScalarType::QInt8) {
+      v_src.dtype() == c10::ScalarType::QInt8 || v_src.dtype() == at::kBool) {
+    // Special case using optimized shader, image_to_nchw_quantized_mul4
     if (plane_size % 4 == 0) {
       global_size.data[0u] = plane_size / 4;
       global_size.data[1u] = 1;
       local_size.data[0u] *= local_size.data[1u];
       local_size.data[1u] = 1;
-    } else {
+    }
+    // Global and local size for regular 1D buffer.
+    else {
       uint32_t numel = v_src.numel();
       global_size = {api::utils::div_up(numel, uint32_t(4)), 1u, 1u};
       local_size = {64u, 1u, 1u};

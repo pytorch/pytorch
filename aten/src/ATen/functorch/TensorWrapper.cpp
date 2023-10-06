@@ -11,6 +11,8 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <iostream>
+
 namespace at {
 namespace functorch {
 
@@ -38,15 +40,9 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
 }
 
 void TensorWrapper::refreshMetadata() {
-  auto dim = value_.dim();
-  auto sizes = value_.sizes();
-  auto strides = value_.strides();
-  storage_offset_ = value_.storage_offset();
-  sizes_and_strides_.resize(value_.dim());
-  for (int64_t i = 0; i < dim; i++) {
-    sizes_and_strides_.size_at_unchecked(i) = sizes[i];
-    sizes_and_strides_.stride_at_unchecked(i) = strides[i];
-  }
+  // update size, strides and storage_offset
+  set_sizes_and_strides(
+      value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
 
   refresh_numel();
   refresh_contiguous();
@@ -157,18 +153,6 @@ TensorWrapper::TensorWrapper(
   refreshMetadata();
 
   set_storage_access_should_throw();
-}
-
-// The following are some internal inherited methods that we do not support.
-// They should never get called.
-void TensorWrapper::set_size(int64_t dim, int64_t new_size) {
-  TORCH_INTERNAL_ASSERT(false, "Can't set_size for TensorWrapper");
-}
-void TensorWrapper::set_stride(int64_t dim, int64_t new_stride) {
-  TORCH_INTERNAL_ASSERT(false, "Can't set_stride for TensorWrapper");
-}
-void TensorWrapper::set_storage_offset(int64_t storage_offset) {
-  TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for TensorWrapper");
 }
 
 const char* TensorWrapper::tensorimpl_type_name() const {

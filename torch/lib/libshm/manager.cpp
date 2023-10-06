@@ -83,7 +83,7 @@ int main(int argc, char* argv[]) {
   setsid(); // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  c10::optional<c10::TempDir> tempdir;
+  std::optional<c10::TempDir> tempdir;
   try {
     tempdir = c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
     if (!tempdir.has_value()) {

@@ -58,7 +58,7 @@ class FullyConnectedFakeLowpFPOp final : public Operator<Context> {
         axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
             this->template GetSingleArgument<bool>("float16_compute", false)) {}
-  ~FullyConnectedFakeLowpFPOp() {}
+  ~FullyConnectedFakeLowpFPOp() override {}
 
   template <
       typename T_X,
@@ -104,7 +104,7 @@ class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
         axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
             this->template GetSingleArgument<bool>("float16_compute", false)) {}
-  ~FullyConnectedGradientFakeLowpFPOp() {}
+  ~FullyConnectedGradientFakeLowpFPOp() override {}
 
   template <
       typename T_X,

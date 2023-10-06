@@ -7,7 +7,8 @@
 #include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <iostream>
+#include <ostream>
+#include <sstream>
 #include <utility>
 
 namespace c10 {
@@ -17,7 +18,7 @@ OptionalTypePtr OptionalType::create(TypePtr contained) {
 }
 
 TypePtr OptionalType::ofTensor() {
-  static auto value = TypeFactory::create<OptionalType>(TensorType::get());
+  static auto value = OptionalType::create(TensorType::get());
   return value;
 }
 

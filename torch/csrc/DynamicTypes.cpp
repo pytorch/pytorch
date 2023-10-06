@@ -57,16 +57,14 @@ THPLayout* getTHPLayout(at::Layout layout) {
 }
 
 PyObject* createPyObject(const at::Storage& storage) {
-  if (storage.device_type() != at::DeviceType::Meta &&
-      storage.data() == nullptr && storage.sym_nbytes() != 0 &&
-      // Grabbing storage() from FunctionalTensorWrapper is allowed.
-      // This is useful for checking aliasing info from python
-      dynamic_cast<at::functionalization::FunctionalStorageImpl*>(
-          storage.unsafeGetStorageImpl()) == nullptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
-  }
+  // Note [Invalid Python Storages]
+  // When a user creates a python tensor wrapper subclass, the subclass
+  // is a tensor object that has a nullptr storage.
+  // We still allow users to call `my_subclass.untyped_storage()`, and get back
+  // a valid storage object (this can be useful for detecting aliasing
+  // information about storages from python). However, any accesses to the
+  // data_ptr is not allowed, through methods like
+  // x.untyped_storage().data_ptr()
   PyObject* obj = THPStorage_Wrap(storage);
   if (!obj)
     throw python_error();
@@ -99,11 +97,9 @@ bool isStorage(PyObject* obj) {
 
 std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
     PyObject* obj) {
-  at::ScalarType scalar_type;
-  bool is_typed_storage;
-
-  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
-  PyObject* untyped_storage_obj;
+  at::ScalarType scalar_type = at::ScalarType::Undefined;
+  bool is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+  PyObject* untyped_storage_obj = nullptr;
 
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and

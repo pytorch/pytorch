@@ -690,68 +690,116 @@ python_ref_db: List[OpInfo] = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j0",
         torch_opinfo_name="special.bessel_j0",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j1",
         torch_opinfo_name="special.bessel_j1",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.entr",
         torch_opinfo_name="special.entr",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(precisionOverride({torch.float16: 1e-1, torch.bfloat16: 1e-1}),),
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_large",
+                dtypes=[torch.bfloat16, torch.float16],
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.erfcx",
         torch_opinfo_name="special.erfcx",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=0, rtol=4e-6),
+                }
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(precisionOverride({torch.bfloat16: 3e-1, torch.float16: 3e-1}),),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1",
         torch_opinfo_name="special.i1",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                    }
+                )
+            ),
+        ),
+        skips=(
+            DecorateInfo(
+                unittest.skip("Incorrect result!"),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_large",
+                dtypes=(torch.int8,),
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.log_ndtr",
         torch_opinfo_name="special.log_ndtr",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtr",
         torch_opinfo_name="special.ndtr",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",
         torch_opinfo_name="special.ndtri",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.spherical_bessel_j0",
         torch_opinfo_name="special.spherical_bessel_j0",
-        supports_nvfuser=False,
         op_db=op_db,
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
+            ),
+        ),
     ),
     #
     # Elementwise Binary Special OpInfos
@@ -760,7 +808,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.special.zeta",
         torch_opinfo_name="special.zeta",
         supports_one_python_scalar=True,
-        supports_nvfuser=False,
         op_db=op_db,
         skips=(
             # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu

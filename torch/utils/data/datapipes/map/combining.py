@@ -40,14 +40,14 @@ class ConcaterMapDataPipe(MapDataPipe):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
 
-    def __getitem__(self, index) -> T_co:
+    def __getitem__(self, index) -> T_co:  # type: ignore[type-var]
         offset = 0
         for dp in self.datapipes:
             if index - offset < len(dp):
                 return dp[index - offset]
             else:
                 offset += len(dp)
-        raise IndexError("Index {} is out of range.".format(index))
+        raise IndexError(f"Index {index} is out of range.")
 
     def __len__(self) -> int:
         return sum(len(dp) for dp in self.datapipes)

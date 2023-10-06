@@ -108,7 +108,7 @@ struct C10_API Storage {
     return storage_impl_->mutable_data();
   }
 
-  at::DataPtr& mutable_data_ptr() {
+  at::DataPtr& mutable_data_ptr() const {
     return storage_impl_->mutable_data_ptr();
   }
 

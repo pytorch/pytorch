@@ -39,6 +39,24 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str,
 
     return tuple(flat_args), tuple(kwarg_keys)
 
+def _cast_forward_inputs(
+    dtype: Optional[torch.dtype],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, Any]:
+    """
+    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
+    This respects the existing ``requires_grad`` on the tensors.
+    """
+    if dtype is None:
+        return args, kwargs
+
+    def cast_fn(x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_floating_point(x) or x.dtype == dtype:
+            return x
+        return x.to(dtype)
+
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
@@ -89,7 +107,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                 with device_mod.stream(stream):
                     output = obj.to(target_device)
                 # synchronize with the copy stream
-                with torch.cuda.device(target_device.index):
+                with device_mod.device(target_device.index):
                     current_stream = device_mod.current_stream()
                     # Sync the current stream with the copy stream
                     current_stream.wait_stream(stream)

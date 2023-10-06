@@ -1,4 +1,5 @@
 #include "torch/csrc/autograd/FunctionsManual.h"
+#include "torch/csrc/dynamo/compiled_autograd.h"
 
 // ${generated_comment}
 

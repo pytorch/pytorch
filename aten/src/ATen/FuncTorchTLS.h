@@ -3,8 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <memory>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // NOTE [functorch TLS in pytorch/pytorch]
 //
@@ -29,6 +28,7 @@ struct TORCH_API FuncTorchTLSBase {
   virtual std::unique_ptr<FuncTorchTLSBase> deepcopy() const = 0;
 
   virtual int64_t checkSupportsSingleLevelAutogradFunction() const = 0;
+  virtual void checkSupportsCppAutogradFunction() const = 0;
   virtual void checkSupportsInplaceRequiresGrad() const = 0;
   virtual void checkSupportsRetainGrad() const = 0;
 };
@@ -43,5 +43,4 @@ TORCH_API void setFuncTorchTLS(
 // get a mutable reference to the functorch tls
 TORCH_API std::unique_ptr<FuncTorchTLSBase>& functorchTLSAccessor();
 
-} // namespace functorch
-} // namespace at
+} // namespace at::functorch

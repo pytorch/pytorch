@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <ATen/ATen.h>
 
@@ -14,6 +15,17 @@ namespace autograd {
 
 auto Error::apply(variable_list&& inputs) -> variable_list {
   throw std::runtime_error(msg);
+}
+
+void Error::compiled_args(CompiledNodeArgs& args) {
+  // throw the error durring collect, the graph won't get compiled
+  apply(variable_list());
+}
+
+variable_list Error::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  TORCH_INTERNAL_ASSERT(false, "unreachable");
 }
 
 auto DelayedError::apply(variable_list&& inputs) -> variable_list {
@@ -53,6 +65,18 @@ auto UndefinedGradBackward::apply(variable_list&& output_grads)
 
 auto Identity::apply(variable_list&& grads) -> variable_list {
   return std::move(grads);
+}
+
+void GraphRoot::compiled_args(CompiledNodeArgs& args) {
+  args.collect(outputs);
+}
+variable_list GraphRoot::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  saved.before(outputs);
+  variable_list result(outputs);
+  saved.after(outputs);
+  return result;
 }
 
 } // namespace autograd
