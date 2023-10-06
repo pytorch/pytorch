@@ -3979,17 +3979,6 @@ class FallbackKernel(ExternKernelAlloc):
                 convert_shape_to_inductor(output.stride()),
             )
 
-        if isinstance(example_output, torch.Tensor):
-            return FallbackKernel(
-                tensor_to_layout(example_output),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                schema=schema,
-            )
-
-
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -4102,6 +4091,11 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
+    def has_aliasing(self):
+        return any(
+            isinstance(inp, FallbackKernel) and inp.has_aliasing()
+            for inp in self.inputs
+        )
 
 def _prepare_convolution_fusion_create(
     cls,
