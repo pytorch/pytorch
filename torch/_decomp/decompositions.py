@@ -3778,9 +3778,9 @@ def matmul(tensor1, tensor2):
             and dim_tensor2 == 3
             and batch_tensor1[0] != batch_tensor2[0]
         ):
-            if batch_tensor1[0] == 1 and tensor1.requires_grad():
+            if batch_tensor1[0] == 1 and tensor1.requires_grad:
                 return matmul(tensor1.squeeze(0), tensor2)
-            if batch_tensor2[0] == 1 and tensor2.requires_grad():
+            if batch_tensor2[0] == 1 and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)

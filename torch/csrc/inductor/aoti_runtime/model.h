@@ -307,7 +307,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants,
       std::optional<std::string> cubin_dir) {
-    return std::make_unique<AOTInductorModel>(constants, cubin_dir);
+    return std::make_unique<AOTInductorModel>(std::move(constants), cubin_dir);
   }
 
  private:
