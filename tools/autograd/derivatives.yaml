@@ -2786,8 +2786,13 @@
   result: auto_linear
 
 - name: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
-  self: unbind_backward(grads, dim)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: unbind_backward(grads, dim)
+      result: auto_linear
+    AutogradNestedTensor:
+      self: unbind_backward_nested(grads, at::native::get_nested_tensor_impl(self)->get_nested_sizes(), dim, self.options())
+      result: auto_linear
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
   tensors: stack_tensors_backward(grad, dim, to_args_scalartypes(tensors))

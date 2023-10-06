@@ -20,6 +20,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
@@ -992,6 +993,26 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
                     : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
+}
+
+Tensor unbind_backward_nested(
+    const variable_list& grads,
+    const Tensor& nt_sizes,
+    int64_t dim,
+    const at::TensorOptions& options) {
+  std::vector<Tensor> grads_tensors;
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      grads_tensors.push_back(static_cast<Tensor>(grads[i]));
+    } else {
+      const auto component_size = nt_sizes[i].contiguous();
+      const c10::IntArrayRef grad_size(
+          component_size.data_ptr<int64_t>(), component_size.size(0));
+      grads_tensors.push_back(at::zeros(grad_size, options));
+    }
+  }
+
+  return at::_nested_tensor_from_tensor_list(grads_tensors);
 }
 
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
