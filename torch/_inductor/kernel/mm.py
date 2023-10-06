@@ -144,7 +144,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     from torch._inductor.ir import FixedLayout, FlexibleLayout
 
-    if len(choices) == 1 and isinstance(layout, FixedLayout):
+    if (
+        len(choices) == 1
+        and use_aten_gemm_kernels()
+        and isinstance(layout, FixedLayout)
+    ):
         # If we are not autotuning, we can swap to a FlexibleLayout
         # in order to get fusion optimizations to kick in, e.g. ConcatFusion
         layout = FlexibleLayout(
