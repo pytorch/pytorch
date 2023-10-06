@@ -77,7 +77,6 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
-bytecode_src_log = torch._logging.getArtifactLogger(__name__, "bytecode_src")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
@@ -535,29 +534,10 @@ def _compile(
             out_code,
         )
 
-        if bytecode_src_log.isEnabledFor(logging.DEBUG):
-            try:
-                import depyf  # type: ignore[import]
-            except ImportError:
-                bytecode_src_log.debug(
-                    "Decompilation relies on the library `depyf`, "
-                    "which could not be found on this machine. Run `pip "
-                    "install depyf` to install the library."
-                )
-                raise
-
-            try:
-                decompiled_src = depyf.decompile(out_code)
-                bytecode_src_log.debug("possible source code:")
-                bytecode_src_log.debug(decompiled_src)
-            except Exception as e:
-                bytecode_src_log.debug("Decompilation fails due to: %s", str(e))
-            finally:
-                bytecode_src_log.debug(
-                    "If you find the decompiled code is wrong,"
-                    "please submit an issue at "
-                    "https://github.com/youkaichao/depyf/issues."
-                )
+        for hook in config.output_bytecode_hooks:
+            hook_output = hook(code, out_code)
+            if hook_output is not None:
+                out_code = hook_output
 
         assert output is not None
 
