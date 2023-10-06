@@ -208,6 +208,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
     int64_t output_size,
