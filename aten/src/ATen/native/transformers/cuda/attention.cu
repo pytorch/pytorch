@@ -51,6 +51,7 @@
 #include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/narrow_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <ATen/native/cudnn/MHA.h>

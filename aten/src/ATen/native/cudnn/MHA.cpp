@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+//#ifndef AT_PER_OPERATOR_HEADERS
+//#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 

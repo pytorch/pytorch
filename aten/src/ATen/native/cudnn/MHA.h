@@ -1,5 +1,6 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+//#include <ATen/ATen.h>
 
 namespace at { namespace native {
 

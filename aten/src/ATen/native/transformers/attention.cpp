@@ -26,6 +26,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cudnn_mha.h>
 #include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_masked_softmax.h>
 #include <ATen/ops/_native_multi_head_attention_native.h>
