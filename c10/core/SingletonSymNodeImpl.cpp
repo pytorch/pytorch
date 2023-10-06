@@ -22,7 +22,7 @@ bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
       return true;
     }
     TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
-  } else if (auto mb_si = rhs->singleton_int()) {
+  } else if (rhs->singleton_int()) {
     if (lhs->constant_int() && *lhs->constant_int() < 2) {
       return false;
     }
