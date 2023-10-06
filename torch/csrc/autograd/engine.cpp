@@ -965,6 +965,8 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
+  LOG(WARNING) << "Engine::evaluate_function " << func->name();
+
   // The InputBuffer::adds that supplied incoming grads took pains to
   // ensure they're safe to consume in the context of the present
   // func's stream (if applicable). So we guard onto that stream
@@ -1166,11 +1168,12 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
+  LOG(WARNING) << "Engine::execute";
   validate_outputs(
       root_edges,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<variable_list&>(inputs),
-      [](const std::string& msg) { return msg; });
+      [](const std::string& msg) { return "root edges " + msg; });
   if (accumulate_grad && create_graph) {
     TORCH_WARN_ONCE(
         "Using backward() with create_graph=True will create a reference cycle "

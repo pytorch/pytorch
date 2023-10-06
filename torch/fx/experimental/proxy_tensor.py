@@ -356,7 +356,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
-
     # print(proxy_out.tracer.graph)
     # for node in proxy_out.tracer.graph.nodes:
     #     print(node, node.meta)
@@ -423,6 +422,9 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         constant = None
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+
+    log.warning("%s", proxy_out.node.format_node_compact())
+
     return out
 
 

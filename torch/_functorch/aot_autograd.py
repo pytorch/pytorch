@@ -1673,6 +1673,9 @@ def create_joint(
         backward_out = []
         # Call the backwards pass
         if grad_primals:
+            from torchviz import make_dot
+            for out in needed_outs:
+                log.warning("DOT GRAPH\n%s", make_dot(out))
             with fx_traceback.preserve_node_meta():
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
