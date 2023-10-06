@@ -71,7 +71,9 @@ decomps_to_exclude = [
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
-    aten.glu,  # has lowering in inductor
+    aten.glu,  # inductor lowers this directly
+    aten.split.Tensor,  # inductor lowers this directly
+    aten.unbind,  # inductor lowers this directly
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -200,6 +202,9 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
+            return alpha * out + beta * self
+        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+            out = (mat1.T * mat2).sum(dim=0, keepdim=True)
             return alpha * out + beta * self
     return NotImplemented
 
