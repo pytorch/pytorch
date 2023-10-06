@@ -308,14 +308,12 @@ def _multi_tensor_asgd(
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_axs = _view_complex_as_real(grouped_axs)
+        grouped_grads = list(grouped_grads)
+        for i in range(len(grouped_params)):
+            if torch.is_complex(grouped_params[i]):
+                grouped_params[i] = torch.view_as_real(grouped_params[i])
+                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                grouped_axs[i] = torch.view_as_real(grouped_axs[i])
 
         # update step
         torch._foreach_add_(grouped_state_steps, 1)
