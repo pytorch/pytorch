@@ -11,29 +11,18 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 
 import hypothesis
 import hypothesis.strategies as st
-import pytest
-
-import torch._numpy as np
 from hypothesis.extra.numpy import arrays
+
+import pytest
 from pytest import raises as assert_raises
 
-from torch._numpy.testing import (
-    assert_,
-    assert_allclose,  # IS_PYPY,
-    assert_almost_equal,
-    assert_array_almost_equal,
-    assert_array_equal,
-    assert_equal,
-    assert_raises_regex,
-    assert_warns,
-    suppress_warnings,  # HAS_REFCOUNT, IS_WASM
-)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
     TestCase,
+    TEST_WITH_TORCHDYNAMO
 )
 
 skip = functools.partial(skipif, True)
@@ -47,25 +36,75 @@ IS_PYPY = False
 # from numpy lib import digitize, piecewise, trapz, select, trim_zeros, interp
 from numpy.lib import delete, extract, insert, msort, place, setxor1d, unwrap, vectorize
 
-from torch._numpy import (
-    angle,
-    bartlett,
-    blackman,
-    corrcoef,
-    cov,
-    diff,
-    flipud,
-    gradient,
-    hamming,
-    hanning,
-    i0,
-    kaiser,
-    meshgrid,
-    sinc,
-    unique,
-)
-from torch._numpy._util import normalize_axis_tuple
-from torch._numpy.random import rand
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        angle,
+        bartlett,
+        blackman,
+        corrcoef,
+        cov,
+        diff,
+        flipud,
+        gradient,
+        hamming,
+        hanning,
+        i0,
+        kaiser,
+        meshgrid,
+        sinc,
+        unique,
+    )
+    from numpy.core.numeric import normalize_axis_tuple
+    from numpy.random import rand
+
+    from numpy.testing import (
+        assert_,
+        assert_allclose,  # IS_PYPY,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        assert_raises_regex,
+        assert_warns,
+        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        angle,
+        bartlett,
+        blackman,
+        corrcoef,
+        cov,
+        diff,
+        flipud,
+        gradient,
+        hamming,
+        hanning,
+        i0,
+        kaiser,
+        meshgrid,
+        sinc,
+        unique,
+    )
+    from torch._numpy._util import normalize_axis_tuple
+    from torch._numpy.random import rand
+
+    from torch._numpy.testing import (
+        assert_,
+        assert_allclose,  # IS_PYPY,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        assert_raises_regex,
+        assert_warns,
+        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
+    )
 
 
 def get_mat(n):
@@ -867,7 +906,8 @@ class TestDelete(TestCase):
         with pytest.raises(IndexError):
             np.delete([0, 1, 2], np.array([], dtype=float))
 
-    @parametrize("indexer", [np.array([1]), [1]])
+    @parametrize("indexer", [subtest(np.array([1]), name="array([1])"),
+                             subtest([1], name="[1]")])
     def test_single_item_array(self, indexer):
         a_del_int = delete(self.a, 1)
         a_del = delete(self.a, indexer)
