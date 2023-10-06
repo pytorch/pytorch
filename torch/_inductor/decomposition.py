@@ -268,14 +268,60 @@ def angle(x):
         nan = torch.where(torch.isnan(x), float("nan"), 0.0)
         return ret + nan
 
+
 @register_decomposition([aten.add])
-def add(x, y):
-    if x.is_complex():
-        z1 = x.real + y.real
-        z2 = x.imag + y.imag;
-        return torch.complex(z1, z2);
-    else:
+def add(x, y, **kwargs):
+    x_is_complex = torch.is_tensor(x) and x.is_complex()
+    y_is_complex = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex and not y_is_complex:
         return NotImplemented
+    r = y.real
+    i = y.imag
+    alpha = kwargs.get("alpha")
+    if alpha is not None:
+        r *= alpha
+        i *= alpha
+    r = x.real + r
+    i = x.imag + i
+    return (
+        torch.where(
+            torch.arange(2, device=x.device, dtype=torch.uint8) == 0,
+            r.unsqueeze(-1),
+            i.unsqueeze(-1),
+        )
+        .view(x.dtype)
+        .squeeze(-1)
+    )
+
+
+@register_decomposition([aten.real])
+def real(self):
+    if not torch.is_tensor(self) or not self.is_complex():
+        return NotImplemented
+    assert self.is_complex(), "real should only be called on a complex tensor"
+    if self.dtype == torch.complex32:
+        return self.view(torch.float16)[..., ::2]
+    elif self.dtype == torch.complex64:
+        return self.view(torch.float32)[..., ::2]
+    elif self.dtype == torch.complex128:
+        return self.view(torch.float64)[..., ::2]
+    else:
+        raise AssertionError("unsupported complex type")
+
+
+@register_decomposition([aten.imag])
+def imag(self):
+    if not torch.is_tensor(self) or not self.is_complex():
+        return NotImplemented
+    if self.dtype == torch.complex32:
+        return self.view(torch.float16)[..., 1::2]
+    elif self.dtype == torch.complex64:
+        return self.view(torch.float32)[..., 1::2]
+    elif self.dtype == torch.complex128:
+        return self.view(torch.float64)[..., 1::2]
+    else:
+        raise AssertionError("unsupported complex type")
+
 
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):

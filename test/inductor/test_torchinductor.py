@@ -611,6 +611,15 @@ class CommonTemplate:
 
         self.common(fn, (x, y))
 
+    def test_add_complex(self):
+        def fn(a, b):
+            return a + b
+
+        x = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
+        y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
+
+        self.common(fn, (x, y))
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -637,19 +646,6 @@ class CommonTemplate:
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
         self.common(fn, (complex_input, real_input, interger_real_input))
-
-    def test_add(self):
-        def fn(a, b):
-            return a + b
-
-        x = torch.tensor(
-            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1]
-        )
-        y = torch.tensor(
-            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1]
-        )
-
-        self.common(fn, (x, y))
 
     def test_sgn(self):
         def fn(a):
@@ -3060,7 +3056,7 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
         class ToComplex(nn.Module):
             def forward(self, x):
