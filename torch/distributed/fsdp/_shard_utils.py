@@ -230,6 +230,8 @@ def _create_chunk_dtensor(
             )
             local_tensor = tensor_list[rank].clone().detach()
 
+            # TP is the inner dimension and FSDP is the outer dimension.
+            # Therefore, shard placements for tensor is (Shard(0), dt_placements)
             placements = [DShard(0) for _ in range(parent_mesh.ndim)]
             placements[1] = dt_placements
             return DTensor.from_local(local_tensor, parent_mesh, placements)

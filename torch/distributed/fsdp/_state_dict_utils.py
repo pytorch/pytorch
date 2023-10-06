@@ -676,15 +676,32 @@ def _sharded_pre_load_state_dict_hook(
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             state_dict[fqn_from_global_root] = tensor
         else:
-            if param.device != fsdp_state._device_mesh.device_type:
-                param = param.to(fsdp_state._device_mesh.device_type)
-            placements = list(copy.deepcopy(param.placements))
-            placements[-1] = Replicate()
-            param = param.redistribute(
-                device_mesh=param.device_mesh,
-                placements=placements,
-            )
-            state_dict[fqn_from_global_root] = param.to_local()
+            print("here!!!")
+            device_mesh = fsdp_state._device_mesh
+            device_type = device_mesh.device_type
+            if param.device != device_type:
+                param = param.to(device_type)
+
+            parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+            if not parent_mesh:
+                placements = list(copy.deepcopy(param.placements))
+                placements[-1] = Replicate()
+                param = param.redistribute(
+                    device_mesh=param.device_mesh,
+                    placements=placements,
+                )
+                state_dict[fqn_from_global_root] = param.to_local()
+            else:
+                dp_rank = list(device_mesh.mesh).index(parent_mesh.get_rank())
+                param = DTensor.from_local(param.to_local(), device_mesh, (Shard(0),))
+                # print(f"dp_rank:{dp_rank}")
+                # placements = list(copy.deepcopy(param.placements))
+                # placements[0] = Replicate()
+                # param = param.redistribute(
+                #     device_mesh=parent_mesh,
+                #     placements=placements,
+                # )
+                state_dict[fqn_from_global_root] = param.to_local()
 
     with SimpleProfiler.profile("_enter_unshard_params_ctx"):
         _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
