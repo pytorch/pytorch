@@ -55,17 +55,17 @@ void test_overflow() {
   ASSERT_EQ(s1.toInt(), 100000);
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toHalf(), std::runtime_error);
+  ASSERT_THROW(s1.toHalf(), c10::ValueError);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toInt(), std::runtime_error);
+  ASSERT_THROW(s1.toInt(), c10::ValueError);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toInt(), std::runtime_error);
+  ASSERT_THROW(s1.toInt(), c10::ValueError);
 }
 
 TEST(TestScalar, TestScalar) {

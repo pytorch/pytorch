@@ -330,13 +330,14 @@ class TestForeach(TestCase):
         if values is not None:
             try:
                 actual = op(inputs + [values], self.is_cuda, is_fastpath, **kwargs)
-            except RuntimeError as e:
+            except Exception as e:
                 # Match with error messages from regular non-foreach reference if no
                 # custom error message was provided.
                 if custom_values_err is None:
                     with self.assertRaisesRegex(type(e), re.escape(str(e))):
                         ref(ref_inputs, values=values)
                 else:
+                    self.assertEqual(type(e), RuntimeError)
                     self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
             else:
                 expected = ref(ref_inputs, values=values)

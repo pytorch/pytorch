@@ -3454,7 +3454,7 @@ class TestRandomTensorCreation(TestCase):
                                          2**53 + 2)):
             res = torch.empty(0, dtype=dtype, device=device)
             torch.randperm(small_n, out=res)  # No exception expected
-            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res, device=device))
+            self.assertRaises(ValueError, lambda: torch.randperm(large_n, out=res, device=device))
 
         # Test non-contiguous tensors
         for n in (4, 5, 6, 10, 20):

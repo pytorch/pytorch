@@ -6672,8 +6672,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_interpolate_undefined_behavior_casting(self):
         x = torch.ones([1, 1, 16, 16])
-        self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=-1e20, mode="bilinear"))
-        self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=1e20, mode="bilinear"))
+        self.assertRaises(ValueError, lambda: F.interpolate(x, scale_factor=-1e20, mode="bilinear"))
+        self.assertRaises(ValueError, lambda: F.interpolate(x, scale_factor=1e20, mode="bilinear"))
 
     def test_interpolate_buffer_overflow(self):
         # Test buffer overflow issue due to inaccurate floating point

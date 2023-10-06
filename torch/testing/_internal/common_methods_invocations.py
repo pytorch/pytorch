@@ -6157,10 +6157,12 @@ def error_inputs_masked_fill(op_info, device, **kwargs):
                      error_regex="only supports a 0-dimensional value tensor, but got tensor with 1 dimension")
     # downcasting complex value (scalar overload)
     yield ErrorInput(SampleInput(make_arg((2, 2)), args=(make_arg(()) > 0, 1j)),
+                     error_type=ValueError,
                      error_regex=r"value cannot be converted to type .* without overflow")
     # downcasting complex value (tensor overload)
     yield ErrorInput(SampleInput(torch.ones(2, dtype=torch.long, device=device),
                                  args=(make_arg(()) > 0, torch.tensor(1j, device=device))),
+                     error_type=ValueError,
                      error_regex=r"value cannot be converted to type .* without overflow")
 
     if torch.device(device).type == 'cuda':
