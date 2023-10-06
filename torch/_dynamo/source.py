@@ -337,6 +337,12 @@ class GetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class ConstantGetItemSource(GetItemSource):
+    def guard_source(self):
+        return GuardSource.CONSTANT
+
+
+@dataclasses.dataclass(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")

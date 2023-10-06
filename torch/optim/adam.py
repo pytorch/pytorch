@@ -486,11 +486,14 @@ def _multi_tensor_adam(params: List[Tensor],
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
-        device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        device_max_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        for i in range(len(device_params)):
+            if torch.is_complex(device_params[i]):
+                device_params[i] = torch.view_as_real(device_params[i])
+                device_grads[i] = torch.view_as_real(device_grads[i])
+                device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
+                device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
+                if amsgrad:
+                    device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
