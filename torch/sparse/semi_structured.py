@@ -361,7 +361,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 if weight.compressed_tensor_cusparselt is None:
                     assert weight.sparse_tensor_cutlass is not None and weight.meta_tensor_cutlass is not None
                     return torch._sparse_semi_structured_linear(
-<<<<<<< HEAD
                         input_tensor,
                         weight.sparse_tensor_cutlass,
                         weight.meta_tensor_cutlass,
@@ -373,20 +372,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         input_tensor.view(-1, shape[-1]).t(),
                         bias
                     ).t().view(*shape[:-1], -1)
-=======
-                        input_tensor, weight.values(), weight.indices(), bias=bias
-                    )
-                else:
-                    return (
-                        torch._cslt_sparse_mm(
-                            weight.compressed_tensor,  # type: ignore[arg-type]
-                            input_tensor.view(-1, shape[-1]).t(),
-                            bias,
-                        )
-                        .t()
-                        .view(*shape[:-1], -1)
-                    )
->>>>>>> de30920a330 ([sparse] Fix semi-structured sparse shape mismatch bug)
 
         # handle values
         if func is torch.ops.aten.values.default:
