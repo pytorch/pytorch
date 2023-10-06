@@ -113,15 +113,15 @@ inline bool isBatchedTensor(const Tensor& tensor) {
 
 // It is unsafe to call this on a Tensor that is not backed by a
 // BatchedTensorImpl. Please use `maybeGetBatchedImpl` whenever possible.
-inline BatchedTensorImpl* unsafeGetBatchedImpl(Tensor tensor) {
+inline BatchedTensorImpl* unsafeGetBatchedImpl(const Tensor& tensor) {
   return static_cast<BatchedTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
 
-inline BatchedTensorImpl* maybeGetBatchedImpl(Tensor tensor) {
+inline BatchedTensorImpl* maybeGetBatchedImpl(const Tensor& tensor) {
   if (!isBatchedTensor(tensor)) {
     return nullptr;
   }
-  return unsafeGetBatchedImpl(std::move(tensor));
+  return unsafeGetBatchedImpl(tensor);
 }
 
 // Returns a bitset. If bit i is set, then that means dim i is a batchdim.
