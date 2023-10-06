@@ -320,8 +320,7 @@ def _multi_tensor_adagrad(
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
     for ((device_params, device_grads, device_state_sums, device_state_steps), _) in grouped_tensorlists.values():
-
-        device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
+        device_has_sparse_grad = has_sparse_grad and any(grad.is_sparse for grad in device_grads)
 
         if device_has_sparse_grad:
             _single_tensor_adagrad(
@@ -343,11 +342,11 @@ def _multi_tensor_adagrad(
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_state_sums = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_state_sums
-        ]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        for i in range(len(device_params)):
+            if torch.is_complex(device_params[i]):
+                device_params[i] = torch.view_as_real(device_params[i])
+                device_grads[i] = torch.view_as_real(device_grads[i])
+                device_state_sums[i] = torch.view_as_real(device_state_sums[i])
 
         # Update steps
         torch._foreach_add_(device_state_steps, 1)
