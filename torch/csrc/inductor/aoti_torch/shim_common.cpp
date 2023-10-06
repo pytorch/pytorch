@@ -117,7 +117,8 @@ AOTITorchError aoti_torch_get_sizes(
 AOTITorchError aoti_torch_get_size(
     AtenTensorHandle tensor,
     int64_t d,
-    int64_t* ret_size) {
+    int64_t* ret_size
+) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_size = t->size(d);
@@ -136,7 +137,8 @@ AOTITorchError aoti_torch_get_strides(
 AOTITorchError aoti_torch_get_stride(
     AtenTensorHandle tensor,
     int64_t d,
-    int64_t* ret_stride) {
+    int64_t* ret_stride
+) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_stride = t->stride(d);
@@ -145,7 +147,8 @@ AOTITorchError aoti_torch_get_stride(
 
 AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
-    int64_t* ret_storage_offset) {
+    int64_t* ret_storage_offset
+) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
@@ -340,8 +343,7 @@ AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
-    at::Tensor out_tensor =
-        at::_ops::repeat_interleave_Tensor::call(*repeats_tensor, output_size);
+    at::Tensor out_tensor = at::_ops::repeat_interleave_Tensor::call(*repeats_tensor, output_size);
     at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
     *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
   });

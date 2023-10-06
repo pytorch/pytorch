@@ -84,15 +84,13 @@ class RAIIAtenTensorHandle {
 
   int64_t stride(int64_t d) {
     int64_t stride;
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_stride(handle_.get(), d, &stride));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_stride(handle_.get(), d, &stride));
     return stride;
   }
 
   int64_t storage_offset() {
     int64_t storage_offset;
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
     return storage_offset;
   }
 
