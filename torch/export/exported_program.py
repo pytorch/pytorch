@@ -624,14 +624,19 @@ class ExportedProgram:
             )
             return new_signature
 
+        transformed_gs = _get_updated_graph_signature(self.graph_signature, transformed_gm)
+        from torch._export.exported_program import _process_constraints
+        transformed_ranges, transformed_equalities = _process_constraints(
+            transformed_gm, transformed_gs, self.example_inputs
+        )
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            _get_updated_graph_signature(self.graph_signature, transformed_gm),
+            transformed_gs,
             copy.deepcopy(self.call_spec),
             self.state_dict,
-            _get_updated_range_constraints(transformed_gm),
-            copy.deepcopy(self.equality_constraints),
+            transformed_ranges,
+            transformed_equalities,
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
             self.dialect,
