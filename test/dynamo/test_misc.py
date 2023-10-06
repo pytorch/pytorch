@@ -7242,15 +7242,41 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    def test_itertools_accumulate_symint_default_sum(self):
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        def fn(x):
+            r = itertools.accumulate([x.size(0), x.size(1)])
+            for i in r:
+                x *= i
+            return x
+
+        x = torch.randn(2, 3)
+        eager = fn(x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_itertools_accumulate_tensors_default_sum(self):
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
         def fn(a, b, c, d, x):
             l = [a, b, c, d, x]
             for i, t in enumerate(l):
                 l[i] = t * x
-            return itertools.accumulate(l)
+            return list(itertools.accumulate(l))
 
-        t_list = [torch.tensor([i]) for i in range(4)]
-        x = torch.randn([2, 2])
+        t_list = [torch.tensor([i + 1]) for i in range(4)]
+        x = torch.tensor([[1, 2], [3, 4]])
         eager = fn(*t_list, x)
 
         counter = CompileCounter()
@@ -7258,19 +7284,23 @@ def ___make_guard_fn():
         compiled = compiled_fn(*t_list, x)
 
         self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(counter.frame_count, 1)
 
     def test_itertools_accumulate_tensors_builtins(self):
+        from torch._dynamo.utils import counters
+
         for builtin_op in [operator.mul, operator.sub, operator.pow]:
+            counters.clear()
 
             def fn(a, b, c, d, x):
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return itertools.accumulate(l, func=builtin_op)
+                return list(itertools.accumulate(l, builtin_op))
 
-            t_list = [torch.tensor([i]) for i in range(4)]
-            x = torch.randn([2, 2])
+            t_list = [torch.tensor([i + 1]) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
             counter = CompileCounter()
@@ -7278,9 +7308,11 @@ def ___make_guard_fn():
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(len(counters["graph_break"]), 0)
             self.assertEqual(counter.frame_count, 1)
 
     def test_itertools_accumulate_tensors_user_defined(self):
+        from torch._dynamo.utils import counters
         def udo_fn_0(a, b):
             return -1
 
@@ -7297,16 +7329,17 @@ def ___make_guard_fn():
             return a * len(seen)
 
         for udo_fn in [udo_fn_0, udo_fn_1, udo_fn_2]:
+            counters.clear()
             torch._dynamo.reset()
 
             def fn(a, b, c, d, x):
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return itertools.accumulate(l, func=udo_fn)
+                return list(itertools.accumulate(l, udo_fn))
 
             t_list = [torch.tensor([i]) for i in range(4)]
-            x = torch.randn([2, 2])
+            x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
             counter = CompileCounter()
@@ -7314,6 +7347,7 @@ def ___make_guard_fn():
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(len(counters["graph_break"]), 0)
             self.assertEqual(counter.frame_count, 1)
 
     def test_pure_python_accumulate(self):
