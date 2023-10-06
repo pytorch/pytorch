@@ -2938,6 +2938,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
 
 @register_meta(
     [
+        aten._foreach_abs_.default,
         aten._foreach_neg_.default,
         aten._foreach_reciprocal_.default,
         aten._foreach_sqrt_.default,
@@ -2953,6 +2954,7 @@ def meta__foreach_unaop_(self):
 
 @register_meta(
     [
+        aten._foreach_abs.default,
         aten._foreach_neg.default,
         aten._foreach_reciprocal.default,
         aten._foreach_sqrt.default,
@@ -2992,6 +2994,8 @@ def _check_foreach_binop_tensor_lists(self, other):
         aten._foreach_div.List,
         aten._foreach_maximum.List,
         aten._foreach_minimum.List,
+        aten._foreach_clamp_min.List,
+        aten._foreach_clamp_max.List,
     ]
 )
 def meta__foreach_binop_list(self, other, alpha=1):
@@ -3007,6 +3011,8 @@ def meta__foreach_binop_list(self, other, alpha=1):
         aten._foreach_div_.List,
         aten._foreach_maximum_.List,
         aten._foreach_minimum_.List,
+        aten._foreach_clamp_min_.List,
+        aten._foreach_clamp_max_.List,
     ]
 )
 def meta__foreach_binop__list(self, other, alpha=1):
