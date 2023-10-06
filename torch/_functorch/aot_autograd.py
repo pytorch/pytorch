@@ -463,11 +463,6 @@ class ViewAndMutationMeta:
     # This gives us info about every output (mostly around whether it aliases other tensors)
     output_info: List[OutputAliasInfo]
 
-    # length = # mutated inps + # user outputs
-    # For every output *and* mutated input returned from the forward,
-    # tells us whether or not the output should require gradients or not
-    requires_grad_info: List[bool]
-
     # length = the number of intermediate bases appended as outputs to the end of the forward graph.
     # Note: this is not necessarily the same thing as:
     #   len([x for x in output_info if x.output_type == OutputType.alias_of_intermediate])
@@ -611,7 +606,6 @@ class ViewAndMutationMeta:
             return NotImplemented
         return (self.input_info == other.input_info and
                 self.output_info == other.output_info and
-                self.requires_grad_info == other.requires_grad_info and
                 self.num_intermediate_bases == other.num_intermediate_bases and
                 self.keep_input_mutations == other.keep_input_mutations and
                 self.is_rng_op_functionalized == other.is_rng_op_functionalized and
@@ -807,11 +801,6 @@ def run_functionalized_fw_and_collect_metadata(
                 else:
                     mutates_data = True
                     mutates_metadata = has_metadata_mutation(f_arg)
-                # Only track requires_grad info on *mutated* inputs,
-                # because they show up in the autograd.Function.forward as outputs
-                input_requires_grad_info.append(
-                    isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
-                )
             else:
                 mutates_data = False
                 mutates_metadata = False
@@ -965,14 +954,6 @@ def run_functionalized_fw_and_collect_metadata(
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad
             )
             output_info.append(out_info)
-            output_requires_grad_info.append(out_info.requires_grad)
-
-        # Our autograd.Function.forward returns both mutated inputs and outputs,
-        # so we need grad info on all of them.
-        requires_grad_info = input_requires_grad_info + output_requires_grad_info
-        assert len(requires_grad_info) == len(output_info) + len(
-            [x for x in input_info if x.mutates_data or x.mutates_metadata]
-        )
 
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
@@ -995,7 +976,6 @@ def run_functionalized_fw_and_collect_metadata(
 
         metadata = ViewAndMutationMeta(
             input_info=input_info,
-            requires_grad_info=requires_grad_info,
             output_info=output_info,
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
@@ -1178,7 +1158,6 @@ def maybe_to_fresh_input(idx, t, meta):
     if idx in meta.mutated_inp_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
         mutated_inp_idx = meta.mutated_inp_indices.index(idx)
-        assert meta.input_info[idx].requires_grad == meta.requires_grad_info[mutated_inp_idx]
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation
@@ -2008,11 +1987,6 @@ def remove_dupe_metadata(
 
     return ViewAndMutationMeta(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
-        # requires_grad_info consists of (mutated_inputs, forward_outputs).
-        # Need to remove only the duplicate entries that correspond to the mutated inputs.
-        requires_grad_info=[
-            x for i, x in enumerate(m.requires_grad_info)
-            if i >= len(m.mutated_inp_indices) or keep_arg_mask[m.mutated_inp_indices[i]]],
         # For outputs that are views of inputs, we store the index of the input that the output
         # was generated from. Need to update that index to account for removed dupes.
         output_info=[
@@ -2063,7 +2037,6 @@ def create_synthetic_base_metadata(
     # given the requires_grad info on mutated inputs,
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     input_infos = []
-    mutated_inp_require_grad_info = []
     for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
@@ -2081,13 +2054,6 @@ def create_synthetic_base_metadata(
             requires_grad=any(m.input_info[x].requires_grad for x in outer_indices)
         )
         input_infos.append(inpt_info)
-        # requires_grad_info consists of (mutated_inputs, forward_outputs).
-        # For any mutated inputs that correspond to aliased inputs,
-        # Need to replace them with their mutated synthetic base
-        if inpt_info.mutates_data or inpt_info.mutates_metadata:
-            for x in outer_indices:
-                assert m.requires_grad_info[x] == m.input_info[x].requires_grad
-            mutated_inp_require_grad_info.append(any(m.input_info[x].requires_grad for x in outer_indices))
 
     # Find any inputs that fulfill the following criteria:
     # (1) They are part of a synthetic base (because they alias another input,
@@ -2101,9 +2067,6 @@ def create_synthetic_base_metadata(
     # grab the original requires grad info on the outputs, except the ones from the mutated inputs
     num_original_input_data_mutations = len([x for x in m.input_info if x.mutates_data or x.mutates_metadata])
     output_grad_info = [x.requires_grad for x in m.output_info]
-    assert output_grad_info == m.requires_grad_info[num_original_input_data_mutations:]
-    input_metadata_mutation_grad_info = [
-        outer_args[outer_idx].requires_grad for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     input_metadata_output_info = [
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
@@ -2133,14 +2096,12 @@ def create_synthetic_base_metadata(
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
     ]
 
-    requires_grad_info = mutated_inp_require_grad_info + output_grad_info + input_metadata_mutation_grad_info
     output_info = existing_output_infos + input_metadata_output_info
     # Regenerate traced tangents to include mutated inputs including synthetic bases
     traced_tangents = inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents):]
 
     return ViewAndMutationMeta(
         input_info=input_infos,
-        requires_grad_info=requires_grad_info,
         output_info=output_info,
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
@@ -2700,11 +2661,6 @@ def create_runtime_wrapper(
                     o_ = o.alias
                 else:
                     o_ = o
-                assert (
-                    runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i]
-                    ==
-                    runtime_metadata.output_info[i].requires_grad
-                )
 
                 o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
@@ -2824,7 +2780,6 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
         fw_metadata.traced_tangents,
     )
 
-    assert len(fw_metadata.requires_grad_info) == fw_metadata.num_mutated_inputs + fw_metadata.num_outputs
     joint_inputs = (flat_args, traced_tangents)
 
     fn_prepared_for_autograd = fn_prepped_for_autograd(
@@ -3078,10 +3033,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
             num_forward = CompiledFunction.metadata.num_forward
-
-            assert num_forward_returns == len(
-                CompiledFunction.metadata.requires_grad_info
-            ) + num_intermediate_bases
 
             # Partitioners must put symint arguments at the end separate from tensor arguments
             tensors_saved_for_backwards = fw_outs[
