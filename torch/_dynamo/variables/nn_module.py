@@ -127,8 +127,8 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self)
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
-        return variables.ConstantVariable.create(result, **options).add_guard(
-            NNModuleSource(AttrSource(self.source, name)).make_guard(
+        return variables.ConstantVariable.create(result, **options).add_guards(
+            NNModuleSource(AttrSource(self.source, name)).make_guards(
                 GuardBuilder.HASATTR
             )
         )
@@ -759,8 +759,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 assert not args or kwargs
                 if tx.output.side_effects.has_pending_mutation(self):
                     unimplemented("Module.parameters() with pending mutation")
-                options["guards"].add(
-                    self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
+                options["guards"].update(
+                    self.source.make_guards(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
                 items = []
                 for name, value in self.value.named_parameters():

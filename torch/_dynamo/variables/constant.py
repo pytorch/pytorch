@@ -42,7 +42,7 @@ class ConstantVariable(VariableTracker):
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
                 guards = (
-                    {item_source.make_guard(GuardBuilder.CONSTANT_MATCH)}
+                    item_source.make_guards(GuardBuilder.CONSTANT_MATCH)
                     if item_source
                     else None
                 )

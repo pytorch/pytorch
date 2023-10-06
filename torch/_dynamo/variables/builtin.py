@@ -829,9 +829,11 @@ class BuiltinVariable(VariableTracker):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
-                    guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+                    guards.update(
+                        obj.source.make_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
+                    )
                 else:
-                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                    guards.update(obj.source.make_guards(GuardBuilder.LIST_LENGTH))
             if cls is SetVariable:
                 return cls(
                     list(obj.unpack_var_sequence(tx)),

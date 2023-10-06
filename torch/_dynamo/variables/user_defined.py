@@ -266,7 +266,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
                     [ConstantVariable.create(k, **options) for k in keys], **options
-                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                ).add_guards(self.source.make_guards(GuardBuilder.ODICT_KEYS))
 
             if (
                 method in (collections.OrderedDict.__contains__, dict.__contains__)
@@ -278,7 +278,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not kwargs
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value, **options
-                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                ).add_guards(self.source.make_guards(GuardBuilder.ODICT_KEYS))
 
             if (
                 method is collections.OrderedDict.items
@@ -374,16 +374,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             options = VariableTracker.propagate(self, args, kwargs.values())
             options.setdefault("guards", set())
             if self.source:
-                options["guards"].add(
-                    AttrSource(self.source, "func").make_guard(GuardBuilder.ID_MATCH)
+                options["guards"].update(
+                    AttrSource(self.source, "func").make_guards(GuardBuilder.ID_MATCH)
                 )
-                options["guards"].add(
-                    AttrSource(self.source, "args").make_guard(
+                options["guards"].update(
+                    AttrSource(self.source, "args").make_guards(
                         GuardBuilder.CONSTANT_MATCH
                     )
                 )
-                options["guards"].add(
-                    AttrSource(self.source, "keywords").make_guard(
+                options["guards"].update(
+                    AttrSource(self.source, "keywords").make_guards(
                         GuardBuilder.CONSTANT_MATCH
                     )
                 )
@@ -406,7 +406,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, partial_args, partial_kwargs
             )
         elif callable(self.value):
-            self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            self.add_guards(self.source.make_guards(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -571,8 +571,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
         options = VariableTracker.propagate(self)
         if self.source:
-            options["guards"].add(
-                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            options["guards"].update(
+                AttrSource(self.source, name).make_guards(GuardBuilder.HASATTR)
             )
         if self._check_for_getattribute() or self._check_for_getattr():
             unimplemented("hasattr with custom __getattr__")

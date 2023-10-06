@@ -823,9 +823,7 @@ class SetVariable(VariableTracker):
                             e.vt.source, set_element.vt.source
                         )
                         if alias_guard:
-                            e.vt = e.vt.add_guards(
-                                {e.vt.source.make_guard(alias_guard)}
-                            )
+                            e.vt = e.vt.add_guards(e.vt.source.make_guards(alias_guard))
 
         return self.items
 

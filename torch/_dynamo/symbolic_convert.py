@@ -1884,8 +1884,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def store_global_weakref(self, name, value):
-        self.output.guards.add(
-            GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
+        self.output.guards.update(
+            GlobalWeakRefSource(name).make_guards(GuardBuilder.WEAKREF_ALIVE)
         )
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))

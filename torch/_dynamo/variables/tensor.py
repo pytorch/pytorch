@@ -201,11 +201,11 @@ class TensorVariable(VariableTracker):
         from .builder import VariableBuilder
 
         attr_source = AttrSource(self.source, name)
-        has_attr_guard = attr_source.make_guard(GuardBuilder.HASATTR)
+        has_attr_guards = attr_source.make_guards(GuardBuilder.HASATTR)
         return (
             VariableBuilder(tx, attr_source)(real_value)
             .add_options(self)
-            .add_guard(has_attr_guard)
+            .add_guards(has_attr_guards)
         )
 
     def var_getattr(self, tx, name):
@@ -249,7 +249,7 @@ class TensorVariable(VariableTracker):
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
-            result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+            result = result.add_guards(self.make_guards(GuardBuilder.TYPE_MATCH))
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.

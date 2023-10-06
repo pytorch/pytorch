@@ -183,8 +183,14 @@ class Guard:
         return self._hash
 
     def sort_key(self):
+        from torch._dynamo.guards import GuardBuilder
+
         return (
             self.source.value if self.source else -1,
+            # HAS- checking guards *MUST* be first amongst their equal matched peers.
+            -1
+            if self.create_fn in [GuardBuilder.HAS_ITEM, GuardBuilder.HASATTR]
+            else 0,
             len(self.name),
             self.name,
             self.inner_create_fn().__code__.co_firstlineno,
@@ -776,13 +782,16 @@ class Source:
     def name(self) -> str:
         raise NotImplementedError()
 
-    def make_guard(self, fn, is_volatile=False) -> Guard:
+    def make_guards(self, fn, is_volatile=False) -> Set[Guard]:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self, fn, is_volatile)
+        return {Guard(self, fn, is_volatile)}
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+    def _make_self_guards(self, fn, is_volatile):
+        return self.make_guards(fn, is_volatile)
 
 
 # Subclasses can be found in torch/_dynamo/source.py
@@ -791,6 +800,34 @@ class Source:
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source
+
+    def _make_self_guards(self, fn, is_volatile=False):
+        return super().make_guards(fn, is_volatile)
+
+    def make_guards(self, fn, is_volatile=False) -> Set[Guard]:
+        # TODO(voz): Move me
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.source import AttrSource, GetItemSource
+
+        all_guards = set()
+        # Handle self
+        if isinstance(self, AttrSource):
+            all_guards.update(super().make_guards(GuardBuilder.HASATTR))
+        elif isinstance(self, GetItemSource):
+            all_guards.update(super().make_guards(GuardBuilder.HAS_ITEM))
+
+        # Traverse bases until all are protected
+        curr_base = self.base
+        while isinstance(curr_base, ChainedSource):
+            if isinstance(curr_base, AttrSource):
+                all_guards.update(curr_base.make_guards(GuardBuilder.HASATTR))
+            elif isinstance(curr_base, GetItemSource):
+                all_guards.update(curr_base.make_guards(GuardBuilder.HAS_ITEM))
+            curr_base = curr_base.base
+
+        self_guards = self._make_self_guards(fn, is_volatile)
+        all_guards.update(self_guards)
+        return all_guards
 
 
 def detect_fake_mode(inputs: Any = None):

@@ -354,6 +354,51 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
+    def HAS_ITEM(self, guard: Guard):
+        assert isinstance(guard.originating_source, torch._dynamo.source.GetItemSource)
+        base = guard.originating_source.base.name()
+        item = guard.originating_source.index
+        ref = self.arg_ref(base)
+        base_obj = self.get(base)
+
+        if isinstance(item, torch._guards.Source):
+            item = item.name()
+            val = self.get(item) in base_obj
+        else:
+            if isinstance(base_obj, torch.nn.Sequential):
+                # Handled elsewhere - nn module guarding
+                return
+            elif isinstance(base_obj, type(iter(()))):
+                base_guards = guard.originating_source.base._make_self_guards(
+                    GuardBuilder.TUPLE_ITERATOR_LEN, False
+                )
+                assert len(base_guards) == 1
+                self.TUPLE_ITERATOR_LEN(base_guards.pop())
+                return
+            elif isinstance(item, int) and isinstance(
+                base_obj, (list, tuple, collections.deque)
+            ):
+                base_guards = guard.originating_source.base._make_self_guards(
+                    GuardBuilder.LIST_LENGTH, False
+                )
+                assert len(base_guards) == 1
+                self.LIST_LENGTH(base_guards.pop())
+                return
+            elif isinstance(base_obj, (dict, collections.OrderedDict)):
+                base_guards = guard.originating_source.base._make_self_guards(
+                    GuardBuilder.DICT_KEYS, False
+                )
+                assert len(base_guards) == 1
+                self.DICT_KEYS(base_guards.pop())
+                return
+            val = item in base_obj
+        assert val
+        code = f"{item!r} in {ref}"
+
+        # We could ostensibly write rejection guards (not in), but I cant think of a reason yet
+
+        self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
+
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)

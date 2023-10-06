@@ -194,13 +194,11 @@ class VariableTracker(metaclass=HasPostInit):
         cache[idx] = (result, value)
         return result
 
-    def add_guard(self, guard):
-        return self.clone(guards=set.union(self.guards, {guard}))
-
     def add_guards(self, guards):
         if guards is None:
             return self
-        assert isinstance(guards, set)
+        if not isinstance(guards, set):
+            guards = {guards}
         return self.clone(guards=set.union(self.guards, guards))
 
     def add_options(self, options, *more):
@@ -240,20 +238,20 @@ class VariableTracker(metaclass=HasPostInit):
 
     def can_make_guard(self):
         try:
-            self.make_guard(None)
+            self.make_guards(None)
             return True
         except NotImplementedError:
             return False
 
-    def make_guard(self, fn):
+    def make_guards(self, fn):
         if self.source:
-            return self.source.make_guard(fn)
+            return self.source.make_guards(fn)
         raise NotImplementedError()
 
     def replace_guards(self, guards, *fns):
         name = self.source.name()
         new_guards = {g for g in (guards or []) if g.name != name}
-        new_guards.update(self.source.make_guard(fn) for fn in fns)
+        new_guards.update(self.source.make_guards(fn) for fn in fns)
         return new_guards
 
     def const_getattr(self, tx, name: str) -> Any:

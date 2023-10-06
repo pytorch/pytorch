@@ -360,21 +360,21 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def init_ambient_guards(self):
         # Register a SHAPE_ENV guard to make sure we setup shape guards
         # that show up in ShapeEnv
-        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+        self.guards.update(ShapeEnvSource().make_guards(GuardBuilder.SHAPE_ENV))
 
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        self.guards.update(
+            GlobalStateSource().make_guards(GuardBuilder.DETERMINISTIC_ALGORITHMS)
         )
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
+        self.guards.update(GlobalStateSource().make_guards(GuardBuilder.GRAD_MODE))
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+        self.guards.update(GlobalStateSource().make_guards(GuardBuilder.DEFAULT_DEVICE))
 
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        self.guards.update(
+            GlobalStateSource().make_guards(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+        self.guards.update(GlobalStateSource().make_guards(GuardBuilder.BACKEND_MATCH))
 
     @property
     def root_tracer(self):
@@ -668,10 +668,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tracer = self.root_tracer
 
             if not is_constant_source(source):
-                options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
+                options["guards"].update(source.make_guards(GuardBuilder.TENSOR_MATCH))
 
             if get_static_address_type(target) == "guarded":
-                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+                options["guards"].update(
+                    source.make_guards(GuardBuilder.DATA_PTR_MATCH)
+                )
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
@@ -687,7 +689,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
+            options["guards"].update(source.make_guards(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(target), module_key, **options)

@@ -101,7 +101,7 @@ def validate_args_and_maybe_create_graph_inputs(
 
         if isinstance(a, ConstantVariable):
             # Ensures that we recompile when the constant value changes
-            a.add_guard(GuardBuilder.CONSTANT_MATCH)
+            a.add_guards(GuardBuilder.CONSTANT_MATCH)
 
             if manually_set_subgraph_inputs:
                 # This arg is not used in the body of the higher order op.

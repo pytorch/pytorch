@@ -1324,6 +1324,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
 
+    def test_partial_across_graph_break_uninvoked(self):
+        from functools import partial
+
+        def bar(x, **kwargs):
+            return x + x
+
+        @torch.compile(backend="eager", dynamic=True)
+        def foo(x, i):
+            def inner():
+                print("this is a graph_break")
+                return op(x)
+
+            op = partial(bar, dim=10)
+            x = inner()
+            op = partial(bar, other=10)
+            return inner() + x
+
+        foo(torch.rand(1), 10)
+
 
 def udf_mul(x, y):
     return x * y
