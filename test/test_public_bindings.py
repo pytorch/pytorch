@@ -245,7 +245,7 @@ class TestPublicBindings(TestCase):
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
-        private_allowlist = set((
+        private_allowlist = {
             "torch._inductor.codegen.cuda.cuda_kernel",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
@@ -289,28 +289,52 @@ class TestPublicBindings(TestCase):
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
             "torch.contrib._tensorboard_vis",
-        ))
+            "torch.distributed._composable"
+            "torch.distributed._functional_collectives"
+            "torch.distributed._functional_collectives_impl"
+            "torch.distributed._shard"
+            "torch.distributed._sharded_tensor"
+            "torch.distributed._sharding_spec"
+            "torch.distributed._spmd.api"
+            "torch.distributed._spmd.batch_dim_utils"
+            "torch.distributed._spmd.comm_tensor"
+            "torch.distributed._spmd.data_parallel"
+            "torch.distributed._spmd.distribute"
+            "torch.distributed._spmd.experimental_ops"
+            "torch.distributed._spmd.parallel_mode"
+            "torch.distributed._tensor"
+            "torch.distributed.algorithms._checkpoint.checkpoint_wrapper"
+            "torch.distributed.algorithms._optimizer_overlap"
+            "torch.distributed.rpc._testing.faulty_agent_backend_registry"
+            "torch.distributed.rpc._utils"
+        }
 
         # No new entries should be added to this list.
         # All public modules should be importable on all platforms.
-        public_allowlist = set((
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
-            "torch.distributed.elastic.rendezvous.etcd_store",
-            "torch.distributed.rendezvous",
-            "torch.distributed.rpc._testing.faulty_agent_backend_registry",
-            "torch.distributed.rpc._utils",
-            "torch.distributed.rpc.api",
-            "torch.distributed.rpc.backend_registry",
-            "torch.distributed.rpc.constants",
-            "torch.distributed.rpc.internal",
-            "torch.distributed.rpc.options",
-            "torch.distributed.rpc.rref_proxy",
-            "torch.distributed.rpc.server_process_global_profiler",
-            "torch.distributed.run",
-            "torch.distributed.tensor.parallel",
-            "torch.distributed.utils",
-        ))
+        public_allowlist = set(
+            "torch.distributed.algorithms.ddp_comm_hooks"
+            "torch.distributed.algorithms.model_averaging.averagers"
+            "torch.distributed.algorithms.model_averaging.hierarchical_model_averager"
+            "torch.distributed.algorithms.model_averaging.utils"
+            "torch.distributed.checkpoint"
+            "torch.distributed.constants"
+            "torch.distributed.distributed_c10d"
+            "torch.distributed.elastic.agent.server"
+            "torch.distributed.elastic.rendezvous"
+            "torch.distributed.fsdp"
+            "torch.distributed.launch"
+            "torch.distributed.launcher"
+            "torch.distributed.nn"
+            "torch.distributed.optim"
+            "torch.distributed.pipeline.sync"
+            "torch.distributed.rendezvous"
+            "torch.distributed.rpc.api"
+            "torch.distributed.rpc.backend_registry"
+            "torch.distributed.rpc.constants"
+            "torch.distributed.rpc.internal"
+            "torch.distributed.rpc.options"
+            "torch.distributed.rpc.rref_proxy"
+        )
 
         print("Modules which failed to import")
         print("\n".join(map(str, failures)))
