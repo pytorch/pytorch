@@ -52,7 +52,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     _FUSE_TRANSPOSE = False
-    _FORCE_CUTLASS = False
+    _FORCE_CUTLASS = True
     _WARNING_SHOWN = False
 
     @staticmethod
