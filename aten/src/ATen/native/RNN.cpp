@@ -1080,11 +1080,11 @@ struct PackedBidirectionalLayer
 // into the given layer. returns the last layer's outputs, and a vector of final
 // hidden states produced at each level.
 
-Tensor dropout(const Tensor& input, double p) {
+Tensor _dropout(const Tensor& input, double p) {
   return at::dropout(input, p, /*train=*/true);
 }
 
-PackedSequence dropout(const PackedSequence& input, double p) {
+PackedSequence _dropout(const PackedSequence& input, double p) {
   return {at::dropout(input.data, p, /*train=*/true), input.batch_sizes};
 }
 
@@ -1106,7 +1106,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
     layer_input = layer_output.outputs;
 
     if (dropout_p != 0 && train && l < num_layers - 1) {
-      layer_input = dropout(layer_input, dropout_p);
+      layer_input = _dropout(layer_input, dropout_p);
     }
   }
 

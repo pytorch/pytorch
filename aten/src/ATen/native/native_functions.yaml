@@ -296,28 +296,28 @@
 
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
-- func: dropout(Tensor input, float p, bool train) -> Tensor
+- func: dropout(Tensor input, float p=0.5, bool train=True) -> Tensor
   tags: nondeterministic_seeded
 
-- func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: dropout_(Tensor(a!) self, float p=0.5, bool train=True) -> Tensor(a!)
   tags: nondeterministic_seeded
 
-- func: feature_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_dropout(Tensor input, float p=0.5, bool train=True) -> Tensor
   tags: nondeterministic_seeded
 
-- func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_dropout_(Tensor(a!) self, float p=0.5, bool train=True) -> Tensor(a!)
   tags: nondeterministic_seeded
 
-- func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
+- func: alpha_dropout(Tensor input, float p=0.5, bool train=True) -> Tensor
   tags: nondeterministic_seeded
 
-- func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: alpha_dropout_(Tensor(a!) self, float p=0.5, bool train=True) -> Tensor(a!)
   tags: nondeterministic_seeded
 
-- func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_alpha_dropout(Tensor input, float p=0.5, bool train=True) -> Tensor
   tags: nondeterministic_seeded
 
-- func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_alpha_dropout_(Tensor(a!) self, float p=0.5, bool train=True) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: abs(Tensor self) -> Tensor
