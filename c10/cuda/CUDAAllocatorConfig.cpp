@@ -267,10 +267,12 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
           i < config.size() && (config[i] == "True" || config[i] == "False"),
           "Expected a single True/False argument for expandable_segments");
       m_expandable_segments = (config[i] == "True");
-    // ROCm build's hipify step will change "cuda" to "hip", but for ease of use, accept both.
-    // We must break up the string to prevent hipify here.
-    } else if (config[i].compare("release_lock_on_c" "udamalloc") == 0
-            || config[i].compare("release_lock_on_hipmalloc") == 0) {
+    } else if (
+        // ROCm build's hipify step will change "cuda" to "hip", but for ease of
+        // use, accept both. We must break up the string to prevent hipify here.
+        config[i].compare("release_lock_on_hipmalloc") == 0 ||
+        config[i].compare("release_lock_on_c"
+                          "udamalloc") == 0) {
       used_native_specific_option = true;
       consumeToken(config, ++i, ':');
       ++i;
@@ -278,10 +280,12 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
           i < config.size() && (config[i] == "True" || config[i] == "False"),
           "Expected a single True/False argument for release_lock_on_cudamalloc");
       m_release_lock_on_cudamalloc = (config[i] == "True");
-    // ROCm build's hipify step will change "cuda" to "hip", but for ease of use, accept both.
-    // We must break up the string to prevent hipify here.
-    } else if (config[i].compare("pinned_use_c" "uda_host_register") == 0
-            || config[i].compare("pinned_use_hip_host_register") == 0) {
+    } else if (
+        // ROCm build's hipify step will change "cuda" to "hip", but for ease of
+        // use, accept both. We must break up the string to prevent hipify here.
+        config[i].compare("pinned_use_hip_host_register") == 0 ||
+        config[i].compare("pinned_use_c"
+                          "uda_host_register") == 0) {
       i = parsePinnedUseCudaHostRegister(config, i);
       used_native_specific_option = true;
     } else if (config[i].compare("pinned_num_register_threads") == 0) {
