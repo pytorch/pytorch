@@ -790,7 +790,7 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
-        elif self.value is itertools.accumulate:
+        elif self.value is itertools.accumulate and not kwargs:
             from .builtin import BuiltinVariable
 
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
@@ -812,7 +812,6 @@ class SkipFilesVariable(VariableTracker):
                     return args[1].call_function(tx, [item, acc], {})
 
             else:
-                print("TRYING ACCUMULATE", args[1].is_callable(tx))
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
 
             items = []
