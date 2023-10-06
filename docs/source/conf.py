@@ -2778,6 +2778,7 @@ coverage_ignore_classes = [
     # torch.distributions.utils
     "lazy_property",
     # torch.export.exported_program
+    "ConstantArgument",
     "ExportedProgram",
     # torch.fx.experimental.accelerator_partitioner
     "DAG",
