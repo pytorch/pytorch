@@ -3849,9 +3849,16 @@ class FallbackKernel(ExternKernelAlloc):
 
     def has_side_effects(self):
         # TODO - some fallbacks are still OpOverloadPackets
-        if isinstance(self.op_overload, torch._ops.OpOverload):
-            return get_schema_info(self.op_overload).is_mutable()
-        return False
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return get_schema_info(self.op_overload).is_mutable()
+
+    def has_aliasing(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+
+        return torch._inductor.utils.is_view(self.op_overload)
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
@@ -3963,6 +3970,26 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
+
+        def tensor_to_layout(output: torch.Tensor):
+            return FixedLayout(
+                output.device,
+                output.dtype,
+                convert_shape_to_inductor(output.size()),
+                convert_shape_to_inductor(output.stride()),
+            )
+
+        if isinstance(example_output, torch.Tensor):
+            return FallbackKernel(
+                tensor_to_layout(example_output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema=schema,
+            )
+
+
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -3980,12 +4007,7 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
-                    FixedLayout(
-                        output.device,
-                        output.dtype,
-                        convert_shape_to_inductor(output.size()),
-                        convert_shape_to_inductor(output.stride()),
-                    ),
+                    tensor_to_layout(output),
                     packed,
                     indices,
                 )

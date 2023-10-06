@@ -317,6 +317,10 @@ class BaseSchedulerNode:
                                 ir.AliasedLayout,
                             ),
                         )
+                        and not (
+                            isinstance(input_node.node, ir.FallbackKernel)
+                            and input_node.node.has_aliasing()
+                        )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):

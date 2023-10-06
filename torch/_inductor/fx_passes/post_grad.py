@@ -32,7 +32,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device
+from ..utils import decode_device, is_view
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
@@ -764,7 +764,7 @@ def is_pointwise_use(use):
     ):
         return False
 
-    if use.target is operator.getitem or use.target.is_view:
+    if use.target is operator.getitem or is_view(use.target):
         return all(is_pointwise_use(u) for u in use.users)
 
     return torch.Tag.pointwise in use.target.tags
