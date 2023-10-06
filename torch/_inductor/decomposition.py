@@ -268,6 +268,14 @@ def angle(x):
         nan = torch.where(torch.isnan(x), float("nan"), 0.0)
         return ret + nan
 
+@register_decomposition([aten.add])
+def add(x, y):
+    if x.is_complex():
+        z1 = x.real + y.real
+        z2 = x.imag + y.imag;
+        return torch.complex(z1, z2);
+    else:
+        return NotImplemented
 
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
