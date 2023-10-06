@@ -906,13 +906,11 @@ if(NOT MSVC)
 
   if(${USE_COLORIZE_OUTPUT})
     # Why compiler checks are necessary even when `try_compile` is used
-    # Because of the bug in ccache that can incorrectly identify `-fcolor-diagnostics`
     # As supported by GCC, see https://github.com/ccache/ccache/issues/740 (for older ccache)
     # and https://github.com/ccache/ccache/issues/1275 (for newer ones)
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
       append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
     else()
-      append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
     endif()
   endif()
 

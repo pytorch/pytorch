@@ -2815,7 +2815,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"  # noqa: B950
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,

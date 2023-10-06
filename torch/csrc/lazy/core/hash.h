@@ -153,7 +153,6 @@ static inline hash_t Hash(const at::Generator& value) {
   return TensorHash(value.get_state());
 }
 
-
 // Taken from glibc's implementation of hashing optionals,
 // we want to include a contribution to the hash to distinguish
 // cases where one or another option was null, but we hope it doesn't

@@ -403,7 +403,8 @@ RegisterOperators reg({
           double a;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
-          c10::optional<at::Generator> generator = pop(stack).toOptional<at::Generator>();
+          c10::optional<at::Generator> generator =
+              pop(stack).toOptional<at::Generator>();
 
           pop(stack, tensor, a, b);
           push(stack, tensor.uniform_(a, b, generator));
@@ -421,7 +422,8 @@ RegisterOperators reg({
           double mean;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
-          auto generator = pop(stack).toOptional<at::Generator>();
+          c10::optional<at::Generator> generator =
+              pop(stack).toOptional<at::Generator>();
 
           pop(stack, tensor, mean, std);
           push(stack, tensor.normal_(mean, std, generator));
