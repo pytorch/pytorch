@@ -889,6 +889,7 @@ static void registerSDPAUtilities(PyObject* module) {
                        py::object attn_mask,
                        double dropout,
                        bool is_causal) {
+        // TODO: how do we handle these with more grace than seg fault
         // TODO: (Other way ?)Check if pyobj attn_mask is none if not cast
         if (attn_mask.ptr() == Py_None) {
           return sdp::sdp_params{

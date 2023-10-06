@@ -272,7 +272,7 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
     """Returns whether the given params can be used with efficient_attention.
 
     Args:
-        params (SDPAParams): The parameters to test.
+        params: The parameters to test.
         debug (bool, optional): Whether to print debug information as to why FlashAttention could not be run.
             Defaults to False.
     """
