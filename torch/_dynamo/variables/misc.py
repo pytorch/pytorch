@@ -2,6 +2,7 @@ import collections
 import functools
 import inspect
 import itertools
+import operator
 import sys
 import types
 from typing import Dict, List
@@ -20,7 +21,6 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .lists import ListVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -796,10 +796,8 @@ class SkipFilesVariable(VariableTracker):
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
 
-                def func(tx, item, acc):
-                    return BuiltinVariable(sum).call_function(
-                        tx, [ListVariable([item, acc])], {}
-                    )
+                def func(tx, acc, item):
+                    return BuiltinVariable(operator.add).call_function(tx, [acc, item], {})
 
             elif (
                 len(args) == 2
@@ -808,8 +806,8 @@ class SkipFilesVariable(VariableTracker):
             ):
                 seq = args[0].unpack_var_sequence(tx)
 
-                def func(tx, item, acc):
-                    return args[1].call_function(tx, [item, acc], {})
+                def func(tx, acc, item):
+                    return args[1].call_function(tx, [acc, item], {})
 
             else:
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
