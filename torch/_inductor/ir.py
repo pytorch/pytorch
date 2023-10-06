@@ -3857,7 +3857,6 @@ class FallbackKernel(ExternKernelAlloc):
         # TODO - some fallbacks are still OpOverloadPackets
         if not isinstance(self.op_overload, torch._ops.OpOverload):
             return False
-
         return torch._inductor.utils.is_view(self.op_overload)
 
     # ProxyExecutor Design Note

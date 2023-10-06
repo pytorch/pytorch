@@ -451,7 +451,7 @@ class DebugFormatter:
 
     def _write_ir(self, filename: str, nodes: SchedulerNodeList):
         with self.fopen(filename) as fd:
-            print(f"Writing debug ir to {fd.name}")
+            log.info("Writing debug ir to  %s", fd.name)
             for node in nodes:
                 fd.write(node.debug_str())
                 fd.write("\n\n\n")
