@@ -69,32 +69,34 @@ class _ToTorchTensor(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         dtensor_spec = ctx.dtensor_spec
         mesh = dtensor_spec.mesh
-        grad_placements = ctx.grad_placements
+        grad_out_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
-
-        if grad_placements is not None:
-            grad_spec = DTensorSpec(mesh, grad_placements, tensor_meta=dtensor_meta)
-            grad_output = redistribute_local_tensor(
-                grad_output, grad_spec, dtensor_spec
-            )
-        else:
-            grad_spec = dtensor_spec
 
         _, tensor_stride = compute_global_tensor_info(
             grad_output, mesh, dtensor_spec.placements
         )
-        # grad stride maybe different, set the stride to be the calculated one
-        grad_spec.tensor_meta = TensorMeta(
-            dtensor_meta.shape, tuple(tensor_stride), dtensor_meta.dtype
+        grad_meta = TensorMeta(
+            dtensor_meta.shape, tuple(tensor_stride), grad_output.dtype
         )
+        if grad_out_placements is not None:
+            grad_out_spec = DTensorSpec(
+                mesh, grad_out_placements, tensor_meta=grad_meta
+            )
+            grad_output = redistribute_local_tensor(
+                grad_output, grad_out_spec, dtensor_spec
+            )
+
+        grad_spec = DTensorSpec(mesh, dtensor_spec.placements, tensor_meta=grad_meta)
+
+        # grad stride maybe different, set the stride to be the calculated one
         return (
             DTensor(
                 grad_output,
                 grad_spec,
-                shape=dtensor_meta.shape,
-                dtype=dtensor_meta.dtype,
+                shape=grad_meta.shape,
+                dtype=grad_meta.dtype,
                 requires_grad=grad_output.requires_grad,
-                stride=grad_spec.tensor_meta.stride,
+                stride=grad_meta.stride,
             ),
             None,
         )

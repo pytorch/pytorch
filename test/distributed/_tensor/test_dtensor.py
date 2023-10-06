@@ -8,7 +8,13 @@ from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Replicate,
+    Shard,
+    TensorMeta,
+)
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 
 from torch.testing._internal.common_utils import run_tests
@@ -40,12 +46,19 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
-        local_tensor = torch.randn(3, 3, requires_grad=True)
         dist_tensor_shape = torch.Size([self.world_size * 3, 3])
+        local_tensor = torch.randn(3, 3, requires_grad=True)
+        shard_spec = DTensorSpec(
+            device_mesh,
+            [Shard(0)],
+            tensor_meta=TensorMeta(
+                dist_tensor_shape,
+                local_tensor.stride(),
+                local_tensor.dtype,
+            ),
+        )
         dist_tensor = DTensor(
             local_tensor,
-            device_mesh,
             shard_spec,
             shape=dist_tensor_shape,
             dtype=local_tensor.dtype,
@@ -57,7 +70,6 @@ class DTensorTest(DTensorTestBase):
         with self.assertWarnsRegex(UserWarning, "To construct"):
             DTensor(
                 local_tensor,
-                device_mesh,
                 shard_spec,
                 shape=dist_tensor_shape,
                 dtype=local_tensor.dtype,
@@ -69,7 +81,6 @@ class DTensorTest(DTensorTestBase):
         with self.assertWarnsRegex(UserWarning, "To construct"):
             dist_tensor = DTensor(
                 local_tensor,
-                device_mesh,
                 shard_spec,
                 shape=dist_tensor_shape,
                 dtype=local_tensor.dtype,
@@ -197,15 +208,21 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_to_local(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = (Shard(0),)
         dist_tensor_shape = torch.Size([self.world_size * 3, 3])
         local_tensor_with_grad = torch.randn(
             3, 3, device=self.device_type, requires_grad=True
         )
-
+        shard_spec = DTensorSpec(
+            device_mesh,
+            (Shard(0),),
+            tensor_meta=TensorMeta(
+                dist_tensor_shape,
+                local_tensor_with_grad.stride(),
+                local_tensor_with_grad.dtype,
+            ),
+        )
         sharded_tensor = DTensor(
             local_tensor_with_grad,
-            device_mesh,
             shard_spec,
             shape=dist_tensor_shape,
             dtype=local_tensor_with_grad.dtype,
