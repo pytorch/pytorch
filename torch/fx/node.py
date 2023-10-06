@@ -491,6 +491,47 @@ class Node:
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
+    def format_node_compact(self) -> str:
+        meta_val = self.meta.get('val', self.meta.get('tensor_meta', None))
+
+        dtype_abbrs = {
+            torch.bfloat16: 'bf16',
+            torch.float64: 'f64',
+            torch.float32: 'f32',
+            torch.float16: 'f16',
+            torch.float8_e4m3fn: 'f8e4m3fn',
+            torch.float8_e5m2: 'f8e5m2',
+            torch.complex32: 'c32',
+            torch.complex64: 'c64',
+            torch.complex128: 'c128',
+            torch.int8: 'i8',
+            torch.int16: 'i16',
+            torch.int32: 'i32',
+            torch.int64: 'i64',
+            torch.bool: 'b8',
+            torch.uint8: 'u8',
+        }
+
+        def stringify_shape(shape : torch.Size) -> str:
+            return f"[{', '.join(str(x) for x in shape)}]"
+
+        maybe_type_annotation = ''
+        if isinstance(meta_val, torch.Tensor):
+            maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+        elif isinstance(meta_val, torch.SymInt):
+            maybe_type_annotation = f': Sym({meta_val})'
+
+        if self.op == 'placeholder':
+            assert isinstance(self.target, str)
+            default_val = ' (default=' + str(self.args[0]) + ')' if self.args else ''
+            return f'placeholder {self.name}{maybe_type_annotation}{default_val}'
+        elif self.op == 'get_attr':
+            return f'{self.name}{maybe_type_annotation} = {self._pretty_print_target(self.target)}'
+        elif self.op == 'output':
+            return f'return {self.args[0]}{maybe_type_annotation}'
+        else:
+            return f'{self.name}{maybe_type_annotation} = {self._pretty_print_target(self.target)}(*{_format_arg(self.args)}, **{_format_arg(self.kwargs)})'
+
     @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self,
                               replace_with : 'Node',
