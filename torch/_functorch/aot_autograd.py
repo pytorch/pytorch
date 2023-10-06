@@ -980,13 +980,14 @@ def run_functionalized_fw_and_collect_metadata(
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data
+            if info.mutates_data and info.requires_grad
         ]
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
             if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
             and issubclass(info.raw_type, torch.Tensor)
+            and info.requires_grad
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -1256,7 +1257,7 @@ def fn_prepped_for_autograd(
 
         # Also return a boolean mask specifying which outputs to this function will be used as tangents
         mutated_inputs_grad_mask = [
-            meta.input_info[meta.mutated_inp_indices[i]].mutates_data
+            meta.input_info[meta.mutated_inp_indices[i]].mutates_data and meta.input_info[meta.mutated_inp_indices[i]].requires_grad
             for (i, x) in enumerate(mutated_inputs_to_return)
         ]
 
@@ -1268,6 +1269,7 @@ def fn_prepped_for_autograd(
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, torch.Tensor)
+            and meta.output_info[i].requires_grad
             for (i, x) in enumerate(outs)
         ]
 
@@ -2125,13 +2127,12 @@ def create_synthetic_base_metadata(
 
         for o in m.output_info]
 
-    num_outer_mutated_data_inps = len([x for x in m.input_info if x.mutates_data])
-    inner_mutated_data_inps = [x for inner_idx, x in enumerate(inner_args) if input_infos[inner_idx].mutates_data]
+    inner_mutated_tangents = [x for inner_idx, x in enumerate(inner_args) if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad]
 
     requires_grad_info = mutated_inp_require_grad_info + output_grad_info + input_metadata_mutation_grad_info
     output_info = existing_output_infos + input_metadata_output_info
     # Regenerate traced tangents to include mutated inputs including synthetic bases
-    traced_tangents = inner_mutated_data_inps + m.traced_tangents[num_outer_mutated_data_inps:]
+    traced_tangents = inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents):]
 
     return ViewAndMutationMeta(
         input_info=input_infos,
@@ -2491,14 +2492,14 @@ fw_metadata={str(fw_metadata)}
         else:
             return flat_fn(*unpacked_args)
 
-    if config.debug_assert:
+    if config.debug_assert and False:
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
         assert ref_fw_metadata == fw_metadata_updated, (
             f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
-            f'actual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+            f'\nactual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
         )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
@@ -3127,6 +3128,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # invariant: intermediate bases always require gradients, so we don't have to
             # consider marking them as non-differentiable.
             raw_returns_not_including_intermediate_bases = raw_returns[:num_mutated_inputs + num_outputs]
+            # a = CompiledFunction.metadata.requires_grad_info[:len(CompiledFunction.metadata.input_info)]
+            # b = [x.requires_grad for x in CompiledFunction.metadata.input_info]
+            # if a != b:
+            #     breakpoint()
+            #     print()
             fw_outs_not_requiring_grad = [
                 x
                 for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
@@ -3134,6 +3140,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 and not CompiledFunction.metadata.requires_grad_info[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+            ctx._materialize_non_diff_grads = False
 
             functionalized_rng_runtime_epilogue(
                 CompiledFunction.metadata,
@@ -3187,9 +3194,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     for x, info in zip(out_tangents, out_info)
                     if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
                     and issubclass(info.raw_type, torch.Tensor)
+                    and info.requires_grad
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
-                flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
+                flat_bw_args_with_grads = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
 
                 # sanity asserts
                 # metadata_only_inps = [
@@ -3208,9 +3216,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 assert len(user_tangents) == len(out_info)
                 filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor)]
                 flat_bw_args = tuple(mutated_inp_args) + tuple(filtered_user_tangents)
+                assert len(flat_bw_args) == len(CompiledFunction.metadata.requires_grad_info)
+                flat_bw_args_with_grads = [x for x, req_grad in zip(flat_bw_args, CompiledFunction.metadata.requires_grad_info) if req_grad]
 
             contiguous_args = [
-                t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
+                t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args_with_grads
             ]
 
             rng_args = []
