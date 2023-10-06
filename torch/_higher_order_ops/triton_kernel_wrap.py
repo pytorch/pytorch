@@ -17,24 +17,35 @@ from torch.fx.experimental.proxy_tensor import (
 # Kernel Side Table
 
 # We cannot put Triton Kernels into the FX graph as the graph nodes
-# do not support arbitrary functions
-# Use a side table
+# do not support arbitrary functions.
+# Use a side table.
+# We use two dict so that fetching both the kernel and id are O(1)
 kernel_side_table = threading.local()
-kernel_side_table.table = []
+kernel_side_table.id_to_kernel = dict()
+kernel_side_table.kernel_to_id = dict()
 
 
 # Returns index on the table
 def add_kernel_to_table(kernel) -> int:
-    # TODO(oulgen): Dedup kernels by code id
-    idx = len(kernel_side_table.table)
-    kernel_side_table.table.append(kernel)
+    if kernel in kernel_side_table.kernel_to_id:
+        return kernel_side_table.kernel_to_id[kernel]
+
+    idx = len(kernel_side_table.id_to_kernel)
+    kernel_side_table.id_to_kernel[idx] = kernel
+    kernel_side_table.kernel_to_id[kernel] = idx
     return idx
 
 
 # Returns the triton kernel at the given index
 def get_kernel_from_table(idx: int):
-    assert idx < len(kernel_side_table.table)
-    return kernel_side_table.table[idx]
+    assert idx in kernel_side_table.id_to_kernel
+    return kernel_side_table.id_to_kernel[idx]
+
+
+# Resets the table (only meant to be used in unit tests)
+def reset_kernel_table() -> None:
+    kernel_side_table.id_to_kernel = dict()
+    kernel_side_table.kernel_to_id = dict()
 
 
 ###############################################################################

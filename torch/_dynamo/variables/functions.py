@@ -645,20 +645,14 @@ class TritonKernelVariable(VariableTracker):
     def __init__(self, kernel, kernel_idx, grid, **kwargs):
         super().__init__(**kwargs)
 
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            add_kernel_to_table,
-            get_kernel_from_table,
-        )
+        from torch._higher_order_ops.triton_kernel_wrap import add_kernel_to_table
 
-        if kernel is None:
-            assert kernel_idx is not None
-            self.kernel = get_kernel_from_table(kernel_idx)
-            self.kernel_idx = kernel_idx
-        else:
-            # TODO(oulgen): If kernel idx is not None and we had dedup,
-            # we should assert that kernel and idx matches
-            self.kernel = kernel
-            self.kernel_idx = add_kernel_to_table(kernel)
+        assert kernel is not None
+
+        self.kernel = kernel
+        self.kernel_idx = add_kernel_to_table(kernel)
+
+        assert kernel_idx is None or self.kernel_idx == kernel_idx
 
         self.grid = grid
 
