@@ -9,7 +9,6 @@ import sys
 import tempfile
 import unittest
 
-
 TEST_TENSORBOARD = True
 try:
     import tensorboard.summary.writer.event_file_writer  # noqa: F401
