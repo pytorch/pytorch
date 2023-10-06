@@ -13,8 +13,10 @@ constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 CUDAAllocatorConfig::CUDAAllocatorConfig()
     : m_max_split_size(std::numeric_limits<size_t>::max()),
       m_garbage_collection_threshold(0),
+      m_pinned_num_register_threads(1),
       m_expandable_segments(false),
-      m_release_lock_on_cudamalloc(false) {
+      m_release_lock_on_cudamalloc(false),
+      m_pinned_use_cuda_host_register(false) {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -270,6 +272,12 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
           i < config.size() && (config[i] == "True" || config[i] == "False"),
           "Expected a single True/False argument for release_lock_on_cudamalloc");
       m_release_lock_on_cudamalloc = (config[i] == "True");
+    } else if (config[i].compare("pinned_use_cuda_host_register") == 0) {
+      i = parsePinnedUseCudaHostRegister(config, i);
+      used_native_specific_option = true;
+    } else if (config[i].compare("pinned_num_register_threads") == 0) {
+      i = parsePinnedNumRegisterThreads(config, i);
+      used_native_specific_option = true;
     } else {
       TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", config[i]);
     }
@@ -284,6 +292,46 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
         "backend:cudaMallocAsync ignores max_split_size_mb,"
         "roundup_power2_divisions, and garbage_collect_threshold.");
   }
+}
+
+size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        (config[i] == "True" || config[i] == "False"),
+        "Expected a single True/False argument for pinned_use_cuda_host_register");
+    m_pinned_use_cuda_host_register = (config[i] == "True");
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting pinned_use_cuda_host_register value", "");
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    size_t val2 = stoi(config[i]);
+    TORCH_CHECK(
+        llvm::isPowerOf2_64(val2),
+        "Number of register threads has to be power of 2 ",
+        "");
+    auto maxThreads = CUDAAllocatorConfig::pinned_max_register_threads();
+    TORCH_CHECK(
+        val2 <= maxThreads,
+        "Number of register threads should be less than or equal to " +
+            std::to_string(maxThreads),
+        "");
+    m_pinned_num_register_threads = val2;
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting pinned_num_register_threads value", "");
+  }
+  return i;
 }
 
 // General caching allocator utilities
