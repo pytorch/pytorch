@@ -458,6 +458,17 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
+    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @requires_nccl()
+    @with_comms()
+    def test_tracing(self):
+        def allreduce(t, pg):
+            return ft_c.all_reduce(t, "sum", pg)
+
+        pg = self.process_group
+        compiled_allreduce = torch.compile(allreduce, fullgraph=True)
+        compiled_allreduce(torch.randn(8, device=self.device), pg)
+
 
 class TestOpWaitiness(MultiThreadedTestCase):
     @property
