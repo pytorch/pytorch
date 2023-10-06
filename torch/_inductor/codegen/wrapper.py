@@ -1184,6 +1184,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             if V.graph.aot_mode:
                 self.prefix.writeline("inputs.clear();")
+                self.prefix.writeline(
+                    "auto& kernels = *dynamic_cast<AOTInductorModelKernels*>(this->kernels_.get());"
+                )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.aot_inductor.abi_compatible:
@@ -1202,6 +1205,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
         else:
             super().codegen_input_stride_var_decl(code, name)
+
+    def codegen_model_kernels(self):
+        self.prefix.writeline("namespace {")
+        self.prefix.writeline(
+            "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
+        )
+        self.prefix.writeline("  public:")
+        for kernel in self.src_to_kernel.values():
+            self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
+        self.prefix.writeline("};")
+        self.prefix.writeline("}  // namespace")
 
     def codegen_model_constructor(self):
         """
@@ -1270,10 +1284,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 name = f"output{idx}"
                 self.write_input_output_info("outputs_info_", idx, name)
 
+            self.prefix.writeline(
+                "this->kernels_ = std::make_unique<AOTInductorModelKernels>();"
+            )
+
         self.prefix.writeline("}")
 
     def generate(self):
         if V.graph.aot_mode:
+            self.codegen_model_kernels()
             self.codegen_model_constructor()
         self.write_wrapper_decl()
         return super().generate()
@@ -1645,9 +1664,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if isinstance(arg_type, torch.TensorType):
                 assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
                 new_tensor_args.append(f"{arg.codegen_reference()}")
-            elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
-                # int or SymInt
-                assert isinstance(arg, int)
+            elif isinstance(arg_type, torch.IntType):
+                # int
+                new_int_args.append(str(arg))
+            elif isinstance(arg_type, torch.SymIntType):
+                # SymInt
                 new_int_args.append(str(arg))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
@@ -1929,9 +1950,16 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             }  // anonymous namespace
 
             static inline CUfunction loadKernel(
-                    const std::string &filePath,
+                    std::string filePath,
                     const std::string &funcName,
-                    uint32_t sharedMemBytes) {
+                    uint32_t sharedMemBytes,
+                    const std::optional<std::string> &cubinDir = std::nullopt) {
+                if (cubinDir) {
+                    std::filesystem::path p1{*cubinDir};
+                    std::filesystem::path p2{filePath};
+                    filePath = (p1 / p2.filename()).string();
+                }
+
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
@@ -1977,43 +2005,24 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def generate(self):
         self.prefix.writeline("\n")
-        for kernel in self.src_to_kernel.values():
-            self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
-        self.prefix.writeline("\n")
+        if not V.graph.aot_mode:
+            for kernel in self.src_to_kernel.values():
+                self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
+            self.prefix.writeline("\n")
         return super().generate()
 
-    def generate_load_kernel(self, name, params):
-        mangled_name = params.get("mangled_name", None)
-        assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
-        assert os.path.exists(
-            cubin_path
-        ), f"cubin file should already exist at this moment: {cubin_path}"
-
-        shared_mem = params.get("shared_mem", 0)
-        self.writeline(f"if ({name} == nullptr) {{")
+    @functools.lru_cache(None)
+    def generate_load_kernel_once(
+        self, name: str, mangled_name: str, cubin_path: str, shared_mem: int
+    ):
         if V.graph.aot_mode:
-            runtime_cubin_path_var = f"var_{next(self.arg_var_id)}"
-            self.writeline("    if (this->cubin_dir_.has_value()) {")
             self.writeline(
-                f"""        std::filesystem::path {runtime_cubin_path_var}{{this->cubin_dir_.value()}};"""
+                f"""kernels.{name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem}, this->cubin_dir_);"""
             )
-            self.writeline(
-                f"""        {runtime_cubin_path_var} /= "{os.path.basename(cubin_path)}";"""
-            )
-            self.writeline(
-                f"""        {name} = loadKernel({runtime_cubin_path_var}.c_str(), "{mangled_name}", {shared_mem});"""
-            )
-            self.writeline("    } else {")
-            self.writeline(
-                f"""        {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
-            )
-            self.writeline("    }")
         else:
             self.writeline(
-                f"""    {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
+                f"""{name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
             )
-        self.writeline("}")
 
     def generate_args_decl(self, call_args):
         dynamic_symbols = V.graph.sizevars.free_symbols()
@@ -2075,6 +2084,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self, name, call_args, grid=None, device_index=None, cuda=True, triton=True
     ):
         if not cuda:
+            # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton
             )
@@ -2083,8 +2093,15 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         assert (
             params is not None
         ), f"cuda kernel parameters for {name} should already exist at this moment"
+        mangled_name = params.get("mangled_name", None)
+        assert mangled_name is not None, "missing mangled_name"
+        cubin_path = params.get("cubin_path", None)
+        assert cubin_path is not None and os.path.exists(
+            cubin_path
+        ), f"cubin file should already exist at this moment: {cubin_path}"
+        shared_mem = params.get("shared_mem", 0)
 
-        self.generate_load_kernel(name, params)
+        self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
@@ -2105,9 +2122,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
         if grid_has_unbacked_symbols:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
+        kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                name,
+                kernel_var_name,
                 f"{grid_name}.grid_x",
                 f"{grid_name}.grid_y",
                 f"{grid_name}.grid_z",

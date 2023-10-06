@@ -749,7 +749,13 @@ def expand(x, sizes):
         return x
 
     x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    if x_size_product > 0:
+    # TODO: It would be better to realize the input if any of its sizes
+    # are unbacked, because typically the size will be non-zero.  However,
+    # this cannot be done directly as below as we'll choke on the size_hint
+    # here
+    if x_size_product > 0 and not any(
+        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
+    ):
         # maybe realize input before broadcasting it
         x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -4801,7 +4807,9 @@ try:
     @register_lowering(c10d_functional.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
-            ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
+            ir.AllGatherIntoTensor.create(
+                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
+            )
         )
 
     @register_lowering(c10d_functional.reduce_scatter_tensor)
@@ -4825,6 +4833,16 @@ try:
             self, reduceOp, tag, ranks, group_size
         )
         return list(map(TensorBox.create, result))
+
+    @register_lowering(c10d_functional.all_to_all_single)
+    def all_to_all_single(
+        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+    ):
+        return TensorBox.create(
+            ir.AllToAllSingle.create(
+                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+            )
+        )
 
 except ImportError:
     log.info(
