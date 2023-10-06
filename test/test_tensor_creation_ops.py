@@ -1265,12 +1265,12 @@ class TestTensorCreation(TestCase):
         self.assertEqual(complex(torch.tensor(1.5j)), 1.5j)
 
         for tensor in not_ok:
-            self.assertRaises(ValueError, lambda: int(tensor))
-            self.assertRaises(ValueError, lambda: float(tensor))
-            self.assertRaises(ValueError, lambda: complex(tensor))
+            self.assertRaises(TypeError, lambda: int(tensor))
+            self.assertRaises(TypeError, lambda: float(tensor))
+            self.assertRaises(TypeError, lambda: complex(tensor))
 
-        self.assertRaises(RuntimeError, lambda: float(torch.tensor(1.5j)))
-        self.assertRaises(RuntimeError, lambda: int(torch.tensor(1.5j)))
+        self.assertRaises(ValueError, lambda: float(torch.tensor(1.5j)))
+        self.assertRaises(ValueError, lambda: int(torch.tensor(1.5j)))
 
     # TODO: update to work on CUDA, too?
     @onlyCPU
