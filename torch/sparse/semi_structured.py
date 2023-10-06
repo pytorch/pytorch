@@ -232,7 +232,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
-    def _pad_tensor_for_matmul(self, original_tensor):
+    def _pad_tensor_for_matmul(self, original_tensor : torch.Tensor) -> torch.Tensor:
+        """
+        Calculates padding for dense tensor and pads tensor if necessary.
+        If padding is not required, this function returns the original tensor.
+        """
         # only 2d matmul
         assert original_tensor.dim() == 2
 
@@ -243,7 +247,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
         to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
         to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
         if to_pad_m or to_pad_n:
-            warnings.warn(f"You are doing matmul with a dense tensor that does not meet the shape requirements. Padding dense input tensor of shape ({m}, {n}) to ({m+to_pad_m}, {n+to_pad_n})", UserWarning)
+            warnings.warn(
+                (
+                    "Attempting to do matmul with a dense tensor that does not meet shape requirements."
+                    "Padding dense input tensor of shape ({m}, {n}) to ({m+to_pad_m}, {n+to_pad_n}."
+                ),
+                UserWarning,
+            )
             return torch.nn.functional.pad(original_tensor, (0, to_pad_n, 0, to_pad_m))
         else:
             return original_tensor
