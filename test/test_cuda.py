@@ -76,6 +76,13 @@ class TestCuda(TestCase):
         del self.autocast_lists
         super().tearDown()
 
+    def test_pinned_memory_with_cudaregister(self):
+        torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:True,pinned_num_register_threads:8")
+        t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
+        pinned_t = torch.ones(1 << 21).pin_memory()
+        self.assertTrue(pinned_t.is_pinned())
+
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -3676,6 +3683,15 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
     def test_raises_oom(self):
