@@ -346,7 +346,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
         #
-        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
+        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
         # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
         # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
         # bringing perf gains.
@@ -909,7 +909,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
+        # check the device of the buffers.
         for buffer in self.buffers:
             device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
