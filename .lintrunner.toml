@@ -2661,6 +2661,6 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.0.290',
+    'ruff==0.0.291',
 ]
 is_formatter = true
