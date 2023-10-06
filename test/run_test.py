@@ -1659,6 +1659,7 @@ def main():
         aggregated_heuristics = get_test_prioritizations(selected_tests)
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+    test_prioritizations.print_info()
 
     if IS_CI:
         metrics_dict = {
