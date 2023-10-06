@@ -22,9 +22,12 @@
 #include <ATen/ops/embedding_sparse_backward_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/max.h>
+#include <ATen/ops/argmax.h>
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 
 #include <cstring>
 #include <memory>
@@ -40,6 +43,10 @@ Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
+  TORCH_DEBUG_CHECK(at::max(indices).item<int64_t>() < weight.size(0),
+                    "IndexError embedding index out of bounds, value: ", at::max(indices).item<int64_t>(),
+                    " at index ", at::argmax(indices).item<int64_t>(),
+                    ", is out of bounds of size : [", weight.size(0), "]");
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
     return weight.index_select(0, indices);

@@ -9,6 +9,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <cstdlib>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
@@ -536,6 +537,17 @@ namespace detail {
         __FILE__,                                  \
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+  }
+// This Macro is used to check conditions that are potentially expensive to
+// check and are only checked in debug mode. It is not recommended to use this
+// macro to check conditions that are cheap to check.
+#define TORCH_DEBUG_CHECK(cond, ...)                                 \
+  if (std::getenv("TORCH_DEBUG") && C10_UNLIKELY_OR_CONST(!(cond))) { \
+    ::c10::detail::torchCheckFail(                                   \
+        __func__,                                                    \
+        __FILE__,                                                    \
+        static_cast<uint32_t>(__LINE__),                             \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));                   \
   }
 #endif
 
