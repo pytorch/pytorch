@@ -164,21 +164,7 @@ def mesh_all_to_all(
 
 def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
-    dtype_to_bytes = {
-        torch.bool: 1,
-        torch.uint8: 1,
-        torch.int8: 1,
-        torch.int16: 2,
-        torch.float16: 2,
-        torch.bfloat16: 2,
-        torch.float32: 4,
-        torch.int32: 4,
-        torch.float64: 8,
-        torch.complex64: 8,
-        torch.int64: 8,
-        torch.complex128: 16,
-    }
-    return dtype_to_bytes[spec.tensor_meta.dtype] * math.prod(spec.shape)
+    return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
 
 def get_bandwidth_factor(mesh: DeviceMesh) -> List[float]:
@@ -252,9 +238,8 @@ def redistribute_cost(
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
        are quite trival (i.e. we only need to narrow or simple division)
-    2. Only consider redistribute cost on non-partial transformations, as for partial
-       placement, the cost would be embedded when we generate the actual PlacementStrategy
-       rather than a redistribute cost.
+    2. Only consider redistribute cost on same mesh, cross mesh communication cost is
+       not quite needed for operator strategy estimation/selection.
     """
     if current_spec.mesh != target_spec.mesh:
         # make infinite cost if meshes are not same
@@ -294,5 +279,9 @@ def redistribute_cost(
             cost += reduce_scatter_cost(comm_bytes, current_spec.mesh, i)
             # after reduce_scatter the comm bytes for further collectives halved.
             comm_bytes /= mesh.size(i)
+        elif current.is_shard() and target.is_partial():
+            # ban shard -> partial as it does not make sense to perform
+            # this redistribute
+            return float("inf")
 
     return cost

@@ -54,21 +54,20 @@ import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs, graph_break_reasons
+
+try:
+    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+except ImportError:
+    from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
-
-try:
-    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
-except ImportError:
-    from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
     import torch_xla
@@ -1181,21 +1180,17 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
 
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_spec"],
         )
 
 
 def export_aot_inductor(model, example_inputs, eager_forward):
-    module, exported, output_spec = AOTInductorModelCache.load(
-        model, example_inputs, eager_forward
-    )
+    module, exported = AOTInductorModelCache.load(model, example_inputs, eager_forward)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1203,7 +1198,7 @@ def export_aot_inductor(model, example_inputs, eager_forward):
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
         output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, output_spec)
+        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
 
     return opt_aot_inductor
 
@@ -3181,10 +3176,10 @@ def process_entry(rank, runner, original_dir, args):
         )(runner, args, original_dir)
 
 
-def main(runner, original_dir=None):
+def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
-    args = parse_args()
+    args = parse_args() if not args else parse_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
@@ -3793,6 +3788,10 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
         return
 
     print(f"Running {name}")
+    try:
+        from .microbenchmarks.operator_inp_utils import OperatorInputsMode
+    except ImportError:
+        from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
     operator_mode = OperatorInputsMode()
     fake_tensor_mode = FakeTensorMode()
