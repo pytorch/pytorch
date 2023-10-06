@@ -7273,7 +7273,7 @@ def ___make_guard_fn():
             l = [a, b, c, d, x]
             for i, t in enumerate(l):
                 l[i] = t * x
-            return list(itertools.accumulate(l))
+            return itertools.accumulate(l)
 
         t_list = [torch.tensor([i + 1]) for i in range(4)]
         x = torch.tensor([[1, 2], [3, 4]])
@@ -7297,7 +7297,7 @@ def ___make_guard_fn():
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return list(itertools.accumulate(l, builtin_op))
+                return itertools.accumulate(l, builtin_op)
 
             t_list = [torch.tensor([i + 1]) for i in range(4)]
             x = torch.tensor([[1, 2], [3, 4]])
@@ -7337,7 +7337,7 @@ def ___make_guard_fn():
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return list(itertools.accumulate(l, udo_fn))
+                return itertools.accumulate(l, udo_fn)
 
             t_list = [torch.tensor([i]) for i in range(4)]
             x = torch.tensor([[1, 2], [3, 4]])
