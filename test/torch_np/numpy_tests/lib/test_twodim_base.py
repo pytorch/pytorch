@@ -6,41 +6,72 @@
 import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
-
 import pytest
-
-import torch._numpy as np
 from pytest import raises as assert_raises
 
-from torch._numpy import (
-    arange,
-    array,
-    diag,
-    eye,
-    fliplr,
-    flipud,
-    histogram2d,
-    ones,
-    tri,  # mask_indices,
-    tril_indices,
-    tril_indices_from,
-    triu_indices,
-    triu_indices_from,
-    vander,
-    zeros,
-)
-from torch._numpy.testing import (
-    assert_allclose,
-    assert_array_almost_equal,
-    assert_array_equal,  # assert_array_max_ulp,
-    assert_equal,
-)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
+    TEST_WITH_TORCHDYNAMO
 )
+
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        arange,
+        array,
+        diag,
+        eye,
+        fliplr,
+        flipud,
+        histogram2d,
+        ones,
+        tri,  # mask_indices,
+        tril_indices,
+        tril_indices_from,
+        triu_indices,
+        triu_indices_from,
+        vander,
+        zeros,
+    )
+    from numpy.testing import (
+        assert_allclose,
+        assert_array_almost_equal,
+        assert_array_equal,  # assert_array_max_ulp,
+        assert_equal,
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        arange,
+        array,
+        diag,
+        eye,
+        fliplr,
+        flipud,
+        histogram2d,
+        ones,
+        tri,  # mask_indices,
+        tril_indices,
+        tril_indices_from,
+        triu_indices,
+        triu_indices_from,
+        vander,
+        zeros,
+    )
+    from torch._numpy.testing import (
+        assert_allclose,
+        assert_array_almost_equal,
+        assert_array_equal,  # assert_array_max_ulp,
+        assert_equal,
+    )
+
+
 
 skip = functools.partial(skipif, True)
 
