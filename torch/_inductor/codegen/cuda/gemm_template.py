@@ -288,8 +288,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def filter_op(
         self,
-        op: cutlass_gemm_op.GemmOperation,  # type: ignore[name-defined]
-    ) -> cutlass_gemm_op.GemmOperation:  # type: ignore[name-defined]
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+    ) -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
