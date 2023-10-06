@@ -4,7 +4,7 @@ beit_base_patch16_224,pass,0
 botnet26t_256,pass,0
 cait_m36_384,infra_error,0
 coat_lite_mini,pass,0
-convit_base,fail_to_run,0
+convit_base,pass,0
 convmixer_768_32,pass,0
 convnext_base,pass,0
 crossvit_9_240,pass,0
@@ -59,4 +59,4 @@ twins_pcpvt_base,pass,0
 visformer_small,pass,0
 vit_base_patch16_224,pass,0
 volo_d1_224,pass,0
-xcit_large_24_p8_224,fail_accuracy,0
+xcit_large_24_p8_224,pass,0
