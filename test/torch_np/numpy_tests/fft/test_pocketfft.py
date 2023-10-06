@@ -12,19 +12,18 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TestCase,
     TEST_WITH_TORCHDYNAMO,
+    TestCase,
 )
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.random import random
-    from numpy.testing import assert_allclose, assert_array_equal  # , IS_WASM
+    from numpy.testing import assert_allclose  # , IS_WASM
 else:
     import torch._numpy as np
     from torch._numpy.random import random
-    from torch._numpy.testing import assert_allclose, assert_array_equal  # , IS_WASM
-
+    from torch._numpy.testing import assert_allclose  # , IS_WASM
 
 
 skip = functools.partial(skipif, True)
@@ -73,9 +72,7 @@ class TestFFT1D(TestCase):
 
         # Ensure we get the correct error message
         # NB: Exact wording differs slightly under Dynamo and in eager.
-        with pytest.raises(
-            (ValueError, RuntimeError), match="Invalid number of"
-        ):
+        with pytest.raises((ValueError, RuntimeError), match="Invalid number of"):
             np.fft.ifft([], norm=norm)
 
     def test_fft2(self):
@@ -374,7 +371,7 @@ class TestFFTThreadSafe(TestCase):
                 q.get(timeout=5),
                 expected,
                 atol=2e-14
-                #msg="Function returned wrong value in multithreaded context",
+                # msg="Function returned wrong value in multithreaded context",
             )
 
     def test_fft(self):

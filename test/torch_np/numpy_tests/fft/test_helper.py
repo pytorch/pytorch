@@ -5,7 +5,11 @@
 Copied from fftpack.helper by Pearu Peterson, October 2005
 
 """
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -15,7 +19,6 @@ else:
     import torch._numpy as np
     from torch._numpy import fft, pi
     from torch._numpy.testing import assert_array_almost_equal
-
 
 
 class TestFFTShift(TestCase):

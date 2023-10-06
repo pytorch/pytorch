@@ -1,12 +1,17 @@
 # Owner(s): ["module: dynamo"]
 
 from unittest import expectedFailure as xfail, skipIf as skipif
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
+
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
-if  TEST_WITH_TORCHDYNAMO:
+if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import assert_allclose, assert_array_equal
 else:

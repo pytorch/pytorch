@@ -12,18 +12,18 @@ import textwrap
 import traceback
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
-import pytest
-from pytest import raises as assert_raises
 
+import pytest
 
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
+from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TestCase,
+    slowTest as slow,
     TEST_WITH_TORCHDYNAMO,
-    slowTest as slow
+    TestCase,
 )
 
 
@@ -74,7 +74,13 @@ else:
         single,
         swapaxes,
     )
-    from torch._numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
+    from torch._numpy.linalg import (
+        LinAlgError,
+        matrix_power,
+        matrix_rank,
+        multi_dot,
+        norm,
+    )
     from torch._numpy.testing import (
         assert_,
         assert_allclose,

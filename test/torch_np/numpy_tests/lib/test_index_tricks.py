@@ -3,14 +3,15 @@
 import functools
 
 from unittest import expectedFailure as xfail, skipIf
+
 from pytest import raises as assert_raises  # , assert_raises_regex,
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
 skip = functools.partial(skipIf, True)
@@ -30,7 +31,13 @@ if TEST_WITH_TORCHDYNAMO:
     )
 else:
     import torch._numpy as np
-    from torch._numpy import diag_indices, diag_indices_from, fill_diagonal, index_exp, s_
+    from torch._numpy import (
+        diag_indices,
+        diag_indices_from,
+        fill_diagonal,
+        index_exp,
+        s_,
+    )
     from torch._numpy.testing import (
         assert_,
         assert_almost_equal,
@@ -38,7 +45,6 @@ else:
         assert_array_equal,
         assert_equal,
     )
-
 
 
 @xfail  # (reason="unravel_index not implemented")

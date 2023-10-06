@@ -6,6 +6,7 @@
 import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
+
 import pytest
 from pytest import raises as assert_raises
 
@@ -13,8 +14,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
 
@@ -70,7 +71,6 @@ else:
         assert_array_equal,  # assert_array_max_ulp,
         assert_equal,
     )
-
 
 
 skip = functools.partial(skipif, True)

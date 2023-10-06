@@ -4,14 +4,15 @@
 
 """
 from unittest import expectedFailure as xfail
+
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
 
@@ -26,7 +27,6 @@ else:
     import torch._numpy as np
     from torch._numpy import unique
     from torch._numpy.testing import assert_array_equal, assert_equal
-
 
 
 @xfail  # (reason="TODO")

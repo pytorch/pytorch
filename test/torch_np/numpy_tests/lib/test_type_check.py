@@ -4,8 +4,13 @@
 import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
+
 from pytest import raises as assert_raises
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 if TEST_WITH_TORCHDYNAMO:
@@ -36,7 +41,6 @@ else:
         real_if_close,
     )
     from torch._numpy.testing import assert_, assert_array_equal, assert_equal
-
 
 
 skip = functools.partial(skipif, True)

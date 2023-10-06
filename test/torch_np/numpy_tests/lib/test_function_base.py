@@ -11,9 +11,9 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 
 import hypothesis
 import hypothesis.strategies as st
-from hypothesis.extra.numpy import arrays
 
 import pytest
+from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -21,8 +21,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
 skip = functools.partial(skipif, True)
@@ -906,8 +906,9 @@ class TestDelete(TestCase):
         with pytest.raises(IndexError):
             np.delete([0, 1, 2], np.array([], dtype=float))
 
-    @parametrize("indexer", [subtest(np.array([1]), name="array([1])"),
-                             subtest([1], name="[1]")])
+    @parametrize(
+        "indexer", [subtest(np.array([1]), name="array([1])"), subtest([1], name="[1]")]
+    )
     def test_single_item_array(self, indexer):
         a_del_int = delete(self.a, 1)
         a_del = delete(self.a, indexer)
