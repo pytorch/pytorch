@@ -101,7 +101,8 @@ def get_descendants(node):
 
 def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
     """
-    Decide global ordering of comms, by just enforcing the ordering that's in the input graph.
+    Decide global ordering of comms, by just enforcing the ordering that's in the input graph
+    (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
     comm_nodes = [n for n in nodes if isinstance(n.node, ir.CollectiveKernel)]
