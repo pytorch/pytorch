@@ -956,7 +956,7 @@ def cat(inputs, dim=0):
             input.realize()
         if all(len(input.layout.size) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
-        return fallback_handler(aten.cat)(inputs, dim)
+        return fallback_handler(aten.cat.default)(inputs, dim)
 
     if len(inputs) == 1:
         return clone(inputs[0])
@@ -1547,11 +1547,9 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, is_output=True)
 
 
-def make_fallback(kernel, layout_constraint=None, warn=True):
-    assert (
-        kernel not in decompositions
-    ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
+def make_fallback(op, layout_constraint=None, warn=True):
+    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -1563,16 +1561,28 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
                 " and suppress_errors is being disabled to surface it."
             )
         raise AssertionError(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            f"make_fallback({op}): a decomposition exists, we should switch to it."
             " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
             " or inductor_decompositions, and delete the corresponding `make_fallback` line."
             " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
         )
 
-    add_needs_realized_inputs(kernel)
-    if layout_constraint is not None:
-        add_layout_constraint(kernel, layout_constraint)
-    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+    def register_fallback(op_overload):
+        add_needs_realized_inputs(op_overload)
+        if layout_constraint is not None:
+            add_layout_constraint(op_overload, layout_constraint)
+        return register_lowering(op_overload, type_promotion_kind=None)(
+            fallback_handler(op_overload)
+        )
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        for ol in op.overloads():
+            op_overload = getattr(op, ol)
+            register_fallback(op_overload)
+    elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+        register_fallback(op)
+    else:
+        raise RuntimeError(f"Unsupported fallback {op} with type {type(op)}")
 
 
 def philox_rand_offset(shape):
@@ -1630,7 +1640,8 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 def native_dropout(x, p, train):
     if config.fallback_random:
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.native_dropout.default, x, p, train),
         )
     else:
         raise AssertionError("should be handled in replace_random.py")
@@ -1670,22 +1681,28 @@ def warn_triton_random():
     _warn_triton_random(V.graph.creation_time)
 
 
-fallback_rand = fallback_handler(aten.rand)
-fallback_randn = fallback_handler(aten.randn)
+fallback_rand_default = fallback_handler(aten.rand.default)
+fallback_rand_generator = fallback_handler(aten.rand.generator)
+fallback_randn_default = fallback_handler(aten.randn.default)
+fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if config.fallback_random or kwargs.get("generator", None) is not None:
-        return fallback_rand(*args, **kwargs)
+    if kwargs.get("generator", None) is not None:
+        return fallback_rand_generator(*args, **kwargs)
+    elif config.fallback_random:
+        return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if config.fallback_random or kwargs.get("generator", None) is not None:
-        return fallback_randn(*args, **kwargs)
+    if kwargs.get("generator", None) is not None:
+        return fallback_randn_generator(*args, **kwargs)
+    elif config.fallback_random:
+        return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
 
@@ -1787,7 +1804,7 @@ def bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
@@ -2622,7 +2639,7 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index)(x, indices)
+        return fallback_handler(aten.index.Tensor)(x, indices)
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -3417,7 +3434,9 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(aten.max_pool2d_with_indices)
+fallback_max_pool2d_with_indices = fallback_handler(
+    aten.max_pool2d_with_indices.default
+)
 
 
 @register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
@@ -3502,7 +3521,7 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward
+    aten.max_pool2d_with_indices_backward.default
 )
 
 
@@ -3723,7 +3742,7 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d)
+fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -3843,7 +3862,7 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d)
+fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -3940,7 +3959,7 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward)
+fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4343,7 +4362,9 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow = fallback_handler(aten.pow)
+fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
+fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
 
 
 @register_lowering(aten.pow, broadcast=True)
@@ -4384,7 +4405,12 @@ def pow(a, b):
 
     if is_integer_pow:
         # ops.pow doesn't work for integers
-        return fallback_pow(a, b)
+        if isinstance(a, Number):
+            return fallback_pow_scalar(a, b)
+        elif isinstance(b, Number):
+            return fallback_pow_tensor_scalar(a, b)
+        else:
+            return fallback_pow_tensor_tensor(a, b)
 
     return pow_native(a, b)
 
