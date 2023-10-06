@@ -215,7 +215,6 @@ def _allowed_function_ids():
                     torch.func.vmap,
                     deprecated_func.vmap,
                     torch.nn.functional.triplet_margin_with_distance_loss,
-                    torch.cond,
                 ):
                     continue
 
