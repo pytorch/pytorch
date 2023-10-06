@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import contextlib
 
 import torch
 import torch.distributed as dist
