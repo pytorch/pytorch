@@ -1607,13 +1607,14 @@ def is_invalid_cancel(
     if not head_job or not drci_classifications:
         return False
 
-    if head_job.get("conclusion", "") != "cancelled":
+    full_name = head_job.get("full_name", "")
+    if head_job.get("conclusion", "") != "cancelled" or not full_name:
         return False
 
     # If a job is cancelled and not listed as a failure by Dr.CI, it's an
     # invalid signal and can be ignored
     return all(
-        head_job.get("full_name", "") != failure["name"]
+        full_name != failure["name"]
         for failure in drci_classifications.get("FAILED", [])
     )
 
