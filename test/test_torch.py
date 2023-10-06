@@ -4285,8 +4285,10 @@ else:
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
     @dtypes(torch.double)
-    @skipIfTorchInductor("FIXME")
     def test_ternary_op_mem_overlap(self, device, dtype):
+        if device == "cpu" and TEST_WITH_TORCHINDUCTOR:
+            self.skipTest("Failing on cpu")
+
         ops = [
             ("addcmul", True, True, 'cpu'),
             ("addcmul", True, True, 'cuda'),
@@ -8419,7 +8421,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
-    @skipIfTorchInductor("FIXME")
     def test_to(self):
         self._test_to_with_layout(torch.strided)
         is_cuda10_2_or_higher = (
