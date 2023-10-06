@@ -212,7 +212,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
 
-    @unittest.expectedFailure     # fails as long as numpy scalars are 0D arrays
+    @unittest.expectedFailure  # fails as long as numpy scalars are 0D arrays
     def test_specializing_numpy_float_in_control_flow(self):
         # np.float is unspecialized by default,
         # but it should be specialized when used in control flow.
