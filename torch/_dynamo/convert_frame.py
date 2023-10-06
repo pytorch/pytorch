@@ -129,6 +129,7 @@ def wrap_convert_context(fn):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
         prior_deterministic = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
@@ -141,7 +142,9 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
-            torch.use_deterministic_algorithms(prior_deterministic)
+            torch.use_deterministic_algorithms(
+                prior_deterministic, warn_only=prior_warn_only
+            )
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():

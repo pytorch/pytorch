@@ -1,12 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/util/Exception.h>
 
 #include <torch/library.h>
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_addmm_activation.h>
+#include <ATen/ops/_native_multi_head_attention.h>
+#include <ATen/ops/_transformer_encoder_layer_fwd_native.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/layer_norm.h>
+#endif
 
 namespace at {
 

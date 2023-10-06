@@ -14,6 +14,7 @@ import multiprocessing
 import os
 import pathlib
 import pickle
+import pkgutil
 import platform
 import re
 import shlex
@@ -39,8 +40,6 @@ from time import sleep, time
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
-import triton
-
 import torch
 
 from torch._dynamo.device_interface import (
@@ -50,7 +49,6 @@ from torch._dynamo.device_interface import (
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
-from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -388,49 +386,98 @@ def write_atomic(path: str, content: Union[str, bytes]) -> None:
     tmp_path.rename(path)
 
 
+@dataclasses.dataclass
+class TensorMetadata:
+    """
+    The Tensor metadata relevant when hashing FxGraph cache keys.
+    """
+
+    dtype: torch.dtype
+    shape: torch.Size
+    stride: Tuple[Any, ...]
+    device: torch.device
+    requires_grad: bool
+    storage_offset: int
+    memory_format: Optional[torch.memory_format]
+    is_quantized: bool
+
+
+@dataclasses.dataclass
+class TensorMetadataAndValues:
+    """
+    TensorMetadata plus the elements as a list of raw values.
+    """
+
+    tensor_metadata: TensorMetadata
+    values: List[Any]
+
+
+def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
+    """
+    Extract the TensorMetadata of a tensor.
+    """
+    # Note the order here matters since is_contiguous() can be True
+    # for more than one memory format.
+    memory_formats = [
+        torch.contiguous_format,
+        torch.channels_last,
+        torch.channels_last_3d,
+    ]
+
+    memory_format = None
+    for fmt in memory_formats:
+        if t.is_contiguous(memory_format=fmt):
+            memory_format = fmt
+            break
+
+    return TensorMetadata(
+        dtype=t.dtype,
+        shape=t.shape,
+        stride=t.stride(),
+        device=t.device,
+        requires_grad=t.requires_grad,
+        storage_offset=t.storage_offset(),
+        memory_format=memory_format,
+        is_quantized=t.is_quantized,
+    )
+
+
+def _ident(x: Any) -> Any:
+    return x
+
+
 def _reduce_fake_tensor(t):
     """
-    See FxGraphCachePickler. Custom reducer to enable pickling FakeTensor.
+    See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    return (TensorMetadataHolder, (_extract_tensor_metadata(t), t.device))
+    metadata = extract_tensor_metadata(t)
+    return (_ident, (metadata,))
 
 
-@dataclasses.dataclass
-class TensorMetadataHolder:
-    tensor_metadata: TensorMetadata
-    device: torch.device
-
-
-def _reduce_typed_storage(s):
+def _reduce_tensor(t):
     """
-    See FxGraphCachePickler. Custom reducer to enable pickling TypedStorage.
+    See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
-    # The string repr seems to capture the relevant details for hashing, e.g.,
-    # 0.0\n[torch.storage.TypedStorage(dtype=torch.float32, device=cpu) of size 1]
-    return (TypedStorageMetadataHolder, (str(s),))
-
-
-@dataclasses.dataclass
-class TypedStorageMetadataHolder:
-    storage_metadata: str
+    # See GraphLowering. We expect any Tensors to be small inlined constants.
+    # For these, we hash on the metadata _and_ the actual values.
+    assert len(t.shape) == 0 or (len(t.shape) == 1 and t.shape[0] <= 128)
+    metadata_and_values = TensorMetadataAndValues(
+        extract_tensor_metadata(t), t.tolist()
+    )
+    return (_ident, (metadata_and_values,))
 
 
 class FxGraphCachePickler(pickle.Pickler):
     """
-    Custom pickler to customize the pickling of some objects, only for the purpose
-    of computing a hash for keying into the FxGraphCache. Some objects don't pickle
-    and/or contain attributes that vary between runs, and we want to capture the
-    data that allow us to compute a safe and stable hash.
+    Custom pickler to customize the pickling of some objects (Tensors), only for the
+    purpose of computing a hash for keying into the FxGraphCache. Tensors contain
+    objects that don't pickle and/or vary between runs, and we want to capture the
+    data that allow us to compute a stable, but safe hash.
     """
 
     dispatch_table = copyreg.dispatch_table.copy()
-
-    # Without custom pickling, we get:
-    # AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
     dispatch_table[torch._subclasses.fake_tensor.FakeTensor] = _reduce_fake_tensor
-
-    # The _cdata attribute is not stable across runs.
-    dispatch_table[torch.storage.TypedStorage] = _reduce_typed_storage
+    dispatch_table[torch.Tensor] = _reduce_tensor
 
     @staticmethod
     def dumps(obj) -> bytes:
@@ -443,8 +490,33 @@ class FxGraphCachePickler(pickle.Pickler):
             return stream.getvalue()
 
 
+@functools.lru_cache(None)
+def get_inductor_code_hash() -> bytes:
+    """
+    Compute a hash of all inductor code modules. Used by the FxGraph cache
+    so any inductor code changes would result in new cache keys.
+    """
+    inductor_root = os.path.dirname(__file__)
+
+    contents: Dict[str, bytes] = {}
+    for lib in pkgutil.iter_modules([inductor_root]):
+        spec = lib.module_finder.find_spec(lib.name, None)
+        assert spec is not None
+        module = spec.origin
+        assert module is not None
+        with open(module, "rb") as f:
+            contents[module] = f.read()
+
+    return hashlib.sha256(pickle.dumps(contents)).digest()
+
+
 @dataclasses.dataclass
 class OrderedSetHolder:
+    """
+    See FxGraphHashDetails. Holds a sorted list to support stable hashing
+    of set kwargs.
+    """
+
     items: List[Any]
 
 
@@ -471,9 +543,19 @@ class FxGraphHashDetails:
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
 
+        # TODO(masnesral): We need to account for the fact that the code will be
+        # guarded. Some of the guards are added during compilation. Is it sufficient
+        # to capture the symbolic ranges?
+        ctx = torch._guards.TracingContext.get()
+        self.var_to_range = ctx.fake_mode.shape_env.var_to_range if ctx else None
+
+        # Also hash on various system info (including the triton compiler version), as
+        # well as the inductor configuration and code.
         self.torch_version = torch.__version__
-        self.triton_version = triton.runtime.version_key()
+        self.system_info = CacheBase.get_system()
+
         self.inductor_config = config.save_config()  # type: ignore[attr-defined]
+        self.inductor_code_hash = get_inductor_code_hash()
 
 
 def compiled_fx_graph_hash(fx_args: List[Any], fx_kwargs: Dict[str, Any]) -> str:
@@ -495,7 +577,7 @@ class FxGraphCache:
     Supports caching and reusing compiled Fx graphs.
     """
 
-    # TODO(slarsen): Investigate whether it's beneficial to store compiled graphs
+    # TODO(masnesral): Investigate whether it's beneficial to store compiled graphs
     # in an in-memory cache after loading from disk.
     @classmethod
     def save_graph(cls, key: str, compiled_graph: CompiledFxGraph):
@@ -519,14 +601,7 @@ class FxGraphCache:
     ):
         from filelock import FileLock
 
-        try:
-            key = compiled_fx_graph_hash(fx_args, fx_kwargs)
-        except Exception as ex:
-            warnings.warn(
-                f"Failed to generate Fx Graph cache key; bypassing caching. Please "
-                f"debug the root cause to improve warm compilation time: '{ex}'"
-            )
-            return compile_fx_fn(*fx_args, **fx_kwargs)
+        key = compiled_fx_graph_hash(fx_args, fx_kwargs)
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -894,7 +969,14 @@ def use_custom_generated_macros() -> str:
 def use_fb_internal_macros() -> str:
     if config.is_fbcode():
         openmp_lib = build_paths.openmp_lib()
-        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        preprocessor_flags = " ".join(
+            (
+                "-D C10_USE_GLOG",
+                "-D C10_USE_MINIMAL_GLOG",
+                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+            )
+        )
+        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
     else:
         return ""
 
@@ -950,10 +1032,6 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode:
-        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
-        cuda = True
-
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -980,17 +1058,18 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
-                # This is a special treatment for Meta internal cuda-12 where all libs
-                # are in lib/cuda-12 and lib/cuda-12/stubs
-                for i, path in enumerate(lpaths):
-                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
-                        f"{path}/libcudart_static.a"
-                    ):
-                        for root, dirs, files in os.walk(path):
-                            if "libcudart_static.a" in files:
-                                lpaths[i] = os.path.join(path, root)
-                                lpaths.append(os.path.join(lpaths[i], "stubs"))
-                                break
+                if cuda:
+                    # This is a special treatment for Meta internal cuda-12 where all libs
+                    # are in lib/cuda-12 and lib/cuda-12/stubs
+                    for i, path in enumerate(lpaths):
+                        if path.startswith(
+                            os.environ["CUDA_HOME"]
+                        ) and not os.path.exists(f"{path}/libcudart_static.a"):
+                            for root, dirs, files in os.walk(path):
+                                if "libcudart_static.a" in files:
+                                    lpaths[i] = os.path.join(path, root)
+                                    lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                    break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -1022,6 +1101,8 @@ def get_include_and_linking_paths(
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.dirname(cpp_prefix_path())]
         lpaths = []
         if sys.platform == "darwin":
             # only Apple builtin compilers (Apple Clang++) require openmp
@@ -1082,7 +1163,7 @@ def get_include_and_linking_paths(
         ipaths.append("include")
 
     static_link_libs = []
-    if aot_mode and config.is_fbcode():
+    if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
         static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 

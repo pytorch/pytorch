@@ -13,8 +13,11 @@ from torch._inductor.codecache import (
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
-    TensorMetadataHolder,
-    TypedStorageMetadataHolder,
+    TensorMetadata,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -51,64 +54,78 @@ def test_codecache_fork():
     _run_codecache_test("fork")
 
 
+@instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
-    @requires_cuda()
+    @classmethod
+    def setUpClass(cls):
+        # Reroute all cache disk activity to a clean temporary directory to
+        # ensure isolation (and initial cache misses). Deliberately create the
+        # temp dir in setUpClass, however, so that individual test runs reuse
+        # the same location. We don't expect different tests to reuse cache
+        # entries, so preserving the temp dir provides that additional testing.
+        cls.tmpdir = tempfile.TemporaryDirectory()
+        cls.cache_dir_patch = patch("torch._inductor.codecache.cache_dir")
+        cls.cache_dir_patch.start().return_value = cls.tmpdir.name
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cache_dir_patch.stop()
+        cls.tmpdir.cleanup()
+
     @config.patch({"fx_graph_cache": True})
-    @patch("torch._inductor.codecache.cache_dir")
-    def test_cache_load(self, mock_cache_dir):
+    @parametrize("dynamic", (True, False))
+    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("dtype", (torch.float, torch.bfloat16))
+    def test_cache_load(self, dynamic, device, dtype):
         """
         Verify that we can populate and load CompiledFxGraphs from the cache.
         """
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("requires CUDA")
 
         def fn(x, y):
-            z = x + y
-            return (z @ z,)
+            return (x * 2, y @ y)
 
-        inps = [
-            torch.rand([5, 5]).cuda(),
-            torch.rand([5, 5]).cuda(),
-        ]
+        a = torch.rand([25], dtype=dtype, device=device)
+        b = torch.rand([5, 5], dtype=dtype, device=device)
+        c = a.view(5, 5)
 
-        # Reroute all disk activity to a clean temporary directory to
-        # ensure isolation (and an initial cache miss).
-        with tempfile.TemporaryDirectory() as tmpdir:
-            mock_cache_dir.return_value = tmpdir
+        # Spy on these methods so we can verify they are called.
+        mock_save_graph = Mock(wraps=FxGraphCache.save_graph)
+        mock_load_graph = Mock(wraps=FxGraphCache.load_graph)
+        FxGraphCache.save_graph = mock_save_graph
+        FxGraphCache.load_graph = mock_load_graph
 
-            # Spy on these methods so we can verify they are called.
-            mock_save_graph = Mock(wraps=FxGraphCache.save_graph)
-            mock_load_graph = Mock(wraps=FxGraphCache.load_graph)
-            FxGraphCache.save_graph = mock_save_graph
-            FxGraphCache.load_graph = mock_load_graph
+        compiled_fn = torch.compile(fn, dynamic=dynamic)
 
-            # A first call shold miss in the cache.
-            compiled_fn = torch.compile(fn)
-            compiled_fn(*inps)
-            self.assertEqual(fn(*inps), compiled_fn(*inps))
+        # A first call shold miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(mock_save_graph.call_count, 1)
+        self.assertEqual(mock_load_graph.call_count, 0)
 
-            mock_save_graph.assert_called_once()
-            mock_load_graph.assert_not_called()
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        torch._dynamo.reset()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(mock_save_graph.call_count, 1)
+        self.assertEqual(mock_load_graph.call_count, 1)
 
-            # A second call should hit. (First reset so in-memory guards
-            # don't prevent compilation).
-            torch._dynamo.reset()
-
-            compiled_fn = torch.compile(fn)
-            compiled_fn(*inps)
-            self.assertEqual(fn(*inps), compiled_fn(*inps))
-
-            mock_save_graph.assert_called_once()
-            mock_load_graph.assert_called_once()
+        # But we expect different code if the tensors are aliased.
+        torch._dynamo.reset()
+        self.assertEqual(fn(a, c), compiled_fn(a, c))
+        self.assertEqual(mock_save_graph.call_count, 2)
+        self.assertEqual(mock_load_graph.call_count, 1)
 
     def test_hash_tensors(self):
         """
         Test hashing (pickling) FakeTensors with various characteristics.
         """
         with torch._subclasses.FakeTensorMode():
-            # Verify that FakeTensors get pickled into a TensorMetadataHolder:
+            # Verify that FakeTensors get pickled into a TensorMetadata:
             data = FxGraphCachePickler.dumps(torch.randn(1))
-            self.assertIsInstance(pickle.loads(data), TensorMetadataHolder)
+            self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
-            # Compare hashing of tensors with various characteristics:
+            # Different shapes:
             self.assertEqual(
                 FxGraphCachePickler.dumps(torch.randn(3)),
                 FxGraphCachePickler.dumps(torch.randn(3)),
@@ -116,6 +133,10 @@ class TestFxGraphCache(TestCase):
             self.assertNotEqual(
                 FxGraphCachePickler.dumps(torch.randn(3)),
                 FxGraphCachePickler.dumps(torch.randn(4)),
+            )
+            self.assertNotEqual(
+                FxGraphCachePickler.dumps(torch.randn(3)),
+                FxGraphCachePickler.dumps(torch.randn(3, 3)),
             )
 
             self.assertEqual(
@@ -131,6 +152,29 @@ class TestFxGraphCache(TestCase):
                 FxGraphCachePickler.dumps(torch.randn(4, 3)),
             )
 
+            # Different strides:
+            self.assertEqual(
+                FxGraphCachePickler.dumps(torch.randn(3, 3)),
+                FxGraphCachePickler.dumps(
+                    torch.randn(3, 3).transpose(0, 1).transpose(0, 1)
+                ),
+            )
+            self.assertNotEqual(
+                FxGraphCachePickler.dumps(torch.randn(3, 3)),
+                FxGraphCachePickler.dumps(torch.randn(3, 3).transpose(0, 1)),
+            )
+
+            # Different storage offsets:
+            self.assertEqual(
+                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
+                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
+            )
+            self.assertNotEqual(
+                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
+                FxGraphCachePickler.dumps(torch.randn(2)),
+            )
+
+            # Different dtypes:
             self.assertEqual(
                 FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
                 FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
@@ -140,6 +184,7 @@ class TestFxGraphCache(TestCase):
                 FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float64)),
             )
 
+            # Different 'requires_grad':
             self.assertEqual(
                 FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
                 FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
@@ -149,6 +194,7 @@ class TestFxGraphCache(TestCase):
                 FxGraphCachePickler.dumps(torch.randn(3, requires_grad=False)),
             )
 
+            # Different memory formats:
             self.assertNotEqual(
                 FxGraphCachePickler.dumps(torch.randn(1, 2, 3, 4)),
                 FxGraphCachePickler.dumps(
@@ -156,6 +202,7 @@ class TestFxGraphCache(TestCase):
                 ),
             )
 
+            # Different devices:
             self.assertEqual(
                 FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
                 FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
@@ -233,23 +280,6 @@ class TestFxGraphCache(TestCase):
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details3),
-        )
-
-    def test_hash_typed_storage(self):
-        """
-        Test hashing (pickling) TypedStorage objects.
-        """
-        # Verify that TypedStorage objects get pickled into TypedStorageMetadataHolders:
-        data = FxGraphCachePickler.dumps(torch.TypedStorage([0]))
-        self.assertIsInstance(pickle.loads(data), TypedStorageMetadataHolder)
-
-        self.assertEqual(
-            FxGraphCachePickler.dumps(torch.TypedStorage([0])),
-            FxGraphCachePickler.dumps(torch.TypedStorage([0])),
-        )
-        self.assertNotEqual(
-            FxGraphCachePickler.dumps(torch.TypedStorage([0])),
-            FxGraphCachePickler.dumps(torch.TypedStorage([1])),
         )
 
 
