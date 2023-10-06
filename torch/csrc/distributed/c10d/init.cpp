@@ -32,7 +32,6 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -290,26 +289,6 @@ void _register_builtin_comm_hook(
     ::c10d::Reducer& reducer,
     ::c10d::BuiltinCommHookType comm_hook_type) {
   reducer.register_builtin_comm_hook(comm_hook_type);
-}
-
-py::object c10d_dequeue_python_event() {
-  ::c10d::details::EventInfo evt;
-  if (!::c10d::details::dequeue_c10d_event(evt)) {
-    return py::none();
-  }
-
-  py::dict data;
-  data["event_kind"] = (int)evt.event_kind;
-
-  data["pg_name"] = evt.pg_name;
-  data["backend"] = evt.backend;
-  data["sequence_number"] = evt.sequence_number;
-  data["operation"] = evt.operation;
-  data["timestamp"] = evt.timestamp;
-  data["duration"] = evt.duration_ms.value_or(-1);
-  data["drop_count"] = evt.drop_count;
-
-  return std::move(data);
 }
 
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
@@ -661,11 +640,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::EventKind>(module, "EventKind", R"(
-An enum for collective hooks event types.)")
-      .value("START", ::c10d::EventKind::CollectiveStart)
-      .value("END", ::c10d::EventKind::CollectiveEnd);
-
   py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
       An enum whose values correspond to different debug levels of the
       torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
@@ -689,16 +663,7 @@ An enum for collective hooks event types.)")
           "set_debug_level_from_env",
           ::c10d::setDebugLevelFromEnvironment,
           R"(Sets the debug level of the torch.distributed package from the
-          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
-      .def(
-          "_enable_event_collection",
-          &::c10d::enable_event_collection,
-          "(Enables events collection).",
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_dequeue_c10d_event",
-          &c10d_dequeue_python_event,
-          "(Blocks until a c10d event is available and return it as a python dictionary).");
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   // TODO(crcrpar): Hardening `ReduceOp`.
   //    While keeping most op types as enum value,
