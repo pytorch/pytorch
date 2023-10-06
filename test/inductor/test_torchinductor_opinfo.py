@@ -227,15 +227,17 @@ inductor_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
     "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
+    "fft.ihfft2": {f32},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
+    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
+    "pca_lowrank": {f64},
+    "svd_lowrank": {f32},
 }
 
 
@@ -243,6 +245,7 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
+    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
 
