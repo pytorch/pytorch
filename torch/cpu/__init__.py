@@ -15,6 +15,7 @@ __all__ = [
     "synchronize",
     "current_stream",
     "stream",
+    "set_device",
     "device_count",
     "Stream",
     "StreamContext",
