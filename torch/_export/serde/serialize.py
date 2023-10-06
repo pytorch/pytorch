@@ -20,6 +20,7 @@ import torch._export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils._pytree import treespec_dumps, treespec_loads, tree_map_only
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,
@@ -289,12 +290,12 @@ def _int_to_sympy_int(val) -> sympy.Expr:
 
 
 def serialize_range_constraints(
-    range_constraints: Dict[sympy.Symbol, ep.RangeConstraint]
+    range_constraints: Dict[sympy.Symbol, ValueRanges]
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.min_val),
-            _sympy_int_to_int(v.max_val),
+            _sympy_int_to_int(v.lower),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.upper),  # type: ignore[arg-type]
         )
         for k, v in range_constraints.items()
     }
@@ -1377,11 +1378,11 @@ class ExportedProgramDeserializer:
         self,
         symbol_name_to_range: Dict[str, symbolic_shapes.ValueRanges],
         symbol_name_to_symbol: Dict[str, sympy.Symbol],
-    ) -> Dict[sympy.Symbol, ep.RangeConstraint]:
+    ) -> Dict[sympy.Symbol, ValueRanges]:
         range_constraints = {}
         for k, v in symbol_name_to_range.items():
             if symbol := symbol_name_to_symbol.get(k):
-                range_constraints[symbol] = ep.RangeConstraint(v.lower, v.upper)  # type: ignore[arg-type]
+                range_constraints[symbol] = ValueRanges(v.lower, v.upper)  # type: ignore[arg-type]
             else:
                 log.warning(f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
         return range_constraints
