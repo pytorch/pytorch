@@ -698,7 +698,7 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
-            self.graph_id,
+            self.graph_id if self.graph_id is not None else -1,
         )
 
     def finalize(self):
