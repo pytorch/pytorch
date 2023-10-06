@@ -790,36 +790,46 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
-        elif self.value is itertools.accumulate and not kwargs:
+        elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
 
-            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                seq = args[0].unpack_var_sequence(tx)
+            if any(key not in ["initial", "func"] for key in kwargs.keys()):
+                raise unimplemented("Unsupported kwarg for itertools.accumulate")
 
-                def func(tx, acc, item):
-                    return BuiltinVariable(operator.add).call_function(tx, [acc, item], {})
+            acc = None
 
+            if "initial" in kwargs:
+                acc = kwargs["initial"]
+
+            if (
+                "func" in kwargs
+                and hasattr(kwargs["func"], "call_function")
+                and len(args) == 1
+                and args[0].has_unpack_var_sequence(tx)
+            ):
+                func = kwargs["func"].call_function
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                func = BuiltinVariable(operator.add).call_function
             elif (
                 len(args) == 2
                 and args[0].has_unpack_var_sequence(tx)
                 and hasattr(args[1], "call_function")
             ):
-                seq = args[0].unpack_var_sequence(tx)
-
-                def func(tx, acc, item):
-                    return args[1].call_function(tx, [acc, item], {})
-
+                func = args[1].call_function
             else:
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
 
+            seq = args[0].unpack_var_sequence(tx)
+
             items = []
-            acc = None
+            if acc is not None:
+                items.append(acc)
             for item in seq:
                 if acc is None:
                     acc = item
                 else:
                     try:
-                        acc = func(tx, acc, item)
+                        acc = func(tx, [acc, item], {})
                     except Exception:
                         raise unimplemented(
                             f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
