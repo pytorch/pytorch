@@ -4,23 +4,40 @@
 import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
-
-import torch._numpy as np
 from pytest import raises as assert_raises
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
 
-from torch._numpy import (
-    common_type,
-    iscomplex,
-    iscomplexobj,
-    isneginf,
-    isposinf,
-    isreal,
-    isrealobj,
-    nan_to_num,
-    real_if_close,
-)
-from torch._numpy.testing import assert_, assert_array_equal, assert_equal
-from torch.testing._internal.common_utils import run_tests, TestCase
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        common_type,
+        iscomplex,
+        iscomplexobj,
+        isneginf,
+        isposinf,
+        isreal,
+        isrealobj,
+        nan_to_num,
+        real_if_close,
+    )
+    from numpy.testing import assert_, assert_array_equal, assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        common_type,
+        iscomplex,
+        iscomplexobj,
+        isneginf,
+        isposinf,
+        isreal,
+        isrealobj,
+        nan_to_num,
+        real_if_close,
+    )
+    from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+
+
 
 skip = functools.partial(skipif, True)
 
