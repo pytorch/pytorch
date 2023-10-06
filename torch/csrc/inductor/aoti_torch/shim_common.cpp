@@ -85,6 +85,10 @@ int32_t aoti_torch_dtype_int64() {
   return (int32_t)c10::ScalarType::Long;
 }
 
+int32_t aoti_torch_dtype_bool() {
+  return (int32_t)c10::ScalarType::Bool;
+}
+
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
