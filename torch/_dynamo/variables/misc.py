@@ -797,29 +797,25 @@ class SkipFilesVariable(VariableTracker):
                 raise unimplemented("Unsupported kwarg for itertools.accumulate")
 
             acc = None
-
             if "initial" in kwargs:
                 acc = kwargs["initial"]
 
-            if (
-                "func" in kwargs
-                and hasattr(kwargs["func"], "call_function")
-                and len(args) == 1
-                and args[0].has_unpack_var_sequence(tx)
-            ):
-                func = kwargs["func"].call_function
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                func = BuiltinVariable(operator.add).call_function
-            elif (
-                len(args) == 2
-                and args[0].has_unpack_var_sequence(tx)
-                and hasattr(args[1], "call_function")
-            ):
-                func = args[1].call_function
+            if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
+                seq = args[0].unpack_var_sequence(tx)
+
+                if "func" in kwargs and len(args) == 1:
+                    func = kwargs["func"].call_function
+                elif len(args) == 1:
+                    # Default to operator.add
+                    func = BuiltinVariable(operator.add).call_function
+                elif len(args) == 2:
+                    func = args[1].call_function
+                else:
+                    raise unimplemented(
+                        "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
+                    )
             else:
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
-
-            seq = args[0].unpack_var_sequence(tx)
 
             items = []
             if acc is not None:
