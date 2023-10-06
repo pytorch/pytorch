@@ -874,6 +874,22 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
+    @deviceCountAtLeast(1)
+    @onlyCUDA
+    @dtypes(torch.cfloat)
+    def test_cufft_context(self, devices, dtype):
+        x = torch.randn(32, dtype=dtype, device=devices[0], requires_grad=True)
+        dout = torch.zeros(32, dtype=dtype, device=devices[0])
+
+        # compute iFFT(FFT(x))
+        out = torch.fft.ifft(torch.fft.fft(x))
+        out.backward(dout, retain_graph=True)
+
+        dx = torch.fft.fft(torch.fft.ifft(dout))
+
+        self.assertTrue((x.grad - dx).abs().max() == 0)
+        self.assertFalse((x.grad - x).abs().max() == 0)
+
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes

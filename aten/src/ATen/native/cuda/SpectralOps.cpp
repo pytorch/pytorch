@@ -309,7 +309,8 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   if (!pctx) {
     // workaround for corner case where a primary context exists but is not
     // the current context
-    cudaFree(nullptr);
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, 0);
+    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
   }
   exec_cufft_plan(*config, input.data_ptr(), out.data_ptr(), forward);
 
