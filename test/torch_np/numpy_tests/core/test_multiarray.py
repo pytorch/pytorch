@@ -2943,10 +2943,10 @@ class TestMethods(TestCase):
         ]
         for dt in dtypes:
             a = np.array([1, 2, 3], dtype=dt)
-            assert_raises(ValueError, complex, a)
+            assert_raises(TypeError, complex, a)
 
         c = np.array([(1.0, 3), (2e-3, 7)], dtype=dt)
-        assert_raises(ValueError, complex, c)
+        assert_raises(TypeError, complex, c)
 
 
 class TestCequenceMethods(TestCase):

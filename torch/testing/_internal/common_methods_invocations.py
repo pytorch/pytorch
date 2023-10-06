@@ -397,7 +397,7 @@ def error_inputs_item(op, device, **kwargs):
 
     for shape in cases:
         yield ErrorInput(
-            SampleInput(make_arg(shape)), error_type=RuntimeError,
+            SampleInput(make_arg(shape)), error_type=TypeError,
             error_regex="elements cannot be converted to Scalar")
 
 
