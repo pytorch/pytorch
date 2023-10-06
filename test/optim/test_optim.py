@@ -1398,6 +1398,28 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
             optim.NAdam(None, lr=1e-2, momentum_decay=-0.2)
 
+    def test_nadam_complex(self):
+        for foreach in (False, True):
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam([param], lr=1e-1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam(
+                    [param],
+                    lr=1e-1,
+                    momentum_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+
     def test_adagrad(self):
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: optim.Adagrad(
