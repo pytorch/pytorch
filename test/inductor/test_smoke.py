@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._logging
 
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -39,7 +39,6 @@ class SmokeTest(TestCase):
         # set back to defaults
         torch._logging.set_logs()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_CUDA, "Triton is not available")
     def test_compile_decorator(self):
         @torch.compile

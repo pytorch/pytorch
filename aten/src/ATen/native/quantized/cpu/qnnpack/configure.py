@@ -31,7 +31,6 @@ def main(args):
         ],
         extra_include_dirs="src",
     ):
-
         requantization_objects = [
             build.cc("requantization/precise-scalar.c"),
             build.cc("requantization/fp32-scalar.c"),
@@ -192,7 +191,6 @@ def main(args):
         },
         extra_include_dirs=["src", "test"],
     ):
-
         build.unittest("hgemm-test", build.cxx("hgemm.cc"))
         build.unittest("q8avgpool-test", build.cxx("q8avgpool.cc"))
         build.unittest("q8conv-test", build.cxx("q8conv.cc"))
@@ -252,7 +250,6 @@ def main(args):
         isa=benchmark_isa,
         extra_include_dirs="src",
     ):
-
         build.benchmark("add-bench", build.cxx("add.cc"))
         build.benchmark("average-pooling-bench", build.cxx("average-pooling.cc"))
         build.benchmark("channel-shuffle-bench", build.cxx("channel-shuffle.cc"))

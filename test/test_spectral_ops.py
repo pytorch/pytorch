@@ -20,8 +20,8 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch._prims_common import corresponding_complex_dtype
 
-from setuptools import distutils
 from typing import Optional, List
+from packaging import version
 
 
 if TEST_NUMPY:
@@ -38,11 +38,10 @@ try:
 except ModuleNotFoundError:
     pass
 
-LooseVersion = distutils.version.LooseVersion
 REFERENCE_NORM_MODES = (
     (None, "forward", "backward", "ortho")
-    if LooseVersion(np.__version__) >= '1.20.0' and (
-        not has_scipy_fft or LooseVersion(scipy.__version__) >= '1.6.0')
+    if version.parse(np.__version__) >= version.parse('1.20.0') and (
+        not has_scipy_fft or version.parse(scipy.__version__) >= version.parse('1.6.0'))
     else (None, "ortho"))
 
 
@@ -326,12 +325,13 @@ class TestFFT(TestCase):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
+        default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
-            err_msg = "Unsupported dtype "
+            err_msg = default_msg
         elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
             err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
         else:
-            err_msg = "Unsupported dtype "
+            err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
@@ -445,11 +445,12 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
-
-        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
+        # FIXME: https://github.com/pytorch/pytorch/issues/108205
+        errMsg = "dims must be unique"
+        with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
+        with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(2, -1))
 
         with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):

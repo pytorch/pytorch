@@ -732,8 +732,8 @@ def extend_logger_results_with_comparison(
         comparison_name: string name of model to use for
           layer names in the output
     """
-    for _, results_type_to_results in results.items():
-        for _, model_name_to_results in results_type_to_results.items():
+    for results_type_to_results in results.values():
+        for model_name_to_results in results_type_to_results.values():
             assert model_name_1 in model_name_to_results, \
                 f"{model_name_1} not found in results"
             assert model_name_2 in model_name_to_results, \
@@ -856,7 +856,7 @@ def prepare_n_shadows_model(
         create_n_transformed_and_logged_copies_of_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
             qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
-            custom_prepare_fn, custom_prepare_kwargs
+            custom_prepare_fn, custom_prepare_kwargs  # type: ignore[arg-type]
         )
 
     return mt

@@ -267,7 +267,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymInt> {
   bool load(py::handle src, bool);
 
   static py::handle cast(
-      c10::SymInt si,
+      const c10::SymInt& si,
       return_value_policy /* policy */,
       handle /* parent */);
 };
@@ -279,7 +279,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
   bool load(py::handle src, bool);
 
   static py::handle cast(
-      c10::SymFloat si,
+      const c10::SymFloat& si,
       return_value_policy /* policy */,
       handle /* parent */);
 };
@@ -291,7 +291,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymBool> {
   bool load(py::handle src, bool);
 
   static py::handle cast(
-      c10::SymBool si,
+      const c10::SymBool& si,
       return_value_policy /* policy */,
       handle /* parent */);
 };

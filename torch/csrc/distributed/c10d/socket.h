@@ -12,6 +12,7 @@
 #include <string>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 
 namespace c10d {
@@ -79,6 +80,8 @@ class Socket {
 
   std::uint16_t port() const;
 
+  bool waitForInput(std::chrono::milliseconds timeout);
+
  private:
   explicit Socket(std::unique_ptr<SocketImpl>&& impl) noexcept;
 
@@ -86,20 +89,5 @@ class Socket {
 };
 
 } // namespace detail
-
-class TORCH_API SocketError : public C10dError {
- public:
-  using C10dError::C10dError;
-
-  SocketError(const SocketError&) = default;
-
-  SocketError& operator=(const SocketError&) = default;
-
-  SocketError(SocketError&&) = default;
-
-  SocketError& operator=(SocketError&&) = default;
-
-  ~SocketError() override;
-};
 
 } // namespace c10d

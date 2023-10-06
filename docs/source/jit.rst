@@ -69,6 +69,7 @@ Creating TorchScript Code
     load
     ignore
     unused
+    interface
     isinstance
     Attribute
     annotate

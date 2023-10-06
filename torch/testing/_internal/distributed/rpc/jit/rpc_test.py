@@ -310,7 +310,7 @@ class FutureTypingTest:
             dst_rank: int, inputs: Tuple[Tensor, Tensor]
         ) -> Future[Tensor]:
             return rpc.rpc_async(
-                "worker{}".format(dst_rank), two_args_two_kwargs, inputs
+                f"worker{dst_rank}", two_args_two_kwargs, inputs
             )
 
         fut_res = future_return_to_python(dst_rank, inputs)

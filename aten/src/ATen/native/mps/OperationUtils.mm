@@ -13,6 +13,20 @@
 
 namespace at::native::mps {
 
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
+  __block std::optional<std::exception_ptr> block_exception;
+  dispatch_sync(queue, ^() {
+    try {
+      block();
+    } catch (...) {
+      block_exception = std::current_exception();
+    }
+  });
+  if (block_exception) {
+    std::rethrow_exception(*block_exception);
+  }
+}
+
 /**
  * Computes distance from lowest to highest element offset in given tensor.
  */
@@ -175,7 +189,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
   }
 }
 
-NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
+static NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
   for (const auto i : c10::irange(ndim)) {
     axes[i] = [NSNumber numberWithInteger:i];
@@ -187,7 +201,7 @@ NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
   return getTensorAxes(t.dim());
 }
 
-NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
+static NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
   return getTensorAxes(sizes.size());
 }
 

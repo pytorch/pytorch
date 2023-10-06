@@ -4,6 +4,8 @@
 
     { include: [ "<c10/util/BFloat16-inl.h>", private, "<c10/util/BFloat16.h>", public ] },
     { include: [ "<c10/util/Half-inl.h>", private, "<c10/util/Half.h>", public ] },
+    { include: [ "<c10/util/Float8_e5m2-inl.h>", private, "<c10/util/Float8_e5m2.h>", public ] },
+    { include: [ "<c10/util/Float8_e4m3fn-inl.h>", private, "<c10/util/Float8_e4m3fn.h>", public ] },
 
     { include: [ "<c10/util/complex_math.h>", private, "<c10/util/complex.h>", public ] },
     { include: [ "<c10/util/complex_utils.h>", private, "<c10/util/complex.h>", public ] },

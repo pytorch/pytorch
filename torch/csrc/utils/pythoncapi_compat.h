@@ -390,22 +390,36 @@ PyThreadState_LeaveTracing(PyThreadState *tstate)
 
 
 // bpo-37194 added PyObject_CallNoArgs() to Python 3.9.0a1
-#if PY_VERSION_HEX < 0x030900A1 || defined(PYPY_VERSION)
+// PyObject_CallNoArgs() added to PyPy 3.9.16-v7.3.11
+#if !defined(PyObject_CallNoArgs) && PY_VERSION_HEX < 0x030900A1
 PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
 PyObject_CallNoArgs(PyObject *func)
 {
     return PyObject_CallFunctionObjArgs(func, NULL);
+}
+
+PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
+PyObject_CallMethodNoArgs(PyObject *obj, PyObject *name)
+{
+    return PyObject_CallMethodObjArgs(obj, name, NULL);
 }
 #endif
 
 
 // bpo-39245 made PyObject_CallOneArg() public (previously called
 // _PyObject_CallOneArg) in Python 3.9.0a4
-#if PY_VERSION_HEX < 0x030900A4 || defined(PYPY_VERSION)
+// PyObject_CallOneArg() added to PyPy 3.9.16-v7.3.11
+#if !defined(PyObject_CallOneArg) && PY_VERSION_HEX < 0x030900A4
 PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
 PyObject_CallOneArg(PyObject *func, PyObject *arg)
 {
     return PyObject_CallFunctionObjArgs(func, arg, NULL);
+}
+
+PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
+PyObject_CallMethodOneArg(PyObject *obj, PyObject *name, PyObject *arg)
+{
+    return PyObject_CallMethodObjArgs(obj, name, arg, NULL);
 }
 #endif
 
@@ -566,6 +580,133 @@ PyCode_GetCellvars(PyCodeObject *code)
 #  else
 #    define Py_UNUSED(name) _unused_ ## name
 #  endif
+#endif
+
+
+// gh-105922 added PyImport_AddModuleRef() to Python 3.13.0a1
+#if PY_VERSION_HEX < 0x030D00A0
+PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
+PyImport_AddModuleRef(const char *name)
+{
+    return Py_XNewRef(PyImport_AddModule(name));
+}
+#endif
+
+
+// gh-105927 added PyWeakref_GetRef() to Python 3.13.0a1
+#if PY_VERSION_HEX < 0x030D0000
+PYCAPI_COMPAT_STATIC_INLINE(int)
+PyWeakref_GetRef(PyObject *ref, PyObject **pobj)
+{
+    PyObject *obj;
+    if (ref != NULL && !PyWeakref_Check(ref)) {
+        *pobj = NULL;
+        PyErr_SetString(PyExc_TypeError, "expected a weakref");
+        return -1;
+    }
+    obj = PyWeakref_GetObject(ref);
+    if (obj == NULL) {
+        // SystemError if ref is NULL
+        *pobj = NULL;
+        return -1;
+    }
+    if (obj == Py_None) {
+        *pobj = NULL;
+        return 0;
+    }
+    *pobj = Py_NewRef(obj);
+    return (*pobj != NULL);
+}
+#endif
+
+
+// bpo-36974 added PY_VECTORCALL_ARGUMENTS_OFFSET to Python 3.8b1
+#ifndef PY_VECTORCALL_ARGUMENTS_OFFSET
+#  define PY_VECTORCALL_ARGUMENTS_OFFSET (_Py_CAST(size_t, 1) << (8 * sizeof(size_t) - 1))
+#endif
+
+// bpo-36974 added PyVectorcall_NARGS() to Python 3.8b1
+#if PY_VERSION_HEX < 0x030800B1
+static inline Py_ssize_t
+PyVectorcall_NARGS(size_t n)
+{
+    return n & ~PY_VECTORCALL_ARGUMENTS_OFFSET;
+}
+#endif
+
+
+// gh-105922 added PyObject_Vectorcall() to Python 3.9.0a4
+#if PY_VERSION_HEX < 0x030900A4
+PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
+PyObject_Vectorcall(PyObject *callable, PyObject *const *args,
+                     size_t nargsf, PyObject *kwnames)
+{
+#if PY_VERSION_HEX >= 0x030800B1 && !defined(PYPY_VERSION)
+    // bpo-36974 added _PyObject_Vectorcall() to Python 3.8.0b1
+    return _PyObject_Vectorcall(callable, args, nargsf, kwnames);
+#else
+    PyObject *posargs = NULL, *kwargs = NULL;
+    PyObject *res;
+    Py_ssize_t nposargs, nkwargs, i;
+
+    if (nargsf != 0 && args == NULL) {
+        PyErr_BadInternalCall();
+        goto error;
+    }
+    if (kwnames != NULL && !PyTuple_Check(kwnames)) {
+        PyErr_BadInternalCall();
+        goto error;
+    }
+
+    nposargs = (Py_ssize_t)PyVectorcall_NARGS(nargsf);
+    if (kwnames) {
+        nkwargs = PyTuple_GET_SIZE(kwnames);
+    }
+    else {
+        nkwargs = 0;
+    }
+
+    posargs = PyTuple_New(nposargs);
+    if (posargs == NULL) {
+        goto error;
+    }
+    if (nposargs) {
+        for (i=0; i < nposargs; i++) {
+            PyTuple_SET_ITEM(posargs, i, Py_NewRef(*args));
+            args++;
+        }
+    }
+
+    if (nkwargs) {
+        kwargs = PyDict_New();
+        if (kwargs == NULL) {
+            goto error;
+        }
+
+        for (i = 0; i < nkwargs; i++) {
+            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
+            PyObject *value = *args;
+            args++;
+            if (PyDict_SetItem(kwargs, key, value) < 0) {
+                goto error;
+            }
+        }
+    }
+    else {
+        kwargs = NULL;
+    }
+
+    res = PyObject_Call(callable, posargs, kwargs);
+    Py_DECREF(posargs);
+    Py_XDECREF(kwargs);
+    return res;
+
+error:
+    Py_DECREF(posargs);
+    Py_XDECREF(kwargs);
+    return NULL;
+#endif
+}
 #endif
 
 

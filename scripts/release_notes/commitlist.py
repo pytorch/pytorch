@@ -1,15 +1,22 @@
 import argparse
-from common import run, topics, get_features, frontend_categories
-from collections import defaultdict
-import os
-from pathlib import Path
 import csv
-import pprint
-import common
-from common import get_commit_data_cache, features_to_dict
-import re
 import dataclasses
+import os
+import pprint
+import re
+from collections import defaultdict
+from pathlib import Path
 from typing import List
+
+import common
+from common import (
+    features_to_dict,
+    frontend_categories,
+    get_commit_data_cache,
+    get_features,
+    run,
+    topics,
+)
 
 
 """
@@ -25,6 +32,8 @@ Update the existing commitlist to commit bfcb687b9c.
     python commitlist.py --update-to bfcb687b9c
 
 """
+
+
 @dataclasses.dataclass(frozen=False)
 class Commit:
     commit_hash: str
@@ -43,9 +52,13 @@ class Commit:
     merge_into: str = None
 
     def __repr__(self):
-        return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
+        return (
+            f"Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})"
+        )
+
 
 commit_fields = tuple(f.name for f in dataclasses.fields(Commit))
+
 
 class CommitList:
     # NB: Private ctor. Use `from_existing` or `create_new`.
@@ -61,7 +74,9 @@ class CommitList:
     @staticmethod
     def create_new(path, base_version, new_version):
         if os.path.exists(path):
-            raise ValueError('Attempted to create a new commitlist but one exists already!')
+            raise ValueError(
+                "Attempted to create a new commitlist but one exists already!"
+            )
         commits = CommitList.get_commits_between(base_version, new_version)
         return CommitList(path, commits)
 
@@ -83,11 +98,12 @@ class CommitList:
     @staticmethod
     def write_to_disk_static(path, commit_list):
         os.makedirs(Path(path).parent, exist_ok=True)
-        with open(path, 'w') as csvfile:
+        with open(path, "w") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(commit_fields)
             for commit in commit_list:
                 writer.writerow(dataclasses.astuple(commit))
+
     @staticmethod
     def keywordInFile(file, keywords):
         for key in keywords:
@@ -105,16 +121,27 @@ class CommitList:
             pr_link = f"https://github.com/pytorch/pytorch/pull/{features['pr_number']}"
         else:
             pr_link = None
-        files_changed_str = ' '.join(features['files_changed'])
-        return Commit(commit_hash, category, topic, features["title"], files_changed_str,  pr_link, features["author"], a1, a2, a3)
+        files_changed_str = " ".join(features["files_changed"])
+        return Commit(
+            commit_hash,
+            category,
+            topic,
+            features["title"],
+            files_changed_str,
+            pr_link,
+            features["author"],
+            a1,
+            a2,
+            a3,
+        )
 
     @staticmethod
     def category_remapper(category: str) -> str:
         if category in frontend_categories:
-            category = category + '_frontend'
+            category = category + "_frontend"
             return category
-        if category == 'Meta API':
-            category = 'composability'
+        if category == "Meta API":
+            category = "composability"
             return category
         if category in common.quantization.categories:
             category = common.quantization.name
@@ -135,20 +162,20 @@ class CommitList:
             optional[str]
         """
         pairs = [
-            ('[dynamo]', 'dynamo'),
-            ('[torchdynamo]', 'dynamo'),
-            ('[torchinductor]', 'inductor'),
-            ('[inductor]', 'inductor'),
-            ('[codemod', 'skip'),
-            ('[profiler]', 'profiler'),
-            ('[functorch]', 'functorch'),
-            ('[autograd]', 'autograd_frontend'),
-            ('[quantization]', 'quantization'),
-            ('[nn]', 'nn_frontend'),
-            ('[complex]', 'complex_frontend'),
-            ('[mps]', 'mps'),
-            ('[optimizer]', 'optimizer_frontend'),
-            ('[xla]', 'xla'),
+            ("[dynamo]", "dynamo"),
+            ("[torchdynamo]", "dynamo"),
+            ("[torchinductor]", "inductor"),
+            ("[inductor]", "inductor"),
+            ("[codemod", "skip"),
+            ("[profiler]", "profiler"),
+            ("[functorch]", "functorch"),
+            ("[autograd]", "autograd_frontend"),
+            ("[quantization]", "quantization"),
+            ("[nn]", "nn_frontend"),
+            ("[complex]", "complex_frontend"),
+            ("[mps]", "mps"),
+            ("[optimizer]", "optimizer_frontend"),
+            ("[xla]", "xla"),
         ]
         title_lower = title.lower()
         for bracket, category in pairs:
@@ -158,123 +185,188 @@ class CommitList:
 
     @staticmethod
     def categorize(features):
-        title = features['title']
-        labels = features['labels']
-        category = 'Uncategorized'
-        topic = 'Untopiced'
+        title = features["title"]
+        labels = features["labels"]
+        category = "Uncategorized"
+        topic = "Untopiced"
 
         # Revert commits are merged directly to master with no associated PR number
-        if features['pr_number'] is None:
+        if features["pr_number"] is None:
             if title.startswith("Revert"):
-                return 'skip', topic
+                return "skip", topic
 
         # We ask contributors to label their PR's appropriately
         # when they're first landed.
         # Check if the labels are there first.
         already_categorized = already_topiced = False
         for label in labels:
-            if label.startswith('release notes: '):
-                category = label.split('release notes: ', 1)[1]
+            if label.startswith("release notes: "):
+                category = label.split("release notes: ", 1)[1]
                 category = CommitList.category_remapper(category)
                 already_categorized = True
-            if label.startswith('topic: '):
-                topic = label.split('topic: ', 1)[1]
+            if label.startswith("topic: "):
+                topic = label.split("topic: ", 1)[1]
                 already_topiced = True
         if already_categorized and already_topiced:
             return category, topic
 
         # update this to check if each file starts with caffe2
-        if 'caffe2' in title:
-            return 'caffe2', topic
-        if 'Reverted' in labels:
-            return 'skip', topic
-        if 'bc_breaking' in labels:
-            topic = 'bc-breaking'
-        if 'module: deprecation' in labels:
-            topic = 'deprecation'
+        if "caffe2" in title:
+            return "caffe2", topic
+        if "Reverted" in labels:
+            return "skip", topic
+        if "bc_breaking" in labels:
+            topic = "bc-breaking"
+        if "module: deprecation" in labels:
+            topic = "deprecation"
 
         found_bracket_category = CommitList.bracket_category_matcher(title)
         if found_bracket_category:
             return found_bracket_category, topic
 
-        files_changed = features['files_changed']
+        files_changed = features["files_changed"]
         for file in files_changed:
             file_lowercase = file.lower()
-            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.ci', '.azure_pipelines']):
-                category = 'releng'
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "docker/",
+                    ".circleci",
+                    ".github",
+                    ".jenkins",
+                    ".ci",
+                    ".azure_pipelines",
+                ],
+            ):
+                category = "releng"
                 break
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
-            if CommitList.keywordInFile(file, ['torch/utils/data', 'test_dataloader', 'test_datapipe']):
-                category = 'dataloader_frontend'
+            if CommitList.keywordInFile(
+                file, ["torch/utils/data", "test_dataloader", "test_datapipe"]
+            ):
+                category = "dataloader_frontend"
                 break
-            if CommitList.keywordInFile(file, ['torch/csrc/api', 'test/cpp/api']):
-                category = 'cpp_frontend'
+            if CommitList.keywordInFile(file, ["torch/csrc/api", "test/cpp/api"]):
+                category = "cpp_frontend"
                 break
-            if CommitList.keywordInFile(file, ['distributed', 'c10d']):
-                category = 'distributed'
+            if CommitList.keywordInFile(file, ["distributed", "c10d"]):
+                category = "distributed"
                 break
-            if ('vulkan' in file_lowercase):
-                category = 'vulkan'
+            if "vulkan" in file_lowercase:
+                category = "vulkan"
                 break
-            if ('Foreach' in file_lowercase):
-                category = 'foreach_frontend'
+            if "Foreach" in file_lowercase:
+                category = "foreach_frontend"
                 break
-            if 'onnx' in file_lowercase:
-                category = 'onnx'
+            if "onnx" in file_lowercase:
+                category = "onnx"
                 break
-            if CommitList.keywordInFile(file, ['torch/fx', 'test_fx']):
-                category = 'fx'
+            if CommitList.keywordInFile(file, ["torch/fx", "test_fx"]):
+                category = "fx"
                 break
-            if CommitList.keywordInFile(file, ['torch/ao', 'test/ao']):
+            if CommitList.keywordInFile(file, ["torch/ao", "test/ao"]):
                 category = common.quantization.name
                 break
             # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
-            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "torch/quantization",
+                    "test/quantization",
+                    "aten/src/ATen/native/quantized",
+                    "torch/nn/quantiz",
+                ],
+            ):
                 category = common.quantization.name
                 break
-            if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
-                category = 'package'
+            if CommitList.keywordInFile(file, ["torch/package", "test/package"]):
+                category = "package"
                 break
-            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py']):
-                category = 'mobile'
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "torch/csrc/jit/mobile",
+                    "aten/src/ATen/native/metal",
+                    "test/mobile",
+                    "torch/backends/_nnapi/",
+                    "test/test_nnapi.py",
+                ],
+            ):
+                category = "mobile"
                 break
-            if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
-                category = 'linalg_frontend'
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "aten/src/ATen/native/LinearAlgebra.cpp",
+                    "test/test_linalg.py",
+                    "torch/linalg",
+                ],
+            ):
+                category = "linalg_frontend"
                 break
-            if CommitList.keywordInFile(file, ['torch/sparse', 'aten/src/ATen/native/sparse', 'torch/_masked/__init__.py']):
-                category = 'sparse_frontend'
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "torch/sparse",
+                    "aten/src/ATen/native/sparse",
+                    "torch/_masked/__init__.py",
+                ],
+            ):
+                category = "sparse_frontend"
                 break
-            if CommitList.keywordInFile(file, ['tools/autograd']):
-                category = 'autograd_frontend'
+            if CommitList.keywordInFile(file, ["tools/autograd"]):
+                category = "autograd_frontend"
                 break
-            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules', 'torch/nn/functional.py']):
-                category = 'nn_frontend'
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "test/test_nn.py",
+                    "test/test_module.py",
+                    "torch/nn/modules",
+                    "torch/nn/functional.py",
+                ],
+            ):
+                category = "nn_frontend"
                 break
-            if CommitList.keywordInFile(file, ['torch/csrc/jit', 'torch/jit']):
-                category = 'jit'
+            if CommitList.keywordInFile(file, ["torch/csrc/jit", "torch/jit"]):
+                category = "jit"
                 break
-            if CommitList.keywordInFile(file, ['torch/_meta_registrations.py', 'torch/_decomp', 'torch/_prims', 'torch/_refs']):
-                category = 'composability'
+            if CommitList.keywordInFile(
+                file,
+                [
+                    "torch/_meta_registrations.py",
+                    "torch/_decomp",
+                    "torch/_prims",
+                    "torch/_refs",
+                ],
+            ):
+                category = "composability"
                 break
-            if CommitList.keywordInFile(file, ['torch/_dynamo']):
-                category = 'dynamo'
+            if CommitList.keywordInFile(file, ["torch/_dynamo"]):
+                category = "dynamo"
                 break
-            if CommitList.keywordInFile(file, ['torch/_inductor']):
-                category = 'inductor'
+            if CommitList.keywordInFile(file, ["torch/_inductor"]):
+                category = "inductor"
                 break
         else:
             # Below are some extra quick checks that aren't necessarily file-path related,
             # but I found that to catch a decent number of extra commits.
-            if len(files_changed) > 0 and all(f_name.endswith(('.cu', '.cuh')) for f_name in files_changed):
-                category = 'cuda'
-            elif '[PyTorch Edge]' in title:
-                category = 'mobile'
-            elif len(files_changed) == 1 and 'torch/testing/_internal/common_methods_invocations.py' in files_changed[0]:
+            if len(files_changed) > 0 and all(
+                f_name.endswith((".cu", ".cuh")) for f_name in files_changed
+            ):
+                category = "cuda"
+            elif "[PyTorch Edge]" in title:
+                category = "mobile"
+            elif (
+                len(files_changed) == 1
+                and "torch/testing/_internal/common_methods_invocations.py"
+                in files_changed[0]
+            ):
                 # when this is the only file changed, it's almost always an OpInfo change.
-                category = 'python_frontend'
-            elif len(files_changed) == 1 and 'torch/_torch_docs.py' in files_changed[0]:
+                category = "python_frontend"
+            elif len(files_changed) == 1 and "torch/_torch_docs.py" in files_changed[0]:
                 # individual torch_docs changes are usually for python ops
-                category = 'python_frontend'
+                category = "python_frontend"
 
         # If we couldn't find a category but the topic is not user facing we can skip these:
         if category == "Uncategorized" and topic == "not user facing":
@@ -284,18 +376,18 @@ class CommitList:
 
     @staticmethod
     def get_commits_between(base_version, new_version):
-        cmd = f'git merge-base {base_version} {new_version}'
+        cmd = f"git merge-base {base_version} {new_version}"
         rc, merge_base, _ = run(cmd)
         assert rc == 0
 
         # Returns a list of something like
         # b33e38ec47 Allow a higher-precision step type for Vec256::arange (#34555)
-        cmd = f'git log --reverse --oneline {merge_base}..{new_version}'
+        cmd = f"git log --reverse --oneline {merge_base}..{new_version}"
         rc, commits, _ = run(cmd)
         assert rc == 0
 
-        log_lines = commits.split('\n')
-        hashes, titles = zip(*[log_line.split(' ', 1) for log_line in log_lines])
+        log_lines = commits.split("\n")
+        hashes, titles = zip(*[log_line.split(" ", 1) for log_line in log_lines])
         return [CommitList.gen_commit(commit_hash) for commit_hash in hashes]
 
     def filter(self, *, category=None, topic=None):
@@ -322,21 +414,29 @@ def create_new(path, base_version, new_version):
     commits = CommitList.create_new(path, base_version, new_version)
     commits.write_result()
 
+
 def update_existing(path, new_version):
     commits = CommitList.from_existing(path)
     commits.update_to(new_version)
     commits.write_result()
 
+
 def rerun_with_new_filters(path):
     current_commits = CommitList.from_existing(path)
     for i, commit in enumerate(current_commits.commits):
         current_category = commit.category
-        if current_category == 'Uncategorized' or current_category not in common.categories:
+        if (
+            current_category == "Uncategorized"
+            or current_category not in common.categories
+        ):
             feature_item = get_commit_data_cache().get(commit.commit_hash)
             features = features_to_dict(feature_item)
             category, topic = CommitList.categorize(features)
-            current_commits.commits[i] = dataclasses.replace(commit, category=category, topic=topic)
+            current_commits.commits[i] = dataclasses.replace(
+                commit, category=category, topic=topic
+            )
     current_commits.write_result()
+
 
 def get_hash_or_pr_url(commit: Commit):
     # cdc = get_commit_data_cache()
@@ -344,16 +444,17 @@ def get_hash_or_pr_url(commit: Commit):
     if pr_link is None:
         return commit.commit_hash
     else:
-        regex = r'https://github.com/pytorch/pytorch/pull/([0-9]+)'
+        regex = r"https://github.com/pytorch/pytorch/pull/([0-9]+)"
         matches = re.findall(regex, pr_link)
         if len(matches) == 0:
             return commit.commit_hash
 
-        return f'[#{matches[0]}]({pr_link})'
+        return f"[#{matches[0]}]({pr_link})"
+
 
 def to_markdown(commit_list: CommitList, category):
     def cleanup_title(commit):
-        match = re.match(r'(.*) \(#\d+\)', commit.title)
+        match = re.match(r"(.*) \(#\d+\)", commit.title)
         if match is None:
             return commit.title
         return match.group(1)
@@ -364,22 +465,29 @@ def to_markdown(commit_list: CommitList, category):
             merge_mapping[commit.merge_into].append(commit)
 
     cdc = get_commit_data_cache()
-    lines = [f'\n## {category}\n']
+    lines = [f"\n## {category}\n"]
     for topic in topics:
-        lines.append(f'### {topic}\n')
+        lines.append(f"### {topic}\n")
         commits = commit_list.filter(category=category, topic=topic)
-        if '_' in topic:
-            commits.extend(commit_list.filter(category=category, topic=topic.replace('_', ' ')))
-        if ' ' in topic:
-            commits.extend(commit_list.filter(category=category, topic=topic.replace(' ', '_')))
+        if "_" in topic:
+            commits.extend(
+                commit_list.filter(category=category, topic=topic.replace("_", " "))
+            )
+        if " " in topic:
+            commits.extend(
+                commit_list.filter(category=category, topic=topic.replace(" ", "_"))
+            )
         for commit in commits:
             if commit.merge_into:
                 continue
             all_related_commits = merge_mapping[commit.commit_hash] + [commit]
-            commit_list_md = ", ".join(get_hash_or_pr_url(c) for c in all_related_commits)
-            result = f'- {cleanup_title(commit)} ({commit_list_md})\n'
+            commit_list_md = ", ".join(
+                get_hash_or_pr_url(c) for c in all_related_commits
+            )
+            result = f"- {cleanup_title(commit)} ({commit_list_md})\n"
             lines.append(result)
     return lines
+
 
 def get_markdown_header(category):
     header = f"""
@@ -404,29 +512,37 @@ The categories below are as follows:
 * Developers: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, etc
 """
 
-    return [header, ]
+    return [
+        header,
+    ]
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Tool to create a commit list')
+    parser = argparse.ArgumentParser(description="Tool to create a commit list")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--create-new', '--create_new', nargs=2)
-    group.add_argument('--update-to', '--update_to')
+    group.add_argument("--create-new", "--create_new", nargs=2)
+    group.add_argument("--update-to", "--update_to")
     # I found this flag useful when experimenting with adding new auto-categorizing filters.
     # After running commitlist.py the first time, if you add any new filters in this file,
     # re-running with "rerun_with_new_filters" will update the existing commitlist.csv file,
     # but only affect the rows that were previously marked as "Uncategorized"
-    group.add_argument('--rerun-with-new-filters', '--rerun_with_new_filters', action='store_true')
-    group.add_argument('--stat', action='store_true')
-    group.add_argument('--export-markdown', '--export_markdown', action='store_true')
-    group.add_argument('--export-csv-categories', '--export_csv_categories', action='store_true')
-    parser.add_argument('--path', default='results/commitlist.csv')
+    group.add_argument(
+        "--rerun-with-new-filters", "--rerun_with_new_filters", action="store_true"
+    )
+    group.add_argument("--stat", action="store_true")
+    group.add_argument("--export-markdown", "--export_markdown", action="store_true")
+    group.add_argument(
+        "--export-csv-categories", "--export_csv_categories", action="store_true"
+    )
+    parser.add_argument("--path", default="results/commitlist.csv")
     args = parser.parse_args()
 
     if args.create_new:
         create_new(args.path, args.create_new[0], args.create_new[1])
-        print("Finished creating new commit list. Results have been saved to results/commitlist.csv")
+        print(
+            "Finished creating new commit list. Results have been saved to results/commitlist.csv"
+        )
         return
     if args.update_to:
         update_existing(args.path, args.update_to)
@@ -445,7 +561,7 @@ def main():
         categories = list(commits.stat().keys())
         for category in categories:
             print(f"Exporting {category}...")
-            filename = f'results/export/result_{category}.csv'
+            filename = f"results/export/result_{category}.csv"
             CommitList.write_to_disk_static(filename, commits.filter(category=category))
         return
 
@@ -456,12 +572,13 @@ def main():
             print(f"Exporting {category}...")
             lines = get_markdown_header(category)
             lines += to_markdown(commits, category)
-            filename = f'results/export/result_{category}.md'
+            filename = f"results/export/result_{category}.md"
             os.makedirs(os.path.dirname(filename), exist_ok=True)
-            with open(filename, 'w') as f:
+            with open(filename, "w") as f:
                 f.writelines(lines)
         return
     raise AssertionError()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

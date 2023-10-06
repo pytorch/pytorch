@@ -65,6 +65,7 @@ struct Node;
 namespace at {
 
 class OptionalTensorRef;
+class TensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 using ITensorList = c10::IListRef<Tensor>;
@@ -96,6 +97,7 @@ class TORCH_API Tensor: public TensorBase {
   explicit Tensor(unsafe_borrow_t, const TensorBase& rhs): TensorBase(unsafe_borrow_t{}, rhs) {}
   friend MaybeOwnedTraits<Tensor>;
   friend OptionalTensorRef;
+  friend TensorRef;
 
  public:
   Tensor() = default;

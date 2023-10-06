@@ -79,7 +79,7 @@ class PackagingErrorReason(Enum):
     """
 
     def __repr__(self):
-        return "<%s.%s>" % (self.__class__.__name__, self.name)
+        return f"<{self.__class__.__name__}.{self.name}>"
 
     IS_EXTENSION_MODULE = (
         "Module is a C extension module. torch.package supports Python modules only."
@@ -156,14 +156,12 @@ class PackagingError(Exception):
                     message.write(f"      Context: {error_context}\n")
                 if module_name in _DISALLOWED_MODULES:
                     message.write(
-                        (
-                            "      Note: While we usually use modules in the python standard library "
-                            f"from the local environment, `{module_name}` has a lot of system "
-                            "level access and therefore can pose a security risk. We heavily "
-                            f"recommend removing `{module_name}` from your packaged code. However, if that "
-                            "is not possible, add it to the extern list by calling "
-                            f'PackageExporter.extern("`{module_name}`")\n'
-                        )
+                        "      Note: While we usually use modules in the python standard library "
+                        f"from the local environment, `{module_name}` has a lot of system "
+                        "level access and therefore can pose a security risk. We heavily "
+                        f"recommend removing `{module_name}` from your packaged code. However, if that "
+                        "is not possible, add it to the extern list by calling "
+                        f'PackageExporter.extern("`{module_name}`")\n'
                     )
                 if debug:
                     module_path = dependency_graph.first_path(module_name)
@@ -173,10 +171,8 @@ class PackagingError(Exception):
         if not debug:
             message.write("\n")
             message.write(
-                (
-                    "Set debug=True when invoking PackageExporter for a visualization of where "
-                    "broken modules are coming from!\n"
-                )
+                "Set debug=True when invoking PackageExporter for a visualization of where "
+                "broken modules are coming from!\n"
             )
         # Save the dependency graph so that tooling can get at it.
         self.dependency_graph = dependency_graph
@@ -1002,7 +998,7 @@ class PackageExporter:
 
     def _validate_dependency_graph(self):
         # 1. Check the graph for any errors inserted during dependency analysis.
-        for module_name, attrs in self.dependency_graph.nodes.items():
+        for attrs in self.dependency_graph.nodes.values():
             if "error" in attrs:
                 raise PackagingError(self.dependency_graph, debug=self.debug)
 

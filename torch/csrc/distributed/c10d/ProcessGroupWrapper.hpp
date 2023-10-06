@@ -110,7 +110,7 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-    c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts) override;

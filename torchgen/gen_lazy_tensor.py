@@ -115,7 +115,7 @@ def parse_native_functions_keys(
         )
     }
 
-    with open(backend_yaml_path, "r") as f:
+    with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -134,10 +134,10 @@ def validate_shape_inference_header(
     shape_inference_hdr: str, expected_shape_infr_decls: List[str]
 ) -> None:
     try:
-        with open(shape_inference_hdr, "r") as f:
+        with open(shape_inference_hdr) as f:
             shape_infr_decls = f.read()
             shape_infr_decl_lines = set(shape_infr_decls.split("\n"))
-    except IOError as e:
+    except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified shape_inference_hdr file: {shape_inference_hdr}"
         ) from e

@@ -28,7 +28,10 @@ PRUNE_FUNCTIONS = {
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
     "<built-in method __exit__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "cudaStreamIsCapturing": PRUNE_ALL,
-    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": PRUNE_ALL,
+
+    # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
+    "cudaGetDeviceCount": PRUNE_ALL,
+    "cudaGetDeviceProperties_v2": PRUNE_ALL,
 }
 
 # ROCTracer is currently not producing events that profiler can extract. We
@@ -128,6 +131,10 @@ class ProfilerTree:
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
 
         # Profiler inserts a `cudaDeviceSynchronize` at the end of profiling.
+        # and may also insert 'Context Sync' CUDA synchronization event.
+        if flat_nodes and flat_nodes[-2][1] == "cudaDeviceSynchronize":
+            flat_nodes = flat_nodes[:-2]
+
         if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 
@@ -562,19 +569,19 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
+                              aten::reshape
+                                aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
-                              aten::matmul
-                                aten::unsqueeze
+                              aten::addmm
+                                aten::expand
                                   aten::as_strided
-                                aten::mm
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                aten::squeeze_
-                                  aten::as_strided_
-                              aten::add_
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -609,19 +616,19 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
+                              aten::reshape
+                                aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
-                              aten::matmul
-                                aten::unsqueeze
+                              aten::addmm
+                                aten::expand
                                   aten::as_strided
-                                aten::mm
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                aten::squeeze_
-                                  aten::as_strided_
-                              aten::add_
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>

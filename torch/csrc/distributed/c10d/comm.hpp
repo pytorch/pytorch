@@ -10,7 +10,7 @@ namespace c10d {
 
 // Broadcast many tensors to all processes in the process group.
 TORCH_API void broadcast_coalesced(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank = 0);
@@ -111,8 +111,7 @@ class TORCH_API CommHookInterface {
   // Returns the resulting tensor once the communication hook result is
   // ready. The resulting tensor will then be copied to the grads of
   // individual parameters.
-  virtual at::Tensor parseHookResult(
-      const c10::IValue& result) = 0;
+  virtual at::Tensor parseHookResult(const c10::IValue& result) = 0;
 };
 
 namespace detail {

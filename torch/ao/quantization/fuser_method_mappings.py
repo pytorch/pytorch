@@ -47,7 +47,7 @@ def fuse_conv_bn(is_qat, conv, bn):
         if fused_module_class is not None:
             return fused_module_class(conv, bn)
         else:
-            raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn)))
+            raise NotImplementedError(f"Cannot fuse train modules: {(conv, bn)}")
     else:
         return nn.utils.fuse_conv_bn_eval(conv, bn)
 
@@ -84,7 +84,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         if fused_module is not None:
             return fused_module(conv, bn, relu)
         else:
-            raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, relu)))
+            raise NotImplementedError(f"Cannot fuse train modules: {(conv, bn, relu)}")
     else:
         map_to_fused_module_eval = {
             nn.Conv1d: nni.ConvReLU1d,
@@ -96,7 +96,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
             return fused_module(fused_conv, relu)
         else:
-            raise NotImplementedError("Cannot fuse eval modules: {}".format((conv, bn, relu)))
+            raise NotImplementedError(f"Cannot fuse eval modules: {(conv, bn, relu)}")
 
 def fuse_linear_bn(is_qat, linear, bn):
     r"""Given the linear and bn modules, fuses them and returns the fused module
@@ -187,7 +187,7 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     all_mappings = get_combined_dict(_DEFAULT_OP_LIST_TO_FUSER_METHOD,
                                      additional_fuser_method_mapping)
     fuser_method = all_mappings.get(op_list, None)
-    assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
+    assert fuser_method is not None, f"did not find fuser method for: {op_list} "
     return fuser_method
 
 def _reverse2(f):
@@ -244,5 +244,5 @@ def get_fuser_method_new(
         fuser_method = fuser_method_mapping.get(op_pattern, None)
         if fuser_method is not None:
             break
-    assert fuser_method is not None, "did not find fuser method for: {} ".format(op_pattern)
+    assert fuser_method is not None, f"did not find fuser method for: {op_pattern} "
     return fuser_method

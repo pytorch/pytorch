@@ -261,11 +261,11 @@ def augment_many_model_functions_with_bundled_inputs(
 
 
         if input_list is not None and not isinstance(input_list, Sequence):
-            raise TypeError("Error inputs for function {0} is not a Sequence".format(function_name))
+            raise TypeError(f"Error inputs for function {function_name} is not a Sequence")
 
         function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore[attr-defined]
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
-        model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
+        model._c._register_attribute(f"_bundled_inputs_deflated_{function_name}", deflated_inputs_type, [])
 
         if hasattr(model, "_generate_bundled_inputs_for_" + function_name):
             if input_list is not None:
@@ -290,7 +290,7 @@ def augment_many_model_functions_with_bundled_inputs(
             for inp_idx, args in enumerate(input_list):
                 if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore[arg-type]
                     raise TypeError(
-                        "Error bundled input for function {0} idx: {1} is not a Tuple or a List".format(function_name, inp_idx)
+                        f"Error bundled input for function {function_name} idx: {inp_idx} is not a Tuple or a List"
                     )
                 deflated_args = []
                 parts.append("(")
@@ -314,7 +314,7 @@ def augment_many_model_functions_with_bundled_inputs(
             # Back-channel return this expr for debugging.
             if _receive_inflate_expr is not None:
                 _receive_inflate_expr.append(expr)
-            setattr(model, "_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs)
+            setattr(model, f"_bundled_inputs_deflated_{function_name}", deflated_inputs)
             definition = textwrap.dedent("""
                 def _generate_bundled_inputs_for_{name}(self):
                     deflated = self._bundled_inputs_deflated_{name}
@@ -334,17 +334,14 @@ def augment_many_model_functions_with_bundled_inputs(
 
         # Add to the high level helper methods
         inputs_info = repr(info[function]) if info and function in info else '[]'
-        get_bundled_inputs_functions_and_info_template += """
+        get_bundled_inputs_functions_and_info_template += f"""
             temp_dict : Dict[str,List[str]] = {{}}
-            info: List[str] = {info}
+            info: List[str] = {inputs_info}
 
             temp_dict['info'] = info
-            temp_dict['get_inputs_function_name'] = ['get_all_bundled_inputs_for_{name}']
-            all_inputs['{name}'] = temp_dict
-            """.format(
-            name=function_name,
-            info=inputs_info,
-        )
+            temp_dict['get_inputs_function_name'] = ['get_all_bundled_inputs_for_{function_name}']
+            all_inputs['{function_name}'] = temp_dict
+            """
 
         # To ensure backwards compatibility and a streamlined api for forward these wrappers are provided
         if function_name == 'forward':
@@ -358,12 +355,12 @@ def augment_many_model_functions_with_bundled_inputs(
                 """))
 
     # Define some high level helper methods that act on all bundled inputs
-    model.define(textwrap.dedent("""
+    model.define(textwrap.dedent(f"""
         def get_bundled_inputs_functions_and_info(self):
             all_inputs : Dict[str, Dict[str,List[str]]] = {{}}
-            {template}
+            {get_bundled_inputs_functions_and_info_template}
             return all_inputs
-        """.format(template=get_bundled_inputs_functions_and_info_template)))
+        """))
 
 def _inflate_expr(
     arg: T, ref: str, inflate_helper_fn_name: str, skip_size_check: bool = False

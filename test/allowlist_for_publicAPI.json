@@ -998,11 +998,6 @@
     "Tuple",
     "Union"
   ],
-  "torch.utils": [
-    "disable_minidumps",
-    "enable_minidumps",
-    "enable_minidumps_on_exceptions"
-  ],
   "torch.utils.benchmark.utils.compare": [
     "Colorize",
     "Table",
@@ -1193,6 +1188,8 @@
     "_foreach_round_",
     "_foreach_sigmoid",
     "_foreach_sigmoid_",
+    "_foreach_sign",
+    "_foreach_sign_",
     "_foreach_sin",
     "_foreach_sin_",
     "_foreach_sinh",

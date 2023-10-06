@@ -3,7 +3,10 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode
+from torch.testing._internal.common_utils import (
+    enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode,
+    set_default_dtype,
+)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -115,12 +118,16 @@ class TestModels(JitTestCase):
                         export_import=check_export_import)
 
     def test_dcgan_models(self):
-        self._test_dcgan_models(self, device='cpu')
+        # Note: Can sometimes fail with low precision if run with float dtype
+        with set_default_dtype(torch.double):
+            self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_dcgan_models_cuda(self):
-        # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_dcgan_models(self, device='cuda', check_export_import=False)
+        # Note: Can sometimes fail with low precision if run with float dtype
+        with set_default_dtype(torch.double):
+            # XXX: export_import on CUDA modules doesn't work (#11480)
+            self._test_dcgan_models(self, device='cuda', check_export_import=False)
 
     @staticmethod
     def _test_neural_style(self, device, check_export_import=True):

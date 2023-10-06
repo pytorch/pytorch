@@ -19,7 +19,7 @@ from torch._C._distributed_c10d import (
     Store,
     ReduceOp,
 )
-from torch.distributed.distributed_c10d import _CollOp, P2POp
+from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -86,12 +86,19 @@ class AllReduce:
     def work(self, data):
         for i in range(len(data[0])):
             tensors = []
+            # use rank0 as the device for sum
+            rank_0_device = data[0][i].device
+            # collect all data to the list and make them
+            # all on rank 0 device
             for src_rank in range(0, len(data)):
-                tensors.append(data[src_rank][i])
+                tensors.append(data[src_rank][i].to(rank_0_device))
+
+            # now mimic reduce across all ranks
             res = _reduce_ops[self.op](tensors)
-            with torch.no_grad():
-                for src_rank in range(len(data)):
-                    data[src_rank][i].copy_(res)
+
+            # copy all the reduced value to each rank
+            for src_rank in range(len(data)):
+                data[src_rank][i].copy_(res.to(data[src_rank][i].device))
 
 
 class AllGather:
@@ -160,11 +167,12 @@ class ReduceScatter:
                 dest_tensor_on_rank_i = data[i][0]
                 # Can't handle reduce_scatter with multiple output tensor
                 assert len(dest_tensor_on_rank_i) == 1
+                dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
-                    dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].copy_(to_scatter[i].to(dst_tensor_device))
                     start_reduction[i] = True
                 else:
-                    dest_tensor_on_rank_i[0].add_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
 
 class Broadcast:
     def __init__(self, src):
@@ -228,33 +236,14 @@ class Collective:
 
 
 class ProcessLocalGroup(dist.ProcessGroup):
-    _pg_lock = threading.Lock()
-    _pg_list = []
-    _count = 0
-    _ready = False
-
     _coll_lock = threading.Lock()
     _cur_coll_on_pgs = {}
 
     _terminate = threading.Event()
 
     @classmethod
-    def _register(cls, pg):
-        with cls._pg_lock:
-            while len(cls._pg_list) <= pg._rank:
-                cls._pg_list.append(None)
-            cls._pg_list[pg._rank] = pg
-            cls._count += 1
-            if cls._count == pg._world_size:
-                cls._ready = True
-
-    @classmethod
     def _start_coll(cls, collective, pg):
         with cls._coll_lock:
-            if not cls._ready:
-                raise Exception(
-                    f"world not ready, only {cls._count} PG's registered but world has {pg.size()} ranks"
-                )
             # pg_name is unique, we use that to record the mapping between pg and collective
             if pg.pg_name not in cls._cur_coll_on_pgs:
                 cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
@@ -355,7 +344,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         if isinstance(world, ThreadLocalWorld):
             world = world._get_world()
         self._world = weakref.ref(world)
-        ProcessLocalGroup._register(self)
+        self._ctx = torch.autograd.set_multithreading_enabled(False)
 
     def size(self):
         return self._world_size
@@ -375,7 +364,21 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
 
 def _create_threaded_pg(prefix_store, rank, world_size, timeout):
-    return ProcessLocalGroup(rank, world_size)
+    pg = ProcessLocalGroup(rank, world_size)
+    # https://github.com/pytorch/pytorch/pull/103033 changed store based barrier to optional
+    # When device mesh involves sub groups while store based barrier is not enabled in c10d,
+    # even though threaded pg actual collectives are assumed to be single threaded,
+    # different threads may be initializing different groups,
+    # leading to race conditions.
+    # For example, if we have a mesh of [[0, 1], [2, 3]], the sub groups
+    # (dim 0 and 1) would be initialized in different threads independently.
+    # In this case we can no longer rely on class or global variables
+    # but have to rely on store based barrier to make sure each group
+    # is ready separately before we can invoke collectives in any of the groups.
+
+    # the prefix store is already per group so we pass an empty name here
+    _store_based_barrier(rank, prefix_store, "", world_size, timeout)
+    return pg
 
 
 dist.Backend.register_backend("threaded", _create_threaded_pg)
@@ -453,12 +456,16 @@ class ThreadLocalWorld:
 
 
 _old_pg_world = None
+_ctx_manager = None
 
 
 def _install_threaded_pg():
     global _old_pg_world
+    global _ctx_manager
     _old_pg_world = dist.distributed_c10d._world
     dist.distributed_c10d._world = ThreadLocalWorld()
+    _ctx_manager = torch.autograd.set_multithreading_enabled(False)
+
     return dist.distributed_c10d._world
 
 

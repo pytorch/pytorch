@@ -292,6 +292,14 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       ") must match device of ", plain_indices_name," (=",
       plain_indices.device(),
       ")");
+
+  // Autograd Invariants
+  //
+  // These are internal asserts because users should not be able to
+  // create non-floating point dtype tensors with requires_grad flag
+  // set to true.
+  TORCH_INTERNAL_ASSERT(!compressed_indices.requires_grad());
+  TORCH_INTERNAL_ASSERT(!plain_indices.requires_grad());
 }
 
 void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {

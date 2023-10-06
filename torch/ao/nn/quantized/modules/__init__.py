@@ -104,7 +104,7 @@ class Quantize(torch.nn.Module):
         return Quantize(scale.float().item(), zero_point.long().item(), mod.activation_post_process.dtype)
 
     def extra_repr(self):
-        return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
+        return f'scale={self.scale}, zero_point={self.zero_point}, dtype={self.dtype}'
 
 
 class DeQuantize(torch.nn.Module):

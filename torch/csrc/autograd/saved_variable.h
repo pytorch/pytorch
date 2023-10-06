@@ -48,6 +48,10 @@ class TORCH_API SavedVariable {
 
   void reset_data();
 
+  bool has_hooks() const {
+    return (bool)hooks_;
+  }
+
  private:
   // This field contains either:
   // 1. the variable to save

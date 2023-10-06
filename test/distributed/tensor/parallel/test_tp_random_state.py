@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.random as random
 
 from torch.distributed._tensor import DeviceMesh
@@ -82,10 +83,13 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 assert _1d_mesh.ndim == 1
 
                 tensor_local = dtensor.to_local()
-                local_shape = tensor_local.shape
 
                 # all-gather local shards
-                tensor_gather = _1d_mesh.all_gather(tensor_local, gather_dim=0)
+                tensor_gather = funcol.all_gather_tensor(
+                    tensor_local,
+                    gather_dim=0,
+                    group=(_1d_mesh, 0)
+                )
                 self.assertEqual(_1d_mesh.get_coordinate()[0], tp_rank)
 
                 # compare local shards within the TP group
@@ -102,7 +106,11 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
                 # check across TP groups
                 # all-gather local shards
-                tensor_gather = device_mesh.all_gather(tensor_local, mesh_dim=1, gather_dim=0)
+                tensor_gather = funcol.all_gather_tensor(
+                    tensor_local,
+                    gather_dim=0,
+                    group=(_1d_mesh, 1)
+                )
 
                 # compare local shards across TP groups
                 def dp_weights_assert(tensor1, tensor2):

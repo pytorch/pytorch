@@ -122,4 +122,4 @@ def typename(type):
     except AttributeError:
         if len(type) == 1:
             return typename(*type)
-        return '(%s)' % ', '.join(map(typename, type))
+        return f"({', '.join(map(typename, type))})"

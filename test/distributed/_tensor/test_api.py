@@ -69,6 +69,12 @@ class DTensorAPITest(DTensorTestBase):
             shard_spec = [Shard(0)]
             distribute_tensor(tensor_to_distribute, device_mesh, shard_spec)
 
+        with self.assertRaisesRegex(RuntimeError, "distribute leaf tensor"):
+            shard_spec = [Shard(0)]
+            global_tensor = torch.randn(*tensor_shape, requires_grad=True)
+            global_tensor_to_distribute = global_tensor + 2
+            distribute_tensor(global_tensor_to_distribute, device_mesh, shard_spec)
+
         spec = [Shard(0), Shard(1)]
         dtensor = distribute_tensor(tensor_to_distribute, device_mesh, spec)
 

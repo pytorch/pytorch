@@ -693,7 +693,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         )
         if len(self.param_groups) != 1:
             raise RuntimeError(
-                "Specifying `params_per_rank` only supports a single " "parameter group"
+                "Specifying `params_per_rank` only supports a single parameter group"
             )
         self._verify_params_per_rank(params_per_rank)
         self._partition_parameters_cache = [[] for _ in range(self.world_size)]
@@ -924,7 +924,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         rank.
         """
         assert self._overlap_with_ddp, (
-            "`_bucket_assignments_per_rank` " "only be used if `overlap_with_ddp=True`"
+            "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
         )
         if len(self._bucket_assignments_per_rank_cache) > 0:
             return self._bucket_assignments_per_rank_cache
@@ -1074,7 +1074,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 "be used when `overlap_with_ddp=False`"
             )
             assert closure is None, (
-                "`closure` is not supported when using " "a local functional optimizer"
+                "`closure` is not supported when using a local functional optimizer"
             )
             loss = self.optim.step(gradients=gradients)
 
@@ -1404,7 +1404,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 f" or dicts, but got {torch.typename(params)}"
             ) from e
         if len(all_params) == 0:
-            raise ValueError("ZeroRedundancyOptimizer got an empty parameter " "list")
+            raise ValueError("ZeroRedundancyOptimizer got an empty parameter list")
         all_tensors = True
         all_dicts = True
         for param in all_params:
@@ -1412,7 +1412,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             all_dicts &= isinstance(param, dict)
         if not all_tensors and not all_dicts:
             raise TypeError(
-                "`params` argument should be an iterable of " "Tensors or dicts"
+                "`params` argument should be an iterable of Tensors or dicts"
             )
         # Ensure that `self._all_params` contains a list of all parameters
         if all_tensors:

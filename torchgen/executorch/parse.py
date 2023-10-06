@@ -124,7 +124,7 @@ def parse_et_yaml(
     """Parse native_functions.yaml into NativeFunctions and an Operator Indexed Dict
     of fields to persist from native_functions.yaml to functions.yaml
     """
-    with open(path, "r") as f:
+    with open(path) as f:
         es = yaml.load(f, Loader=LineLoader)
 
     et_kernel = extract_kernel_fields(es)

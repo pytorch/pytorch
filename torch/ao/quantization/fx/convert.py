@@ -51,6 +51,7 @@ from .utils import (
     _get_module,
     _is_custom_module_lstm,
     _is_custom_module_mha,
+    assert_and_get_unique_device,
     get_custom_module_class_keys,
     create_getattr_from_value,
     collect_producer_nodes,
@@ -130,7 +131,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32] and \
             (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -183,7 +184,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                     # For scale and zero_point values we register them as buffers in the root module.
                     # However, note that when the values are not tensors, as in the case of
                     # per_tensor quantization, they will be treated as literals.
-                    # However, registring them as a node seems to cause issue with dynamo
+                    # However, registering them as a node seems to cause issue with dynamo
                     # tracing where it may consider tensor overload as opposed to default.
                     # With extra check of scale and zero_point being scalar, it makes
                     # sure that the default overload can be used.
@@ -453,7 +454,15 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
     return (
-        (dtype in [torch.quint8, torch.qint8, torch.qint32] and (not is_dynamic)) or  # type: ignore[return-value]
+        (dtype in [
+            torch.quint8,
+            torch.qint8,
+            torch.qint32,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32
+        ] and (not is_dynamic)) or  # type: ignore[return-value]
         is_dynamic or
         dtype == torch.float16
     )
@@ -572,7 +581,7 @@ def _maybe_get_observer_for_node(
     If the node is observed, return the observer
     instance. Otherwise, return None.
     """
-    for maybe_obs_node, _ in node.users.items():
+    for maybe_obs_node in node.users.keys():
         if maybe_obs_node.op == 'call_module':
             maybe_obs = modules[str(maybe_obs_node.target)]
             if _is_activation_post_process(maybe_obs):
@@ -733,6 +742,9 @@ def convert_weighted_module(
         is_ptq = weight_post_process is None
         if is_ptq:
             weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
+            device = assert_and_get_unique_device(float_module)
+            if device:
+                weight_post_process.to(device)
 
         # Call weight observer/fake_quant at least once to ensure the scales and zero points
         # have the right shapes. Note: there are two cases where we don't have to do this:
@@ -970,11 +982,11 @@ def convert(
         # all the values either match what was set in prepare node_name_to_qconfig
         # or are set to None in the convert_node_name_to_qconfig.
         for k, v in node_name_to_qconfig.items():
-            assert k in convert_node_name_to_qconfig, 'Expected key {} in convert node_name_to_qconfig'.format(k)
+            assert k in convert_node_name_to_qconfig, f'Expected key {k} in convert node_name_to_qconfig'
             if convert_node_name_to_qconfig[k] is not None:
                 assert qconfig_equals(v, convert_node_name_to_qconfig[k]), \
-                    "Expected k {} to have the same value in prepare and convert QConfigMappings, " \
-                    "but {} was updated to {}".format(k, v, convert_node_name_to_qconfig[k])
+                    f"Expected k {k} to have the same value in prepare and convert QConfigMappings, " \
+                    f"but {v} was updated to {convert_node_name_to_qconfig[k]}"
         node_name_to_qconfig = convert_node_name_to_qconfig
 
     custom_module_classes = get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)

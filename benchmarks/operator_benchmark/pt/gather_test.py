@@ -1,6 +1,7 @@
-import operator_benchmark as op_bench
-import torch
 import numpy
+import torch
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for gather operator."""
@@ -13,18 +14,14 @@ gather_configs_short = op_bench.config_list(
         [512, 512, 1],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        "device": ["cpu", "cuda"],
     },
-    tags=["short"]
+    tags=["short"],
 )
 
 
 gather_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024],
-    N=[128, 1024],
-    dim=[0, 1],
-    device=['cpu', 'cuda'],
-    tags=["long"]
+    M=[128, 1024], N=[128, 1024], dim=[0, 1], device=["cpu", "cuda"], tags=["long"]
 )
 
 
@@ -35,7 +32,9 @@ class GatherBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {
             "input_one": torch.rand(M, N, device=device),
             "dim": dim,
-            "index": torch.tensor(numpy.random.randint(0, min_val, (M, N)), device=device)
+            "index": torch.tensor(
+                numpy.random.randint(0, min_val, (M, N)), device=device
+            ),
         }
         self.set_module_name("gather")
 
@@ -43,8 +42,7 @@ class GatherBenchmark(op_bench.TorchBenchmarkBase):
         return torch.gather(input_one, dim, index)
 
 
-op_bench.generate_pt_test(gather_configs_short + gather_configs_long,
-                          GatherBenchmark)
+op_bench.generate_pt_test(gather_configs_short + gather_configs_long, GatherBenchmark)
 
 
 if __name__ == "__main__":

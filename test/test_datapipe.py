@@ -206,7 +206,7 @@ class TestStreamWrapper(TestCase):
             if self.opened:
                 return "".join(self)
             else:
-                raise IOError("Cannot read from un-opened file descriptor")
+                raise OSError("Cannot read from un-opened file descriptor")
 
         def __iter__(self):
             for i in range(5):
@@ -285,7 +285,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
         except Exception as e:
-            warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
+            warnings.warn(f"TestIterableDatasetBasic was not able to cleanup temp dir due to {str(e)}")
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -1407,6 +1407,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
+    @skipIfTorchDynamo
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
             return -d

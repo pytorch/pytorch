@@ -7,7 +7,7 @@
 #include <deque>
 #include <vector>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 namespace {
 
@@ -66,6 +66,4 @@ Allocator* getCUDADeviceAllocator() {
   return c10::cuda::CUDACachingAllocator::get();
 }
 
-} // namespace cuda
-
-} // namespace at
+} // namespace at::cuda

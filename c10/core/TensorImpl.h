@@ -75,7 +75,7 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 
 // Product of all dims up to k (not including dims[k])
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
-  TORCH_CHECK((unsigned)k <= dims.size());
+  TORCH_CHECK(k >= 0 && static_cast<size_t>(k) <= dims.size());
   int64_t r = 1;
   for (const auto i : c10::irange(k)) {
     r *= dims[i];
@@ -238,6 +238,7 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
   c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
+  c10::optional<std::string> custom_storage_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -254,16 +255,21 @@ struct C10_API ExtraMeta {
     if (other.custom_data_ptr_error_msg_) {
       custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
     }
+    if (other.custom_storage_error_msg_) {
+      custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    }
   }
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
-      c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt)
+      c10::optional<std::string> custom_data_ptr_error_msg = c10::nullopt,
+      c10::optional<std::string> custom_storage_access_error_msg = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
-        backend_meta_(std::move(backend_meta)) {}
+        backend_meta_(std::move(backend_meta)),
+        custom_storage_error_msg_(std::move(custom_storage_access_error_msg)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(*this);
@@ -577,6 +583,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_;
   }
 
+ private:
+  [[noreturn]] void throw_cannot_call_with_symbolic(const char* meth) const;
+
   // NOTE: The general recipe for customizable methods is that the fastpath
   // function (e.g., sizes()) does an unlikely policy test, and if doesn't
   // trigger, it does the fast path implementation with no checks and going
@@ -612,10 +621,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef sizes_default() const {
-    // TODO: force backtrace to be printed on this error
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call sizes() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("sizes");
+    }
     return sizes_and_strides_.sizes_arrayref();
   }
 
@@ -694,9 +702,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t numel_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call numel() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("numel");
+    }
     return numel_;
   }
 
@@ -750,9 +758,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t storage_offset_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call storage_offset() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("storage_offset");
+    }
     return storage_offset_;
   }
 
@@ -783,9 +791,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef strides_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call strides() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("strides");
+    }
     return sizes_and_strides_.strides_arrayref();
   }
 
@@ -1118,6 +1126,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return device_custom().is_xla();
     }
     return device_opt_.has_value() && device_opt_->type() == kXLA;
+  }
+
+  bool is_mtia() const {
+    if (C10_UNLIKELY(device_policy_)) {
+      return device_custom().is_mtia();
+    }
+    return device_opt_.has_value() && device_opt_->type() == kMTIA;
   }
 
   bool is_hpu() const {
@@ -1542,7 +1557,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Shared implementation of mutable_data_ptr_impl() and the future
   // mutable_data_ptr_impl().
   template <typename T, typename Func>
-  T* data_ptr_impl_impl(const Func& get_data) const {
+  __ubsan_ignore_pointer_overflow__ T* data_ptr_impl_impl(
+      const Func& get_data) const {
     if (C10_UNLIKELY(!has_storage())) {
       throw_data_ptr_access_error();
     }
@@ -1552,6 +1568,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
+    // Note: storage_offset_ can be non-null even for zero-elements tensors
+    // (for example if created as `torch.empty(5)[10:]`) that triggers
+    // applying non-zero offset to null pointer in UBSan
     return get_data() + storage_offset_;
   }
 
@@ -1654,7 +1673,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void release_storage_and_set_meta_custom_data_ptr_error_msg_(
       c10::optional<std::string> s) {
     storage_ = {};
-    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+    set_storage_access_should_throw();
+    get_extra_meta().custom_data_ptr_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = s;
   }
 
  protected:

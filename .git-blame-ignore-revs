@@ -30,3 +30,11 @@ e3900d2ba5c9f91a24a9ce34520794c8366d5c54
 30fb2c4abaaaa966999eab11674f25b18460e609
 # 2023-06-06 clang-format on Foreach / Multi-Tensor-Apply
 515c4279416f13fcc3c898e560f8ae8f15139a03
+# 2023-07-25 Apply UFMT to all files in benchmarks
+dd3a77bc965adf9fe8ba582ee13bb7f14c9661b0
+# 2023-07-26 Enable UFMT on a bunch of low traffic Python files outside of main files
+f70844bec783bfce43c950ccf180dc494e86f2bf
+# 2023-07-28 Apply UFMT to all non test/torch files
+e6ec0efaf87703c5f889cfc20b29be455885d58d
+# 2023-07-31 [optim][BE] split test file into logical parts: SWA, LR, optim
+a53cda1ddc15336dc1ff0ce1eff2a49cdc5f882e

@@ -20,14 +20,17 @@ if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
 # Custom Runtime Errors thrown from the distributed package
+DistError = torch._C._DistError
 DistBackendError = torch._C._DistBackendError
+DistNetworkError = torch._C._DistNetworkError
+DistStoreError = torch._C._DistStoreError
 
 if is_available():
     from torch._C._distributed_c10d import (
         Store,
         FileStore,
         TCPStore,
-        ProcessGroup,
+        ProcessGroup as ProcessGroup,
         Backend as _Backend,
         PrefixStore,
         Reducer,
@@ -62,13 +65,13 @@ if is_available():
     # this.
 
     from .distributed_c10d import (
-        _backend,
         _all_gather_base,
         _reduce_scatter_base,
         _create_process_group_wrapper,
         _rank_not_in_group,
         _coalescing_manager,
         _CoalescingManager,
+        _get_process_group_name,
     )
 
     from .rendezvous import (
