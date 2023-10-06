@@ -868,6 +868,8 @@ coverage_ignore_functions = [
     "transform_transpose",
     "valid_index",
     "valid_index_tensor",
+    # torch.fx.experimental.migrate_gradual_types.transform_to_z3
+    "evaluate_conditional_with_constraints",
     # torch.fx.experimental.migrate_gradual_types.util
     "gen_bvar",
     "gen_dvar",
@@ -1051,6 +1053,8 @@ coverage_ignore_functions = [
     "bisect",
     "translation_validation_enabled",
     "translation_validation_timeout",
+    "z3op",
+    "z3str",
     # torch.fx.graph_module
     "reduce_deploy_graph_module",
     "reduce_graph_module",
@@ -2880,6 +2884,8 @@ coverage_ignore_classes = [
     "Var",
     # torch.fx.experimental.validator
     "BisectValidationException",
+    "PopulateValidator",
+    "SympyToZ3",
     "ValidationException",
     # torch.fx.graph
     "PythonCode",
