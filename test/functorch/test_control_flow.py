@@ -2,7 +2,7 @@
 import functools
 import unittest
 
-from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO, parametrize, instantiate_parametrized_tests
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
@@ -59,6 +59,24 @@ def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_f
                 for field_name in meta_field_name:
                     ret.append(node.meta.get(field_name))
     return ret
+
+def _reduce_func(*operands):
+    acc = 0
+    for operand in operands:
+        acc += operand
+    return acc
+
+class _ReduceObj:
+    def __call__(self, *operands):
+        return _reduce_func(*operands)
+
+class _ReduceMod(torch.nn.Module):
+    def _reduce(self, *operands):
+        return _reduce_func(*operands)
+
+    def forward(self, *operands):
+        return self._reduce(*operands)
+
 
 
 @skipIfNoDynamoSupport
@@ -1575,6 +1593,45 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
         for inp in inps:
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
             self._expected_inline_normalized(gm.print_readable(print_output=False), exp_graph)
+
+    def _create_test_fns_for_cond(self, pred, inner_most_fn, operands, closure_list, nested_level):
+        if nested_level == 0:
+            if len(closure_list) > 0:
+                true_fn = lambda *operands : inner_most_fn(*operands) + inner_most_fn(*closure_list)
+                false_fn = lambda *operands: inner_most_fn(*operands) - inner_most_fn(*closure_list)
+            else:
+                true_fn = lambda *operands : inner_most_fn(*operands)
+                false_fn = lambda *operands: inner_most_fn(*operands)
+
+            def fn(pred, operands):
+                if len(operands) == 0 and len(closure_list) == 0:
+                    return torch.zeros(1)
+                return cond(pred, true_fn, false_fn, operands)
+            return (pred, operands), fn
+        else:
+            args, inner_fn = self._create_test_fns_for_cond(pred <= 0, inner_most_fn, operands, closure_list, nested_level -1)
+            true_fn = lambda *operands: inner_most_fn(*operands) + inner_fn(*args)
+            false_fn = lambda *operands: inner_most_fn(*operands) - inner_fn(*args)
+            def fn(pred, operands):
+                if len(operands) == 0 and len(closure_list) == 0:
+                    return torch.ones(1)
+                return cond(pred, true_fn, false_fn, operands)
+            return (pred, operands), fn
+
+    @parametrize("pred", [True, torch.tensor(0), torch.randn(1), torch.tensor(False)])
+    @parametrize("inner_most_fn", [_reduce_func, _ReduceMod(), _ReduceObj()])
+    @parametrize("operands", [(), (torch.randn(2, 3), torch.randn(2, 3))])
+    @parametrize("closure_list", [[], [torch.randn(2, 3), torch.randn(2, 3)]])
+    @parametrize("nested_level", [0, 2])
+    def test_cond_tracing_with_valid_inputs(self, pred, inner_most_fn, operands, closure_list, nested_level):
+        args, fn = self._create_test_fns_for_cond(pred, inner_most_fn, operands, closure_list, nested_level)
+        eager_res = fn(*args)
+        for tracing_mode in ["symbolic", "fake", "real"]:
+            # set _allow_non_fake_inputs = True to allow fake prop through closures
+            gm = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=True)(*args)
+            self.assertEqual(gm(*args), eager_res)
+
+instantiate_parametrized_tests(TestControlFlowTraced)
 
 if __name__ == '__main__':
     run_tests()
