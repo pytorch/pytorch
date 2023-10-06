@@ -2695,7 +2695,11 @@ def create_runtime_wrapper(
                     o_ = o.alias
                 else:
                     o_ = o
-                assert runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i] == runtime_metadata.output_info[i].requires_grad
+                assert (
+                    runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i]
+                    ==
+                    runtime_metadata.output_info[i].requires_grad
+                )
 
                 o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
