@@ -99,6 +99,20 @@ for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
 
 
+class MyOptimizer(torch.optim.Optimizer):
+    def __init__(self, params, val):
+        super().__init__(params, {})
+        self.val = val
+
+    def _init_group(self):
+        return self.val
+
+    def step(self):
+        ret = self._init_group()
+        assert self.val == ret
+        return ret
+
+
 class End2EndTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
@@ -149,6 +163,18 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
             torch.randn(5, requires_grad=True),
         )
         optimizer.step(fn)
+
+    def test_init_group(self):
+        # Test can handle
+        for val, alt in [
+            (1, (False, 10.0)),
+            ([10, False], 1),
+            ((0.1, False), [5, 0.0]),
+            ([0.2, 0.4, True], [0]),
+        ]:
+            opt = MyOptimizer([Parameter(torch.randn(10, 5), requires_grad=False)], val)
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(opt.step)
+            opt_fn()
 
 
 if __name__ == "__main__":
