@@ -1395,6 +1395,37 @@ class TypeGuardAccessor : public GuardAccessor {
   }
 };
 
+/**
+ * Similar to PythonLambdaLeafGuard, this class is a way to allow developers
+ * to supply accessor as a python function. This way, we can gradually move
+ * accessors for different sources in C++.
+ */
+class PythonLambdaGuardAccessor : public GuardAccessor {
+ public:
+  PythonLambdaGuardAccessor(RootGuardManager* root, py::function accessor_fn)
+      : GuardAccessor(root, accessor_fn), _accessor_fn(accessor_fn.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_CallOneArg(_accessor_fn, obj); // new ref
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_CallOneArg(_accessor_fn, obj); // new ref
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+ private:
+  PyObject* _accessor_fn;
+};
+
 void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
   // Adds tensor X is not tensor Y. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
@@ -1568,6 +1599,10 @@ PyObject* torch_c_dynamo_guards_init() {
             py::str unique_key("__type_accessor__");
             return self.get_child_manager<TypeGuardAccessor>(unique_key);
           },
+          py::return_value_policy::reference)
+      .def(
+          "lambda_manager",
+          &GuardManager::get_child_manager<PythonLambdaGuardAccessor>,
           py::return_value_policy::reference);
 
   // Guard Manager
