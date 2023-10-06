@@ -465,9 +465,8 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
-        pg = self.process_group
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
-        compiled_allreduce(torch.randn(8, device=self.device), pg)
+        compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
 
 
 class TestOpWaitiness(MultiThreadedTestCase):
