@@ -20602,7 +20602,7 @@ python_ref_db = [
         "_refs.clamp",
         torch_opinfo_name="clamp",
         skips=(
-            DecorateInfo(skipIfTorchDynamo, 'TestCommon', 'test_out_warning'),
+            DecorateInfo(skipIfTorchDynamo(), 'TestCommon', 'test_out_warning'),
         ),
     ),
     PythonRefInfo(
