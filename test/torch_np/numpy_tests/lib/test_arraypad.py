@@ -3,6 +3,9 @@
 from unittest import expectedFailure as xfail, skipIf as skipif
 from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
 
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
 if  TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import assert_allclose, assert_array_equal
@@ -11,8 +14,6 @@ else:
     from torch._numpy.testing import assert_allclose, assert_array_equal
 
 
-# If we are going to trace through these, we should use NumPy
-# If testing on eager mode, we use torch._numpy
 class TestConstant(TestCase):
     @xfail  # (reason="tuple values")
     def test_check_constant(self):
