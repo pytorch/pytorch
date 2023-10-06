@@ -807,10 +807,9 @@ class SkipFilesVariable(VariableTracker):
                 and hasattr(args[1], "call_function")
             ):
                 seq = args[0].unpack_var_sequence(tx)
+
                 def func(tx, item, acc):
-                    return args[1].call_function(
-                        tx, [item, acc], {}
-                    )
+                    return args[1].call_function(tx, [item, acc], {})
 
             else:
                 print("TRYING ACCUMULATE", args[1].is_callable(tx))

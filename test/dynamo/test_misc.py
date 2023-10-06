@@ -7313,6 +7313,7 @@ def ___make_guard_fn():
 
     def test_itertools_accumulate_tensors_user_defined(self):
         from torch._dynamo.utils import counters
+
         def udo_fn_0(a, b):
             return -1
 
