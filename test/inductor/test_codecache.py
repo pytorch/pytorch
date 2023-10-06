@@ -14,6 +14,7 @@ from torch._inductor.codecache import (
     FxGraphCachePickler,
     FxGraphHashDetails,
     TensorMetadata,
+    TensorMetadataAndValues,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -73,10 +74,9 @@ class TestFxGraphCache(TestCase):
         cls.tmpdir.cleanup()
 
     @config.patch({"fx_graph_cache": True})
-    @parametrize("dynamic", (True, False))
     @parametrize("device", ("cuda", "cpu"))
     @parametrize("dtype", (torch.float, torch.bfloat16))
-    def test_cache_load(self, dynamic, device, dtype):
+    def test_cache_load(self, device, dtype):
         """
         Verify that we can populate and load CompiledFxGraphs from the cache.
         """
@@ -96,7 +96,7 @@ class TestFxGraphCache(TestCase):
         FxGraphCache.save_graph = mock_save_graph
         FxGraphCache.load_graph = mock_load_graph
 
-        compiled_fn = torch.compile(fn, dynamic=dynamic)
+        compiled_fn = torch.compile(fn, dynamic=False)
 
         # A first call shold miss in the cache.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
@@ -116,7 +116,17 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(mock_save_graph.call_count, 2)
         self.assertEqual(mock_load_graph.call_count, 1)
 
-    def test_hash_tensors(self):
+    def test_tensor_constants(self):
+        """
+        Test the handling of small vs. large tensor constants.
+        """
+        data = FxGraphCachePickler.dumps(torch.tensor([i for i in range(9)]))
+        self.assertIsInstance(pickle.loads(data), TensorMetadata)
+
+        data = FxGraphCachePickler.dumps(torch.tensor([i for i in range(8)]))
+        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+
+    def test_hash_fake_tensors(self):
         """
         Test hashing (pickling) FakeTensors with various characteristics.
         """

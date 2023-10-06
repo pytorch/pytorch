@@ -412,10 +412,21 @@ class TensorMetadataAndValues:
     values: List[Any]
 
 
+class DynamicShapeError(BaseException):
+    """
+    TODO(masnesral): Support dynamic shapes and remove this.
+    """
+
+    pass
+
+
 def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
+    if not all(isinstance(e, int) for e in t.shape):
+        raise DynamicShapeError()
+
     # Note the order here matters since is_contiguous() can be True
     # for more than one memory format.
     memory_formats = [
@@ -458,13 +469,17 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
-    # See GraphLowering. We expect any Tensors to be small inlined constants.
-    # For these, we hash on the metadata _and_ the actual values.
-    assert len(t.shape) == 0 or (len(t.shape) == 1 and t.shape[0] <= 128)
-    metadata_and_values = TensorMetadataAndValues(
-        extract_tensor_metadata(t), t.tolist()
-    )
-    return (_ident, (metadata_and_values,))
+    # If we see tensors, we know they're contstants stored as attributes on
+    # the GraphModule. See tensor lowering; small constants are inlined. If
+    # we see a small tensor, therefore, no reference will ultimately remain
+    # in the generated code. So we need to include its value in the cache key.
+    # Large constannts are effectively treated as inputs and we consider only
+    # their metadata.
+    metadata = extract_tensor_metadata(t)
+    if len(t.shape) == 0 or (len(t.shape) == 1 and t.shape[0] <= 8):
+        return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
+    else:
+        return (_ident, (metadata,))
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -543,12 +558,6 @@ class FxGraphHashDetails:
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
 
-        # TODO(masnesral): We need to account for the fact that the code will be
-        # guarded. Some of the guards are added during compilation. Is it sufficient
-        # to capture the symbolic ranges?
-        ctx = torch._guards.TracingContext.get()
-        self.var_to_range = ctx.fake_mode.shape_env.var_to_range if ctx else None
-
         # Also hash on various system info (including the triton compiler version), as
         # well as the inductor configuration and code.
         self.torch_version = torch.__version__
@@ -601,7 +610,12 @@ class FxGraphCache:
     ):
         from filelock import FileLock
 
-        key = compiled_fx_graph_hash(fx_args, fx_kwargs)
+        try:
+            key = compiled_fx_graph_hash(fx_args, fx_kwargs)
+        except DynamicShapeError:
+            # TODO(masnresral): support dynamic shapes
+            log.debug("fx graph cache: skipping caching due to dynamic shapes")
+            return compile_fx_fn(*fx_args, **fx_kwargs)
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
