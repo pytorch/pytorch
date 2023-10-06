@@ -11,6 +11,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.fx.passes.utils.matcher_utils import SubgraphMatcherWithKwNodesMap
 
 class TestMatcher(JitTestCase):
     def test_subgraph_matcher_with_attributes(self):
@@ -122,3 +123,57 @@ class TestMatcher(JitTestCase):
         maxpool_sp_graph = make_fx(maxpool_sp)(*inputs).graph
         match_sp_result = maxpool_matcher.match(maxpool_sp_graph)
         self.assertEqual(len(match_sp_result), 1)
+
+    def test_split_to_graph_and_name_nodes_map(self):
+        """Testing the helper function"""
+        from torch.fx.passes.utils.matcher_utils import _split_to_graph_and_name_nodes_map
+        def pattern(x, weight):
+            conv = F.conv2d(x, weight)
+            relu = F.relu(conv)
+            relu_mul_by_two = relu * 2
+            return relu, relu_mul_by_two, {"conv": conv, "relu": relu}
+
+        from torch._export import capture_pre_autograd_graph
+        example_inputs = (
+            torch.randn(1, 3, 3, 3) * 10,
+            torch.randn(3, 3, 3, 3),
+        )
+        ref_res = pattern(*example_inputs)
+        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
+        after_split_res = pattern_gm(*example_inputs)
+        self.assertEqual(ref_res[0], after_split_res[0])
+        self.assertEqual(ref_res[1], after_split_res[1])
+
+    def test_matcher_with_name_nodes_map(self):
+        def target_graph(x, weight):
+            x = x * 2
+            weight = weight * 3
+            conv = F.conv2d(x, weight)
+            relu = F.relu(conv)
+            relu2 = relu * 2
+            return relu + relu2
+
+        def pattern(x, weight):
+            conv = F.conv2d(x, weight)
+            relu = F.relu(conv)
+            relu_mul_by_two = relu * 2
+            return relu, relu_mul_by_two, {"conv": conv, "relu": relu}
+
+        from torch._export import capture_pre_autograd_graph
+        example_inputs = (
+            torch.randn(1, 3, 3, 3) * 10,
+            torch.randn(3, 3, 3, 3),
+        )
+        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
+        matcher = SubgraphMatcherWithNameNodesMap(pattern_gm)
+        target_gm = capture_pre_autograd_graph(target_graph, example_inputs)
+        internal_matches = matcher.match(target_gm)
+        for internal_match in internal_matches:
+            name_nodes_map = internal_match.name_nodes_map
+            assert "conv" in name_nodes_map
+            assert "relu" in name_nodes_map
+            name_nodes_map["conv"].meta["custom_annotation"] = "annotation"
+            # check if we correctly annotated the target graph module
+            for n in target_gm.graph.nodes:
+                if n == name_nodes_map["conv"]:
+                    assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
