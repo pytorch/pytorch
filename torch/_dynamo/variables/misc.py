@@ -802,7 +802,6 @@ class SkipFilesVariable(VariableTracker):
             elif (
                 len(args) == 2
                 and args[0].has_unpack_var_sequence(tx)
-                and hasattr(args[1], "call_function")
             ):
                 seq = args[0].unpack_var_sequence(tx)
 
