@@ -1538,7 +1538,7 @@
       self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
       result: auto_linear
     AutogradNestedTensor:
-      self: _nested_split_with_sizes_backward(grads, split_sizes, dim, self)
+      self: _nested_split_with_sizes_backward(grads, split_sizes, dim, at::native::get_nested_tensor_impl(self)->get_nested_sizes(), self.options())
 
 - name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())

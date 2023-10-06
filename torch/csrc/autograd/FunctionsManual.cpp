@@ -2116,8 +2116,35 @@ Tensor _nested_split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    const Tensor& self) {
-  return not_implemented("aten::split_with_sizes");
+    const Tensor& nt_sizes,
+    const at::TensorOptions& options) {
+  // add 1 to account for batch dim
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  // it's possible some of the grads are not defined (represents tensors of all
+  // 0s). Since at::cat can't handle those, let's define them
+  std::vector<Tensor> grads_all_defined;
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
+    } else {
+      const auto& length = split_sizes[i].expect_int();
+      auto nt_split_size = nt_sizes.clone();
+      auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
+      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+        // subtract 1 to account for batch dim
+        nt_split_size_ptr
+            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+      }
+      Tensor zeros_buffer = at::zeros(
+          {at::native::get_numel_from_nested_size_tensor(nt_split_size)},
+          options);
+      auto nt_split_grad = at::native::wrap_buffer(zeros_buffer, nt_split_size);
+      grads_all_defined.push_back(nt_split_grad);
+    }
+  }
+
+  auto ret = at::cat(grads_all_defined, dim);
+  return ret;
 }
 
 Tensor split_backward(
