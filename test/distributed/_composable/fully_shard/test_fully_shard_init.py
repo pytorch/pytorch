@@ -9,11 +9,12 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened, clean_tensor_name
-from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import _Policy, CustomPolicy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
+    FakeSequential,
     NestedSequentialModel,
     UnitModule,
 )
@@ -43,18 +44,27 @@ class TestInitialization(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_policy(self):
         """Tests passing a ``policy`` for pseudo-auto-wrapping."""
+
+        def lambda_fn(module: nn.Module):
+            if isinstance(module, nn.Sequential):
+                return True
+            elif isinstance(module, FakeSequential):
+                return {"backward_prefetch": BackwardPrefetch.BACKWARD_POST}
+            return False
+
         self.run_subtests(
             {
                 "policy": [
                     None,
                     ModuleWrapPolicy({UnitModule}),
                     ModuleWrapPolicy({nn.Sequential}),
+                    CustomPolicy(lambda_fn),
                 ],
             },
             self._test_policy,
         )
 
-    def _test_policy(self, policy: Optional[_FSDPPolicy]):
+    def _test_policy(self, policy: Optional[_Policy]):
         use_nested_sequential_model = "Sequential" in getattr(
             policy, "_module_classes_str", ""
         )
@@ -139,6 +149,20 @@ class TestInitialization(FSDPTest):
         for submodule in composable_module.modules():
             composable_module_classes.add(type(submodule))
         self.assertEqual(local_module_classes, composable_module_classes)
+
+        # Check that the composable module has the same FSDP states with the
+        # same attributes (mainly checking backward prefetch since the lambda
+        # wrap policy overrides it for `FakeSequential`)
+        wrapper_states = traversal_utils._get_fsdp_states(fsdp_wrapped_model)
+        composable_states = traversal_utils._get_fsdp_states(composable_module)
+        self.assertEqual(len(wrapper_states), len(composable_states))
+        for wrapper_state, composable_state in zip(wrapper_states, composable_states):
+            self.assertEqual(
+                wrapper_state.sharding_strategy, composable_state.sharding_strategy
+            )
+            self.assertEqual(
+                wrapper_state.backward_prefetch, composable_state.backward_prefetch
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):
@@ -251,11 +275,20 @@ class TestInitialization(FSDPTest):
         Tests that nested applications of ``fully_shard`` share the expected
         data structure state.
         """
+        self.run_subtests(
+            {"use_policy": [False, True]},
+            self._test_nested_fully_shard_shared_state,
+        )
+
+    def _test_nested_fully_shard_shared_state(self, use_policy: bool):
         device = torch.device("cuda")
         composable_module = CompositeParamModel(device=device)
-        fully_shard(composable_module.u1)
-        fully_shard(composable_module.u2)
-        fully_shard(composable_module)
+        if use_policy:
+            fully_shard(composable_module, policy=ModuleWrapPolicy({UnitModule}))
+        else:
+            fully_shard(composable_module.u1)
+            fully_shard(composable_module.u2)
+            fully_shard(composable_module)
 
         # Run a forward pass to trigger lazy initialization
         inp = torch.randn((2, 100), device=device)
@@ -267,7 +300,14 @@ class TestInitialization(FSDPTest):
         # NOTE: This check only requires that the data structure state is
         # shared. Namely, sharing the FSDP state object itself is sufficient
         # but not necessary.
-        data_structure_names = ["_streams", "_exec_order_data", "_free_event_queue"]
+        data_structure_names = [
+            "_exec_order_data",
+            "_free_event_queue",
+            "_pre_unshard_stream",
+            "_unshard_stream",
+            "_post_backward_stream",
+            "_default_stream",
+        ]
         for data_structure_name in data_structure_names:
             all_structures = set()
             for module in (

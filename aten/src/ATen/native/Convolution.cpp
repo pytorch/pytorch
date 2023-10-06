@@ -497,7 +497,6 @@ struct ConvParams {
            && input.is_cuda()
            && input.dim() <= MIOPEN_DIM_MAX
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
-           && !(input.scalar_type() == at::kBFloat16 && bias_defined) // MIOpen currently doesn't support bias with bfloat16
            && cudnn_enabled
            ;
   }
@@ -509,10 +508,9 @@ struct ConvParams {
     if (transposed && is_output_padding_big()) {
       return false;
     }
-    if (transposed && groups > 1 && at::symint::size<T>(input, 1) == groups) {
-      return false;
-    }
-    if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
+    if (input.device().is_cpu() &&
+        ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
+         (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -771,6 +769,7 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
+#if AT_MKLDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -789,6 +788,7 @@ static void check_input_same_type_as_parameters(
     check_input_same_type_as_parameters(input, weight, bias);
   }
 }
+#endif
 
 static auto view4d(const at::Tensor& tensor) -> at::Tensor {
   TORCH_CHECK(tensor.ndimension() == 3,

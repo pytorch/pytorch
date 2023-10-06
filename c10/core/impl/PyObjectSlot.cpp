@@ -55,8 +55,9 @@ bool PyObjectSlot::check_interpreter(PyInterpreter* interpreter) {
   return interpreter == pyobj_interpreter();
 }
 
-bool PyObjectSlot::has_pyobj() {
-  return check_pyobj(pyobj_interpreter()).has_value();
+bool PyObjectSlot::has_pyobj_nonhermetic() {
+  return check_pyobj(pyobj_interpreter(), /*ignore_hermetic_tls=*/true)
+      .has_value();
 }
 
 bool PyObjectSlot::owns_pyobj() {

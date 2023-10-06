@@ -60,7 +60,7 @@ class BinaryBuildWorkflow:
     branches: str = "nightly"
     # Mainly for macos
     cross_compile_arm64: bool = False
-    xcode_version: str = ""
+    macos_runner: str = "macos-12-xl"
 
     def __post_init__(self) -> None:
         if self.abi_version:
@@ -94,6 +94,7 @@ class OperatingSystem:
     WINDOWS = "windows"
     MACOS = "macos"
     MACOS_ARM64 = "macos-arm64"
+    LINUX_AARCH64 = "linux-aarch64"
 
 
 LINUX_BINARY_BUILD_WORFKLOWS = [
@@ -231,6 +232,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         ),
     ),
 ]
+
 WINDOWS_BINARY_SMOKE_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -305,7 +307,8 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.MACOS_ARM64
         ),
-        cross_compile_arm64=True,
+        cross_compile_arm64=False,
+        macos_runner="macos-13-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
@@ -325,6 +328,20 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
+AARCH64_BINARY_BUILD_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX_AARCH64,
+        package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.LINUX_AARCH64
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            isolated_workflow=True,
+        ),
+    ),
+]
+
 
 def main() -> None:
     jinja_env = jinja2.Environment(
@@ -338,6 +355,10 @@ def main() -> None:
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
             LINUX_BINARY_BUILD_WORFKLOWS,
+        ),
+        (
+            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+            AARCH64_BINARY_BUILD_WORKFLOWS,
         ),
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),

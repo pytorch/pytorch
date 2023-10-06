@@ -50,8 +50,12 @@ C10_DEFINE_bool(
     false,
     "enable rethrowing caught exception");
 
-namespace torch {
-namespace jit {
+C10_DEFINE_bool(
+    torch_jit_enable_expanded_stacks,
+    false,
+    "When true we will attemps to pre-expand node stacks and cache expanded stacks.");
+
+namespace torch::jit {
 
 using CodeImpl = interpreter::CodeImpl;
 
@@ -324,7 +328,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(STOREN): {
             INST_GUARD;
-            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() >= inst.N);
+            TORCH_INTERNAL_ASSERT(stack.size() >= inst.N);
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
@@ -678,13 +682,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DTYPE): {
             INST_GUARD;
-            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
+            TORCH_INTERNAL_ASSERT(!stack.empty());
             dtype(stack);
           }
             INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
-            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
+            TORCH_INTERNAL_ASSERT(!stack.empty());
             dim(stack);
           }
             INST_NEXT;
@@ -1096,7 +1100,6 @@ Code::Code(
           remaining_bailout_depth)) {}
 
 Code::Code(CodeImpl* codeImpl) : pImpl(codeImpl) {}
-Code::~Code() = default;
 
 MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
@@ -1112,8 +1115,6 @@ MobileCode::MobileCode(
           support_default_args_before_out,
           emit_promoted_ops,
           remaining_bailout_depth)) {}
-
-MobileCode::~MobileCode() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
@@ -1168,7 +1169,6 @@ InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(
           code,
           std::move(taskLauncher))) {}
-InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {
   static_cast<InterpreterStateImpl*>(pImpl.get())->run(stack);
@@ -1202,5 +1202,4 @@ void InterpreterContinuation::operator()() {
 #endif
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

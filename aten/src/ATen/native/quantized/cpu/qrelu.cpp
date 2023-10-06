@@ -17,6 +17,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_prelu_kernel_native.h>
 #include <ATen/ops/hardtanh_native.h>
 #include <ATen/ops/leaky_relu_native.h>
 #include <ATen/ops/prelu.h>
@@ -35,7 +36,7 @@ DEFINE_DISPATCH(qrelu_leaky_stub);
 DEFINE_DISPATCH(qprelu_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-Tensor qnnpack_relu(Tensor input) {
+static Tensor qnnpack_relu(Tensor input) {
   Tensor qy;
   TORCH_CHECK(
       input.ndimension() > 0, "qnnpack_relu(): Got empty input tensor");
@@ -150,7 +151,7 @@ Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   return self;
 }
 
-Tensor _prelu_kernel_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
+static Tensor _prelu_kernel_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
                                 double output_scale, int64_t output_zero_point) {
   auto ndim = self.dim();
   // for ndim < 1 or > 5, go to reference path

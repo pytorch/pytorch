@@ -11,8 +11,7 @@
 #include <ATen/ops/tensor.h>
 #endif
 
-namespace at {
-namespace sparse {
+namespace at::sparse {
 
 // Just for documentary purposes
 using SparseTensor = Tensor;
@@ -182,5 +181,4 @@ class TensorGeometryHolder<0> {
   geometry_holder_t t_strides;
 };
 
-} // namespace sparse
-} // namespace at
+} // namespace at::sparse

@@ -246,6 +246,38 @@ class LiftParametersAndBuffersIntoArgsStep:
         return (*model_args, *self.inputs), model_kwargs
 
 
+class ConvertComplexToRealRepresentationInputStep:
+    """Convert complex dtype tensors to real representation tensors.
+
+    ONNX does not support complex dtype tensors. Thus, we convert complex dtype tensors
+    to real representation tensors (i.e., float dtype tensors with an extra dimension
+    representing the real and imaginary parts of the complex number).
+
+    """
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        """Convert complex tensors to float tensors.
+
+        Args:
+            model_args: The model args.
+            model_kwargs: The model kwargs.
+
+        Returns:
+            A tuple of the model args and kwargs.
+        """
+        return (
+            tuple(
+                torch.view_as_real(arg)
+                if isinstance(arg, torch.Tensor) and arg.is_complex()
+                else arg
+                for arg in model_args
+            ),
+            model_kwargs,
+        )
+
+
 class RemoveNoneInputStep:
     """Remove `None` from arguments.
 
@@ -394,6 +426,32 @@ class FlattenOutputStep:
         """Flatten the model outputs."""
         flattened_outputs, _ = pytree.tree_flatten(model_outputs)
         return flattened_outputs
+
+
+class ConvertComplexToRealRepresentationOutputStep:
+    """Convert complex dtype tensors to real representation tensors.
+
+    ONNX does not support complex dtype tensors. Thus, we convert complex dtype tensors
+    to real representation tensors (i.e., float dtype tensors with an extra dimension
+    representing the real and imaginary parts of the complex number).
+
+    """
+
+    def apply(self, model_outputs: Any) -> Any:
+        """Convert float tensors to complex tensors.
+
+        Args:
+            model_output: The model output.
+
+        Returns:
+            A tuple of the model output.
+        """
+        return [
+            torch.view_as_real(output)
+            if isinstance(output, torch.Tensor) and torch.is_complex(output)
+            else output
+            for output in model_outputs
+        ]
 
 
 class FlattenOutputWithTreeSpecValidationStep:

@@ -5,7 +5,7 @@
 
 namespace at {
 
-void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_WARN_ONCE("The operator '",
                   op.schema().operator_name(),
                   "' is not currently supported ",
@@ -41,7 +41,7 @@ void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   }
 }
 
-void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "The operator '",
@@ -56,12 +56,12 @@ void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
 
 // This dispatch should never be called for tensor on MPS but is frequently called
 // If one of them are on CPU
-Tensor slow_conv2d_forward_mps(const Tensor& self,
-                               const Tensor& weight,
-                               IntArrayRef kernel_size,
-                               const c10::optional<Tensor>& bias,
-                               IntArrayRef stride,
-                               IntArrayRef padding) {
+static Tensor slow_conv2d_forward_mps(const Tensor& self,
+                                      const Tensor& weight,
+                                      IntArrayRef kernel_size,
+                                      const c10::optional<Tensor>& bias,
+                                      IntArrayRef stride,
+                                      IntArrayRef padding) {
   TORCH_CHECK(self.device() == weight.device(),
               __func__,
               ": input(device='",

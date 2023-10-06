@@ -23,11 +23,13 @@ void memcpy_to_mapping(const Tensor& src, api::MemoryMap& dst_mapping) {
     memcpy_to_mapping_impl<c10::qint8>(src, dst_mapping);
   } else if (src.dtype() == c10::kQInt32) {
     memcpy_to_mapping_impl<c10::qint32>(src, dst_mapping);
+  } else if (src.dtype() == c10::kBool) {
+    memcpy_to_mapping_uint8(src, dst_mapping);
   } else {
     TORCH_CHECK(
         false,
         "Invalid Data Type: expected c10::kQInt32, c10::kQInt8, c10::kQUInt8,",
-        " at::kHalf or at::Float but got ",
+        " c10::kBool, at::kHalf, or at::Float but got ",
         src.dtype());
   }
 }
@@ -43,11 +45,13 @@ void memcpy_from_mapping(api::MemoryMap& src_mapping, Tensor& dst) {
     memcpy_from_mapping_impl<c10::qint8>(src_mapping, dst);
   } else if (dst.dtype() == c10::kQInt32) {
     memcpy_from_mapping_impl<c10::qint32>(src_mapping, dst);
+  } else if (dst.dtype() == c10::kBool) {
+    memcpy_from_mapping_bool(src_mapping, dst);
   } else {
     TORCH_CHECK(
         false,
         "Invalid Data Type: expected c10::kQInt32, c10::kQInt8, c10::kQUInt8,",
-        " at::kHalf or at::Float but got ",
+        " c10::kBool, at::kHalf or at::Float but got ",
         dst.dtype());
   }
 }
@@ -284,7 +288,20 @@ at::Tensor from_vulkan(vTensor& v_src) {
   at::TensorOptions opt(at::kCPU);
   opt = opt.dtype(v_src.dtype());
 
-  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src.memory_format());
+  c10::MemoryFormat v_src_memory_format;
+
+  switch (v_src.gpu_memory_layout()) {
+    case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
+      v_src_memory_format = c10::MemoryFormat::Contiguous;
+      break;
+    case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
+      v_src_memory_format = c10::MemoryFormat::ChannelsLast;
+      break;
+    default:
+      TORCH_CHECK(false, "No corresponding memory format");
+  }
+
+  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src_memory_format);
   ops::pack_vulkan_to_cpu(v_src, ret);
   return ret;
 }

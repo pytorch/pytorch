@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Tuple
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
-    is_rerun_disabled_tests,
     unzip,
     upload_workflow_stats_to_s3,
 )
@@ -43,15 +42,6 @@ def parse_xml_report(
     test_cases: List[Dict[str, Any]] = []
 
     root = ET.parse(report)
-    # TODO: unlike unittest, pytest-flakefinder used by rerun disabled tests for test_ops
-    # includes skipped messages multiple times (50 times by default). This slows down
-    # this script too much (O(n)) because it tries to gather all the stats. This should
-    # be fixed later in the way we use pytest-flakefinder. A zipped test report from rerun
-    # disabled test is only few MB, but will balloon up to a much bigger XML file after
-    # extracting from a dozen to few hundred MB
-    if is_rerun_disabled_tests(root):
-        return test_cases
-
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
@@ -137,10 +127,6 @@ def get_pytest_parallel_times() -> Dict[Any, Any]:
         invoking_file = report.parent.name
 
         root = ET.parse(report)
-        # TODO: Skip test reports from rerun disabled tests, same reason as mentioned
-        # above
-        if is_rerun_disabled_tests(root):
-            continue
 
         assert len(list(root.iter("testsuite"))) == 1
         for test_suite in root.iter("testsuite"):
@@ -313,6 +299,11 @@ if __name__ == "__main__":
         help="Head branch of the workflow",
     )
     parser.add_argument(
+        "--head-repository",
+        required=True,
+        help="Head repository of the workflow",
+    )
+    parser.add_argument(
         "--circleci",
         action="store_true",
         help="If this is being run through circleci",
@@ -369,7 +360,7 @@ if __name__ == "__main__":
         failed_tests_cases,
     )
 
-    if args.head_branch == "main":
+    if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases

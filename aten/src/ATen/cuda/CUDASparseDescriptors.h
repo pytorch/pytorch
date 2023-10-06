@@ -10,9 +10,7 @@
 #include <type_traits>
 #endif
 
-namespace at {
-namespace cuda {
-namespace sparse {
+namespace at::cuda::sparse {
 
 template <typename T, cusparseStatus_t (*destructor)(T*)>
 struct CuSparseDescriptorDeleter {
@@ -261,6 +259,4 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
 
 #endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
-} // namespace sparse
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::sparse

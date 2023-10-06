@@ -129,7 +129,9 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
     import torch.distributed as dist
     import torch.nn as nn
     import torch.optim as optim
+    import torch.multiprocessing as mp
 
+    from torch.nn.parallel import DistributedDataParallel
     from torch.distributed.algorithms.ddp_comm_hooks import powerSGD_hook as powerSGD
 
     class SimpleModel(nn.Module):
@@ -175,8 +177,8 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
 
         state = {
             'state_dict': ddp_model.state_dict(),
-            'comm_hook': hook,
-            'comm_hook_state': hook_state}
+            'comm_hook': powersgd_hook,
+            'comm_hook_state': powersgd_state}
 
         if rank == 0:
             torch.save(state, CHECKPOINT)
@@ -185,11 +187,12 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
         map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
         checkpoint = torch.load(CHECKPOINT, map_location=map_location)
 
-        ddp_model.load_state_dict(checkpoint['state_dict'])
+        new_ddp_model = DistributedDataParallel(SimpleModel().to(rank), device_ids=[rank])
+        new_ddp_model.load_state_dict(checkpoint['state_dict'])
         powersgd_hook = checkpoint['comm_hook']
         powersgd_state = checkpoint['comm_hook_state']
 
-        ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
+        new_ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
 
         if rank == 0:
             os.remove(CHECKPOINT)

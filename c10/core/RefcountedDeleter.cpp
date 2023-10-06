@@ -16,7 +16,7 @@ void refcounted_deleter(void* ctx_) {
 
 std::mutex replace_data_ptr_mutex;
 
-void maybeApplyRefcountedDeleter(c10::Storage storage) {
+void maybeApplyRefcountedDeleter(const c10::Storage& storage) {
   std::lock_guard<std::mutex> guard(replace_data_ptr_mutex);
   c10::DataPtr& data_ptr = storage.mutable_data_ptr();
 
@@ -45,7 +45,7 @@ void maybeApplyRefcountedDeleter(c10::Storage storage) {
   storage.set_data_ptr(std::move(new_data_ptr));
 }
 
-c10::Storage newStorageImplFromRefcountedDataPtr(c10::Storage storage) {
+c10::Storage newStorageImplFromRefcountedDataPtr(const c10::Storage& storage) {
   c10::maybeApplyRefcountedDeleter(storage);
 
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
@@ -66,13 +66,12 @@ c10::Storage newStorageImplFromRefcountedDataPtr(c10::Storage storage) {
   reinterpret_cast<c10::RefcountedDeleterContext*>(data_ptr.get_context())
       ->refcount++;
 
-  c10::Allocator* allocator = c10::GetAllocator(storage_impl->device_type());
   c10::Storage new_storage = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       storage_impl->nbytes(),
-      allocator,
+      std::move(new_data_ptr),
+      storage_impl->allocator(),
       /*resizable=*/storage_impl->resizable());
-  new_storage.set_data_ptr(std::move(new_data_ptr));
   return new_storage;
 }
 

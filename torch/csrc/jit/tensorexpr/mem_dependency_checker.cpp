@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 
 #include <fstream>
+#include <iostream>
 
 namespace torch::jit::tensorexpr::analysis {
 
@@ -30,7 +31,7 @@ const char* AccessToString(AccessType a) {
   return "Unknown";
 }
 
-void getDependencyChain(
+static void getDependencyChain(
     const std::shared_ptr<AccessInfo>& info,
     DependencySet& dependencies) {
   if (!dependencies.insert(info).second) {
@@ -42,7 +43,7 @@ void getDependencyChain(
   }
 }
 
-void getDependentsChain(
+static void getDependentsChain(
     const std::shared_ptr<AccessInfo>& info,
     DependencySet& dependents) {
   if (!dependents.insert(info).second) {
@@ -582,7 +583,7 @@ void MemDependencyChecker::visit(LoadPtr v) {
 // dependence. This function does not consider overlap in bound range, but
 // rather the stride of the bound relative to the loop variable. This is the
 // section of the code which considers iteration order, if allowed.
-bool executionSafetyCheck(
+static bool executionSafetyCheck(
     const std::shared_ptr<AccessInfo>& info,
     const std::shared_ptr<AccessInfo>& other,
     const std::vector<ExprPtr>& aStrides,

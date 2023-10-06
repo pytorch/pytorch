@@ -10,6 +10,8 @@
 
 #include <c10/util/irange.h>
 
+#include <iostream>
+
 namespace torch::jit::tensorexpr {
 
 using namespace analysis;
@@ -70,7 +72,7 @@ BoundsInfo mergeTensorAccesses(
   return ret;
 }
 
-std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
+static std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(s);
@@ -80,7 +82,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   return varToBuf;
 }
 
-std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
+static std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(e);
@@ -195,7 +197,7 @@ std::vector<ExprPtr> getBoundExtents(
 
 using BoundSet = std::unordered_set<Bound, BoundHash>;
 
-BoundSet convertBounds(
+static BoundSet convertBounds(
     const std::vector<TensorAccessBoundsInfo>& bounds,
     TensorAccessKind filter = kMutate) {
   BoundSet ret;
@@ -209,7 +211,7 @@ BoundSet convertBounds(
   return ret;
 }
 
-BoundSet convertBounds(
+static BoundSet convertBounds(
     BoundsInfo& bounds,
     BufPtr buf,
     TensorAccessKind filter = kMutate) {
@@ -271,7 +273,7 @@ HazardKind getPotentialHazards(
   return HazardKind::NoDependency;
 }
 
-IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
+static IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   TORCH_INTERNAL_ASSERT(
       tabi.start.size() == tabi.stop.size(), buildErrorMessage());
   IndexBounds ret(tabi.start.size());
@@ -284,7 +286,7 @@ IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   return ret;
 }
 
-std::vector<IndexBounds> getIndexBounds(
+static std::vector<IndexBounds> getIndexBounds(
     const std::vector<TensorAccessBoundsInfo>& vTABI,
     TensorAccessKind filter = kMutate) {
   std::vector<IndexBounds> bounds;
@@ -296,7 +298,7 @@ std::vector<IndexBounds> getIndexBounds(
   return bounds;
 }
 
-bool hasConflictingOverlap(
+static bool hasConflictingOverlap(
     const BoundsInfo& aBounds,
     const BoundsInfo& bBounds,
     TensorAccessKind aFilter = kMutate,

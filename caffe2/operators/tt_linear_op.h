@@ -25,7 +25,7 @@ class TTLinearOp final : public Operator<Context> {
         out_sizes_(this->template GetRepeatedArgument<int>("out_sizes")),
         tt_ranks_(this->template GetRepeatedArgument<int>("tt_ranks")),
         Y_temp_(unique_ptr<Blob>(new Blob())) {}
-  ~TTLinearOp() {}
+  ~TTLinearOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0); // Input array
@@ -180,7 +180,7 @@ class TTLinearGradientOp : public Operator<Context> {
   template <class... Args>
   explicit TTLinearGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~TTLinearGradientOp() {}
+  ~TTLinearGradientOp() override {}
 
   bool RunOnDevice() override {
     return false;

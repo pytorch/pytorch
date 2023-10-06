@@ -79,6 +79,11 @@ DynamicType::~DynamicType() {
 }
 
 std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
+  if (auto dynRaw = other.castRaw<DynamicType>()) {
+    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+        "Error creating dynamic type instance not managed by shared_ptr: ",
+        other.str());
+  }
   if (auto dyn = other.cast<DynamicType>()) {
     return dyn;
   }
@@ -86,6 +91,11 @@ std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
 }
 
 DynamicTypePtr DynamicType::create(Type& other) {
+  if (auto dynRaw = other.castRaw<DynamicType>()) {
+    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+        "Error creating dynamic type instance not managed by shared_ptr: ",
+        other.str());
+  }
   if (auto dyn = other.cast<DynamicType>()) {
     return dyn;
   }
@@ -365,7 +375,7 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
 }
 
 TORCH_API TupleTypePtr
-ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
+ivalue::TupleTypeFactory<TupleType>::fallback(C10_UNUSED const Type& type) {
 #ifdef C10_MOBILE
   return nullptr;
 #else
@@ -386,10 +396,5 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #endif
 }
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, __) \
-  constexpr bool DynamicTypeTrait<NAME##Type>::isBaseType;
-FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
-FORALL_DYNAMIC_TYPES_FAKE(DYNAMIC_TYPE_TAG_VALUE)
-#undef DYNAMIC_TYPE_TAG_VALUE
 
 } // namespace c10

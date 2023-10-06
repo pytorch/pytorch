@@ -40,11 +40,12 @@ C10_API void refcounted_deleter(void* ctx_);
 
 // If the storage's DataPtr does not use `refcounted_deleter`, replace it with
 // a DataPtr that does, so it can be shared between multiple StorageImpls
-C10_API void maybeApplyRefcountedDeleter(c10::Storage storage);
+C10_API void maybeApplyRefcountedDeleter(const c10::Storage& storage);
 
 // Create a new StorageImpl that points to the same data. If the original
 // StorageImpl's DataPtr does not use `refcounted_deleter`, it will be replaced
 // with one that does
-C10_API c10::Storage newStorageImplFromRefcountedDataPtr(c10::Storage storage);
+C10_API c10::Storage newStorageImplFromRefcountedDataPtr(
+    const c10::Storage& storage);
 
 } // namespace c10

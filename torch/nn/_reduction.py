@@ -16,7 +16,7 @@ def get_enum(reduction: str) -> int:
         ret = 2
     else:
         ret = -1  # TODO: remove once JIT exceptions support control flow
-        raise ValueError("{} is not a valid value for reduction".format(reduction))
+        raise ValueError(f"{reduction} is not a valid value for reduction")
     return ret
 
 # In order to support previous versions, accept boolean size_average and reduce

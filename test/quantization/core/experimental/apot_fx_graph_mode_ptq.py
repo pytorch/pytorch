@@ -49,7 +49,7 @@ Prepare full precision model
 full_precision_model = float_model
 
 top1, top5 = evaluate(full_precision_model, criterion, data_loader_test)
-print("Model #0 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #0 Evaluation accuracy on test dataset: {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 """
 Prepare model PTQ for specified qconfig for torch.nn.Linear
@@ -69,7 +69,7 @@ prepared_model = prepare_ptq_linear(uniform_qconfig_8bit)
 quantized_model = convert_fx(prepared_model)  # convert the calibrated model to a quantized model
 
 top1, top5 = evaluate(quantized_model, criterion, data_loader_test)
-print("Model #1 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #1 Evaluation accuracy on test dataset (b=8, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 """
 Prepare model with uniform activation, uniform weight
@@ -80,7 +80,7 @@ prepared_model = prepare_ptq_linear(uniform_qconfig_4bit)
 quantized_model = convert_fx(prepared_model)  # convert the calibrated model to a quantized model
 
 top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)
-print("Model #1 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #1 Evaluation accuracy on test dataset (b=4, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 """
 Prepare model with uniform activation, APoT weight
@@ -90,7 +90,7 @@ Prepare model with uniform activation, APoT weight
 prepared_model = prepare_ptq_linear(apot_weights_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print("Model #2 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #2 Evaluation accuracy on test dataset (b=8, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 """
 Prepare model with uniform activation, APoT weight
@@ -100,7 +100,7 @@ Prepare model with uniform activation, APoT weight
 prepared_model = prepare_ptq_linear(apot_weights_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print("Model #2 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #2 Evaluation accuracy on test dataset (b=4, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 
 """
@@ -111,7 +111,7 @@ Prepare model with APoT activation and weight
 prepared_model = prepare_ptq_linear(apot_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print("Model #3 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #3 Evaluation accuracy on test dataset (b=8, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 """
 Prepare model with APoT activation and weight
@@ -121,11 +121,11 @@ Prepare model with APoT activation and weight
 prepared_model = prepare_ptq_linear(apot_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print("Model #3 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Model #3 Evaluation accuracy on test dataset (b=4, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
 
 """
 Prepare eager mode quantized model
 """
 eager_quantized_model = resnet18(pretrained=True, quantize=True).eval()
 top1, top5 = evaluate(eager_quantized_model, criterion, data_loader_test)
-print("Eager mode quantized model evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
+print(f"Eager mode quantized model evaluation accuracy on test dataset: {top1.avg:2.2f}, {top5.avg:2.2f}")

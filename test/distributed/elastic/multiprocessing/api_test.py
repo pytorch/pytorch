@@ -244,7 +244,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
         def assert_in_file(self, expected: List[str], filename: str) -> None:
             expected = [f"{line.rstrip()}\n" for line in expected]
-            with open(filename, "r") as fp:
+            with open(filename) as fp:
                 actual = fp.readlines()
                 for line in expected:
                     self.assertIn(line, actual)

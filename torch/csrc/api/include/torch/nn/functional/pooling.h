@@ -637,7 +637,9 @@ inline std::vector<int64_t> _unpool_output_size(
   std::vector<int64_t> default_size;
   for (const auto d : c10::irange(kernel_size.size())) {
     default_size.push_back(
-        (input_size[d + 2] - 1) * stride[d] + kernel_size[d] - 2 * padding[d]);
+        (input_size[input_size.size() - kernel_size.size() + d] - 1) *
+            stride[d] +
+        kernel_size[d] - 2 * padding[d]);
   }
   if (!output_size) {
     return default_size;
@@ -691,8 +693,8 @@ inline Tensor max_unpool1d(
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
   output_size_.push_back(1);
   return torch::max_unpool2d(
-             input.unsqueeze(3), indices.unsqueeze(3), output_size_)
-      .squeeze(3);
+             input.unsqueeze(-1), indices.unsqueeze(-1), output_size_)
+      .squeeze(-1);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

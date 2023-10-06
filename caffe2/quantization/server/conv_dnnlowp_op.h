@@ -19,7 +19,7 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
   USE_CONV_POOL_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, ConvFp32Op);
   ConvDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
-  virtual ~ConvDNNLowPOp();
+  ~ConvDNNLowPOp() override;
 
  protected:
   bool RunOnDeviceWithOrderNCHW() override;

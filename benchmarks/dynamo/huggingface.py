@@ -162,12 +162,17 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "BlenderbotForCausalLM",
 }
 
+SKIP_DUE_TO_CONTROL_FLOW = {"AllenaiLongformerBase"}
 
-REQUIRE_HIGHER_TOLERANCE = {
+
+REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "MT5ForConditionalGeneration",
     # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
     # harmful.
     "AlbertForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "RobertaForQuestionAnswering",
 }
 
 
@@ -177,6 +182,10 @@ SKIP_FOR_CPU = {
 
 ONLY_EVAL_MODE = {
     "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
+}
+
+FP32_ONLY_MODELS = {
+    "GoogleFnet",
 }
 
 
@@ -218,6 +227,11 @@ def get_sequence_length(model_cls, model_name):
         seq_length = 256
     elif model_name.startswith("MobileBert"):
         seq_length = 128
+    elif model_name.startswith("Wav2Vec2"):
+        # If too short, will fail with something like
+        # ValueError: `mask_length` has to be smaller than `sequence_length`,
+        # but got `mask_length`: 10 and `sequence_length`: 9`
+        seq_length = 10000  # NB: a more realistic size is 155136
     else:
         log.info(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
@@ -234,6 +248,18 @@ def generate_inputs_for_model(
     num_visual_features = 42
     seq_length = get_sequence_length(model_cls, model_name)
     vocab_size = model.config.vocab_size
+
+    if model_name.startswith("Wav2Vec2"):
+        # TODO: If we add more input_values style models, try to work this
+        # into the overall control flow
+        target_length = 100
+        return {
+            "input_values": torch.randn((bs, seq_length), device=device),
+            # Added because that's what the example training script has
+            "attention_mask": rand_int_tensor(device, 0, 2, (bs, seq_length)),
+            "labels": rand_int_tensor(device, 0, vocab_size, (bs, target_length)),
+        }
+
     if model_name.endswith("MultipleChoice"):
         input = rand_int_tensor(device, 0, vocab_size, (bs, num_choices, seq_length))
     elif model_name.startswith("Roberta"):
@@ -386,6 +412,14 @@ class HuggingfaceRunner(BenchmarkRunner):
     def skip_models_for_cpu(self):
         return SKIP_FOR_CPU
 
+    @property
+    def fp32_only_models(self):
+        return FP32_ONLY_MODELS
+
+    @property
+    def skip_models_due_to_control_flow(self):
+        return SKIP_DUE_TO_CONTROL_FLOW
+
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -425,6 +459,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        extra_args=None,
     ):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
@@ -505,10 +540,13 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
+        else:
+            if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):

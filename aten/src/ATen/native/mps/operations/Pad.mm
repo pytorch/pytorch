@@ -9,10 +9,13 @@
 #include <ATen/ops/constant_pad_nd_native.h>
 #include <ATen/ops/reflection_pad1d_backward_native.h>
 #include <ATen/ops/reflection_pad1d_native.h>
+#include <ATen/ops/reflection_pad2d_backward_native.h>
+#include <ATen/ops/reflection_pad2d_native.h>
 #include <ATen/ops/reflection_pad3d_backward_native.h>
 #include <ATen/ops/reflection_pad3d_native.h>
 #include <ATen/ops/replication_pad1d_backward_native.h>
 #include <ATen/ops/replication_pad1d_native.h>
+#include <ATen/ops/replication_pad2d_backward_native.h>
 #include <ATen/ops/replication_pad2d_native.h>
 #include <ATen/ops/replication_pad3d_backward_native.h>
 #include <ATen/ops/replication_pad3d_native.h>
@@ -22,13 +25,13 @@ namespace at::native {
 namespace mps {
 
 // Pad operations (1D/2D/3D forward and backward)
-Tensor& pad_out_template(Tensor& output,
-                         const Tensor& input_,
-                         IntArrayRef padding,
-                         const c10::optional<Tensor>& grad_output_opt,
-                         MPSGraphPaddingMode mode,
-                         double constantValue,
-                         const string op_name) {
+static Tensor& pad_out_template(Tensor& output,
+                                const Tensor& input_,
+                                IntArrayRef padding,
+                                const c10::optional<Tensor>& grad_output_opt,
+                                MPSGraphPaddingMode mode,
+                                double constantValue,
+                                const string op_name) {
   using CachedGraph = MPSUnaryGradCachedGraph;
   const int padding_size = (int)padding.size();
   int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
@@ -135,7 +138,7 @@ Tensor& pad_out_template(Tensor& output,
                     ") at dimension ",
                     dim_w,
                     " of input ",
-                    ndims);
+                    input_.sizes());
 
         if (padding_dim > 1) {
           TORCH_CHECK(pad_t < input_h && pad_b < input_h,
@@ -147,7 +150,7 @@ Tensor& pad_out_template(Tensor& output,
                       ") at dimension ",
                       dim_h,
                       " of input ",
-                      ndims);
+                      input_.sizes());
         }
         if (padding_dim > 2) {
           TORCH_CHECK(pad_front < input_d && pad_back < input_d,
@@ -159,7 +162,7 @@ Tensor& pad_out_template(Tensor& output,
                       ") at dimension ",
                       dim_d,
                       " of input ",
-                      ndims);
+                      input_.sizes());
         }
       }
       outputSizes.insert(outputSizes.begin(), output_w);

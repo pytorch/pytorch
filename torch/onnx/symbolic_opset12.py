@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import sys
 from typing import Optional, Tuple

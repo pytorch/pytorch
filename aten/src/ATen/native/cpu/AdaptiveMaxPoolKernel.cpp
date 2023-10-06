@@ -121,7 +121,7 @@ void cpu_adaptive_max_pool_channels_last(
     int64_t size = channels;
     int64_t len = size - (size % Vec::size());
     // temp buffer holding index with integer_t
-    std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
+    auto index_buffer = std::make_unique<integer_t []>(len);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t ih0 = start_index(oh, output_height, input_height);
@@ -235,9 +235,9 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
     int64_t size = channels;
     int64_t len = size - (size % bVec::size());
     // temp buffer holding index with integer_t
-    std::unique_ptr<int32_t []> index_buffer(new int32_t[len]);
+    auto index_buffer = std::make_unique<int32_t []>(len);
     // temp buffer holding max value with float
-    std::unique_ptr<float []> max_arr(new float[size]);
+    auto max_arr = std::make_unique<float []>(size);
     float* max = max_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {
@@ -346,7 +346,7 @@ void cpu_adaptive_max_pool_backward(
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
@@ -393,7 +393,7 @@ void cpu_adaptive_max_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 

@@ -1,4 +1,5 @@
 from collections import namedtuple
+from functools import partial
 from typing import Optional, Any, Union, Type
 
 import torch
@@ -22,6 +23,7 @@ from torch.ao.quantization.fake_quantize import (
 
 from .observer import (
     _PartialWrapper,
+    MinMaxObserver,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -56,6 +58,7 @@ __all__ = [
     "per_channel_dynamic_qconfig",
     "float_qparams_weight_only_qconfig",
     "float_qparams_weight_only_qconfig_4bit",
+    "default_quint8_weight_qconfig",
     "default_qat_qconfig",
     "default_dynamic_qat_qconfig",
     "default_weight_only_qconfig",
@@ -74,6 +77,7 @@ __all__ = [
     "get_default_qat_qconfig_dict",
     "QConfigAny",
     "qconfig_equals",
+
 ]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -100,7 +104,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("QConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfig, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
@@ -125,7 +129,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead")
-        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 default_qconfig = QConfig(activation=default_observer,
@@ -233,7 +237,7 @@ def get_default_qconfig(backend='x86', version=0):
     if backend not in supported_backends:
         raise AssertionError(
             "backend: " + str(backend) +
-            " not supported. backend must be one of {}".format(supported_backends)
+            f" not supported. backend must be one of {supported_backends}"
         )
 
     if version == 0:
@@ -245,6 +249,10 @@ def get_default_qconfig(backend='x86', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
         elif backend == 'onednn':
+            if not torch.cpu._is_cpu_support_vnni():
+                warnings.warn(
+                    "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
+                    "on CPU without Vector Neural Network Instruction support.")
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
@@ -301,6 +309,8 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
+default_quint8_weight_qconfig = QConfig(activation=HistogramObserver, weight=MinMaxObserver)
+
 def get_default_qat_qconfig(backend='x86', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
@@ -317,7 +327,7 @@ def get_default_qat_qconfig(backend='x86', version=1):
     if backend not in supported_backends:
         raise AssertionError(
             "backend: " + str(backend) +
-            " not supported. backend must be one of {}".format(supported_backends)
+            f" not supported. backend must be one of {supported_backends}"
         )
 
     # Histogram observer is too slow for quantization aware training
@@ -449,6 +459,13 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig],
 QConfigAny = Optional[QConfig]
 QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
+def _get_factory_kwargs_based_on_module_device(module):
+    assert isinstance(module, torch.nn.Module)
+    devices = {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
+    device = next(iter(devices)) if len(devices) > 0 else None
+    return None if device is None else {'device': device}
+
 def _add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
         module: Optional[nn.Module]) -> Any:
@@ -468,19 +485,14 @@ def _add_module_to_qconfig_obs_ctr(
     if module is None or qconfig is None or qconfig._fields != ('activation', 'weight'):
         return qconfig
 
-    def get_factory_kwargs_based_on_module_device():
-        assert isinstance(module, torch.nn.Module)
-        devices = {p.device for p in module.parameters()} | \
-            {p.device for p in module.buffers()}
-        device = next(iter(devices)) if len(devices) > 0 else None
-        return None if device is None else {'device': device}
 
     def configure_constructor_to_put_obs_on_module_device(original_constructor):
+        get_factory_kwargs_based_on_module_device_with_model = partial(_get_factory_kwargs_based_on_module_device, module)
         try:
             # check if constructor can accept factory_kwargs
             check = original_constructor.with_args(factory_kwargs=None)
             check()
-            return original_constructor.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+            return original_constructor.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device_with_model)
         except AttributeError:  # qconfig doesn't have activation or weight
             return original_constructor
         except TypeError:  # the class doesn't accept factory_kwargs argument

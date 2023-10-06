@@ -1,6 +1,8 @@
 import torch
 
-__all__ = ["get_cpu_capability", ]
+__all__ = [
+    "get_cpu_capability",
+]
 
 
 def get_cpu_capability() -> str:

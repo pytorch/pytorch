@@ -47,21 +47,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 # SHA-1 if stable_hash=True, otherwise it will consistent for a single
 # process run but not necessarily across processes.
 def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
-    # TODO: factor this into a helper
     import torch._dynamo
+    from torch._dynamo.utils import is_compile_supported
 
-    compile_supported = torch._dynamo.is_dynamo_supported()
     device_type = storage.device.type
-    if device_type == "cpu":
-        pass
-    elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
-
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-
-    if stable_hash or not compile_supported:
+    if stable_hash or not is_compile_supported(device_type):
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary
@@ -117,7 +107,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         # The dtype-casting view cannot be compiled, and so the
         # padding/reshaping also needs to be done externally even
         # though it could be profitably fused
-        pad = x.numel() % 4
+        pad = -x.numel() % 4
         if pad > 0:
             x = F.pad(x, (0, pad), "constant", 0)
         x = x.view(torch.int32)

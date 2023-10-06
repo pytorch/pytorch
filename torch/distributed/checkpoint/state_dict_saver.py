@@ -22,7 +22,7 @@ def save_state_dict(
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: SavePlanner = None,
+    planner: Optional[SavePlanner] = None,
 ) -> Metadata:
     """
     Saves a distributed model in SPMD style.
@@ -37,6 +37,11 @@ def save_state_dict(
     .. warning::
         If using the `process_group` argument, make sure that only its ranks
         call `save_state_dict` and that all data in state_dict belong to it.
+
+    .. note::
+        When saving checkpoint for FSDP's `ShardingStrategy.HYBRID_SHARD`, only one of
+        the shard_group should be calling `save_state_dict` and the corresponding process
+        group needs to be passed in.
 
     .. note::
         This function can be used to save a state_dict without having a process group

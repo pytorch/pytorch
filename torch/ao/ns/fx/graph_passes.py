@@ -424,7 +424,7 @@ def _can_insert_copy_of_subgraph_a(
                     return False
             cur_idx += 1
 
-        for kwarg_name, kwarg_val in norm_kwargs.items():
+        for kwarg_val in norm_kwargs.values():
             # stitch the inputs from base graph
             if cur_idx == 0:
                 pass

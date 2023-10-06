@@ -13,9 +13,17 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.has_cuda and torch.cuda.is_available():
+if torch.backends.cuda.is_built() and torch.cuda.is_available():
     def timer() -> float:
         torch.cuda.synchronize()
+        return timeit.default_timer()
+elif torch._C._get_privateuse1_backend_name() != "privateuseone":
+    privateuse1_device_handler = getattr(torch, torch._C._get_privateuse1_backend_name(), None) \
+        if torch._C._get_privateuse1_backend_name() != "cpu" else None
+
+    def timer() -> float:
+        if privateuse1_device_handler:
+            privateuse1_device_handler.synchronize()
         return timeit.default_timer()
 else:
     timer = timeit.default_timer

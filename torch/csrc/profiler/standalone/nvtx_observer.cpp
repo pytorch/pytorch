@@ -65,9 +65,8 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   return producer_op_pair;
 }
 
-std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
-    c10::List<c10::IValue> list,
-    std::string fn_name) {
+static std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
+    const c10::List<c10::IValue>& list) {
   std::list<std::pair<at::RecordFunctionHandle, int>> input_op_id_list;
   auto state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
@@ -81,7 +80,7 @@ std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
   return input_op_id_list;
 }
 
-std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
+static std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
     const at::RecordFunction& fn) {
   std::pair<at::RecordFunctionHandle, int> undefined_op_pair(0, -1);
   std::list<std::pair<at::RecordFunctionHandle, int>> input_producer_ops_;
@@ -95,7 +94,7 @@ std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
     } else {
       if (input_item.isList()) {
         std::list<std::pair<at::RecordFunctionHandle, int>> tmp_op_ids =
-            flattenOpIdList(input_item.toList(), std::string(fn.name()));
+            flattenOpIdList(input_item.toList());
         // Extend the current sizes array by the array returned from input sizes
         if (!tmp_op_ids.empty()) {
           input_producer_ops_.splice(input_producer_ops_.end(), tmp_op_ids);
@@ -110,7 +109,7 @@ std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
   return input_producer_ops_;
 }
 
-void updateOutputTensorTracker(const at::RecordFunction& fn) {
+static void updateOutputTensorTracker(const at::RecordFunction& fn) {
   int output_nr = 0;
   auto state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");

@@ -8,14 +8,14 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-bool compareConstValue(Value* v, double d) {
+static bool compareConstValue(Value* v, double d) {
   auto ival = toIValue(v);
   return ival.has_value() &&
       ((ival->isInt() && static_cast<int>(ival->toInt()) == d) ||
        (ival->isDouble() && ival->toDouble() == d));
 }
 
-void handleBinaryOpInputs(Node* node) {
+static void handleBinaryOpInputs(Node* node) {
   // We do not handle binary ops with two scalar inputs,
   // and we assume scalar is always at the second place.
   if (node->input(0)->type()->isSubtypeOf(TensorType::get())) {
@@ -123,7 +123,7 @@ static void ConvertScalarToTensor(Block* block) {
   }
 }
 
-void mayDecomposeAdd(Node* node) {
+static void mayDecomposeAdd(Node* node) {
   if (node->inputs().size() < 3) {
     return; // corner-case in BERT-mrpc that's not in line with
             // native_functions.yaml

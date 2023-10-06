@@ -83,7 +83,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
             else:
                 return (len(self.datapipe) + self.batch_size - 1) // self.batch_size
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
 @functional_datapipe('unbatch')

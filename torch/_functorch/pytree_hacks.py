@@ -13,7 +13,7 @@ def tree_map_(fn_, pytree):
     return pytree
 
 
-class PlaceHolder():
+class PlaceHolder:
     def __repr__(self):
         return '*'
 

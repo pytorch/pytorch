@@ -29,6 +29,7 @@ class _InternalGlobals:
             _C_onnx.OperatorExportTypes.ONNX
         )
         self.onnx_shape_inference: bool = True
+        self._autograd_inlining: bool = True
 
     @property
     def training_mode(self):
@@ -68,6 +69,17 @@ class _InternalGlobals:
         if type(value) is not bool:
             raise TypeError("in_onnx_export must be a boolean")
         self._in_onnx_export = value
+
+    @property
+    def autograd_inlining(self) -> bool:
+        """Whether Autograd must be inlined."""
+        return self._autograd_inlining
+
+    @autograd_inlining.setter
+    def autograd_inlining(self, value: bool):
+        if type(value) is not bool:
+            raise TypeError("autograd_inlining must be a boolean")
+        self._autograd_inlining = value
 
 
 GLOBALS = _InternalGlobals()

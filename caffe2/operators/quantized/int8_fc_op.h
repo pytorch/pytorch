@@ -20,7 +20,7 @@ class Int8FCOp final : public Operator<CPUContext> {
     createSharedBuffer<CPUContext>(ws_);
   }
 
-  ~Int8FCOp() {
+  ~Int8FCOp() override {
     if (this->qnnpackObject_ != nullptr) {
       qnnp_delete_operator(this->qnnpackObject_);
       this->qnnpackObject_ = nullptr;

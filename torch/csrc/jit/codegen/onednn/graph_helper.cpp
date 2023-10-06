@@ -12,7 +12,7 @@ namespace onednn {
 
 using opkind = dnnl::graph::op::kind;
 
-void fixConvOptionalBias(Node* node) {
+static void fixConvOptionalBias(Node* node) {
   if (node->namedInput("bias")->mustNotBeNone() == false) {
     // Replace non-existent optional bias with const None
     auto g = node->owningGraph();
@@ -22,7 +22,7 @@ void fixConvOptionalBias(Node* node) {
   }
 }
 
-c10::optional<size_t> getDimensions(Value* v) {
+static c10::optional<size_t> getDimensions(Value* v) {
   if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
   } else {
@@ -36,7 +36,7 @@ c10::optional<size_t> getDimensions(Value* v) {
 // no need to check beforehand whether the op is supported by oneDNN Graph or
 // not oneDNN Graph ops separated by wildcards don't end up in the same
 // partition.
-Operator makeWildcardOp(Node* node) {
+static Operator makeWildcardOp(Node* node) {
   auto o = Operator(node, opkind::Wildcard);
   // wildcard op contains only topology info
   for (size_t i = 0; i < node->inputs().size(); i++) {
@@ -82,13 +82,13 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::Convolution)
         .setInput(0, 1, 2)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("strides", Operator::Ints, 3)
-        .setAttr("pads_begin", Operator::Ints, 4)
-        .setAttr("pads_end", Operator::Ints, 4)
-        .setAttr("dilations", Operator::Ints, 5)
-        .setAttr("groups", Operator::Int, 6)
-        .setAttr("filter_format", std::string("OIX"))
-        .setAttr("data_format", std::string("NCX"));
+        .setAttr(dnnl::graph::op::attr::strides, Operator::Ints, 3)
+        .setAttr(dnnl::graph::op::attr::pads_begin, Operator::Ints, 4)
+        .setAttr(dnnl::graph::op::attr::pads_end, Operator::Ints, 4)
+        .setAttr(dnnl::graph::op::attr::dilations, Operator::Ints, 5)
+        .setAttr(dnnl::graph::op::attr::groups, Operator::Int, 6)
+        .setAttr(dnnl::graph::op::attr::weights_format, std::string("OIX"))
+        .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (
       (nodeKind == Symbol::fromQualString("aten::_convolution")) ||
       (nodeKind == Symbol::fromQualString("aten::convolution"))) {
@@ -97,13 +97,13 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::Convolution)
         .setInput(0, 1, 2)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("strides", Operator::Ints, 3)
-        .setAttr("pads_begin", Operator::Ints, 4)
-        .setAttr("pads_end", Operator::Ints, 4)
-        .setAttr("dilations", Operator::Ints, 5)
-        .setAttr("groups", Operator::Int, 8)
-        .setAttr("filter_format", std::string("OIX"))
-        .setAttr("data_format", std::string("NCX"));
+        .setAttr(dnnl::graph::op::attr::strides, Operator::Ints, 3)
+        .setAttr(dnnl::graph::op::attr::pads_begin, Operator::Ints, 4)
+        .setAttr(dnnl::graph::op::attr::pads_end, Operator::Ints, 4)
+        .setAttr(dnnl::graph::op::attr::dilations, Operator::Ints, 5)
+        .setAttr(dnnl::graph::op::attr::groups, Operator::Int, 8)
+        .setAttr(dnnl::graph::op::attr::weights_format, std::string("OIX"))
+        .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::batch_norm")) {
     auto training = toIValue(node->namedInput("training"));
     REQUIRE(training.has_value()); // cannot get training status in script mode
@@ -111,8 +111,8 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
       return Operator(node, opkind::BatchNormInference)
           .setInput(0, 1, 2, 3, 4)
           .setOutput(dnnl_graph_, 0)
-          .setAttr("epsilon", Operator::Float, 7)
-          .setAttr("data_format", std::string("NCX"));
+          .setAttr(dnnl::graph::op::attr::epsilon, Operator::Float, 7)
+          .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
     }
   } else if (nodeKind == Symbol::fromQualString("aten::layer_norm")) {
     auto normalized_shape = toIValue(node->namedInput("normalized_shape"));
@@ -120,8 +120,8 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::LayerNorm)
         .setInput(0, 2, 3)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("epsilon", Operator::Float, 4)
-        .setAttr("keep_stats", false);
+        .setAttr(dnnl::graph::op::attr::epsilon, Operator::Float, 4)
+        .setAttr(dnnl::graph::op::attr::keep_stats, false);
   } else if (nodeKind == Symbol::fromQualString("aten::addmm")) {
     auto alpha = toIValue(node->namedInput("alpha"));
     auto beta = toIValue(node->namedInput("beta"));
@@ -148,7 +148,7 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return makeEltwiseOp(node, opkind::ReLU);
   else if (nodeKind == Symbol::fromQualString("aten::elu"))
     return makeEltwiseOp(node, opkind::Elu)
-        .setAttr("alpha", Operator::Float, 1);
+        .setAttr(dnnl::graph::op::attr::alpha, Operator::Float, 1);
   else if (nodeKind == Symbol::fromQualString("aten::sigmoid"))
     return makeEltwiseOp(node, opkind::Sigmoid);
   else if (nodeKind == Symbol::fromQualString("aten::gelu"))
@@ -176,23 +176,23 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
         ? std::numeric_limits<float>::infinity()
         : Operator::ScalarToFloat(node, 2);
     return makeEltwiseOp(node, opkind::Clamp)
-        .setAttr("min", clamp_min_value)
-        .setAttr("max", clamp_max_value);
+        .setAttr(dnnl::graph::op::attr::min, clamp_min_value)
+        .setAttr(dnnl::graph::op::attr::max, clamp_max_value);
   } else if (nodeKind == Symbol::fromQualString("aten::hardtanh")) {
     return makeEltwiseOp(node, opkind::Clamp)
-        .setAttr("min", Operator::ScalarToFloat, 1)
-        .setAttr("max", Operator::ScalarToFloat, 2);
+        .setAttr(dnnl::graph::op::attr::min, Operator::ScalarToFloat, 1)
+        .setAttr(dnnl::graph::op::attr::max, Operator::ScalarToFloat, 2);
   } else if (nodeKind == Symbol::fromQualString("aten::hardswish"))
     return makeEltwiseOp(node, opkind::HardSwish);
   else if (nodeKind == Symbol::fromQualString("aten::log"))
     return makeEltwiseOp(node, opkind::Log);
   else if (nodeKind == Symbol::fromQualString("aten::leaky_relu")) {
     return makeEltwiseOp(node, opkind::LeakyReLU)
-        .setAttr("alpha", Operator::Float, 1);
+        .setAttr(dnnl::graph::op::attr::alpha, Operator::Float, 1);
   } else if (nodeKind == Symbol::fromQualString("aten::relu6")) {
     return makeEltwiseOp(node, opkind::Clamp)
-        .setAttr("min", 0.f)
-        .setAttr("max", 6.f);
+        .setAttr(dnnl::graph::op::attr::min, 0.f)
+        .setAttr(dnnl::graph::op::attr::max, 6.f);
   } else if (
       (nodeKind == Symbol::fromQualString("aten::softmax")) ||
       (nodeKind == Symbol::fromQualString("aten::_softmax"))) {
@@ -200,13 +200,13 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::SoftMax)
         .setInput(0)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("axis", axis);
+        .setAttr(dnnl::graph::op::attr::axis, axis);
   } else if (nodeKind == Symbol::fromQualString("aten::_log_softmax")) {
     auto axis = toIValue(node->namedInput("dim"))->toInt();
     return Operator(node, opkind::LogSoftmax)
         .setInput(0)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("axis", axis);
+        .setAttr(dnnl::graph::op::attr::axis, axis);
   } else if (nodeKind == Symbol::fromQualString("aten::cat")) {
     auto o = Operator(node, opkind::Concat);
     REQUIRE(node->namedInput("tensors")->node()->kind() == prim::ListConstruct);
@@ -224,7 +224,8 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     auto listConstruct = node->input(0)->node();
     for (auto input : listConstruct->inputs())
       o.setInputValue(input);
-    return o.setOutput(dnnl_graph_, 0).setAttr("axis", Operator::Int, 1);
+    return o.setOutput(dnnl_graph_, 0)
+        .setAttr(dnnl::graph::op::attr::axis, Operator::Int, 1);
   } else if (
       (nodeKind == Symbol::fromQualString("aten::max_pool2d")) ||
       (nodeKind == Symbol::fromQualString("aten::max_pool2d_with_indices"))) {
@@ -236,13 +237,14 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::MaxPool)
         .setInput(0)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("kernel", Operator::Ints, 1)
-        .setAttr("strides", Operator::Ints, 2)
-        .setAttr("pads_begin", Operator::Ints, 3)
-        .setAttr("pads_end", Operator::Ints, 3)
-        .setAttr("dilations", Operator::Ints, 4)
-        .setAttr("rounding_type", std::string(rounding_type))
-        .setAttr("data_format", std::string("NCX"));
+        .setAttr(dnnl::graph::op::attr::kernel, Operator::Ints, 1)
+        .setAttr(dnnl::graph::op::attr::strides, Operator::Ints, 2)
+        .setAttr(dnnl::graph::op::attr::pads_begin, Operator::Ints, 3)
+        .setAttr(dnnl::graph::op::attr::pads_end, Operator::Ints, 3)
+        .setAttr(dnnl::graph::op::attr::dilations, Operator::Ints, 4)
+        .setAttr(
+            dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
+        .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::avg_pool2d")) {
     // TODO: do we need add checks for all Constants?
     REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
@@ -253,13 +255,14 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::AvgPool)
         .setInput(0)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("kernel", Operator::Ints, 1)
-        .setAttr("strides", Operator::Ints, 2)
-        .setAttr("pads_begin", Operator::Ints, 3)
-        .setAttr("pads_end", Operator::Ints, 3)
-        .setAttr("exclude_pad", !Operator::Bool(node, 5))
-        .setAttr("rounding_type", std::string(rounding_type))
-        .setAttr("data_format", std::string("NCX"));
+        .setAttr(dnnl::graph::op::attr::kernel, Operator::Ints, 1)
+        .setAttr(dnnl::graph::op::attr::strides, Operator::Ints, 2)
+        .setAttr(dnnl::graph::op::attr::pads_begin, Operator::Ints, 3)
+        .setAttr(dnnl::graph::op::attr::pads_end, Operator::Ints, 3)
+        .setAttr(dnnl::graph::op::attr::exclude_pad, !Operator::Bool(node, 5))
+        .setAttr(
+            dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
+        .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::matmul")) {
     auto dim0 = getDimensions(node->namedInput("self")).value_or(-1);
     auto dim1 = getDimensions(node->namedInput("other")).value_or(-1);
@@ -283,13 +286,15 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::MatMul)
         .setInput(0, 1, 2)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("transpose_b", true);
+        .setAttr(dnnl::graph::op::attr::transpose_b, true);
   } else if (nodeKind == Symbol::fromQualString("aten::permute")) {
     REQUIRE(aliasDb_->hasInputWriters(node) == false);
     return Operator(node, opkind::StaticTranspose)
         .setInput(0)
         .setOutput(dnnl_graph_, 0)
-        .setAttr("order", toIValue(node->namedInput("dims"))->toIntVector());
+        .setAttr(
+            dnnl::graph::op::attr::order,
+            toIValue(node->namedInput("dims"))->toIntVector());
   } else if (nodeKind == Symbol::fromQualString("aten::contiguous")) {
     // Contiguous should only be mapped to oneDNN Graph if the destination
     // memory-layout is different than the source memory-format
@@ -307,7 +312,7 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
   return makeWildcardOp(node);
 }
 
-DeviceType inferDeviceFromValue(Value* v) {
+static DeviceType inferDeviceFromValue(Value* v) {
   auto tt = v->type()->cast<TensorType>();
   if (!tt) {
     return at::kCPU;
@@ -319,7 +324,7 @@ DeviceType inferDeviceFromValue(Value* v) {
   return device->type();
 }
 
-DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
+static DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   auto dt = inferDeviceFromValue(graph->inputs()[0]);
   TORCH_CHECK(
       std::all_of(
@@ -330,16 +335,16 @@ DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   return dt;
 }
 
-dnnl::graph::engine::kind getLlgaEngineKind(DeviceType type) {
+static dnnl::engine::kind getLlgaEngineKind(DeviceType type) {
   switch (type) {
     case DeviceType::CPU:
-      return dnnl::graph::engine::kind::cpu;
+      return dnnl::engine::kind::cpu;
     default:
       TORCH_CHECK(false, "Not support device type ", type);
   }
 }
 
-void mayAddListConstructIntoConcatPartition(
+static void mayAddListConstructIntoConcatPartition(
     Node* n,
     OpPartitionMap& opToOwningPartition) {
   // Since prim::ListConstruct is not visible to the LLGA,
@@ -360,7 +365,7 @@ void mayAddListConstructIntoConcatPartition(
 // Scalars would be converted to 1-D tensors later anyway,
 // but they shouldn't be complex-double
 // If this check fails, convert op to wildcard
-bool checkInputCompatibility(Node* node) {
+static bool checkInputCompatibility(Node* node) {
   auto allInputs = node->inputs();
   for (auto input : allInputs) {
     c10::IValue inputIValue = toIValue(input);
@@ -422,6 +427,8 @@ LlgaGraphHelper::LlgaGraphHelper(
     }
   }
 
+  dnnl_graph_->finalize();
+
   GRAPH_DEBUG("Get Partitions");
   std::vector<dnnl::graph::partition> partitions =
       dnnl_graph_->get_partitions(policy);
@@ -465,7 +472,7 @@ bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
 // only use single-op partitions for ops unsupported by NNC, or ops
 // that oneDNN executes faster. prim::ListConstruct is an exception, since
 // we simply want to fuse it with cat.
-bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
+static bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
   return (
       (kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
       (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||

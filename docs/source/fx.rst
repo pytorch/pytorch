@@ -633,9 +633,9 @@ examine our traced module:
     # This print-out returns:
     """
     graph():
-        %x : [#users=1] = placeholder[target=x]
-        %y : [#users=1] = placeholder[target=y]
-        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        %x : [num_users=1] = placeholder[target=x]
+        %y : [num_users=1] = placeholder[target=y]
+        %add : [num_users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
         return add
     """
 

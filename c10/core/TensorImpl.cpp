@@ -501,7 +501,7 @@ DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and
 // test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
 // very slowly.
 
-static bool definitely_true(SymBool b) {
+static bool definitely_true(const SymBool& b) {
   return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
 }
 
@@ -589,7 +589,15 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      false, "Cannot call ", meth, "() on tensor with symbolic sizes/strides");
+}
+
 void TensorImpl::throw_storage_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
+    TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
 }

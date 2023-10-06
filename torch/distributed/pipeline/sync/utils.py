@@ -1,12 +1,12 @@
 from torch import nn
-from typing import List
+from typing import List, Optional
 
 __all__ = ["partition_model"]
 
 def partition_model(
         module: nn.Sequential,
         balance: List[int],
-        devices: List[int] = None):
+        devices: Optional[List[int]] = None):
     """
     Given an :class:`nn.Sequential <torch.nn.Sequential>` module, partitions
     the model across multiple GPU devices according the provided ``balance``

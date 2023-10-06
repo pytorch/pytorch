@@ -226,6 +226,33 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_pass_constant_propagation(fn.graph)
             self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
 
+    def test_conv_deconv(self):
+        for inp_shape, weight_shape, bias, stride, padding, output_padding, dilation, groups, mod in [
+                ([32, 6, 10], [16, 3, 3], None, 2, 2, 1, 1, 2, torch.nn.functional.conv1d),
+                ([32, 16, 10], [16, 3, 3], None, 2, 2, 1, 1, 2, torch.nn.functional.conv_transpose1d),
+                ([1, 32, 5, 10], [30, 16, 3, 3], None, [2, 2], [0, 0], 0, 1, 2, torch.nn.functional.conv2d),
+                ([1, 30, 5, 10], [30, 16, 3, 3], None, [2, 2], [0, 0], 0, 1, 2, torch.nn.functional.conv_transpose2d),
+                ([3, 14, 10, 66, 55], [2, 7, 7, 4, 4], None, 1, 1, 2, 1, 2, torch.nn.functional.conv3d),
+                ([3, 2, 10, 66, 55], [2, 7, 7, 4, 4], None, 1, 1, 0, 1, 2, torch.nn.functional.conv_transpose3d)]:
+            inp = torch.rand(inp_shape)
+            weight = torch.rand(weight_shape)
+            if mod in [torch.nn.functional.conv1d, torch.nn.functional.conv2d, torch.nn.functional.conv3d]:
+                res = mod(inp, weight, bias, stride, padding, dilation, groups).size()
+            else:
+                res = mod(inp, weight, bias, stride, padding, output_padding, dilation, groups).size()
+
+            def foo(inp, weight):
+                if mod in [torch.nn.functional.conv1d, torch.nn.functional.conv2d, torch.nn.functional.conv3d]:
+                    return mod(inp, weight, bias, stride, padding, dilation, groups)
+                else:
+                    return mod(inp, weight, bias, stride, padding, output_padding, dilation, groups)
+
+            fn = torch.jit.trace(foo, (inp, weight))
+            torch._C._jit_erase_non_input_shape_information(fn.graph)
+            torch._C._jit_pass_peephole(fn.graph)
+            torch._C._jit_pass_constant_propagation(fn.graph)
+            self.checkShapeAnalysis(res, fn.graph, assert_propagation=True)
+
     def test_arange_shape(self):
         # no opinfo for tensor constructors
         inps = [

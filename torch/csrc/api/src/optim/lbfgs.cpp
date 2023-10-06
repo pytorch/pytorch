@@ -187,7 +187,7 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   return std::make_tuple(loss, flat_grad);
 }
 
-double _cubic_interpolate(
+static double _cubic_interpolate(
     double x1,
     double f1,
     double g1,
@@ -236,7 +236,7 @@ using Function = std::function<std::tuple<double, Tensor>(
     const std::vector<Tensor>& x,
     double t,
     const Tensor& d)>;
-std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
+static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
     const Function& obj_func,
     const std::vector<Tensor>& x,
     double t,
@@ -438,14 +438,13 @@ Tensor LBFGS::step(LossClosure closure) {
 
   // NOTE: LBFGS has only global state, but we register it as state for
   // the first param, because this helps with casting in load_state_dict
-  auto param_state =
-      state_.find(c10::guts::to_string(_params.at(0).unsafeGetTensorImpl()));
+  auto param_state = state_.find(_params.at(0).unsafeGetTensorImpl());
   if (param_state == state_.end()) {
-    state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())] =
+    state_[_params.at(0).unsafeGetTensorImpl()] =
         std::make_unique<LBFGSParamState>();
   }
   auto& state = static_cast<LBFGSParamState&>(
-      *state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())]);
+      *state_[_params.at(0).unsafeGetTensorImpl()]);
   // evaluate initial f(x) and df/dx
   Tensor orig_loss;
   {
@@ -655,8 +654,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
     state->prev_loss(prev_loss.item<double>());
     state->old_dirs(old_dirs);
     state->old_stps(old_stps);
-    state_[c10::guts::to_string(
-        param_groups_.at(0).params().at(0).unsafeGetTensorImpl())] =
+    state_[param_groups_.at(0).params().at(0).unsafeGetTensorImpl()] =
         std::move(state);
   }
 }

@@ -14,7 +14,6 @@
 
 #include <array>
 #include <cmath>
-#include <iostream>
 
 // This file defines Vectorized<> for the quantized types.
 //
@@ -98,18 +97,19 @@ inline __m256i pack_saturate_and_clamp<uint8_t>(
       _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
 }
 
-inline Vectorized<float> load_uint8_as_float(const uint8_t* src_data) {
-  // Load 8*uint8
-  __m128i input_128 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(src_data));
+inline Vectorized<float> convert_uint8_to_float(at::vec::Vectorized<uint8_t> src) {
+  // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
+  // Only handle first 64 bits
+  __m128i input_128 = _mm256_castsi256_si128(src);
   // Convert from 8*uint8 to 8*int32
   __m256i input_256_int32 = _mm256_cvtepu8_epi32(input_128);
   // Convert from 8*int32 to 8*float
   return _mm256_cvtepi32_ps(input_256_int32);
 }
 
-inline void store_float_as_uint8(at::vec::Vectorized<float> values, uint8_t* dst_data) {
-  // Convert from float32 to int32
-  __m256i x_values_int32 = _mm256_cvtps_epi32(values);
+inline Vectorized<uint8_t> convert_float_to_uint8(at::vec::Vectorized<float> src) {
+  // Convert from float32 to int32 with truncation
+  __m256i x_values_int32 = _mm256_cvttps_epi32(src);
 
   // Convert from int32 to int16 using signed saturation
   __m256i xy_packed_v = _mm256_packs_epi32(x_values_int32, x_values_int32);
@@ -122,22 +122,19 @@ inline void store_float_as_uint8(at::vec::Vectorized<float> values, uint8_t* dst
       xy_packed_v, xy_packed_v, min_val, max_val);
   __m256i permute_mask_v =
     _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
-  xyzw_clamped_v = _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
-
-  // Store to dst
-  _mm_storel_epi64(reinterpret_cast<__m128i*>(dst_data), _mm256_castsi256_si128(xyzw_clamped_v));
+  return _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
 }
 
 template <typename T>
 inline void __attribute__((always_inline)) QuantizeAvx2(
     const float* src,
-    typename T::underlying* dst,
+    T* dst,
     int len,
     float inverse_scale,
     int64_t zero_point) {
   constexpr int VLEN = 8;
-  constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
-  constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
+  constexpr auto min_val = std::numeric_limits<T>::min();
+  constexpr auto max_val = std::numeric_limits<T>::max();
   const __m256i min_v = _mm256_set1_epi32(min_val);
   const __m256i max_v = _mm256_set1_epi32(max_val);
   // This is the largest int32 value < int32_max exactly representable in float
@@ -199,8 +196,8 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 
     __m256i xy_packed_v = _mm256_packs_epi32(x_rounded_v, y_rounded_v);
     __m256i zw_packed_v = _mm256_packs_epi32(z_rounded_v, w_rounded_v);
-    __m256i xyzw_clamped_v = pack_saturate_and_clamp<typename T::underlying>(
-        xy_packed_v, zw_packed_v, min_val, max_val);
+    __m256i xyzw_clamped_v =
+        pack_saturate_and_clamp<T>(xy_packed_v, zw_packed_v, min_val, max_val);
 
     xyzw_clamped_v =
         _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
@@ -531,7 +528,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
     int8_t quantized_values[32];
-    QuantizeAvx2<c10::qint8>(
+    QuantizeAvx2<value_type>(
         rhs_data, quantized_values, 32, inverse_scale, zero_point);
     return Vectorized<c10::qint8>::loadu(quantized_values);
   }
@@ -709,7 +706,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
     uint8_t quantized_values[32];
-    QuantizeAvx2<c10::quint8>(
+    QuantizeAvx2<value_type>(
         rhs_data, quantized_values, 32, inverse_scale, zero_point);
     return Vectorized<c10::quint8>::loadu(quantized_values);
   }

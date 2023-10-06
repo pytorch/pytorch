@@ -79,6 +79,14 @@ ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
 ENV OPENSSL_DIR /opt/openssl
 
+ARG INDUCTOR_BENCHMARKS
+COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/timm.txt timm.txt
+RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 COPY ./common/install_cmake.sh install_cmake.sh

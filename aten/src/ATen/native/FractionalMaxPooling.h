@@ -3,7 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 static inline std::vector<int> generate_intervals(
@@ -77,4 +77,4 @@ static inline void fractional_max_pool_check_shape(
       "Expect _random_samples.size(2) equals to ", ndim, "; got ", D, ".");
 }
 
-}} // at::native
+} // namespace at::native

@@ -4,6 +4,7 @@
 
   - [Release Compatibility Matrix](#release-compatibility-matrix)
   - [General Overview](#general-overview)
+    - [Frequently Asked Questions](#frequently-asked-questions)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
     - [`pytorch/pytorch`](#pytorchpytorch)
@@ -31,8 +32,10 @@
     - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
+- [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
+  - [Triton dependency for the release](#triton-dependency-for-the-release)
 
 <!-- tocstop -->
 
@@ -42,6 +45,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA |
 | --- | --- | --- | --- |
+| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
 | 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
@@ -54,6 +58,14 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 1. Cutting a release branch and making release branch specific changes
 2. Drafting RCs (Release Candidates), and merging cherry picks
 3. Promoting RCs to stable and performing release day tasks
+
+### Frequently Asked Questions
+
+* Q: What is release branch cut  ?
+  * A: When bulk of the tracked features merged into the main branch, the primary release engineer starts the release process of cutting the release branch by creating a new git branch based off of the current `main` development branch of PyTorch. This allows PyTorch development flow on `main` to continue uninterrupted, while the release engineering team focuses on stabilizing the release branch in order to release a series of release candidates (RC). The activities in the release branch include both regression and performance testing as well as polishing new features and fixing release-specific bugs. In general, new features *are not* added to the release branch after it was created.
+
+* Q: What is cherry-pick ?
+  * A: A cherry pick is a process of propagating commits from the main into the release branch, utilizing git's built in [cherry-pick feature](https://git-scm.com/docs/git-cherry-pick). These commits are typically limited to small fixes or documentation updates to ensure that the release engineering team has sufficient time to complete a thorough round of testing on the release branch. To nominate a fix for cherry-picking, a separate pull request must be created against the respective release branch and then mentioned in the Release Tracker issue (example: https://github.com/pytorch/pytorch/issues/94937) following the template from the issue description. The comment nominating a particular cherry-pick for inclusion in the release should include the committed PR against main branch, the newly created cherry-pick PR, as well as the acceptance criteria for why the cherry-pick is needed in the first place.
 
 ## Cutting a release branch preparations
 
@@ -320,6 +332,10 @@ the size restrictions for publishing on PyPI so the default version that is publ
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
 
+# Submitting Tutorials
+
+Tutorials in support of a release feature must be submitted to the [pytorch/tutorials](https://github.com/pytorch/tutorials) repo at least two weeks before the release date to allow for editorial and technical review. There is no cherry-pick process for tutorials. All tutorials will be merged around the release day and published at [pytorch.org/tutorials](https://pytorch.org/tutorials/).
+
 # Special Topics
 
 ## Updating submodules for a release
@@ -337,3 +353,19 @@ git config --file=.gitmodules -e
 An example of this process can be found here:
 
 * https://github.com/pytorch/pytorch/pull/48312
+
+## Triton dependency for the release
+
+In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
+
+In Nightly builds we have following configuration:
+* Conda builds, depend on: https://anaconda.org/pytorch-nightly/torchtriton
+* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton/
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+
+However for release we have following :
+* Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
+* Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+
+Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .

@@ -89,8 +89,7 @@
   );
 */
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 // TODO: combine with TensorArg?  So far that's been for debugging, and this is functional...
 enum class TensorArgType { ReadWrite, ReadOnly };
@@ -373,7 +372,7 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
   }
 }
 
-} // namespace
+} // anonymous namespace
 
 template <typename scalar1, typename scalar2, int step, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
@@ -535,5 +534,4 @@ inline bool CUDA_tensor_apply2(const at::TensorBase &a,
                             max_threads_per_block, min_blocks_per_sm>(a, b, op, aType, bType);
 }
 
-} // cuda
-} // at
+} // namespace at::cuda

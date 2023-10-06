@@ -205,7 +205,7 @@ static void upsample_bicubic2d_backward_kernel(
   }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_bicubic2d_backward", [&] {
-        scalar_t* idata = grad_input.data_ptr<scalar_t>();
+        scalar_t* idata = grad_input.mutable_data_ptr<scalar_t>();
         scalar_t* odata = grad_output.data_ptr<scalar_t>();
 
         upsample_bicubic2d_backward_out_frame<scalar_t>(

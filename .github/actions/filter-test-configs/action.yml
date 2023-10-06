@@ -24,6 +24,9 @@ outputs:
   keep-going:
     description: True if keep-going label was on PR.
     value: ${{ steps.filter.outputs.keep-going }}
+  reenabled-issues:
+    description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
+    value: ${{ steps.filter.outputs.reenabled-issues }}
 
 runs:
   using: composite
@@ -69,7 +72,16 @@ runs:
 
         LOG_FILE=$(grep -l -r "${{ github.sha }}" *.log | tail -n 1)
         if [ -n "${LOG_FILE}" ]; then
-          JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:,]' '{print $2}' | sed 's/"//g' | xargs)
+          # For some reasons, awk {print $2} on Linux and Windows (bash) work correctly while it
+          # needs to be awk {print $3} on MacOS
+          case ${RUNNER_OS} in
+            macOS)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $3}' | sed 's/"//g' | xargs)
+              ;;
+            *)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $2}' | sed 's/"//g' | xargs)
+              ;;
+          esac
           echo "job-name=${JOB_NAME}" >> "${GITHUB_OUTPUT}"
         fi
 
@@ -80,6 +92,11 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TAG: ${{ steps.parse-ref.outputs.tag }}
+        EVENT_NAME: ${{ github.event_name }}
+        SCHEDULE: ${{ github.event.schedule }}
+        HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -91,13 +108,23 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
-          --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}" \
-          --schedule "${{ github.event.schedule }}" \
-          --branch "${{ github.event.workflow_run.head_branch }}"
+          --pr-number "${PR_NUMBER}" \
+          --tag "${TAG}" \
+          --event-name "${EVENT_NAME}" \
+          --schedule "${SCHEDULE}" \
+          --branch "${HEAD_BRANCH}"
 
     - name: Print the filtered test matrix
       shell: bash
       run: |
+        echo "Filtered matrix:"
         echo "${{ steps.filter.outputs.test-matrix }}"
+
+        echo
+        echo "Is the current job unstable? ${{ steps.filter.outputs.is-unstable }}"
+
+        echo
+        echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
+
+        echo
+        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"

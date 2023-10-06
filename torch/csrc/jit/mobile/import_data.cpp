@@ -170,7 +170,7 @@ c10::IValue IValueUnpickler::readArchive(
 std::map<std::string, at::Tensor> load_parameters_from_zip(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
   IValueUnpickler unpickler(std::move(reader));
   auto result = unpickler.deserialize(device).toGenericDict();
   std::map<std::string, at::Tensor> map;
@@ -238,7 +238,7 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
       "' in deserialized mobile::Module");
 }
 
-std::map<std::string, at::Tensor> _load_parameters_bytes(
+static std::map<std::string, at::Tensor> _load_parameters_bytes(
     std::shared_ptr<char> data,
     size_t size,
     c10::optional<at::Device> device) {

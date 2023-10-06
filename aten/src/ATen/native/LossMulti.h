@@ -4,40 +4,34 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
   static C10_UNUSED void multilabel_margin_loss_shape_check(
     int64_t& nframe,
     int64_t& dim,
     const int64_t& ndims,
-    TensorArg& target_arg,
     const Tensor& input,
     const Tensor& target) {
-    bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0;
     TORCH_CHECK(
-                valid_inputs,
-                "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
-                input.sizes());
+        (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
+        "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+        input.sizes());
 
     if (ndims <= 1) {
       nframe = 1;
       dim = ndims == 0 ? 1 : input.size(0);
       TORCH_CHECK(
-                  valid_inputs && target.dim() <= 1 && target.numel() == dim,
-                  "inconsistent size ",
-                  target.sizes(),
-                  " for ",
-                  target_arg);
+          target.dim() <= 1 && target.numel() == dim,
+          "inconsistent target size: ", target.sizes(), " for input of size: ",
+          input.sizes());
     } else {
       nframe = input.size(0);
       dim = input.size(1);
       TORCH_CHECK(
-                  valid_inputs && target.dim() == 2 && target.size(0) == nframe &&
-                  target.size(1) == dim,
-                  "inconsistent size ",
-                  target.sizes(),
-                  " for ",
-                  target_arg);
+          target.dim() == 2 && target.size(0) == nframe &&
+          target.size(1) == dim,
+          "inconsistent target size: ", target.sizes(), " for input of size: ",
+          input.sizes());
     }
   }
 
@@ -45,10 +39,14 @@ namespace {
     int64_t& nframe,
     int64_t& dim,
     const int64_t& ndims,
-    TensorArg& target_arg,
     const Tensor& input,
-    const Tensor& target) {
-    bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0;
+    const Tensor& target,
+    const c10::optional<Tensor>& weight) {
+    TORCH_CHECK(
+        (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
+        "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+        input.sizes());
+
     if (ndims <= 1) {
       nframe = 1;
       dim = ndims == 0 ? 1 : input.size(0);
@@ -58,15 +56,17 @@ namespace {
     }
 
     TORCH_CHECK(
-                valid_inputs,
-                "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
-                input.sizes());
-    TORCH_CHECK(
-                valid_inputs && target.dim() <= 1 && target.numel() == nframe,
-                "inconsistent target size, got: ",
-                target.sizes());
-  }
+        target.dim() <= 1 && target.numel() == nframe,
+        "inconsistent target size, expected ", nframe, " but got ",
+        target.sizes());
+    if (weight && weight->defined()) {
+      TORCH_CHECK(
+          weight->dim() <= 1 && weight->numel() == dim,
+          "inconsistent weight size, expected ", dim, " but got ",
+          weight->sizes());
+    }
+}
 
 
 }  // anonymous namespace
-}} // namespace at::native
+} // namespace at::native
