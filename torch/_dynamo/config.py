@@ -144,6 +144,9 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
+# Get a cprofile trace of Dynamo
+cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
+
 # legacy config, does nothing now!
 skipfiles_inline_module_allowlist = {}
 
@@ -329,6 +332,8 @@ inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 # in the FX graph. This should incorrectly construct the divisible and replacement
 # lists, and incorrectly issue guards.
 inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
+
+add_runtime_assertions_for_inline_constraints = True
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
