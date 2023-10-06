@@ -859,9 +859,6 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cpu",), is_skip=True
-        ),
     },
 )
 
@@ -878,11 +875,6 @@ copy_tests(
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cuda",), is_skip=True
-        ),
-    },
 )
 
 
