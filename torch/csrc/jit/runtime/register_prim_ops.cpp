@@ -27,8 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -292,7 +291,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
+          int64_t val = static_cast<int64_t>(std::stoll(s->string(), &sz));
           if (sz == s->string().size()) {
             push(stack, val);
           } else {
@@ -349,7 +348,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          double b = c10::stod(s->string(), &sz);
+          double b = std::stod(s->string(), &sz);
           if (sz == s->string().size()) {
             push(stack, b);
           } else {
@@ -3368,5 +3367,4 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
 RegisterOperators reg2(createOperators(opGenArgs2));
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

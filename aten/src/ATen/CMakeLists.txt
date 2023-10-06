@@ -161,6 +161,7 @@ file(GLOB native_utils_cpp "native/utils/*.cpp")
 
 # flash_attention sources
 file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
+file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
 #Mem_eff attention sources
@@ -170,7 +171,9 @@ file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention
 
 if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_cu})
+  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
+  list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
 endif()
 
 if(USE_MEM_EFF_ATTENTION)
@@ -178,6 +181,7 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${mem_eff_attention_cuda_cpp})
   list(APPEND MEM_EFF_ATTENTION_CUDA_SOURCES ${native_transformers_cuda_cu} ${mem_eff_attention_cuda_cu} ${mem_eff_attention_cuda_kernels_cu})
+  list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
 # XNNPACK
@@ -370,7 +374,9 @@ if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
-list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
+endif()
 
 if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   # Preserve values for the main build
@@ -444,7 +450,6 @@ if(USE_CUDA AND NOT USE_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       CUDA::cusparse_static
-      CUDA::curand_static
       CUDA::cufft_static_nocallback
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
@@ -464,7 +469,6 @@ if(USE_CUDA AND NOT USE_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       CUDA::cusparse
-      CUDA::curand
       CUDA::cufft
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
@@ -633,3 +637,4 @@ set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(MEM_EFF_ATTENTION_CUDA_SOURCES ${MEM_EFF_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)
+set(ATen_ATTENTION_KERNEL_SRCS ${ATen_ATTENTION_KERNEL_SRCS} PARENT_SCOPE)

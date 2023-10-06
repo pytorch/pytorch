@@ -47,7 +47,7 @@ static_assert(
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
   return verbosity;
 }
 

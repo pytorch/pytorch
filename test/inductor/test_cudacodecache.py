@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
+import unittest
 
 import torch
 
+from torch._inductor import config
 from torch._inductor.codecache import AsyncCompile, CUDACodeCache
 from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
@@ -33,6 +35,7 @@ int saxpy(int n, float a, float *x, float *y) {
 """
 
 
+@unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
 class TestCUDACodeCache(TorchTestCase):
     def test_cuda_load(self):
         # Test both .o and .so compilation.

@@ -76,12 +76,19 @@ TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
+CustomOutParamAnnotation = "__custom_out_param__"
 
-def same_shape(a: ShapeType, b: ShapeType) -> bool:
+
+def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
     for x, y in zip(a, b):
+        if allow_rhs_unbacked:
+            # TODO: We should check that the symbols are consistent
+            # with each other
+            if isinstance(y, torch.SymInt):
+                continue
         if x != y:
             return False
 
@@ -90,7 +97,13 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
+def compare_tensor_meta(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    check_strides=False,
+    *,
+    allow_rhs_unbacked=False,
+):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -101,7 +114,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
+    if not same_shape(a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked):
         msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
@@ -489,7 +502,11 @@ def validate_dim_length(length: int):
     dimension length.
     """
 
-    assert length >= 0
+    if isinstance(length, (int, torch.SymInt)):
+        torch._check_is_size(length)
+    else:
+        # sometimes called with sympy expression by inductor
+        assert length >= 0
 
 
 def validate_shape(shape: ShapeType):
@@ -830,7 +847,6 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
@@ -851,7 +867,7 @@ def is_low_precision_dtype(dtype: torch.dtype) -> bool:
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
-    return dtype in _float_dtypes
+    return dtype.is_floating_point
 
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
@@ -863,7 +879,7 @@ def is_grad_dtype(dtype: torch.dtype) -> bool:
     """
     Checks if the dtype can require a gradient.
     """
-    return is_float_dtype(dtype) or is_complex_dtype(dtype)
+    return dtype.is_floating_point or is_complex_dtype(dtype)
 
 
 _complex_to_real_dtype_map = {
@@ -899,7 +915,7 @@ def dtype_to_type(dtype: torch.dtype) -> type:
         return bool
     if dtype in _integer_dtypes:
         return int
-    if dtype in _float_dtypes:
+    if dtype.is_floating_point:
         return float
     if dtype in _complex_dtypes:
         return complex
@@ -918,7 +934,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
         return sym_int
-    if dtype in _float_dtypes:
+    if dtype.is_floating_point:
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex

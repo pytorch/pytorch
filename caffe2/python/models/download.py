@@ -25,7 +25,7 @@ DOWNLOAD_COLUMNS = 70
 # Don't let urllib hang up on big downloads
 def signalHandler(signal, frame):
     print("Killing download...")
-    exit(0)
+    sys.exit(0)
 
 
 signal.signal(signal.SIGINT, signalHandler)
@@ -107,7 +107,7 @@ def downloadModel(model, args):
                 response = input(query)
             if response.upper() == 'N' or not response:
                 print("Cancelling download...")
-                exit(0)
+                sys.exit(0)
         print("Overwriting existing folder! ({filename})".format(filename=model_folder))
         deleteDirectory(model_folder)
 
@@ -122,7 +122,7 @@ def downloadModel(model, args):
             print("Abort: {reason}".format(reason=str(e)))
             print("Cleaning up...")
             deleteDirectory(model_folder)
-            exit(0)
+            sys.exit(0)
 
     if args.install:
         os.symlink("{folder}/__sym_init__.py".format(folder=dir_path),

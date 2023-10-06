@@ -17,8 +17,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
@@ -32,7 +31,7 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
   EliminateDeadCode(graph);
-  auto aliasDb = torch::make_unique<AliasDb>(graph);
+  auto aliasDb = std::make_unique<AliasDb>(graph);
   createFusionGroups(graph->block(), aliasDb.get(), min_size);
   ConstantPooling(graph);
   ConstantPropagation(graph);
@@ -356,5 +355,4 @@ void performTensorExprFusion(
   GRAPH_DUMP("Graph after fusion: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

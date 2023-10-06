@@ -58,6 +58,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_LINK_WHAT_YOU_USE TRUE)
 
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
@@ -730,7 +731,7 @@ include(cmake/Dependencies.cmake)
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
@@ -931,7 +932,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
 else()
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)

@@ -54,6 +54,8 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
       return ideep::tensor::data_type::u8;
     case ScalarType::BFloat16:
       return ideep::tensor::data_type::bf16;
+    case ScalarType::Half:
+      return ideep::tensor::data_type::f16;
     default:
       TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
   }
@@ -98,6 +100,12 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
             tensor.strides().vec()},
             tensor.template data_ptr<BFloat16>()};
   }
+  else if (tensor.scalar_type() == ScalarType::Half) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::f16,
+            tensor.strides().vec()},
+            tensor.template data_ptr<Half>()};
+  }
   else if (tensor.scalar_type() == ScalarType::Byte) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::u8,
@@ -111,7 +119,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
             tensor.data_ptr()};
   }
   else {
-    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/int8 tensor input");
+    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8 tensor input");
   }
 }
 

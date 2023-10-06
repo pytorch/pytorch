@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM
 )
 
-from torch._inductor.utils import has_triton
+from torch.utils._triton import has_triton
 
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
