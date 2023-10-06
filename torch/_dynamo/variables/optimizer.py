@@ -57,7 +57,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name == "_init_group":
             try:
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
-                self.value._init_group(*py_args, **py_kwargs)
+                ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 # stash a weak_ptr to optimizer to invalidate code
@@ -65,7 +65,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tx.store_global_weakref(self.get_global_name(), self.value)
                 self.create_finalizer(tx)
 
-                return ConstantVariable.create(None)
+                return ConstantVariable.create(ret_val)
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
                 pass
