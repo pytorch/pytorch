@@ -39,6 +39,21 @@ from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
 
+original_zip = zip
+
+def strict_zip(*iterables, strict=True, **kwargs):
+    if not strict:
+        return original_zip(*iterables, **kwargs)
+
+    shortest_length = min(len(it) for it in iterables)
+    for iterable in iterables:
+        if len(iterable) != shortest_length:
+            raise ValueError("The iterables have different lengths and strict mode is enabled.")
+
+    return original_zip(*iterables, **kwargs)
+
+zip = strict_zip
+
 log = logging.getLogger(__name__)
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -962,8 +977,8 @@ def run_functionalized_fw_and_collect_metadata(
         # are *regenerated* later, and not used directly in the autograd graph
         f_input_tangents = [
             inp
-            for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data
+            for inp, info, requires_grad_info in zip(flat_f_args, input_info, input_requires_grad_info)
+            if info.mutates_data and requires_grad_info
         ]
         f_output_tangents = [
             o
@@ -973,7 +988,7 @@ def run_functionalized_fw_and_collect_metadata(
             and info.requires_grad
         ]
         # intermediate bases are also included in the backward graph
-        f_tangents = f_output_tangents + intermediate_bases
+        f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
 
         metadata = ViewAndMutationMeta(
@@ -1290,7 +1305,6 @@ def create_joint(
         outs, tangent_mask = fn(*primals)
         assert len(tangent_mask) == len(outs)
         outs_to_grad = [o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent]
-        breakpoint()
         assert len(outs_to_grad) == len(tangents)
 
         # Get the inputs that need gradients
@@ -1866,7 +1880,7 @@ def merge_view_inputs(
         # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
         # and error out. We can fix them later.
         # These checks are transitive, so we don't need to check every pair.
-        for idx1, idx2 in zip(aliased_input_indices, aliased_input_indices[1:]):
+        for idx1, idx2 in zip(aliased_input_indices, aliased_input_indices[1:], strict=False):
             view1 = fwd_inputs[idx1]
             view2 = fwd_inputs[idx2]
             # The "inputs that are aliased but have different differentiable bases" case
@@ -3184,11 +3198,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 mutated_inp_args = flat_args[:num_mutated_inps] if num_mutated_inps > 0 else []
                 user_tangents = flat_args[num_mutated_inps:]
                 assert len(user_tangents) == len(out_info)
-                filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor) and info.requires_grad]
+                filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor)]
                 flat_bw_args = tuple(mutated_inp_args) + tuple(filtered_user_tangents)
+                assert len(flat_bw_args) == len(CompiledFunction.metadata.requires_grad_info)
+                flat_bw_args_with_grads = [x for x, req_grad in zip(flat_bw_args, CompiledFunction.metadata.requires_grad_info) if req_grad]
 
             contiguous_args = [
-                t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
+                t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args_with_grads
             ]
 
             rng_args = []
