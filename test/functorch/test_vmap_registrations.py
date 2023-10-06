@@ -280,7 +280,6 @@ xfail_not_implemented = {
     "aten::trace_backward",
     "aten::triplet_margin_loss",
     "aten::unflatten_dense_tensors",
-    "aten::unsafe_chunk",
     "aten::upsample_bicubic2d.vec",
     "aten::upsample_bilinear2d.vec",
     "aten::upsample_linear1d.vec",
