@@ -109,27 +109,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     int64_t** ret_sizes // returns borrowed reference
 );
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_size(
-    AtenTensorHandle tensor,
-    int64_t d,
-    int64_t* ret_size
-);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_size(AtenTensorHandle tensor, int64_t d, int64_t* ret_size);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
     AtenTensorHandle tensor,
     int64_t** ret_strides // returns borrowed reference
 );
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_stride(
-    AtenTensorHandle tensor,
-    int64_t d,
-    int64_t* ret_stride
-);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_stride(AtenTensorHandle tensor, int64_t d, int64_t* ret_stride);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
-    int64_t* ret_storage_offset
-);
+    int64_t* ret_storage_offset);
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
@@ -215,9 +208,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_nonzero(
-    AtenTensorHandle self,
-    AtenTensorHandle *out);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
