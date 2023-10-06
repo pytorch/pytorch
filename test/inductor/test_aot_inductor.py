@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import os
 import sys
 import tempfile
 import unittest
@@ -7,11 +8,12 @@ import unittest
 import torch
 import torch._export
 import torch._inductor
-
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.utils import aot_inductor_launcher
+
+from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -183,7 +185,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Model().to(self.device), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_output_path(self):
         class Model(torch.nn.Module):
@@ -199,7 +201,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         with config.patch("aot_inductor.output_path", "tmp_output_"):
-            self.check_model(Model().to(self.device), example_inputs)
+            self.check_model(Model(), example_inputs)
 
     @requires_cuda()
     def test_multi_device(self):
@@ -227,7 +229,7 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 250112, device=self.device),
             torch.randn(1, 512, device=self.device),
         )
-        self.check_model(Model().to(self.device), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_with_offset(self):
         class Model(torch.nn.Module):
@@ -780,6 +782,34 @@ class AOTInductorTestsTemplate:
 
         self.assertTrue(same(result_cpu, result_cuda_0.cpu()))
         self.assertTrue(same(result_cpu, result_cuda_1.cpu()))
+
+    def test_reuse_kernel(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.sin(x)
+                b = torch.mm(a, y)
+                c = torch.sin(b)
+                d = torch.mm(b, c)
+                return d
+
+        example_inputs = (
+            torch.randn(87, 87, device=self.device),
+            torch.randn(87, 87, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
+        if self.device == "cuda":
+            so_path, _ = torch._export.aot_compile(Model(), example_inputs)
+            with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+                src_code = cpp.read()
+                FileCheck().check_count(
+                    "triton_poi_fused_sin_0 = loadKernel(",
+                    1,
+                    exactly=True,
+                ).run(src_code)
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):
