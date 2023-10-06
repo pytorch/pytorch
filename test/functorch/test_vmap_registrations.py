@@ -16,7 +16,6 @@ from torch._C import (
 
 xfail_functorch_batched = {
     "aten::flatten.using_ints",
-    "aten::imag",
     "aten::is_nonzero",
     "aten::isfinite",
     "aten::isreal",
@@ -32,7 +31,6 @@ xfail_functorch_batched = {
     "aten::masked_select_backward",
     "aten::movedim.intlist",
     "aten::one_hot",
-    "aten::real",
     "aten::silu_backward",
     "aten::special_xlogy",
     "aten::special_xlogy.other_scalar",
@@ -123,7 +121,6 @@ xfail_not_implemented = {
     "aten::histogramdd",
     "aten::histogramdd.TensorList_bins",
     "aten::histogramdd.int_bins",
-    "aten::imag",
     "aten::infinitely_differentiable_gelu_backward",
     "aten::isclose",
     "aten::isfinite",
@@ -197,7 +194,6 @@ xfail_not_implemented = {
     "aten::qr.Q",
     "aten::quantile",
     "aten::quantile.scalar",
-    "aten::real",
     "aten::refine_names",
     "aten::rename",
     "aten::rename_",
