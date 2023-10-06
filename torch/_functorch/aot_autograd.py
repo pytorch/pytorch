@@ -2127,7 +2127,11 @@ def create_synthetic_base_metadata(
 
         for o in m.output_info]
 
-    inner_mutated_tangents = [x for inner_idx, x in enumerate(inner_args) if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad]
+    inner_mutated_tangents = [
+        x
+        for inner_idx, x in enumerate(inner_args)
+        if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
+    ]
 
     requires_grad_info = mutated_inp_require_grad_info + output_grad_info + input_metadata_mutation_grad_info
     output_info = existing_output_infos + input_metadata_output_info
@@ -3175,57 +3179,43 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             assert len(flat_args) == expected_grad_outs
             out_info = CompiledFunction.metadata.output_info
-            if (
-                CompiledFunction.metadata.num_mutated_metadata_only_inputs > 0
-                or CompiledFunction.metadata.num_outputs_aliased > 0
-            ):
-                inp_tangents, out_tangents, intermediate_base_tangents = (
-                    flat_args[0:num_mutated_inps],
-                    flat_args[num_mutated_inps:num_mutated_inps + CompiledFunction.metadata.num_outputs],
-                    flat_args[num_mutated_inps + CompiledFunction.metadata.num_outputs:],
-                )
-                # input_info contains info on *every* input,
-                # But in the backward(), we are only given grad outputs for every mutated input.
-                # We then need to filter out the grad outputs that correspond to metadata-only mutations.
-                mutated_inp_indices = CompiledFunction.metadata.mutated_inp_indices
-                input_info = CompiledFunction.metadata.input_info
-                assert len(inp_tangents) == len(mutated_inp_indices)
-                inp_tangents_filtered = [
-                    x
-                    for x, info_idx in zip(inp_tangents, mutated_inp_indices)
-                    if input_info[info_idx].mutates_data
-                ]
-                # We also need to filter out grad outputs that correspond to outputs aliasing inputs/intermediates
-                out_tangents_filtered = [
-                    x
-                    for x, info in zip(out_tangents, out_info)
-                    if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
-                    and issubclass(info.raw_type, torch.Tensor)
-                    and info.requires_grad
-                ]
-                # intermediate bases always require gradients, and always participate in the backward graph.
-                flat_bw_args_with_grads = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
 
-                # sanity asserts
-                # metadata_only_inps = [
-                #     x for x, info_idx in zip(inp_tangents, mutated_inp_indices)
-                #     if not input_info[info_idx].mutates_data
-                # ]
-                # aliased_outputs = [
-                #     x for x, info in zip(out_tangents, out_info) if info.output_type != OutputType.non_alias]
-                # assert all(x is None for x in metadata_only_inps)
-                # assert all(x is None for x in aliased_outputs)
-            else:
-                # filter out non-tensor grad_outputs (aka due to ints being returned as outputs in the forward)
-                num_mutated_inps = CompiledFunction.metadata.num_mutated_inputs
-                mutated_inp_args = flat_args[:num_mutated_inps] if num_mutated_inps > 0 else []
-                user_tangents = flat_args[num_mutated_inps:]
-                assert len(user_tangents) == len(out_info)
-                filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor)]
-                flat_bw_args = tuple(mutated_inp_args) + tuple(filtered_user_tangents)
-                flat_metas = [i for i in CompiledFunction.metadata.input_info if i.mutates_data or i.mutates_metadata] + CompiledFunction.metadata.output_info
-                flat_metas = [i for i in flat_metas if isinstance(i, InputAliasInfo) or issubclass(i.raw_type, torch.Tensor)]
-                flat_bw_args_with_grads = [x for x, info in zip(flat_bw_args, flat_metas) if info.requires_grad]
+            inp_tangents, out_tangents, intermediate_base_tangents = (
+                flat_args[0:num_mutated_inps],
+                flat_args[num_mutated_inps:num_mutated_inps + CompiledFunction.metadata.num_outputs],
+                flat_args[num_mutated_inps + CompiledFunction.metadata.num_outputs:],
+            )
+            # input_info contains info on *every* input,
+            # But in the backward(), we are only given grad outputs for every mutated input
+            # We then need to filter out the grad outputs that correspond to metadata-only mutations or don't require grad
+            mutated_inp_indices = CompiledFunction.metadata.mutated_inp_indices
+            input_info = CompiledFunction.metadata.input_info
+            assert len(inp_tangents) == len(mutated_inp_indices)
+            inp_tangents_filtered = [
+                x
+                for x, info_idx in zip(inp_tangents, mutated_inp_indices)
+                if input_info[info_idx].mutates_data and input_info[info_idx].requires_grad
+            ]
+            # We also need to filter out grad outputs that correspond to outputs aliasing inputs/intermediates
+            out_tangents_filtered = [
+                x
+                for x, info in zip(out_tangents, out_info)
+                if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
+                and issubclass(info.raw_type, torch.Tensor)
+                and info.requires_grad
+            ]
+            # intermediate bases always require gradients, and always participate in the backward graph.
+            flat_bw_args_with_grads = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
+
+            # sanity asserts
+            # metadata_only_inps = [
+            #     x for x, info_idx in zip(inp_tangents, mutated_inp_indices)
+            #     if not input_info[info_idx].mutates_data
+            # ]
+            # aliased_outputs = [
+            #     x for x, info in zip(out_tangents, out_info) if info.output_type != OutputType.non_alias]
+            # assert all(x is None for x in metadata_only_inps)
+            # assert all(x is None for x in aliased_outputs)
 
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args_with_grads
