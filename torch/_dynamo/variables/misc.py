@@ -15,6 +15,7 @@ from ..source import AttrSource, ODictGetItemSource
 from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
+from .lists import ListVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -796,7 +797,11 @@ class SkipFilesVariable(VariableTracker):
                 seq = args[0].unpack_var_sequence(tx)
 
                 def func(tx, item, acc):
-                    return BuiltinVariable(sum).call_function(tx, [item, acc], {})
+                    return BuiltinVariable(sum).call_function(
+                        tx, 
+                        [ListVariable([item, acc])], 
+                        {}
+                    )
 
             elif (
                 len(args) == 2
