@@ -859,6 +859,17 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_threshold_backward_dtype(self, device):
+        grad = torch.randint(10, (4,), device=device)
+        input_tensor = torch.randint(10, (4,), device=device)
+
+        ref = torch.ops.aten.threshold_backward(grad, input_tensor, 1)
+        res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
+        self.assertEqual(ref.dtype, res.dtype)
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
