@@ -529,3 +529,83 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertTrue(guard_manager.check(f_locals))
+
+    # DefaultsSource
+    def test_fn_defaults(self):
+        def foo(a, b=1, *, c=2):
+            return a + b + c
+
+        guard_manager = RootGuardManager()
+        guard_manager.add_lambda_guard(
+            lambda x: callable(x),
+            lambda x: f"Expected callable but got {type(x)}",
+        )
+
+        # Guard on b = 1
+        guard_manager.__defaults__[0].add_lambda_guard(
+            lambda x: x == 1,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+
+        # Guard on c = 2
+        guard_manager.__kwdefaults__.dict_get_item_manager("c").add_lambda_guard(
+            lambda x: x == 2,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+        foo.__defaults__ = (4,)
+        self.assertFalse(guard_manager.check(foo))
+        foo.__defaults__ = (1,)
+        self.assertTrue(guard_manager.check(foo))
+        foo.__kwdefaults__["c"] = 1
+        self.assertFalse(guard_manager.check(foo))
+
+    def test_iter(self):
+        a = (1, 1, 3, 4, 5, 6)
+        foo = iter(a)
+
+        guard_manager = RootGuardManager()
+        guard_manager.add_lambda_guard(
+            lambda x: isinstance(x, type(iter(tuple()))),
+            lambda x: f"Expected iterator but got {type(x)}",
+        )
+
+        def tuple_iterator_getitem(it, index):
+            # Not straightforward to write the __reduce__ equivalent in C++
+            _, (obj,), start = it.__reduce__()
+            if len(obj) <= start + index:
+                return None
+            return obj[start + index]
+
+        accessor = functools.partial(tuple_iterator_getitem, index=2)
+        foo_mgr = guard_manager.lambda_manager(accessor)
+        foo_mgr.add_lambda_guard(
+            lambda x: x == 3,
+            lambda x: f"Expected value 3 but got {x}",
+        )
+
+        # Check that we can use the same accessor
+        foo_mgr = guard_manager.lambda_manager(accessor)
+        foo_mgr.add_lambda_guard(
+            lambda x: x - 1 == 2,
+            lambda x: f"Expected value 3 but got {x}",
+        )
+        self.assertEqual(len(guard_manager.get_accessors()), 1)
+
+        accessor = functools.partial(tuple_iterator_getitem, index=1)
+        foo_mgr = guard_manager.lambda_manager(accessor)
+        foo_mgr.add_lambda_guard(
+            lambda x: x == 1,
+            lambda x: f"Expected value 3 but got {x}",
+        )
+
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+
+        self.assertTrue(guard_manager.check(foo))
+        # check that iterator hasn't moved
+        self.assertTrue(guard_manager.check(foo))
+        self.assertTrue(guard_manager.check(iter((1, 1, 3))))
+        self.assertFalse(guard_manager.check(iter((1, 1, 1, 1))))
+        self.assertFalse(guard_manager.check(iter((1,))))
+        self.assertFalse(guard_manager.check("foo"))
