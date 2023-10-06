@@ -7,17 +7,6 @@
 namespace c10d {
 
 namespace {
-
-std::string exceptionPtrWhat(const std::exception_ptr& eptr) {
-  try {
-    std::rethrow_exception(eptr);
-  } catch (const std::exception& e) {
-    return e.what();
-  } catch (...) {
-    return "<unknown error>";
-  }
-}
-
 void commonEventinit(
     details::EventInfo& evt,
     const Backend& backend,
@@ -29,9 +18,6 @@ void commonEventinit(
   evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
   evt.drop_count = 0;
-  // isCompleted is mutable :facepalm:
-  if (const_cast<Work&>(work).isCompleted() && !work.isSuccess())
-    evt.error_message = exceptionPtrWhat(work.exception());
 }
 } // namespace
 

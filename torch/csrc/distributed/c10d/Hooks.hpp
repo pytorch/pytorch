@@ -20,9 +20,9 @@ struct TORCH_API EventInfo {
   int64_t timestamp;
   c10::optional<float> duration_ms;
   int64_t drop_count;
-  c10::optional<std::string> error_message;
 };
 
+// TODO do we want to expose something else here?
 TORCH_API bool dequeue_c10d_event(EventInfo& evt);
 TORCH_API void enqueue_c10d_event(EventInfo&& evt);
 
