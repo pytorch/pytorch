@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
+import unittest
 from typing import Any, Optional, Tuple
 
 import torch
@@ -26,6 +27,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
@@ -122,6 +124,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         example_inputs: Tuple[Any, ...],
         has_relu: bool,
         has_bias: bool = True,
+        is_cuda: bool = False,
         expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
     ):
         self._verify_symmetric_xnnpack_qat_graph_helper(
@@ -130,6 +133,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             is_per_channel=True,
             has_relu=has_relu,
             has_bias=has_bias,
+            is_cuda=is_cuda,
             expected_conv_literal_args=expected_conv_literal_args,
         )
         self._verify_symmetric_xnnpack_qat_graph_helper(
@@ -138,6 +142,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             is_per_channel=False,
             has_relu=has_relu,
             has_bias=has_bias,
+            is_cuda=is_cuda,
             expected_conv_literal_args=expected_conv_literal_args,
         )
 
@@ -148,6 +153,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         is_per_channel: bool,
         has_relu: bool,
         has_bias: bool = True,
+        is_cuda: bool = False,
         expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
@@ -189,10 +195,12 @@ class PT2EQATTestCase(QuantizationTestCase):
             relu_node = None
             getitem_node = output_fq_node.args[0]
         bn_node = getitem_node.args[0]
+        if is_cuda:
+            expected_bn_op = torch.ops.aten.cudnn_batch_norm.default
+        else:
+            expected_bn_op = torch.ops.aten._native_batch_norm_legit.default
         self.assertEqual(getitem_node.target, operator.getitem)
-        self.assertEqual(
-            bn_node.target, torch.ops.aten._native_batch_norm_legit.default
-        )
+        self.assertEqual(bn_node.target, expected_bn_op)
 
         # Verify: conv / scale_factor.reshape [+ bias.reshape]
         if has_bias:
@@ -303,9 +311,21 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=True), example_inputs)
 
     def test_qat_conv_bn_fusion(self):
-        example_inputs = (torch.randn(1, 3, 5, 5),)
         m = TestHelperModules.ConvWithBNRelu(relu=False)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_conv_bn_fusion_cuda(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=False).cuda()
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m,
+            example_inputs,
+            has_relu=False,
+            is_cuda=True,
+        )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_fusion_literal_args(self):
@@ -366,6 +386,18 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_conv_bn_relu_fusion_cuda(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True).cuda()
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m,
+            example_inputs,
+            has_relu=True,
+            is_cuda=True,
+        )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_relu_fusion_no_conv_bias(self):

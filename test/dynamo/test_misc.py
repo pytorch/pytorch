@@ -13,6 +13,7 @@ import operator
 import os
 import random
 import sys
+import tempfile
 import threading
 import traceback
 import typing
@@ -6121,37 +6122,41 @@ def fn():
         finally:
             torch.set_grad_enabled(prior)
 
-    def test_determinstic_algorithms_mutated(self):
+    def test_deterministic_algorithms_mutated(self):
         prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         value = None
+        warn_only = None
         cnt = CompileCounter()
 
         @torch._dynamo.allow_in_graph
         def check_state():
             nonlocal value
+            nonlocal warn_only
             value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
-            torch.use_deterministic_algorithms(False)
+            torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
+        def run_fn():
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            fn(torch.randn(10))
+            assert value is True
+            assert warn_only is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+            assert torch.is_deterministic_algorithms_warn_only_enabled() is False
+
         try:
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
-            value = None
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
             assert cnt.frame_count == 1
         finally:
-            torch.use_deterministic_algorithms(prior)
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
@@ -7650,6 +7655,70 @@ ShapeEnv not equal: field values don't match:
         self.assertTrue(
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
+        )
+
+    def test_funcname_cache(self):
+        src = """\
+import torch
+if True:
+    test = 3
+
+class AAA:
+    class DUMMY:
+        class DUMMY2:
+            pass
+
+    def dummy(self):
+        def dummy2():
+            pass
+    class BBB:
+        @staticmethod
+        def CCC():
+            class DDD:
+                if True:
+                    @staticmethod
+                    def EEE():
+                        x = [torch.ones(3, 3) for _ in range(5)]
+                        return x
+            return DDD
+def fn():
+    return 3
+"""
+        with tempfile.NamedTemporaryFile(mode="w") as f:
+            f.write(src)
+            f.flush()
+            from torch._dynamo.funcname_cache import get_funcname
+
+            names = [get_funcname(f.name, i + 1) for i in range(src.count("\n") + 1)]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+
+
+
+
+AAA
+AAA.DUMMY
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.dummy
+AAA.dummy.dummy2
+AAA.dummy.dummy2
+AAA.BBB
+AAA.BBB
+AAA.BBB.CCC
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC
+fn
+fn
+""",
         )
 
 

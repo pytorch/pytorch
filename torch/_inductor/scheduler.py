@@ -688,28 +688,6 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
-    @cache_on_self
-    def _get_atomic_add_buffers(self) -> Set[str]:
-        buffers_store_as_atomic_add = set()
-        for node in self._body.get_nodes():
-            if (
-                node.op == "call_method"
-                and node.target == "store"
-                and (
-                    ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
-                    or (len(node.args) == 5 and node.args[4] == "atomic_add")
-                )
-            ):
-                buffers_store_as_atomic_add.add(
-                    node.kwargs["name"]
-                    if "name" in node.kwargs
-                    else (node.args[1] if len(node.args) >= 2 else "")
-                )
-        return buffers_store_as_atomic_add
-
-    def has_atomic_add(self, check_buf):
-        return check_buf in self._get_atomic_add_buffers()
-
 
 class FusedSchedulerNode(BaseSchedulerNode):
     """
@@ -811,15 +789,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
-
-    def has_atomic_add(self, check_buf):
-        return any(
-            (
-                isinstance(sub_schedule_node1, SchedulerNode)
-                and sub_schedule_node1.has_atomic_add(check_buf)
-            )
-            for sub_schedule_node1 in self.get_nodes()
-        )
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -1251,8 +1220,11 @@ class Scheduler:
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
-                assert s not in unbacked_symbol_to_origin_node
-                unbacked_symbol_to_origin_node[s] = node
+                # Pick the first definer as canonical.  There may be multiple
+                # because if a MultiOutputLayout buffer propagates an unbacked
+                # symint to multiple outputs, they will all claim to def it.
+                if s not in unbacked_symbol_to_origin_node:
+                    unbacked_symbol_to_origin_node[s] = node
 
             # if a kernel takes unbacked symints, register dependencies
             for s in node.node.get_unbacked_symbol_uses():
@@ -1543,7 +1515,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heursitic would be to use live
+        A better but difficult to implement heurisitic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of
@@ -1584,42 +1556,22 @@ class Scheduler:
             fusion_log.debug("cannot fuse (3): node1 must go before node2")
             return False
 
-        if (
-            isinstance(node1, (FusedSchedulerNode, SchedulerNode))
-            and isinstance(node2, SchedulerNode)
-            and isinstance(node2._body, ir.LoopBody)
-        ):
-            # Fix issue: https://github.com/pytorch/pytorch/issues/108963
-            # Check:
-            #   If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
-            #   we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
-            # If True, we will disable the fusion of node1 and node2.
-            if any(
-                (
-                    node2_used_buf in self.mutation_renames
-                    and node1.has_atomic_add(self.mutation_renames[node2_used_buf])
-                )
-                for node2_used_buf in node2._body.reads_name2expr.keys()
-            ):
-                fusion_log.debug("cannot fuse (4): loop body")
-                return False
-
         if node2.is_template():
-            fusion_log.debug("cannot fuse (5): templates can only fuse epilogues")
+            fusion_log.debug("cannot fuse (4): templates can only fuse epilogues")
             return False
         if node1.is_template() and (
             node2.has_aliasing_or_mutation()
             or node2.is_reduction()
             or not config.epilogue_fusion
         ):
-            fusion_log.debug("cannot fuse (6): template epilogue not satisfied")
+            fusion_log.debug("cannot fuse (5): template epilogue not satisfied")
             return False
 
         device = node1.get_device()
         device2 = node2.get_device()
         if device != device2:
             fusion_log.debug(
-                "cannot fuse (7): device mismatch (node1: %s, node2: %s)",
+                "cannot fuse (6): device mismatch (node1: %s, node2: %s)",
                 device,
                 device2,
             )
@@ -1630,7 +1582,7 @@ class Scheduler:
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
-            fusion_log.debug("cannot fuse (8): no shared data")
+            fusion_log.debug("cannot fuse (7): no shared data")
             return False  # heuristic not needed for correctness
 
         if (
@@ -1638,7 +1590,7 @@ class Scheduler:
             and not node2.is_foreach()
             and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
         ):
-            fusion_log.debug("cannot fuse (9): exceeds max fusion")
+            fusion_log.debug("cannot fuse (8): exceeds max fusion")
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.ancestors:
@@ -1648,7 +1600,7 @@ class Scheduler:
             return self.get_backend(device).can_fuse_vertical(node1, node2)
         else:  # nodes don't depend on each other, but may have common reads
             if self.can_fusion_increase_peak_memory(node1, node2):
-                fusion_log.debug("cannot fuse (11): will increase peak memory")
+                fusion_log.debug("cannot fuse (9): will increase peak memory")
                 return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -1934,6 +1886,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.debug_check_inf_and_nan:
+                V.graph.wrapper_code.generate_inf_and_nan_checker(node)
 
             if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()
