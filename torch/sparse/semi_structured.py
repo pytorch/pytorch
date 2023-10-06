@@ -250,7 +250,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 else:
                     return (
                         torch._cslt_sparse_mm(
-                            weight.compressed_tensor,  # type: ignore[arg-type]
+                            weight.compressed_tensor_cusparselt,  # type: ignore[arg-type]
                             input_tensor.view(-1, shape[-1]).t(),
                             bias,
                         )
