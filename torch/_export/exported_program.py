@@ -296,7 +296,7 @@ def _process_constraints(
             of (node, dim) to mark that these dimensions are equal.
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
-    inline_constraints = graph_module.meta.get("inline_constraints", [])
+    inline_constraints = graph_module.meta.get("inline_constraints", {})
     num_params_buffer = len(graph_signature.buffers) + len(graph_signature.parameters)
 
     # Create dict mapping tensor_id to node names
