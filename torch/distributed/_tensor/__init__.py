@@ -46,7 +46,13 @@ def _dtensor_init_helper(
     ), "mesh dimension does not match the length of placements"
 
     assert kwargs["layout"] == torch.strided, "layout value not supported!"
-    torch_stride = torch._prims_common.make_contiguous_strides_for(size)
+    global_stride = torch._prims_common.make_contiguous_strides_for(size)
+    dtype = kwargs.get("dtype", torch.get_default_dtype())
+
+    from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
+    tensor_meta = TensorMeta(size, global_stride, dtype)
+    spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
     # get local tensor shape
     local_shape = compute_local_shape(size, device_mesh, placements)
@@ -57,15 +63,6 @@ def _dtensor_init_helper(
         fill_value = kwargs.pop("fill_value", 0)
         local_tensor = init_op(local_shape, fill_value, **kwargs)
     elif init_op == torch.rand or init_op == torch.randn:
-        # this tensor meta is not used except `shape`
-        dtype = kwargs.get("dtype", torch.get_default_dtype())
-        requires_grad = kwargs.get("requires_grad", False)
-
-        from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
-        tensor_meta = TensorMeta(size, (0,), dtype)
-        spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
-
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
             random._rng_tracker = random.OffsetBasedRNGTracker()
 
@@ -76,12 +73,11 @@ def _dtensor_init_helper(
         local_tensor = init_op(local_shape, **kwargs)
 
     return DTensor(
-        local_tensor=local_tensor,
-        device_mesh=device_mesh,
-        placements=tuple(placements),
+        local_tensor,
+        spec,
         shape=size,
         dtype=local_tensor.dtype,
-        stride=torch_stride,
+        stride=global_stride,
         requires_grad=kwargs["requires_grad"],
     )
 

@@ -196,14 +196,14 @@ class Redistribute(torch.autograd.Function):
         local_tensor = input._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
 
+        assert target_spec.tensor_meta is not None
         return dtensor.DTensor(
             output,
-            device_mesh,
-            target_spec.placements,
+            target_spec,
             shape=input.shape,
             dtype=input.dtype,
             requires_grad=input.requires_grad,
-            stride=input.stride(),
+            stride=target_spec.tensor_meta.stride,
         )
 
     @staticmethod
@@ -237,14 +237,14 @@ class Redistribute(torch.autograd.Function):
 
         local_tensor = grad_output._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
+        assert target_spec.tensor_meta is not None
         output_dtensor = dtensor.DTensor(
             output,
-            target_spec.mesh,
-            target_spec.placements,
+            target_spec,
             shape=grad_output.shape,
             dtype=grad_output.dtype,
             requires_grad=grad_output.requires_grad,
-            stride=grad_output.stride(),
+            stride=target_spec.tensor_meta.stride,
         )
 
         return (

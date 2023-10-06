@@ -73,23 +73,28 @@ class _ToTorchTensor(torch.autograd.Function):
         dtensor_meta = dtensor_spec.tensor_meta
 
         if grad_placements is not None:
-            grad_spec = DTensorSpec(mesh, grad_placements)
+            grad_spec = DTensorSpec(mesh, grad_placements, tensor_meta=dtensor_meta)
             grad_output = redistribute_local_tensor(
                 grad_output, grad_spec, dtensor_spec
             )
+        else:
+            grad_spec = dtensor_spec
 
         _, tensor_stride = compute_global_tensor_info(
             grad_output, mesh, dtensor_spec.placements
         )
+        # grad stride maybe different, set the stride to be the calculated one
+        grad_spec.tensor_meta = TensorMeta(
+            dtensor_meta.shape, tuple(tensor_stride), dtensor_meta.dtype
+        )
         return (
             DTensor(
                 grad_output,
-                mesh,
-                dtensor_spec.placements,
+                grad_spec,
                 shape=dtensor_meta.shape,
                 dtype=dtensor_meta.dtype,
                 requires_grad=grad_output.requires_grad,
-                stride=tuple(tensor_stride),
+                stride=grad_spec.tensor_meta.stride,
             ),
             None,
         )
@@ -129,17 +134,24 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     mesh_broadcast(input, device_mesh, mesh_dim=idx)
 
+        tensor_meta = TensorMeta(
+            torch.Size(tensor_shape), tuple(tensor_stride), input.dtype
+        )
+        spec = DTensorSpec(
+            device_mesh,
+            placements,
+            tensor_meta=tensor_meta,
+        )
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
             input.view_as(input),
-            device_mesh,
-            placements,
-            shape=torch.Size(tensor_shape),
+            spec,
+            shape=tensor_meta.shape,
             dtype=input.dtype,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
             requires_grad=input.requires_grad,
-            stride=tuple(tensor_stride),
+            stride=tensor_meta.stride,
         )
         return dist_tensor
 
@@ -175,8 +187,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     def __new__(
         cls,
         local_tensor: torch.Tensor,
-        device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        spec: DTensorSpec,
         *,
         shape: torch.Size,
         dtype: torch.dtype,
@@ -211,9 +222,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
-        tensor_meta = TensorMeta(shape, stride, dtype)
-        # deepcopy and set spec
-        r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
+        r._spec = spec
         r._local_tensor = local_tensor
         return r
 
@@ -239,8 +248,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         spec, requires_grad = flatten_spec
         return DTensor(
             local_tensor,
-            spec.mesh,
-            spec.placements,
+            spec,
             shape=spec.tensor_meta.shape,
             dtype=spec.tensor_meta.dtype,
             requires_grad=requires_grad,
@@ -498,16 +506,23 @@ def distribute_tensor(
             )
 
     assert local_tensor is not None, "distributing a tensor should not be None"
+
+    tensor_meta = TensorMeta(tensor.size(), tensor.stride(), tensor.dtype)
+    spec = DTensorSpec(
+        device_mesh,
+        tuple(placements),
+        tensor_meta=tensor_meta,
+    )
+
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
         local_tensor.detach().requires_grad_(tensor.requires_grad),
-        device_mesh,
-        tuple(placements),
-        shape=tensor.size(),
-        dtype=tensor.dtype,
+        spec,
+        shape=tensor_meta.shape,
+        dtype=tensor_meta.dtype,
         requires_grad=tensor.requires_grad,
-        stride=tensor.stride(),
+        stride=tensor_meta.stride,
     )
 
 

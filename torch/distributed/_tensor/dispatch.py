@@ -24,34 +24,33 @@ from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-def _is_random_op(op):
-    aten = torch.ops.aten
-    random_ops = [
-        aten.native_dropout.default,
-        aten.normal_.default,
-        aten.uniform_.default,
-    ]
-    return op in random_ops
+aten = torch.ops.aten
+
+_random_ops = {
+    aten.native_dropout.default,
+    aten.normal_.default,
+    aten.uniform_.default,
+}
+
+
+def to_dtensor(res, spec):
+    assert spec is not None and isinstance(
+        spec, DTensorSpec
+    ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+    assert spec.tensor_meta is not None
+    return dtensor.DTensor(
+        res,
+        spec,
+        shape=spec.tensor_meta.shape,
+        dtype=spec.tensor_meta.dtype,
+        requires_grad=res.requires_grad,
+        stride=spec.tensor_meta.stride,
+    )
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
-    def to_dt(res, spec):
-        assert spec is not None and isinstance(
-            spec, DTensorSpec
-        ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-        assert spec.tensor_meta is not None
-        return dtensor.DTensor(
-            res,
-            spec.mesh,
-            spec.placements,
-            shape=spec.tensor_meta.shape,
-            dtype=spec.tensor_meta.dtype,
-            requires_grad=res.requires_grad,
-            stride=spec.tensor_meta.stride,
-        )
-
     if isinstance(res, torch.Tensor):
-        return to_dt(res, spec)
+        return to_dtensor(res, spec)
     elif isinstance(res, (list, tuple)):
         assert spec is not None and isinstance(
             spec, (list, tuple)
@@ -62,9 +61,9 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             # to handle that case and make sure we don't wrap None with DTensor.
             # (i.e. native_layer_norm.backward)
             if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
-                res_list.append(type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)]))
+                res_list.append(type(e)([to_dtensor(ee, ss) for ee, ss in zip(e, s)]))
             elif e is not None and s is not None:
-                res_list.append(to_dt(e, s))
+                res_list.append(to_dtensor(e, s))
             else:
                 res_list.append(None)  # type: ignore[arg-type]
 
@@ -258,7 +257,7 @@ def _operator_dispatch(
 
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-        if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
+        if op_call in _random_ops and is_rng_supported_mesh(mesh):
             if not random._rng_tracker:
                 raise RuntimeError(
                     "A CudaRNGStateTracker instance must be instantiated "
