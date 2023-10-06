@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import contextlib
 
 import torch
 import torch.distributed as dist
@@ -107,12 +108,38 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
+    def _test_mlp_magatron_inference(self):
+        inp_size = [8, 10]
+        # Ensure all tp ranks have same input.
+        torch.manual_seed(0)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = MLPModule(self.device_type)
+        model_tp = MLPModule(self.device_type)
+
+        # Ensure model are initialized the same way.
+        self._check_module(model, model_tp)
+
+        # Shard module and initialize optimizer.
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        model_tp = parallelize_module(model_tp, device_mesh, PairwiseParallel())
+
+        output = model(inp)
+        output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("recompute_activation", [True, False])
     def test_mlp_megatron_e2e(self, is_seq_parallel, recompute_activation):
         self._test_mlp_magatron_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
 
+    @with_comms
+    def test_mlp_megatron_inference(self):
+        with torch.inference_mode():
+            self._test_mlp_magatron_inference()
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
 

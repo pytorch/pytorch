@@ -253,6 +253,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # Decomposes CompositeImplicitAutograd ops
+        r = func.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
         return op_dispatch.operator_dispatch(
             func,
             args,
