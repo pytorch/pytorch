@@ -54,21 +54,20 @@ import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs, graph_break_reasons
+
+try:
+    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+except ImportError:
+    from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
-
-try:
-    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
-except ImportError:
-    from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
     import torch_xla
@@ -710,9 +709,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, model_iter_fn
-            )
+            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1156,16 +1153,14 @@ class AOTInductorModelCache:
     cache = dict()
 
     @classmethod
-    def load(cls, model, example_inputs, eager_forward):
+    def load(cls, model, example_inputs):
         key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
-            example_outputs = eager_forward(
-                copy.deepcopy(model), clone_inputs(example_inputs)
-            )
+            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+            example_outputs = model(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
-            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
             so_path, exported = torch._export.aot_compile(
                 model, example_args, example_kwargs
             )
@@ -1181,21 +1176,31 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
 
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_spec"],
         )
 
 
-def export_aot_inductor(model, example_inputs, eager_forward):
-    module, exported, output_spec = AOTInductorModelCache.load(
-        model, example_inputs, eager_forward
-    )
+def export(model, example_inputs):
+    example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+    example_outputs = model(*example_args, **example_kwargs)
+    _register_dataclass_output_as_pytree(example_outputs)
+
+    ep = torch.export.export(model, example_args, example_kwargs)
+
+    def opt_export(_, example_inputs):
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        return ep(*example_args, **example_kwargs)
+
+    return opt_export
+
+
+def export_aot_inductor(model, example_inputs):
+    module, exported = AOTInductorModelCache.load(model, example_inputs)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1203,7 +1208,7 @@ def export_aot_inductor(model, example_inputs, eager_forward):
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
         output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, output_spec)
+        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
 
     return opt_aot_inductor
 
@@ -2314,27 +2319,15 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                if self.args.export:
-                    # TB and TIMM use list example_inputs
-                    # HF use dict example_inputs
-                    example_args, example_kwargs = _normalize_bench_inputs(
-                        example_inputs
-                    )
-
-                    # Register the output dataclass to pytree
-                    example_outputs = model_copy(*example_args, **example_kwargs)
-                    _register_dataclass_output_as_pytree(example_outputs)
-
+                if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast():
                         optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_args, example_kwargs
+                            model_copy, example_inputs
                         )
-                        new_result = optimized_model_iter_fn(
-                            *example_args, **example_kwargs
-                        )
+                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                     new_result = optimized_model_iter_fn(model_copy, example_inputs)
@@ -2526,7 +2519,7 @@ class BenchmarkRunner:
 
             if self.args.export_aot_inductor:
                 t_0 = time.perf_counter()
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                optimized_model_iter_fn = optimize_ctx
                 t_1 = time.perf_counter()
                 aot_compilation_time = t_1 - t_0
             else:
@@ -2624,9 +2617,6 @@ class BenchmarkRunner:
         print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
-
-        if self.args.export_aot_inductor:
-            optimize_ctx = functools.partial(optimize_ctx, model, example_inputs)
 
         if self.args.accuracy:
             status = self.check_accuracy(
@@ -3212,10 +3202,10 @@ def process_entry(rank, runner, original_dir, args):
         )(runner, args, original_dir)
 
 
-def main(runner, original_dir=None):
+def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
-    args = parse_args()
+    args = parse_args() if not args else parse_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
@@ -3468,7 +3458,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.export:
-        optimize_ctx = torch._export.export
+        optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
@@ -3836,6 +3826,10 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
         return
 
     print(f"Running {name}")
+    try:
+        from .microbenchmarks.operator_inp_utils import OperatorInputsMode
+    except ImportError:
+        from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
     operator_mode = OperatorInputsMode()
     fake_tensor_mode = FakeTensorMode()
