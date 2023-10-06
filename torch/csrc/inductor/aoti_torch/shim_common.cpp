@@ -305,6 +305,19 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
+AOTITorchError aoti_torch_repeat_interleave_Tensor(
+    AtenTensorHandle repeats,
+    int64_t output_size,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
+    at::Tensor out_tensor =
+        at::_ops::repeat_interleave_Tensor::call(*repeats_tensor, output_size);
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
 // Function to check existence of inf and NaN
 AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
