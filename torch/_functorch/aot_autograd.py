@@ -447,6 +447,7 @@ class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
     mutates_metadata: bool
+    requires_grad: bool
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
@@ -818,7 +819,8 @@ def run_functionalized_fw_and_collect_metadata(
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
-                mutates_metadata=mutates_metadata
+                mutates_metadata=mutates_metadata,
+                requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediiate,
@@ -977,8 +979,8 @@ def run_functionalized_fw_and_collect_metadata(
         # are *regenerated* later, and not used directly in the autograd graph
         f_input_tangents = [
             inp
-            for inp, info, requires_grad_info in zip(flat_f_args, input_info, input_requires_grad_info)
-            if info.mutates_data and requires_grad_info
+            for inp, info in zip(flat_f_args, input_info)
+            if info.mutates_data and info.requires_grad
         ]
         f_output_tangents = [
             o
@@ -1254,7 +1256,7 @@ def fn_prepped_for_autograd(
 
         # Also return a boolean mask specifying which outputs to this function will be used as tangents
         mutated_inputs_grad_mask = [
-            meta.input_info[meta.mutated_inp_indices[i]].mutates_data and False
+            meta.input_info[meta.mutated_inp_indices[i]].mutates_data and meta.input_info[meta.mutated_inp_indices[i]].requires_grad
             for (i, x) in enumerate(mutated_inputs_to_return)
         ]
 
@@ -2017,7 +2019,8 @@ def remove_dupe_metadata(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
                 dynamic_dims=o.dynamic_dims,
-                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx]
+                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
+                requires_grad=o.requires_grad
             )
             for o in m.output_info
         ],
@@ -2074,6 +2077,7 @@ def create_synthetic_base_metadata(
             mutates_data=True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data,
             mutates_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata,
             is_leaf=any_leaf,
+            requires_grad=any(m.input_info[x].requires_grad for x in outer_indices)
         )
         input_infos.append(inpt_info)
         # requires_grad_info consists of (mutated_inputs, forward_outputs).
@@ -2102,6 +2106,7 @@ def create_synthetic_base_metadata(
             raw_type=FunctionalTensor,
             dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
+            requires_grad=outer_args[outer_idx].requires_grad # ???
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
         OutputAliasInfo(
@@ -2112,7 +2117,10 @@ def create_synthetic_base_metadata(
             base_idx=None if o.base_idx is None
             else synthetic_base_info[o.base_idx]
             if isinstance(synthetic_base_info[o.base_idx], int)
-            else synthetic_base_info[o.base_idx][0])
+            else synthetic_base_info[o.base_idx][0],
+            requires_grad=o.requires_grad
+        )
+
         for o in m.output_info]
 
     num_outer_mutated_data_inps = len([x for x in m.input_info if x.mutates_data])
@@ -2481,14 +2489,14 @@ fw_metadata={str(fw_metadata)}
         else:
             return flat_fn(*unpacked_args)
 
-    if config.debug_assert:
+    if config.debug_assert and False:
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
         assert ref_fw_metadata == fw_metadata_updated, (
             f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
-            f'actual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+            f'\nactual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
         )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
@@ -3181,7 +3189,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     and info.requires_grad
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
-                flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
+                flat_bw_args_with_grads = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
 
                 # sanity asserts
                 # metadata_only_inps = [

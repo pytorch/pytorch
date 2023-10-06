@@ -2095,6 +2095,7 @@ def forward(self, tangents_1):
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
     return fx_g
+extract_graph._boxed = True
 
 
 def get_ins_outs(fx_g):
