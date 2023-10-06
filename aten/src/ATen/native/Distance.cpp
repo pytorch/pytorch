@@ -308,16 +308,18 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   // We accept integral types (and bools lol) but vector_norm does not
   auto x1_is_int = c10::isIntegralType(x1_.scalar_type(), /*încludeBool=*/true);
   auto x2_is_int = c10::isIntegralType(x2_.scalar_type(), /*încludeBool=*/true);
-  auto x1 = x1_is_int ? x1_.to(commonDtype) : x1_;
-  auto x2 = x2_is_int ? x2_.to(commonDtype) : x2_;
+  auto x1_t = x1_is_int ? x1_.to(commonDtype) : x1_;
+  auto x2_t = x2_is_int ? x2_.to(commonDtype) : x2_;
+  c10::MaybeOwned<Tensor> x1, x2;
+  std::tie(x1, x2) = expand_outplace(x1_t, x2_t);
 
 
   // We want to divide each tensor by its norm first, as it's more numerically stable.
   // This keeps the result between -1.0 and 1.0
   // We clone them, as we're going to modify them in-place
   // This allows the gradients to propagate propertly all the way to x1 and x2
-  auto x1_norm = at::linalg_vector_norm(x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
-  auto x2_norm = at::linalg_vector_norm(x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
+  auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
+  auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
   {
     at::NoGradGuard guard;
@@ -325,7 +327,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
     x2_norm.clamp_min_(eps);
   }
 
-  return ((x1 / x1_norm) * (x2 / x2_norm)).sum(dim);
+  return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);
 }
 
 }}  // namespace at::native

@@ -802,6 +802,10 @@ def min_cut_rematerialization_partition(
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
+        # We can perform "memory fusion" into a cat, but cat cannot be a
+        # producer to a fusion
+        if get_aten_target(b) == aten.cat:
+            return True
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
@@ -907,7 +911,14 @@ def min_cut_rematerialization_partition(
     return fw_module, bw_module
 
 
-def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
+def draw_graph(
+    traced: torch.fx.GraphModule,
+    fname: str,
+    figname: str = "fx_graph",
+    clear_meta: bool = True,
+    prog: str = None,
+    parse_stack_trace: bool = False,
+) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)
@@ -917,9 +928,14 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     if not ext:
         ext = ".svg"
     print(f"Writing FX graph to file: {base}{ext}")
-    g = graph_drawer.FxGraphDrawer(traced, figname)
+    g = graph_drawer.FxGraphDrawer(traced, figname, parse_stack_trace=parse_stack_trace)
     x = g.get_main_dot_graph()
-    getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
+    write_method = getattr(x, "write_" + ext.lstrip("."))
+    fname = f"{base}{ext}"
+    if prog is None:
+        write_method(fname)
+    else:
+        write_method(fname, prog=prog)
 
 
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):

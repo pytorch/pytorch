@@ -45,6 +45,7 @@ def make_dynamic_cls(cls):
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
         (config, "translation_validation", TEST_Z3),
+        (config, "check_shape_env_recorded_events", True),
         xfail_prop="_expected_failure_dynamic",
     )
 

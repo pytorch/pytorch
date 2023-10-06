@@ -1,8 +1,8 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
-    !__has_include("ext/stdio_filebuf.h")
+#if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
+    !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
 namespace torch {
 namespace unwind {
 std::vector<void*> unwind() {
@@ -27,6 +27,7 @@ Stats stats() {
 } // namespace torch
 
 #else
+
 #include <c10/util/flat_hash_map.h>
 #include <elf.h>
 #include <link.h>
@@ -300,9 +301,16 @@ extern "C" void unwind_entry(std::vector<void*>* result);
 __asm__(
     ".global unwind_entry\n"
     "unwind_entry:\n"
+#ifdef __aarch64__
+    "mov x1, sp;\n"
+    "mov x2, x29;\n"
+    "b unwind_c;\n"
+#else
     "mov %rsp, %rsi;\n"
     "mov %rbp, %rdx;\n"
-    "jmp unwind_c;\n");
+    "jmp unwind_c;\n"
+#endif
+);
 
 namespace torch {
 namespace unwind {
@@ -310,6 +318,19 @@ std::vector<void*> unwind() {
   std::vector<void*> frames;
   unwind_entry(&frames);
   return frames;
+}
+
+c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
+  if (!addr) {
+    return c10::nullopt;
+  }
+  std::shared_lock lock(cache_mutex_);
+  const LibraryInfo* library_info = unwind_cache.findLibraryFor((uint64_t)addr);
+  if (!library_info) {
+    return c10::nullopt;
+  }
+  return std::make_pair(
+      library_info->name(), (uint64_t)addr - library_info->load_bias());
 }
 
 struct Symbolizer {
@@ -325,16 +346,15 @@ struct Symbolizer {
     if (frame_map_.count(addr)) {
       return;
     }
-    auto maybe_library =
-        addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
+    auto maybe_library = libraryFor(addr);
     if (!maybe_library) {
       frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
       return;
     }
     has_pending_results_ = true;
-    auto& entry = getOrCreate(maybe_library->name());
+    auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
-    auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
+    auto libaddress = maybe_library->second - 1;
     entry.comm->out() << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
@@ -399,13 +419,8 @@ struct Symbolizer {
   };
 };
 
-#ifdef FBCODE_CAFFE2
-// in CUDA binaries, we have to use the internal symbolizer because
-// addr2line seems to hang.
-__attribute__((weak))
-#endif
-std::vector<Frame>
-symbolize(const std::vector<void*>& frames) {
+#ifndef FBCODE_CAFFE2
+std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
   Symbolizer& s = Symbolizer::get();
   for (auto f : frames) {
@@ -418,6 +433,7 @@ symbolize(const std::vector<void*>& frames) {
   }
   return results;
 }
+#endif
 
 Stats stats() {
   return unwind_cache.stats();
