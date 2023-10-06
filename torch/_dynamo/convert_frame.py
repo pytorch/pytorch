@@ -534,6 +534,30 @@ def _compile(
             out_code,
         )
 
+        if bytecode_log.isEnabledFor(logging.DEBUG):
+            try:
+                import depyf  # type: ignore[import]
+            except ImportError:
+                bytecode_log.debug(
+                    "Decompilation relies on the library `depyf`, "
+                    "which could not be found on this machine. Run `pip "
+                    "install depyf` to install the library."
+                )
+                raise
+
+            try:
+                decompiled_src = depyf.decompile(out_code)
+                bytecode_log.debug("possible source code:")
+                bytecode_log.debug(decompiled_src)
+            except Exception as e:
+                bytecode_log.debug("Decompilation fails due to: %s", str(e))
+            finally:
+                bytecode_log.debug(
+                    "If you find the decompiled code is wrong,"
+                    "please submit an issue at "
+                    "https://github.com/youkaichao/depyf/issues."
+                )
+
         assert output is not None
 
         # Skipping Dynamo on a frame without any extracted graph.
