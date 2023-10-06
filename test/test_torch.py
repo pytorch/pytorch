@@ -3146,7 +3146,6 @@ else:
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     # FIXME: move to data movement test suite
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/98175")
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
     def test_copy_transpose_math_view(self, device, dtype):
@@ -4494,7 +4493,6 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
-    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
         y = torch.empty(3, device=devices[1])
