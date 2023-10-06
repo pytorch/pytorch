@@ -719,19 +719,54 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     return wait_for_process(p, timeout=timeout)
 
 
-def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None, retries=1):
-    assert retries >= 0, f"Expecting non negative number for number of retries, got {retries}"
+def retry_shell(
+    command,
+    cwd=None,
+    env=None,
+    stdout=None,
+    stderr=None,
+    timeout=None,
+    retries=1,
+    was_rerun=False,
+) -> Tuple[int, bool]:
+    # Returns exicode + whether it was rerun
+    assert (
+        retries >= 0
+    ), f"Expecting non negative number for number of retries, got {retries}"
     try:
-        exit_code = shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout)
+        exit_code = shell(
+            command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout
+        )
         if exit_code == 0 or retries == 0:
-            return exit_code
-        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout, flush=True)
+            return exit_code, was_rerun
+        print(
+            f"Got exit code {exit_code}, retrying (retries left={retries})",
+            file=stdout,
+            flush=True,
+        )
     except subprocess.TimeoutExpired:
         if retries == 0:
-            print(f"Command took >{timeout // 60}min, returning 124", file=stdout, flush=True)
-            return 124
-        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout, flush=True)
-    return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
+            print(
+                f"Command took >{timeout // 60}min, returning 124",
+                file=stdout,
+                flush=True,
+            )
+            return 124, was_rerun
+        print(
+            f"Command took >{timeout // 60}min, retrying (retries left={retries})",
+            file=stdout,
+            flush=True,
+        )
+    return retry_shell(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        timeout=timeout,
+        retries=retries - 1,
+        was_rerun=True,
+    )
 
 
 def discover_test_cases_recursively(suite_or_case):
@@ -889,7 +924,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
-            exitcode = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+            exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
