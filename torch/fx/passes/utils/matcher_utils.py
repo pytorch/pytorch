@@ -389,12 +389,12 @@ class SubgraphMatcher:
         return matches
 
 def _split_to_graph_and_name_nodes_map(
-    g: GraphModule,
+    gm: GraphModule,
 ) -> Tuple[GraphModule, Dict[str, Node]]:
     from torch.utils._pytree import tree_flatten, tree_unflatten
     from torch.fx.graph import _PyTreeInfo
     name_nodes_map = {}
-    for n in g.graph.nodes:
+    for n in gm.graph.nodes:
         if n.op == "output":
             output = tree_unflatten(n.args[0], gm._out_spec)
             assert isinstance(output, tuple), "Expecting the pattern graph to return a tuple"

@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+import torch.nn.functional as F
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -11,7 +12,8 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.passes.utils.matcher_utils import SubgraphMatcherWithKwNodesMap
+from torch.fx.passes.utils.matcher_utils import SubgraphMatcherWithNameNodesMap
+from torch.testing._internal.common_utils import run_tests
 
 class TestMatcher(JitTestCase):
     def test_subgraph_matcher_with_attributes(self):
@@ -177,3 +179,6 @@ class TestMatcher(JitTestCase):
             for n in target_gm.graph.nodes:
                 if n == name_nodes_map["conv"]:
                     assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
+
+if __name__ == "__main__":
+    run_tests()
