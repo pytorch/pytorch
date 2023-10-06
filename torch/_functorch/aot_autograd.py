@@ -2492,7 +2492,7 @@ fw_metadata={str(fw_metadata)}
         else:
             return flat_fn(*unpacked_args)
 
-    if config.debug_assert and False:
+    if config.debug_assert:
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
@@ -3223,8 +3223,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 assert len(user_tangents) == len(out_info)
                 filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor)]
                 flat_bw_args = tuple(mutated_inp_args) + tuple(filtered_user_tangents)
-                assert len(flat_bw_args) == len(CompiledFunction.metadata.requires_grad_info)
-                flat_bw_args_with_grads = [x for x, req_grad in zip(flat_bw_args, CompiledFunction.metadata.requires_grad_info) if req_grad]
+                flat_metas = [i for i in CompiledFunction.metadata.input_info if i.mutates_data or i.mutates_metadata] + CompiledFunction.metadata.output_info
+                flat_metas = [i for i in flat_metas if isinstance(i, InputAliasInfo) or issubclass(i.raw_type, torch.Tensor)]
+                flat_bw_args_with_grads = [x for x, info in zip(flat_bw_args, flat_metas) if info.requires_grad]
 
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args_with_grads
