@@ -45,7 +45,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
+from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -1781,7 +1781,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
-        from torch._dynamo.utils import counters
 
         counters.clear()
 
@@ -7243,8 +7242,7 @@ def ___make_guard_fn():
         self.assertIsInstance(res, torch.Tensor)
 
     def test_itertools_accumulate_symint_default_sum(self):
-        from torch._dynamo.utils import counters
-
+        # https://github.com/pytorch/pytorch/issues/110287
         counters.clear()
 
         def fn(x):
@@ -7256,17 +7254,13 @@ def ___make_guard_fn():
         x = torch.randn(2, 3)
         eager = fn(x)
 
-        counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(x)
 
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
-        self.assertEqual(counter.frame_count, 1)
 
     def test_itertools_accumulate_tensors_default_sum(self):
-        from torch._dynamo.utils import counters
-
         counters.clear()
 
         def fn(a, b, c, d, x):
@@ -7279,17 +7273,13 @@ def ___make_guard_fn():
         x = torch.tensor([[1, 2], [3, 4]])
         eager = fn(*t_list, x)
 
-        counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(*t_list, x)
 
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
-        self.assertEqual(counter.frame_count, 1)
 
     def test_itertools_accumulate_tensors_builtins(self):
-        from torch._dynamo.utils import counters
-
         for builtin_op in [operator.mul, operator.sub, operator.pow]:
             counters.clear()
 
@@ -7303,17 +7293,13 @@ def ___make_guard_fn():
             x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
-            self.assertEqual(counter.frame_count, 1)
 
     def test_itertools_accumulate_tensors_user_defined(self):
-        from torch._dynamo.utils import counters
-
         def udo_fn_0(a, b):
             return -1
 
@@ -7343,13 +7329,11 @@ def ___make_guard_fn():
             x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
-            self.assertEqual(counter.frame_count, 1)
 
     def test_pure_python_accumulate(self):
         def accumulate(iterable, func=lambda x, y: x + y):

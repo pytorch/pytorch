@@ -793,21 +793,12 @@ class SkipFilesVariable(VariableTracker):
         elif self.value is itertools.accumulate and not kwargs:
             from .builtin import BuiltinVariable
 
-            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+            if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-
-                def func(tx, acc, item):
-                    return BuiltinVariable(operator.add).call_function(tx, [acc, item], {})
-
-            elif (
-                len(args) == 2
-                and args[0].has_unpack_var_sequence(tx)
-            ):
-                seq = args[0].unpack_var_sequence(tx)
-
-                def func(tx, acc, item):
-                    return args[1].call_function(tx, [acc, item], {})
-
+                if len(args) == 1:
+                    func = BuiltinVariable(operator.add).call_function
+                elif len(args) == 2:
+                    func = args[1].call_function
             else:
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
 
@@ -818,7 +809,7 @@ class SkipFilesVariable(VariableTracker):
                     acc = item
                 else:
                     try:
-                        acc = func(tx, acc, item)
+                        acc = func(tx, [acc, item], {})
                     except Exception:
                         raise unimplemented(
                             f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
