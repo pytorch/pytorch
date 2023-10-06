@@ -6,7 +6,7 @@ import logging
 import os
 import pprint
 import textwrap
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
 import sympy
 
@@ -603,7 +603,7 @@ class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
         scheduler: "Scheduler",
-        node: ir.ComputedBuffer | ir.TemplateBuffer,
+        node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
         group_fn,
     ):
         super().__init__(scheduler, node)
