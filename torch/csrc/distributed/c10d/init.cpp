@@ -47,6 +47,12 @@
 
 #include <torch/custom_class.h>
 
+namespace c10 {
+
+void SetGlobalRank(int64_t);
+
+}
+
 namespace {
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
@@ -2623,7 +2629,9 @@ Example::
 
   module.def(
       "_set_global_rank",
-      [](int64_t rank) { c10::SetGlobalRank(rank); },
+      [](int64_t rank) {
+        c10::SetGlobalRank(rank);
+      },
       py::arg("rank"),
       R"(
         Arguments:
