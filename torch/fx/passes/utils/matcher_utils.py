@@ -45,7 +45,7 @@ class InternalMatch:
     # nodes in matched subgraph returned by output
     returning_nodes: List[Node] = field(default_factory=list)
 
-    # map from a string keyword to a node in the target graph
+    # map from a string name to a node in the target graph
     # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
     name_nodes_map: Dict[str, Node] = field(default_factory=dict)
 
