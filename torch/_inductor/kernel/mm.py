@@ -133,14 +133,31 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
 
     if m * n != 0 and use_cutlass_template(layout):
-        cutlass_template = CUTLASSGemmTemplate([mat1, mat2], layout, alpha=1, beta=0)
+        cutlass_template = CUTLASSGemmTemplate(
+            [mat1, mat2], layout, alpha=1, beta=0, can_fuse_epilogue=False
+        )
+        # This will list only ops incapable of EVT fusion
         ops = cutlass_template.gen_ops()
         for op in ops:
             cutlass_template.maybe_append_choice(
                 choices,
                 op=op,
             )
-        log.debug("Added %d cutlass gemm configs.", len(ops))
+        cutlass_template_evt = CUTLASSGemmTemplate(
+            [mat1, mat2], layout, alpha=1, beta=0, can_fuse_epilogue=True
+        )
+        # This will list only ops capable of EVT fusion
+        ops_evt = cutlass_template_evt.gen_ops()
+        for op in ops_evt:
+            cutlass_template_evt.maybe_append_choice(
+                choices,
+                op=op,
+            )
+        log.debug(
+            "Added %d cutlass gemm configs and %d fuseable gemm configs.",
+            len(ops),
+            len(ops_evt),
+        )
 
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 

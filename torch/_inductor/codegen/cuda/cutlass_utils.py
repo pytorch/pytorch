@@ -57,22 +57,23 @@ def try_import_cutlass() -> bool:
     )
 
     if os.path.isdir(cutlass_py_full_path):
-        cutlass_file_names = [
-            file_name
-            for file_name in os.listdir(cutlass_py_full_path)
-            if file_name.endswith(".py")
-        ]
-        cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-        if not os.path.isdir(tmp_cutlass_py_full_path):
-            os.mkdir(tmp_cutlass_py_full_path)
-        for file_name in cutlass_file_names:
-            _gen_cutlass_file(
-                file_name,
-                cutlass_module_names,
-                cutlass_py_full_path,
-                tmp_cutlass_py_full_path,
-            )
-        sys.path.append(tmp_cutlass_py_full_path)
+        if tmp_cutlass_py_full_path not in sys.path:
+            cutlass_file_names = [
+                file_name
+                for file_name in os.listdir(cutlass_py_full_path)
+                if file_name.endswith(".py")
+            ]
+            cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
+            if not os.path.isdir(tmp_cutlass_py_full_path):
+                os.mkdir(tmp_cutlass_py_full_path)
+            for file_name in cutlass_file_names:
+                _gen_cutlass_file(
+                    file_name,
+                    cutlass_module_names,
+                    cutlass_py_full_path,
+                    tmp_cutlass_py_full_path,
+                )
+            sys.path.append(tmp_cutlass_py_full_path)
         try:
             import cutlass_generator  # type: ignore[import]  # noqa: F401
             import cutlass_library  # type: ignore[import]  # noqa: F401
@@ -136,18 +137,14 @@ class CUTLASSArgs:
 
 
 @functools.lru_cache(None)
-def gen_ops() -> List[Any]:
-    """
-    Generates all supported CUTLASS operations.
-    """
+def _gen_ops_cached(arch, version) -> List[Any]:
+    # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
     import cutlass_generator  # type: ignore[import]
     import cutlass_manifest  # type: ignore[import]
 
-    arch = get_cuda_arch()
-    version = get_cuda_version()
     if arch is None or version is None:
         log.error(
             "Cannot detect cuda arch %s or cuda version %s. "
@@ -174,6 +171,15 @@ def gen_ops() -> List[Any]:
             ) from e
 
     return manifest.operations
+
+
+def gen_ops() -> List[Any]:
+    """
+    Generates all supported CUTLASS operations.
+    """
+    arch = get_cuda_arch()
+    version = get_cuda_version()
+    return _gen_ops_cached(arch, version)
 
 
 def dtype_match(
