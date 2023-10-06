@@ -4,7 +4,12 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only, TreeSpec
+
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec, tree_map_only
+except ImportError:
+    tree_map_only = torch.utils._pytree.tree_map_only  # type: ignore[assignment]
+    PyTreeSpec = torch.utils._pytree.TreeSpec  # type: ignore[assignment, misc]
 
 
 # Common type aliases
@@ -334,7 +339,7 @@ class OpInfo:
     flat_args_schema: List[object]
     local_args: Sequence[object]
     local_kwargs: Dict[str, object]
-    args_tree_spec: Optional[TreeSpec] = None
+    args_tree_spec: Optional[PyTreeSpec] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None
