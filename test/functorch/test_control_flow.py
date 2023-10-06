@@ -1597,11 +1597,17 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
     def _create_test_fns_for_cond(self, pred, inner_most_fn, operands, closure_list, nested_level):
         if nested_level == 0:
             if len(closure_list) > 0:
-                true_fn = lambda *operands : inner_most_fn(*operands) + inner_most_fn(*closure_list)
-                false_fn = lambda *operands: inner_most_fn(*operands) - inner_most_fn(*closure_list)
+                def true_fn(*operands):
+                    return inner_most_fn(*operands) + inner_most_fn(*closure_list)
+
+                def false_fn(*operands):
+                    return inner_most_fn(*operands) - inner_most_fn(*closure_list)
             else:
-                true_fn = lambda *operands : inner_most_fn(*operands)
-                false_fn = lambda *operands: inner_most_fn(*operands)
+                def true_fn(*operands):
+                    return inner_most_fn(*operands)
+
+                def false_fn(*operands):
+                    return inner_most_fn(*operands)
 
             def fn(pred, operands):
                 if len(operands) == 0 and len(closure_list) == 0:
@@ -1609,9 +1615,14 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
                 return cond(pred, true_fn, false_fn, operands)
             return (pred, operands), fn
         else:
-            args, inner_fn = self._create_test_fns_for_cond(pred <= 0, inner_most_fn, operands, closure_list, nested_level -1)
-            true_fn = lambda *operands: inner_most_fn(*operands) + inner_fn(*args)
-            false_fn = lambda *operands: inner_most_fn(*operands) - inner_fn(*args)
+            args, inner_fn = self._create_test_fns_for_cond(pred <= 0, inner_most_fn, operands, closure_list, nested_level - 1)
+
+            def true_fn(*operands):
+                return inner_most_fn(*operands) + inner_fn(*args)
+
+            def false_fn(*operands):
+                return inner_most_fn(*operands) - inner_fn(*args)
+
             def fn(pred, operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.ones(1)
