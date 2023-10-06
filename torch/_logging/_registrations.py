@@ -21,6 +21,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "bytecode_src",
+    "Prints the source code of modified bytecode from Dynamo. Mostly useful if you're debugging our bytecode generation in Dynamo.",
+    off_by_default=True,
+)
+register_artifact(
     "graph",
     "Prints the dynamo traced graph (prior to AOTDispatch) in a table. If you prefer python code use `graph_code` instead. ",
 )
