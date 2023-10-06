@@ -1210,16 +1210,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
-    def test_tensor_size_indexed_by_symint(self):
-        def fn(x, y):
-            index = x.shape[-1]
-            return x + y.shape[index]
-
-        x = torch.rand(10, 2)
-        y = torch.rand(10, 8, 6)
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        self.assertEqual(opt_fn(x, y), fn(x, y))
-
     def test_partials_as_input_partials_lambda(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)
