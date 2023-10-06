@@ -49,9 +49,11 @@ class Adadelta(Optimizer):
             group.setdefault("differentiable", False)
 
     def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adadelta does not support sparse gradients")
@@ -73,6 +75,7 @@ class Adadelta(Optimizer):
             acc_deltas.append(state["acc_delta"])
 
             state["step"] += 1
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -102,7 +105,7 @@ class Adadelta(Optimizer):
                 group["differentiable"],
             )
 
-            self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
+            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
 
             adadelta(
                 params_with_grad,
@@ -116,6 +119,7 @@ class Adadelta(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                has_complex=has_complex,
             )
 
         return loss
@@ -178,6 +182,7 @@ def adadelta(
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     lr: float,
     rho: float,
@@ -213,6 +218,7 @@ def adadelta(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -228,6 +234,7 @@ def _single_tensor_adadelta(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for (param, grad, square_avg, acc_delta) in zip(
@@ -268,6 +275,7 @@ def _multi_tensor_adadelta(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -279,6 +287,14 @@ def _multi_tensor_adadelta(
     for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
+
+        if has_complex:
+            for i in range(len(device_params)):
+                if torch.is_complex(device_params[i]):
+                    device_params[i] = torch.view_as_real(device_params[i])
+                    device_grads[i] = torch.view_as_real(device_grads[i])
+                    device_square_avgs[i] = torch.view_as_real(device_square_avgs[i])
+                    device_acc_deltas[i] = torch.view_as_real(device_acc_deltas[i])
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
