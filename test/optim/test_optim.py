@@ -1168,14 +1168,6 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
-        self._test_complex_2d(optim.Adam)
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
-        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
-        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
-        self._test_complex_2d(functools.partial(
-            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
-        ))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1189,6 +1181,20 @@ class TestOptim(TestCase):
             ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
         ):
             optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
+
+    def test_adam_complex(self):
+        self._test_complex_2d(optim.Adam)
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2, amsgrad=True))
 
     def test_adamw(self):
         self._test_basic_cases(
