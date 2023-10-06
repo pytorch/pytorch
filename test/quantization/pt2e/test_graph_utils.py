@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 
-from torch.ao.quantization._pt2e.graph_utils import (
+from torch.ao.quantization.pt2e.graph_utils import (
     find_sequential_partitions,
     get_equivalent_types,
     update_equivalent_types_dict,

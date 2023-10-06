@@ -30,6 +30,7 @@
 #include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_sparse_csr_sum.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -1661,6 +1662,15 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
   return result;
 }
 
+namespace {
+  inline void warn_invalid_degrees_of_freedom(const char* fname, const TensorIterator& iter, double correction) {
+    int64_t reducing_over_num_elements = iter.num_output_elements() == 0 ? 0 : iter.numel() / iter.num_output_elements();
+    if (reducing_over_num_elements - correction <= 0) {
+      TORCH_WARN(fname, "(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel).");
+    }
+  }
+} // namespace
+
 static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     at::OptionalIntArrayRef dim, const c10::optional<Scalar>& correction_opt,
@@ -1713,6 +1723,7 @@ static Tensor& std_var_out(
   TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
               "result type ", self.scalar_type(), " can't be cast to the "
               "desired output type ", result.scalar_type());
+  warn_invalid_degrees_of_freedom(fname, iter, correction);
 
   if (iter.numel() == 0) {
     // Trivial reduction
@@ -1792,6 +1803,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
   ScalarType dtype = get_dtype_from_result(result1, {});
   auto iter =
       make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
+  warn_invalid_degrees_of_freedom(fname, iter, correction);
 
   if (iter.numel() == 0) {
     // Trivial reduction
@@ -2165,6 +2177,24 @@ Tensor sum_sparse_coo(const Tensor& self, at::OptionalIntArrayRef dim, bool keep
     }
   }
   return result;
+}
+
+Tensor sum_sparse_compressed(
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> dtype) {
+  // TODO: The signature of sum.dim_IntList and _sparse_csr_sum.dim_dtype is a little
+  // bit different in the second parameters `dim`, which causes the conversion of `dim`
+  // to call into `_sparse_csr_sum`. Align the signatures would be a better choice.
+  TORCH_CHECK(
+      dim.has_value(), "dim has no value, cannot be used in sum.dim_IntList");
+  auto layout = self.layout();
+  TORCH_CHECK(
+      layout == kSparseCsr,
+      "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout ",
+      layout)
+  return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
 } // namespace native

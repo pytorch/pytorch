@@ -11,6 +11,8 @@
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/max_pool2d_backward_native.h>
+#include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool2d_with_indices_native.h>
 #endif
@@ -253,21 +255,17 @@ static void avg_pool2d_template(const Tensor& input,
                     "not supported on MPS backend. ",
                     "Falling back on CPU. This may have performance implications.");
     if (!is_backward_pass) {
-      const_cast<Tensor&>(output) =
-          at::avg_pool2d(input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
-              .clone()
-              .to("mps");
+      output.copy_(at::avg_pool2d(
+          input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override));
     } else {
-      const_cast<Tensor&>(output) = at::avg_pool2d_backward(grad_output.to("cpu"),
-                                                            input.to("cpu"),
-                                                            kernel_size,
-                                                            stride,
-                                                            padding,
-                                                            ceil_mode,
-                                                            count_include_pad,
-                                                            divisor_override)
-                                        .clone()
-                                        .to("mps");
+      output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
+                                           input.to("cpu"),
+                                           kernel_size,
+                                           stride,
+                                           padding,
+                                           ceil_mode,
+                                           count_include_pad,
+                                           divisor_override));
     }
     return;
   }

@@ -881,7 +881,7 @@ class FSDPTest(MultiProcessTestCase):
 
     @property
     def init_method(self):
-        return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
+        return f"{FILE_SCHEMA}{self.file_name}"
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)

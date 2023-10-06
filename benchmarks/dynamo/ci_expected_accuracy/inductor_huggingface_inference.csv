@@ -37,7 +37,7 @@ PLBartForConditionalGeneration,pass,0
 PegasusForCausalLM,pass,0
 PegasusForConditionalGeneration,pass,0
 RobertaForCausalLM,pass,0
-RobertaForQuestionAnswering,fail_accuracy,0
+RobertaForQuestionAnswering,pass,0
 Speech2Text2ForCausalLM,pass,0
 T5ForConditionalGeneration,pass,0
 T5Small,pass,0

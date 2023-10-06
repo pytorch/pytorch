@@ -6,7 +6,7 @@ from ._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._TensorBase, method), docstr)
+    add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
 common_args = parse_kwargs(
@@ -4728,6 +4728,26 @@ Example::
 )
 
 add_docstr_all(
+    "shape",
+    r"""
+shape() -> torch.Size
+
+Returns the size of the :attr:`self` tensor. Alias for :attr:`size`.
+
+See also :meth:`Tensor.size`.
+
+Example::
+
+    >>> t = torch.empty(3, 4, 5)
+    >>> t.size()
+    torch.Size([3, 4, 5])
+    >>> t.shape
+    torch.Size([3, 4, 5])
+
+""",
+)
+
+add_docstr_all(
     "sort",
     r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -5058,7 +5078,7 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(*reps) -> Tensor
+tile(dims) -> Tensor
 
 See :func:`torch.tile`
 """,

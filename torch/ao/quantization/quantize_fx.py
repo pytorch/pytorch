@@ -247,7 +247,7 @@ def prepare_fx(
     _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
-    r""" Prepare a model for post training static quantization
+    r""" Prepare a model for post training quantization
 
     Args:
       * `model` (torch.nn.Module): torch.nn.Module model
@@ -276,7 +276,7 @@ def prepare_fx(
 
         import torch
         from torch.ao.quantization import get_default_qconfig_mapping
-        from torch.ao.quantization import prepare_fx
+        from torch.ao.quantization.quantize_fx import prepare_fx
 
         class Submodule(torch.nn.Module):
             def __init__(self):
@@ -414,7 +414,7 @@ def prepare_qat_fx(
 
         import torch
         from torch.ao.quantization import get_default_qat_qconfig_mapping
-        from torch.ao.quantization import prepare_fx
+        from torch.ao.quantization.quantize_fx import prepare_qat_fx
 
         class Submodule(torch.nn.Module):
             def __init__(self):

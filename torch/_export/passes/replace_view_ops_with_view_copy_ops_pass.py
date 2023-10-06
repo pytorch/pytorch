@@ -3,7 +3,7 @@ from typing import Dict, Optional, Set
 import torch
 from torch._ops import OpOverload, OpOverloadPacket, HigherOrderOperator
 from torch._export.error import InternalError
-from torch._export.pass_base import ExportPassBase
+from torch._export.pass_base import _ExportPassBase
 
 
 __all__ = ["ReplaceViewOpsWithViewCopyOpsPass"]
@@ -49,7 +49,7 @@ def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> Optional[OpOver
     return None
 
 
-class ReplaceViewOpsWithViewCopyOpsPass(ExportPassBase):
+class ReplaceViewOpsWithViewCopyOpsPass(_ExportPassBase):
     """
     Our backend expects pure functional operators. For efficiency
     purposes, we keep view ops around while functionalizing the exported

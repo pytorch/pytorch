@@ -1,9 +1,10 @@
 from torch.distributions import constraints
-from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import ExpTransform
 
-__all__ = ['LogNormal']
+__all__ = ["LogNormal"]
+
 
 class LogNormal(TransformedDistribution):
     r"""
@@ -15,7 +16,7 @@ class LogNormal(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = LogNormal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # log-normal distributed with mean=0 and stddev=1
         tensor([ 0.1046])
@@ -24,7 +25,7 @@ class LogNormal(TransformedDistribution):
         loc (float or Tensor): mean of log of distribution
         scale (float or Tensor): standard deviation of log of the distribution
     """
-    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.positive
     has_rsample = True
 

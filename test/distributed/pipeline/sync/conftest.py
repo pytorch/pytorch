@@ -46,7 +46,7 @@ def setup_rpc(scope="session"):
         rank=0,
         world_size=1,
         rpc_backend_options=dist.rpc.TensorPipeRpcBackendOptions(
-            init_method="file://{}".format(file.name),
+            init_method=f"file://{file.name}",
         )
     )
     yield

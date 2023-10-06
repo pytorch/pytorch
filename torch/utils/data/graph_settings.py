@@ -54,7 +54,7 @@ def apply_sharding(datapipe: DataPipe,
     graph = traverse_dps(datapipe)
 
     def _helper(graph, prev_applied=None):
-        for _, (dp, sub_graph) in graph.items():
+        for (dp, sub_graph) in graph.values():
             applied = None
             if _is_sharding_datapipe(dp):
                 if prev_applied is not None:

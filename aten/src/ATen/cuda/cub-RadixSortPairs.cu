@@ -2,10 +2,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/cub.cuh>
 
-namespace at {
-namespace cuda {
-namespace cub {
-namespace detail {
+namespace at::cuda::cub::detail {
 
 template <typename key_t, int value_size>
 void radix_sort_pairs_impl(
@@ -86,8 +83,4 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
 AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
 #endif
 
-} // namespace detail
-
-} // namespace cub
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::cub::detail

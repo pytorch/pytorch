@@ -6,7 +6,6 @@ Automatic Mixed Precision package - torch.amp
 
 .. Both modules below are missing doc entry. Adding them here for now.
 .. This does not add anything to the rendered page
-.. py:module:: torch.cpu
 .. py:module:: torch.cpu.amp
 .. py:module:: torch.cuda.amp
 
@@ -30,6 +29,8 @@ For CUDA and CPU, APIs are also provided separately:
 
 * ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``.
 * ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``. For CPU, only lower precision floating point datatype of ``torch.bfloat16`` is supported for now.
+
+:class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 
 .. contents:: :local:
 

@@ -65,6 +65,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_is_full_backward_hook",
     "_forward_hooks",
     "_forward_hooks_with_kwargs",
+    "_forward_hooks_always_called",
     "_forward_pre_hooks",
     "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
@@ -114,7 +115,7 @@ def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
 
 
 def _raise_not_supported(name: str) -> None:
-    raise ValueError("Method ``{}`` not supported for RemoteModule".format(name))
+    raise ValueError(f"Method ``{name}`` not supported for RemoteModule")
 
 
 class _RemoteModule(nn.Module):
@@ -122,14 +123,14 @@ class _RemoteModule(nn.Module):
     def __new__(cls, *args, **kwargs):
         # Use __new__ for logging purposes.
         torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
-        return super(_RemoteModule, cls).__new__(cls)
+        return super().__new__(cls)
 
     def __init__(
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -357,7 +358,7 @@ class _RemoteModule(nn.Module):
     def bfloat16(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.bfloat16.__name__)
 
-    def to(self, *args, **kwargs) -> T:  # type: ignore[return]
+    def to(self, *args, **kwargs) -> T:  # type: ignore[misc, return, type-var]
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
@@ -376,7 +377,7 @@ class _RemoteModule(nn.Module):
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(  # type: ignore[return]
+    def register_forward_hook(  # type: ignore[return, override]
         self,
         hook: Union[
             Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
@@ -499,8 +500,8 @@ class _RemoteModule(nn.Module):
                 and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
             ):
                 raise AttributeError(
-                    "Attribute {} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
-                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
+                    f"Attribute {k} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
+                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``."
                 )
 
     def _install_generated_methods(self):
@@ -684,8 +685,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 
@@ -728,11 +729,9 @@ def _remote_module_reducer(remote_module):
         # Check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
         elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
             print(
-                "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
+                f"The new attribute ``{k}`` of RemoteModule is ignored during RPC pickling. "
                 "To pickle this attribute, please add it to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES``. "
-                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(
-                    k
-                ),
+                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.",
                 file=sys.stderr,
             )
 

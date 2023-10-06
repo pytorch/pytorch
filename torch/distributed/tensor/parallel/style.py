@@ -51,8 +51,11 @@ class PairwiseParallel(ParallelStyle):
     We assume both input and output need to be replicate DTensors.
 
     .. warning::
-        PairwiseParallel only supports ``nn.Multihead Attention``,
-        ``nn.Transformer`` or even-number-layer MLP for now.
+        PairwiseParallel does not support ``nn.MultiheadAttention``,
+        ``nn.Transformer`` well at this moment. One workaround is to apply
+        ``ColwiseParallel`` and ``RowwiseParallel`` to the components of
+        transformer. We recommend to use ``PairwiseParallel`` only
+        for even-number-layer MLP for now.
     """
 
     def __init__(self, _prepare_input=None, _prepare_output=None) -> None:
@@ -73,8 +76,11 @@ class SequenceParallel(PairwiseParallel):
     We assume both input and output need to be sharded DTensors.
 
     .. warning::
-        SequenceParallel only supports ``nn.Multihead Attention``,
-        ``nn.Transformer`` or even-number-layer MLP for now.
+        SequenceParallel does not support ``nn.MultiheadAttention``,
+        ``nn.Transformer`` well at this moment. One workaround is to apply
+        ``ColwiseParallel`` and ``RowwiseParallel`` to the components of
+        transformer. We recommend to use ``SequenceParallel`` only
+        for even-number-layer MLP for now.
     """
 
     def __init__(self) -> None:

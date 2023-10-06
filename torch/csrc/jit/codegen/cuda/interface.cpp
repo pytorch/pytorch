@@ -151,11 +151,8 @@ class NVFuserEnabler {
       return *getCachedFuserEnabledEnvVar();
     }
     // 3. default value
-#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    // default off since TorchScript integration isn't maintained any longer
     return false;
-#else
-    return nvfuserCanBeEnabled();
-#endif
   }
 
  public:
@@ -180,6 +177,7 @@ bool isEnabled() {
 }
 
 bool setEnabled(bool is_enabled) {
+  TORCH_WARN("torch::jit::fuser::cuda::setEnabled() is deprecated");
   return nvfuser_enabler.setEnabled(is_enabled);
 }
 
@@ -235,6 +233,7 @@ void fuseGraph(std::shared_ptr<Graph>& graph) {
     return;
   }
 
+  TORCH_WARN_ONCE("nvfuser integration in TorchScript is deprecated.");
   TORCH_CHECK(
       getFuserInterface()->fn_fuse_graph != nullptr,
       "Running the CUDA fuser requires a CUDA build.");

@@ -179,6 +179,7 @@ Tensor autograd functions
    torch.Tensor.detach
    torch.Tensor.detach_
    torch.Tensor.register_hook
+   torch.Tensor.register_post_accumulate_grad_hook
    torch.Tensor.retain_grad
 
 :hidden:`Function`

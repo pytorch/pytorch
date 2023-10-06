@@ -17,7 +17,7 @@ class SyncBatchNorm(Function):
 
         size = int(input.numel() // input.size(1))
         if size == 1 and world_size < 2:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+            raise ValueError(f'Expected more than 1 value per channel when training, got input size {size}')
 
         num_channels = input.shape[1]
         if input.numel() > 0:
@@ -49,7 +49,8 @@ class SyncBatchNorm(Function):
         # batch_norm_gather_stats_with_counts calculates global mean & invstd based on
         # all gathered mean, invstd and count.
         # for nccl backend, use the optimized version of all gather.
-        if process_group._get_backend_name() == 'nccl':
+        # The Gloo backend does not support `all_gather_into_tensor`.
+        if process_group._get_backend_name() != "gloo":
             # world_size * (2C + 1)
             combined_size = combined.numel()
             combined_flat = torch.empty(1,
@@ -70,7 +71,7 @@ class SyncBatchNorm(Function):
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
-        if not torch.cuda.is_current_stream_capturing():
+        if not (torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()):
             # The lines below force a synchronization between CUDA and CPU, because
             # the shape of the result count_all depends on the values in mask tensor.
             # Such synchronizations break CUDA Graph capturing.
@@ -192,7 +193,8 @@ class CrossMapLRN2d(Function):
         ctx.k = k
         ctx.scale = None
 
-        assert input.dim() == 4
+        if input.dim() != 4:
+            raise ValueError(f"CrossMapLRN2d: Expected input to be 4D, got {input.dim()}D instead.")
 
         ctx.scale = ctx.scale or input.new()
         output = input.new()

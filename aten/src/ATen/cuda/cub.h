@@ -8,9 +8,7 @@
 // a link error, you need to add an explicit instantiation for your
 // types in cub.cu
 
-namespace at {
-namespace cuda {
-namespace cub {
+namespace at::cuda::cub {
 
 inline int get_num_bits(uint64_t max_key) {
   int num_bits = 1;
@@ -86,4 +84,4 @@ inline void mask_exclusive_sum(const bool *mask, int64_t *output_idx, int64_t n)
       reinterpret_cast<const uint8_t*>(mask), output_idx, n);
 }
 
-}}}  // namespace at::cuda::cub
+}  // namespace at::cuda::cub

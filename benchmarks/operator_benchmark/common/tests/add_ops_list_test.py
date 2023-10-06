@@ -8,7 +8,7 @@ unary_ops_configs = op_bench.config_list(
         [128, 128],
     ],
     attr_names=["M", "N"],
-    tags=["short"]
+    tags=["short"],
 )
 
 
@@ -30,7 +30,9 @@ class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(self.input_one)
 
 
-op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(
+    unary_ops_list, unary_ops_configs, UnaryOpBenchmark
+)
 
 
 if __name__ == "__main__":

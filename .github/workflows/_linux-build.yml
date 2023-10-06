@@ -47,6 +47,12 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
+
 
     outputs:
       docker-image:
@@ -83,10 +89,9 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -131,6 +136,7 @@ jobs:
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -148,6 +154,7 @@ jobs:
             -e TORCH_CUDA_ARCH_LIST \
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
+            -e HUGGING_FACE_HUB_TOKEN \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -163,7 +170,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json .pytorch-test-file-ratings.json
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5

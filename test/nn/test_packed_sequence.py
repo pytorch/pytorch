@@ -48,7 +48,7 @@ class PackedSequenceTest(TestCase):
 
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
-        for _, (input_type, _) in self._type_by_name.items():
+        for (input_type, _) in self._type_by_name.values():
             for expected_type_str, (_, cast_str) in self._type_by_name.items():
                 for enforce_sorted in [True, False]:
                     padded, lengths = self._padded_sequence(input_type)

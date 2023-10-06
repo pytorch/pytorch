@@ -925,7 +925,7 @@ template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int 
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   double *wr = w;
-  double *wi = w + n;
+  double *wi = w ? w + n : nullptr;
   (void)rwork; // unused
   dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -934,7 +934,7 @@ template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int ld
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   float *wr = w;
-  float *wi = w + n;
+  float *wi = w ? w  + n : nullptr;
   (void)rwork; // unused
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }

@@ -112,8 +112,8 @@ def _retrieve_device(module: nn.Module) -> torch.device:
             device = parameter.device
         elif device != parameter.device:
             raise ValueError(
-                'nn.Module: {}, should have all parameters on a single device,'
-                ' please use .to() to place the module on a single device'.format(module))
+                f'nn.Module: {module}, should have all parameters on a single device,'
+                ' please use .to() to place the module on a single device')
 
     return device if device is not None else torch.device("cpu")
 
@@ -218,7 +218,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
     return partitions, devices
 
 
-MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
+MOVING_DENIED = TypeError("denied to move parameters and buffers, because Pipe should manage device placement")
 
 
 class Pipe(Module):
