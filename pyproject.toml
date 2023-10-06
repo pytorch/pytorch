@@ -76,6 +76,12 @@ select = [
     "PLE",
     "PLR1722", # use sys exit
     "PLW3301", # nested min max
+    "PT006", # TODO: enable more PT rules
+    "PT022",
+    "PT023",
+    "PT024",
+    "PT025",
+    "PT026",
     "RUF017",
     "TRY302",
 ]

@@ -2292,6 +2292,11 @@ class TestCase(expecttest.TestCase):
     # `torch.float` when `setUp` and `tearDown` are called.
     _default_dtype_check_enabled: bool = False
 
+    # Always use difflib to print diffs on multi line equality.
+    # Undocumented feature in unittest
+    _diffThreshold = sys.maxsize
+    maxDiff = sys.maxsize
+
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
         if torch.cuda.is_initialized():
