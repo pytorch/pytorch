@@ -668,7 +668,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,

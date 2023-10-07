@@ -744,8 +744,8 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor,
-    int64_t,
-    int64_t,
+    c10::SymInt,
+    c10::SymInt,
     at::Tensor,
     at::Tensor,
     at::Tensor>
