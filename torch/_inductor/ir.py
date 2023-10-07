@@ -3760,12 +3760,10 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
-        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
         assert isinstance(
             kernel,
             (
                 torch._ops.OpOverload,
-                torch._ops.OpOverloadPacket,
                 torch._ops.HigherOrderOperator,
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
@@ -3777,19 +3775,17 @@ class FallbackKernel(ExternKernelAlloc):
                 else kernel.__name__
             )
             if V.graph.cpp_wrapper:
-                if isinstance(kernel, torch._ops.OpOverload):
-                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                    self.kernel = (
-                        f"at::_ops::{kernel.__name__.replace('.default', '')}::call"
-                        if kernel._overloadname == "default"
-                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                    )
-                    schema = kernel._schema
-                else:
-                    self.kernel = f"at::{op_base_name}"
+                assert isinstance(kernel, torch._ops.OpOverload)
+                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                self.kernel = (
+                    f"at::{op_base_name}"
+                    if kernel._overloadname == "default"
+                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                )
+                schema = kernel._schema
             else:
                 self.kernel = f"aten.{op_base_name}"
 
