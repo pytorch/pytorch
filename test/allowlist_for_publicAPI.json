@@ -297,9 +297,6 @@
     "symbolic_trace",
     "wrap"
   ],
-  "torch.fx.experimental.migrate_gradual_types.transform_to_z3": [
-    "D"
-  ],
   "torch.fx.experimental.migrate_gradual_types.z3_types": [
     "D"
   ],
@@ -1037,9 +1034,6 @@
     "Sequence",
     "Tuple",
     "Union"
-  ],
-  "torch.utils.benchmark": [
-    "timer"
   ],
   "torch.utils.benchmark.utils.compare": [
     "Colorize",
@@ -1862,6 +1856,7 @@
     "BinConstraintT",
     "Conj",
     "ConstraintGenerator",
+    "D",
     "DVar",
     "Disj",
     "F",
@@ -2319,7 +2314,8 @@
     "Number",
     "Optional",
     "Tuple",
-    "Union"
+    "Union",
+    "timer"
   ],
   "torch.utils.benchmark.examples.op_benchmark": [
     "BinaryOpFuzzer",
