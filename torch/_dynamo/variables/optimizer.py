@@ -65,6 +65,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tx.store_global_weakref(self.get_global_name(), self.value)
                 self.create_finalizer(tx)
 
+                # This is currently safe only because the only actual `ret_val`s returned
+                # by the `_init_group` of existing optimizers are properties that are invariant 
+                # to the input tensors (e.g. dtype, layout). Changing these would trigger a 
+                # recompilation and hence never result in the wrong specialization of `ret_val`.
                 return ConstantVariable.create(ret_val)
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
