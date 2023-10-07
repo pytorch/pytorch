@@ -85,6 +85,10 @@ int32_t aoti_torch_dtype_int64() {
   return (int32_t)c10::ScalarType::Long;
 }
 
+int32_t aoti_torch_dtype_bool() {
+  return (int32_t)c10::ScalarType::Bool;
+}
+
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
@@ -228,8 +232,8 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       at::Tensor* ret3_tensor = new at::Tensor(std::move(r3));
       *ret3 = tensor_pointer_to_tensor_handle(ret3_tensor);
     }
-    *ret4 = r4;
-    *ret5 = r5;
+    *ret4 = r4.expect_int();
+    *ret5 = r5.expect_int();
     at::Tensor* ret6_tensor = new at::Tensor(std::move(r6));
     *ret6 = tensor_pointer_to_tensor_handle(ret6_tensor);
     at::Tensor* ret7_tensor = new at::Tensor(std::move(r7));

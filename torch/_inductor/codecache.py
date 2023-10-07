@@ -139,20 +139,24 @@ class CacheBase:
         except ModuleNotFoundError:
             triton_version = None
 
-        system: Dict[str, Any] = {
-            "device": {
-                "name": torch.cuda.get_device_properties(
-                    torch.cuda.current_device()
-                ).name,
-            },
-            "version": {
-                "cuda": torch.version.cuda,
-                "triton": triton_version,
-            },
-            "other": {
-                "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-            },
-        }
+        try:
+            system: Dict[str, Any] = {
+                "device": {
+                    "name": torch.cuda.get_device_properties(
+                        torch.cuda.current_device()
+                    ).name,
+                },
+                "version": {
+                    "cuda": torch.version.cuda,
+                    "triton": triton_version,
+                },
+                "other": {
+                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+                },
+            }
+        except (AssertionError, RuntimeError):
+            # If cuda is not installed, none of the above config is relevant.
+            system = {}
 
         system["hash"] = hashlib.sha256(
             json.dumps(system, sort_keys=True).encode("utf-8")

@@ -48,48 +48,56 @@ TEST(SymIntTest, SingletonSymNode) {
   ASSERT_TRUE(a >= a);
   ASSERT_TRUE(a >= b);
   ASSERT_TRUE(b >= a);
-  ASSERT_FALSE(a >= c);
-  ASSERT_FALSE(c >= a);
-  ASSERT_FALSE(c >= 3);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a >= c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c >= a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c >= 3), c10::Error);
   ASSERT_TRUE(c >= 2);
   ASSERT_TRUE(c >= 1);
-  ASSERT_TRUE(std::numeric_limits<int64_t>::max() >= c);
-  ASSERT_FALSE(std::numeric_limits<int64_t>::max() - 1 >= c);
   ASSERT_FALSE(1 >= c);
 
   // lt
   ASSERT_FALSE(a < a);
   ASSERT_FALSE(a < b);
   ASSERT_FALSE(b < a);
-  ASSERT_FALSE(a < c);
-  ASSERT_FALSE(c < a);
-  ASSERT_FALSE(a < std::numeric_limits<int64_t>::max());
-  ASSERT_FALSE(3 < a);
-  ASSERT_FALSE(2 < a);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a < c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c < a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(3 < a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(2 < a), c10::Error);
   ASSERT_TRUE(1 < a);
 
   // le
   ASSERT_TRUE(a <= a);
   ASSERT_TRUE(b <= a);
   ASSERT_TRUE(a <= b);
-  ASSERT_FALSE(c <= a);
-  ASSERT_FALSE(a <= c);
-  ASSERT_FALSE(3 <= c);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a <= c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c <= a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(3 <= c), c10::Error);
   ASSERT_TRUE(2 <= c);
   ASSERT_TRUE(1 <= c);
-  ASSERT_TRUE(c <= std::numeric_limits<int64_t>::max());
-  ASSERT_FALSE(c <= std::numeric_limits<int64_t>::max() - 1);
   ASSERT_FALSE(c <= 1);
 
   // gt
   ASSERT_FALSE(a > a);
   ASSERT_FALSE(b > a);
   ASSERT_FALSE(a > b);
-  ASSERT_FALSE(c > a);
-  ASSERT_FALSE(a > c);
-  ASSERT_FALSE(std::numeric_limits<int64_t>::max() > a);
-  ASSERT_FALSE(a > 3);
-  ASSERT_FALSE(a > 2);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a > c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c > a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a > 3), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a > 2), c10::Error);
   ASSERT_TRUE(a > 1);
 }
 #endif

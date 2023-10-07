@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import copy
 import logging
 import re
@@ -23,7 +21,7 @@ GEMM_TEMPLATE = r"""
 {{template.globals().getvalue()}}
 {{instance_definition}}
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
-// Otherwise, compuates the Gemm kernel using the given workspace ptr.
+// Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
 {{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   try {
@@ -158,7 +156,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def __init__(
         self,
-        input_nodes: List[Layout | Buffer],
+        input_nodes: List[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
@@ -183,7 +181,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return res
 
     @staticmethod
-    def cutlass_layout(torch_layout) -> Optional[cutlass_lib.LayoutType]:  # type: ignore[name-defined]
+    def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
@@ -196,8 +194,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def flip_cutlass_layout(
-        cutlass_layout: cutlass_lib.LayoutType,  # type: ignore[name-defined]
-    ) -> cutlass_lib.LayoutType:  # type: ignore[name-defined]
+        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]
+    ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
@@ -232,7 +230,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def define_gemm_instance(
-        op: cutlass_gemm_op.GemmOperation,  # type: ignore[name-defined]
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
@@ -278,7 +276,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # return False
 
     @staticmethod
-    def swap_XW(op: cutlass_gemm_op.GemmOperation) -> cutlass_gemm_op.GemmOperation:  # type: ignore[name-defined]
+    def swap_XW(op: "cutlass_gemm_op.GemmOperation") -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
         # Swap X and W in GemmOperation.
         new_op = copy.deepcopy(op)
         new_op.A.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.A.layout)
@@ -290,8 +288,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def filter_op(
         self,
-        op: cutlass_gemm_op.GemmOperation,  # type: ignore[name-defined]
-    ) -> cutlass_gemm_op.GemmOperation:  # type: ignore[name-defined]
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+    ) -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
@@ -372,7 +370,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         return op
 
-    def gen_ops(self) -> List[cutlass_gemm_op.GemmOperation]:  # type: ignore[name-defined]
+    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
         import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library as cutlass_lib  # type: ignore[import]
@@ -479,8 +477,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
-        op: cutlass_gemm_op.GemmOperation,  # type: ignore[name-defined]
-        output_node: Optional[Layout | Buffer] = None,
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+        output_node: Optional[Buffer] = None,
     ) -> str:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]
