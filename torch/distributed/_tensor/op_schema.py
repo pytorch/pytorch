@@ -6,10 +6,12 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 try:
-    from torch.utils._cxx_pytree import PyTreeSpec, tree_map_only
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
 except ImportError:
-    tree_map_only = torch.utils._pytree.tree_map_only  # type: ignore[assignment]
-    PyTreeSpec = torch.utils._pytree.TreeSpec  # type: ignore[assignment, misc]
+    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_map_only,
+        TreeSpec,
+    )
 
 
 # Common type aliases
@@ -339,7 +341,7 @@ class OpInfo:
     flat_args_schema: List[object]
     local_args: Sequence[object]
     local_kwargs: Dict[str, object]
-    args_tree_spec: Optional[PyTreeSpec] = None
+    args_tree_spec: Optional[TreeSpec] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None

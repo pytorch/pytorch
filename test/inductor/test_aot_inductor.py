@@ -63,6 +63,7 @@ class AOTInductorModelRunner:
             example_inputs,
             options=options,
             constraints=constraints,
+            remove_runtime_assertions=True,
         )
         return so_path, exported
 
@@ -685,10 +686,7 @@ class AOTInductorTestsTemplate:
             torch.tensor([1, 1, 1], device="cuda"),
             torch.randn((1, 32), dtype=torch.float16, device="cuda"),
         )
-        with torch._dynamo.config.patch(
-            {"add_runtime_assertions_for_inline_constraints": False}
-        ):
-            self.check_model(Repro(), example_inputs)
+        self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
         class Model(torch.nn.Module):

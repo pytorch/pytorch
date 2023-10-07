@@ -624,10 +624,12 @@ class TestOptim(TestCase):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach),
+                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=0.0048, foreach=foreach),
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+                multi_tensor=foreach,
             )
 
     def test_sgd_complex(self):
@@ -1324,13 +1326,13 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
-        # Handles https://github.com/pytorch/pytorch/issues/69698
+        # Handles https://github.com/pytorch/pytorch/issues/110606
         self.rel_tol = 2e-2
-        for optimizer in [optim.Adadelta]:
-            self._test_complex_optimizer(lambda weight: optimizer([weight]))
-            self._test_complex_optimizer(lambda weight: optimizer([weight], rho=0.95))
+        for foreach in (False, True):
+            self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], foreach=foreach))
+            self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], rho=0.95, foreach=foreach))
             self._test_complex_optimizer(
-                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+                lambda weight: optim.Adadelta([weight], rho=0.95, weight_decay=1, foreach=foreach)
             )
 
     def test_nadam(self):
@@ -1397,6 +1399,28 @@ class TestOptim(TestCase):
             optim.NAdam(None, lr=1e-2, betas=(1.0, 0.0))
         with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
             optim.NAdam(None, lr=1e-2, momentum_decay=-0.2)
+
+    def test_nadam_complex(self):
+        for foreach in (False, True):
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam([param], lr=1e-1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam(
+                    [param],
+                    lr=1e-1,
+                    momentum_decay=0.01,
+                    foreach=foreach,
+                )
+            )
 
     def test_adagrad(self):
         self._test_basic_cases(
@@ -1573,6 +1597,29 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.RAdam(None, lr=1e-2, weight_decay=-1)
+
+    def test_radam_complex(self):
+        for foreach in (False, True):
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam([param], lr=1e-1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    decoupled_weight_decay=True,
+                    foreach=foreach,
+                )
+            )
 
     def test_rmsprop(self):
         for foreach in (False, True):
@@ -2436,7 +2483,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):

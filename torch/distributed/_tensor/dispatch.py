@@ -25,8 +25,10 @@ from torch.distributed._tensor.sharding_prop import ShardingPropagator
 try:
     from torch.utils._cxx_pytree import tree_flatten, tree_unflatten
 except ImportError:
-    tree_flatten = torch.utils._pytree.tree_flatten  # type: ignore[assignment]
-    tree_unflatten = torch.utils._pytree.tree_unflatten  # type: ignore[assignment]
+    from torch.utils._pytree import (  # type: ignore[assignment]
+        tree_flatten,
+        tree_unflatten,
+    )
 
 
 def _is_random_op(op):
