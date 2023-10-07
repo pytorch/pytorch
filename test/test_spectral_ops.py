@@ -1195,7 +1195,8 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
     def test_istft_requires_window(self, device):
-        stft = torch.rand((51, 5), dtype=torch.cdouble) # 51 = 2 * n_fft + 1, 5 = number of frames
+        stft = torch.rand((51, 5), dtype=torch.cdouble)
+        # 51 = 2 * n_fft + 1, 5 = number of frames
         with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
             x = torch.istft(stft, n_fft=100, length=100)
 
