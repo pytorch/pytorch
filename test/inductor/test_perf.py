@@ -469,6 +469,14 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(20, 1, grad=True), T(1, 20, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """220""")
 
+    def test_partitioning_cat(self):
+        def f(a, b):
+            a = torch.tanh(a)
+            return torch.cat([a, b])
+
+        inp = (T(10, grad=True), T(10, grad=True))
+        self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
 
 def unfusible(x):
     return aten.special_bessel_j0(x)

@@ -23,8 +23,6 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
 # Remove when migration is done.
 from torch.export import (
-    ArgumentKind,
-    ArgumentSpec,
     ExportBackwardSignature,
     ExportGraphSignature,
     ExportedProgram,
@@ -34,8 +32,6 @@ from torch.export import (
 
 
 __all__ = [
-    "ArgumentKind",
-    "ArgumentSpec",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "ExportedProgram",
