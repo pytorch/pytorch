@@ -257,6 +257,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # This is mostly for inference mode when we want to
         # decompose CompositeImplicitAutograd ops.
         # For the long run, we need to think of a better way to handle it.
+        # TODO: We can benchmark this decompose further to see if we can
+        # completely remove the check and apply it for all DTensor Ops.
         if func == aten.linear.default:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
