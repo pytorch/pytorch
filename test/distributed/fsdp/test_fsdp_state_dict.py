@@ -1216,7 +1216,7 @@ class TestFSDPStateDict(FSDPTest):
 class TestFSDPStateDict4GPUs(FSDPTest):
     @property
     def world_size(self):
-        return 4
+        return max(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(4)
     def test_local_state_dict_reshard(self):

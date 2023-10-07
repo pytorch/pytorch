@@ -1271,7 +1271,7 @@ class TritonKernel(Kernel):
                     return None
                 elif assert_min and assert_max:
                     # The conditions need to be in parens because of Python's operator precedence.
-                    # It'd be less error-prone to use and/or/not, which is suported by triton
+                    # It'd be less error-prone to use and/or/not, which is supported by triton
                     cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
                     cond_print = f"0 <= {self.var} < {size_str}"
                 elif assert_min:
@@ -1918,7 +1918,7 @@ class TritonKernel(Kernel):
         for numel in self.numels:
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
-                # This default heuristic hint was picked carefuly: it is
+                # This default heuristic hint was picked carefully: it is
                 # large, to ensure that we don't shrink the block size (since
                 # if you don't have many elements, it'd be wasteful to pick a
                 # large block size).  Since we don't know how many elements we
@@ -2184,7 +2184,7 @@ class TritonKernel(Kernel):
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)
             if buf and len(buf.layout.size) == 4:
-                # ignore the tensor if only 1 dimention is non-zero
+                # ignore the tensor if only 1 dimension is non-zero
                 if len([x for x in buf.layout.size if x == 1]) == 3:
                     continue
                 stride_order = ir.get_stride_order(buf.layout.stride)
@@ -2519,7 +2519,7 @@ class TritonScheduling(BaseScheduling):
             if not any(
                 isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
             ):
-                # We probablly should look what are the nodes inside a foreach
+                # We probably should look what are the nodes inside a foreach
                 # schedule node
                 node_names = [
                     n.get_name()
