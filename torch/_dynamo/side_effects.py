@@ -440,7 +440,7 @@ class SideEffects:
             # can be generated at any time after this point, and can be generated multiple times! If we were to defer
             # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
             # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
-            # esentially a lookup.
+            # essentially a lookup.
             if (
                 hasattr(handle, "user_code_variable_name")
                 and handle.user_code_variable_name
