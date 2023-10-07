@@ -1246,6 +1246,19 @@ class BuiltinVariable(VariableTracker):
                         return getattr_var
 
             obj.convert_to_unspecialized(tx)
+        # FIXME (tmanlaibaatar) this is utter hack to unblock HuggingFace export
+        # Export generally doesn't want to allow mutations on objects directly,
+        # but we don't have good way to do this rn. For now, we make it an undefined
+        # behaviour and just set attributes directly on the PretrainedConfig object
+        # for now.
+        elif isinstance(obj, variables.dicts.HFPretrainedConfigVariable) and tx.export:
+            if name_var.is_python_constant() and isinstance(
+                val, variables.ConstantVariable
+            ):
+                setattr(
+                    obj.obj, name_var.as_python_constant(), val.as_python_constant()
+                )
+                return ConstantVariable(None)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
