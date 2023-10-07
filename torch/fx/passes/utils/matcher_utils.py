@@ -5,14 +5,13 @@ import torch
 from torch.fx import (
     Node,
     Graph,
-    GraphModule,
 )
 from torch.fx._compatibility import compatibility
 from typing import Dict, List, Set, Any, Union, Tuple
 import logging
 import os
 
-__all__ = ['SubgraphMatcher', 'InternalMatch', 'SubgraphMatcherWithNameNodesMap']
+__all__ = ['SubgraphMatcher', 'InternalMatch']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger():
@@ -47,7 +46,7 @@ class InternalMatch:
 
     # map from a string name to a node in the target graph
     # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
-    name_nodes_map: Dict[str, Node] = field(default_factory=dict)
+    name_node_map: Dict[str, Node] = field(default_factory=dict)
 
     def __copy__(self):
         return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),
@@ -387,41 +386,3 @@ class SubgraphMatcher:
         logger.info("Matches returned: %s", matches)
 
         return matches
-
-def _split_to_graph_and_name_nodes_map(
-    gm: GraphModule,
-) -> Tuple[GraphModule, Dict[str, Node]]:
-    from torch.utils._pytree import tree_flatten, tree_unflatten
-    from torch.fx.graph import _PyTreeInfo
-    name_nodes_map = {}
-    for n in gm.graph.nodes:
-        if n.op == "output":
-            output = tree_unflatten(n.args[0], gm._out_spec)
-            assert isinstance(output, tuple), "Expecting the pattern graph to return a tuple"
-            assert len(output) >= 2, "Expecting the pattern graph to have at least two outputs"
-            *out, name_nodes_map = output
-            flattened, out_spec = tree_flatten(out)
-            assert isinstance(name_nodes_map, Dict), "Expecting the input graph to have a dict output as the last element"
-            n.args = (flattened,)
-            orig_pytree_info = gm._graph._codegen.pytree_info
-            gm._graph._codegen.pytree_info = _PyTreeInfo(orig_pytree_info.orig_args, orig_pytree_info.in_spec, out_spec)
-    gm.recompile()
-    return gm, name_nodes_map
-
-
-class SubgraphMatcherWithNameNodesMap(SubgraphMatcher):
-    def __init__(self, pattern_gm: GraphModule,
-                 match_output: bool = False,
-                 match_placeholder: bool = False,
-                 remove_overlapping_matches: bool = True,
-                 ignore_literals: bool = False) -> None:
-        pattern_gm, name_nodes_map = _split_to_graph_and_name_nodes_map(pattern_gm)
-        self.name_nodes_map = name_nodes_map
-        super().__init__(pattern_gm.graph, match_output, match_placeholder, remove_overlapping_matches, ignore_literals)
-
-    def match(self, gm: GraphModule) -> List[InternalMatch]:
-        internal_matches = super().match(gm.graph)
-        for internal_match in internal_matches:
-            for k, n in self.name_nodes_map.items():
-                internal_match.name_nodes_map[k] = internal_match.nodes_map[n]
-        return internal_matches

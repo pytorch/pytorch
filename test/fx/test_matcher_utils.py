@@ -12,7 +12,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.passes.utils.matcher_utils import SubgraphMatcherWithNameNodesMap
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import SubgraphMatcherWithNameNodeMap
 from torch.testing._internal.common_utils import run_tests
 
 class TestMatcher(JitTestCase):
@@ -126,9 +126,10 @@ class TestMatcher(JitTestCase):
         match_sp_result = maxpool_matcher.match(maxpool_sp_graph)
         self.assertEqual(len(match_sp_result), 1)
 
-    def test_split_to_graph_and_name_nodes_map(self):
-        """Testing the helper function"""
-        from torch.fx.passes.utils.matcher_utils import _split_to_graph_and_name_nodes_map
+    def test_split_to_graph_and_name_node_map(self):
+        """Testing the internal helper function for splitting the pattern graph"""
+        from torch.fx.passes.utils.matcher_with_name_node_map_utils import _split_to_graph_and_name_node_map
+
         def pattern(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
@@ -140,13 +141,15 @@ class TestMatcher(JitTestCase):
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        ref_res = pattern(*example_inputs)
         pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
+        before_split_res = pattern_gm(*example_inputs)
+        pattern_gm, name_node_map = _split_to_graph_and_name_node_map(pattern_gm)
         after_split_res = pattern_gm(*example_inputs)
-        self.assertEqual(ref_res[0], after_split_res[0])
-        self.assertEqual(ref_res[1], after_split_res[1])
+        self.assertEqual(before_split_res[0], after_split_res[0])
+        self.assertEqual(before_split_res[1], after_split_res[1])
 
-    def test_matcher_with_name_nodes_map(self):
+    def test_matcher_with_name_node_map(self):
+
         def target_graph(x, weight):
             x = x * 2
             weight = weight * 3
@@ -167,17 +170,17 @@ class TestMatcher(JitTestCase):
             torch.randn(3, 3, 3, 3),
         )
         pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
-        matcher = SubgraphMatcherWithNameNodesMap(pattern_gm)
+        matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
         target_gm = capture_pre_autograd_graph(target_graph, example_inputs)
-        internal_matches = matcher.match(target_gm)
+        internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
-            name_nodes_map = internal_match.name_nodes_map
-            assert "conv" in name_nodes_map
-            assert "relu" in name_nodes_map
-            name_nodes_map["conv"].meta["custom_annotation"] = "annotation"
+            name_node_map = internal_match.name_node_map
+            assert "conv" in name_node_map
+            assert "relu" in name_node_map
+            name_node_map["conv"].meta["custom_annotation"] = "annotation"
             # check if we correctly annotated the target graph module
             for n in target_gm.graph.nodes:
-                if n == name_nodes_map["conv"]:
+                if n == name_node_map["conv"]:
                     assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
 
 if __name__ == "__main__":
