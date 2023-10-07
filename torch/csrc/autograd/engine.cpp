@@ -1008,6 +1008,7 @@ void Engine::evaluate_function(
     }
     if (!fn_info.needed_) {
       // Skip execution if we don't need to execute the function.
+      LOG(WARNING) << "Engine::evaluate_function " << func->name() << " not needed";
       return;
     }
   }
@@ -1021,6 +1022,7 @@ void Engine::evaluate_function(
 
   auto num_outputs = outputs.size();
   if (num_outputs == 0) { // Note: doesn't acquire the mutex
+    LOG(WARNING) << "Engine::evaluate_function " << func->name() << " no outputs";
     // Records leaf stream (if applicable)
     // See Note [Streaming backwards]
     if (opt_parent_stream) {
@@ -1051,8 +1053,10 @@ void Engine::evaluate_function(
     auto& output = outputs[i];
     const auto& next = fn.next_edge(i);
 
-    if (!next.is_valid())
+    if (!next.is_valid()) {
+      LOG(WARNING) << "Engine::evaluate_function " << func->name() << " output " << i << " !next.is_valid()";
       continue;
+    }
 
     // Check if the next function is ready to be computed
     bool is_ready = false;
@@ -1074,6 +1078,7 @@ void Engine::evaluate_function(
       if (!exec_info_.empty()) {
         auto it = exec_info_.find(next.function.get());
         if (it == exec_info_.end() || !it->second.should_execute()) {
+          LOG(WARNING) << "Engine::evaluate_function " << func->name() << " dep should not execute " << next.function->name();
           continue;
         }
       }
@@ -1087,9 +1092,11 @@ void Engine::evaluate_function(
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        LOG(WARNING) << "Engine::evaluate_function " << func->name() << " pushing " << next.function->name();
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
+        LOG(WARNING) << "Engine::evaluate_function " << func->name() << " dep not ready " << next.function->name();
         not_ready.emplace(next.function.get(), std::move(input_buffer));
       }
     } else {
@@ -1102,9 +1109,12 @@ void Engine::evaluate_function(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        LOG(WARNING) << "Engine::evaluate_function " << func->name() << " pushing preexisting buffer " << next.function->name();
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
+      } else {
+        LOG(WARNING) << "Engine::evaluate_function " << func->name() << " preexisting buffer not ready " << next.function->name();
       }
     }
   }
@@ -1583,6 +1593,7 @@ void GraphTask::init_to_execute(
     // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node* output = output_edge.function.get();
     auto& info = exec_info_[output];
+    LOG(WARNING) << "init output " << output->name();
     if (accumulate_grad) {
       // if called through `.backward()` we directly set `needed_` for all the
       // outputs to true
@@ -1630,10 +1641,14 @@ void GraphTask::init_to_execute(
     auto& frame = stack.back();
     const auto fn = frame.fn_;
 
+    LOG(WARNING) << "parent " << fn->name() << " should_execute=" << nodeShouldExecute(fn);
+
     Node* child_fn = nullptr;
     while ((child_fn = frame.get_next_fn()) && !seen.emplace(child_fn).second) {
+      LOG(WARNING) << "  child " << child_fn->name();
       // (1) next child exists AND has already been seen
       if (nodeShouldExecute(child_fn)) {
+        LOG(WARNING) << "  child implies parent is needed";
         exec_info_[fn].needed_ = true;
       }
     }
@@ -1651,6 +1666,7 @@ void GraphTask::init_to_execute(
       // finalized. pop stack and update parent
       stack.pop_back();
       if (nodeShouldExecute(fn) && !stack.empty()) {
+        LOG(WARNING) << "  no next child means need " << stack.back().fn_->name();
         exec_info_[stack.back().fn_].needed_ = true;
       }
     }

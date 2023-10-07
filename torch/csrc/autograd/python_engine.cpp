@@ -292,57 +292,40 @@ PyObject* THPEngine_run_backward(
     output_edges.reserve(num_inputs);
     for (const auto i : c10::irange(num_inputs)) {
       PyObject* input = PyTuple_GET_ITEM(inputs, i);
-      if (THPVariable_Check(input)) {
-        const auto& tensor = THPVariable_Unpack(input);
-        TORCH_CHECK(
-            !isBatchedTensor(tensor),
-            "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
-            "torch.vmap. We do not support the case where any inputs are ",
-            "vmapped tensors (input ",
-            i,
-            " is being vmapped over). Please "
-            "call autograd.grad() outside torch.vmap or file a bug report "
-            "with your use case.")
-        const auto output_nr = tensor.output_nr();
-        auto grad_fn = tensor.grad_fn();
-        if (!grad_fn) {
-          grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
-        }
-        if (accumulate_grad) {
-          tensor.retain_grad();
-        }
-        THPUtils_assert(
-            tensor.requires_grad(),
-            "One of the differentiated Tensors does not require grad");
-        if (!grad_fn) {
-          // NOTE [ Autograd Unreachable Input ]
-          // Since input has no grad_accumulator, its guaranteed to be
-          // unreachable. We initialize an edge pointing to a non-nullptr Node
-          // so nodes in the graph (e.g., mul when an operand is scalar) that
-          // have edges pointing to nullptr don't get erroneously assigned
-          // `needed = True` in exec_info.
-          output_edges.emplace_back(std::make_shared<Identity>(), 0);
-        } else {
-          output_edges.emplace_back(grad_fn, output_nr);
-        }
-      } else if (PyObject_IsInstance(input, THPGradientEdgeClass)) {
-        auto node = PyTuple_GetItem(input, 0);
-        bool isTHPFunction = THPFunction_Check(node);
-        bool isTHPCppFunction = THPCppFunction_Check(node);
-        THPUtils_assert(
-            isTHPFunction || isTHPCppFunction,
-            "GradientEdge first object must be an autograd.graph.Node "
-            "but got %s",
-            THPUtils_typename(node));
-        std::shared_ptr<torch::autograd::Node> node_sp;
-        if (isTHPFunction) {
-          node_sp = ((THPFunction*)node)->cdata.lock();
-        } else {
-          node_sp = ((torch::autograd::THPCppFunction*)node)->cdata;
-        }
-
-        auto output_nr = THPUtils_unpackUInt32(PyTuple_GetItem(input, 1));
-        output_edges.emplace_back(node_sp, output_nr);
+      THPUtils_assert(
+          THPVariable_Check(input),
+          "all inputs have to be Tensors, but got %s",
+          THPUtils_typename(input));
+      const auto& tensor = THPVariable_Unpack(input);
+      TORCH_CHECK(
+          !isBatchedTensor(tensor),
+          "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+          "torch.vmap. We do not support the case where any inputs are ",
+          "vmapped tensors (input ",
+          i,
+          " is being vmapped over). Please "
+          "call autograd.grad() outside torch.vmap or file a bug report "
+          "with your use case.")
+      const auto output_nr = tensor.output_nr();
+      auto grad_fn = tensor.grad_fn();
+      if (!grad_fn) {
+        grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
+      }
+      if (accumulate_grad) {
+        tensor.retain_grad();
+      }
+      THPUtils_assert(
+          tensor.requires_grad(),
+          "One of the differentiated Tensors does not require grad");
+      if (!grad_fn) {
+        // NOTE [ Autograd Unreachable Input ]
+        // Since input has no grad_accumulator, its guaranteed to be
+        // unreachable. We initialize an edge pointing to a non-nullptr Node so
+        // nodes in the graph (e.g., mul when an operand is scalar) that have
+        // edges pointing to nullptr don't get erroneously assigned `needed =
+        // True` in exec_info.
+        LOG(WARNING) << "unreachable input, creating Identity edge";
+        output_edges.emplace_back(std::make_shared<Identity>(), 0);
       } else {
         THPUtils_assert(
             false,
