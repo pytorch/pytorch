@@ -7313,19 +7313,17 @@ def ___make_guard_fn():
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return list(itertools.accumulate(l, **kwargs))
+                return itertools.accumulate(l, **kwargs)
 
             t_list = [torch.tensor([i + 1]) for i in range(4)]
             x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
-            self.assertEqual(counter.frame_count, 1)
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):

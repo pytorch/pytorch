@@ -17,7 +17,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     OutputSpecType,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
@@ -150,10 +150,23 @@ def _operator_dispatch(
             else:
                 mesh = arg.device_mesh
         elif isinstance(arg, torch.Tensor):
-            raise RuntimeError(
-                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                " torch.Tensor to DTensor before calling distributed operators!"
-            )
+            if arg.ndim == 0 and mesh is not None:
+                # scalar tensor can be safely treated as replicated
+                args_schema.append(
+                    DTensorSpec(
+                        mesh,
+                        (Replicate(),) * mesh.ndim,
+                        tensor_meta=TensorMeta(
+                            shape=arg.shape, stride=arg.stride(), dtype=arg.dtype
+                        ),
+                    )
+                )
+                local_args.append(arg)
+            else:
+                raise RuntimeError(
+                    f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                    " torch.Tensor to DTensor before calling distributed operators!"
+                )
         else:
             args_schema.append(arg)
             local_args.append(arg)

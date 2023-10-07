@@ -20,20 +20,11 @@ namespace c10 {
 // a proxy to evaluate equality. We also constrain the range of values for this
 // as to enable inequality checks.
 //
-// We also support a positive integer scalar "coeff" that is used for computing
-// strides. For example given, a [B, j0, D] tensor, it can be strided in two
-// different ways: [D * j0, D, 1] and [j0, 1, sum(j0)]. The coeff is used to
-// differentiate the two cases.
-//
-// During tracing the strides of the outputs need to be a function of the size
-// and strides of the inputs so it is important that SingletonSymNode itself is
-// able to express this.
 class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff)
-      : val_(val), coeff_(coeff) {}
+  explicit SingletonSymNodeImpl(int64_t val) : val_(val) {}
 
   bool bool_() override {
     return false;
@@ -76,10 +67,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   }
 
   std::string str() override {
-    if (coeff_ == 1) {
-      return "j" + std::to_string(val_);
-    }
-    return std::to_string(coeff_) + "*j" + std::to_string(val_);
+    return "j" + std::to_string(val_);
   }
 
   // NOTE [ Inequalities with SingletonInt ]
@@ -108,28 +96,15 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   // would mean that means that if we define the indeterminate j0 >= 3 to be
   // False, the also indeterminate j0 < 3 will be evaluated to be True!
   //
-  // [ Coefficient are assumed positive ]
-  //
-  // For the purpose of computing inequalities, we consider the coefficient of
-  // the SingletonInt to be a positive integer.
-  //
-  // Thus, no modificaitons are needed to the logic since
-  // j0 >= k implies coeff * j0 >= k
-  //
   c10::SymNode eq(const c10::SymNode& other) override;
   c10::SymNode ne(const c10::SymNode& other) override;
   c10::SymNode ge(const c10::SymNode& other) override;
   c10::SymNode gt(const c10::SymNode& other) override;
   c10::SymNode lt(const c10::SymNode& other) override;
   c10::SymNode le(const c10::SymNode& other) override;
-  c10::SymNode mul(const c10::SymNode& other) override;
 
   c10::optional<int64_t> singleton_int() override {
     return val_;
-  }
-
-  c10::optional<int64_t> singleton_coeff() override {
-    return coeff_;
   }
 
   bool is_symbolic() override {
@@ -143,6 +118,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
   DEFINE_BINARY_NOT_SUPPORTED(add)
   DEFINE_BINARY_NOT_SUPPORTED(sub)
+  DEFINE_BINARY_NOT_SUPPORTED(mul)
   DEFINE_BINARY_NOT_SUPPORTED(truediv)
   DEFINE_BINARY_NOT_SUPPORTED(pow)
   DEFINE_BINARY_NOT_SUPPORTED(floordiv)
@@ -170,7 +146,6 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
  private:
   int64_t val_;
-  int64_t coeff_;
 };
 
 } // namespace c10

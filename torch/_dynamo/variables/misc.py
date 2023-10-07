@@ -805,11 +805,11 @@ class SkipFilesVariable(VariableTracker):
 
                 if "func" in kwargs and len(args) == 1:
                     func = kwargs["func"].call_function
+                elif len(args) == 2:
+                    func = args[1].call_function
                 elif len(args) == 1:
                     # Default to operator.add
                     func = BuiltinVariable(operator.add).call_function
-                elif len(args) == 2:
-                    func = args[1].call_function
                 else:
                     raise unimplemented(
                         "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
