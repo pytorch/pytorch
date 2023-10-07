@@ -74,29 +74,6 @@ class WorkflowCheckState:
         self.jobs: JobNameToStateDict = {}
 
 
-class FlakyRule:
-    def __init__(self, name: str, captures: List[str]):
-        self.name = re.compile(name)
-        self.captures = [re.compile(r) for r in captures]
-
-    def matches(self, job: Optional[Dict[str, Any]]) -> bool:
-        return (
-            job is not None
-            and self.name.search(job.get("name", "")) is not None
-            and job.get("failure_captures") is not None
-            and all(
-                any(
-                    r.search(capture) is not None
-                    for capture in job.get("failure_captures", [])
-                )
-                for r in self.captures
-            )
-        )
-
-    def __repr__(self) -> str:
-        return f"FlakyRule[name='{self.name}', captures={self.captures}]"
-
-
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
   nodes {
@@ -1261,13 +1238,6 @@ def read_merge_rules(
         return [MergeRule(**x) for x in rc]
 
 
-@lru_cache(maxsize=None)
-def read_flaky_rules() -> List[FlakyRule]:
-    # NOTE: This is currently hardcoded, can be extended to do per repo rules
-    FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
-    return _get_flaky_rules(FLAKY_RULES_URL)
-
-
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: Optional[GitRepo] = None,
@@ -1298,7 +1268,6 @@ def find_matching_merge_rule(
     reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
 
     rules = read_merge_rules(repo, pr.org, pr.project)
-    flaky_rules = read_flaky_rules()
     if not rules:
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
@@ -1313,10 +1282,11 @@ def find_matching_merge_rule(
             f"{type(e)}\n{e}"
         )
     checks = get_classifications(
+        pr.pr_num,
+        pr.project,
         checks,
         pr.last_commit()["oid"],
         base_rev,
-        flaky_rules,
         ignore_current_checks=ignore_current_checks,
     )
 
@@ -1467,11 +1437,6 @@ def checks_to_markdown_bullets(
     ]
 
 
-@retries_decorator(rc=[])
-def _get_flaky_rules(url: str) -> List[FlakyRule]:
-    return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
-
-
 @retries_decorator()
 def save_merge_record(
     collection: str,
@@ -1575,6 +1540,27 @@ where
         return []
 
 
+@retries_decorator()
+def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
+    """
+    Query HUD API to find similar failures to decide if they are flaky
+    """
+    # NB: This doesn't work internally atm because this requires making an
+    # external API call to HUD
+    failures = gh_fetch_url(
+        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+        data=f"repo={project}",
+        headers={
+            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+            "Accept": "application/vnd.github.v3+json",
+        },
+        method="POST",
+        reader=json.load,
+    )
+
+    return failures.get(str(pr_num), {}) if failures else {}
+
+
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
 
 
@@ -1595,11 +1581,50 @@ def is_broken_trunk(
     )
 
 
+def is_flaky(
+    head_job: Optional[Dict[str, Any]],
+    drci_classifications: Any,
+) -> bool:
+    if not head_job or not drci_classifications:
+        return False
+
+    # Consult the list of flaky failures from Dr.CI
+    return any(
+        head_job.get("full_name", "") == flaky["name"]
+        for flaky in drci_classifications.get("FLAKY", [])
+    )
+
+
+def is_invalid_cancel(
+    head_job: Optional[Dict[str, Any]],
+    drci_classifications: Any,
+) -> bool:
+    """
+    After https://github.com/pytorch/test-infra/pull/4579, invalid cancelled
+    signals have been removed from HUD and Dr.CI. The same needs to be done
+    here for consistency
+    """
+    if not head_job or not drci_classifications:
+        return False
+
+    full_name = head_job.get("full_name", "")
+    if head_job.get("conclusion", "") != "cancelled" or not full_name:
+        return False
+
+    # If a job is cancelled and not listed as a failure by Dr.CI, it's an
+    # invalid signal and can be ignored
+    return all(
+        full_name != failure["name"]
+        for failure in drci_classifications.get("FAILED", [])
+    )
+
+
 def get_classifications(
+    pr_num: int,
+    project: str,
     checks: Dict[str, JobCheckState],
     head_sha: str,
     merge_base: Optional[str],
-    flaky_rules: List[FlakyRule],
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
     # Group by job name without shard id and suffix to correctly identify broken
@@ -1637,6 +1662,8 @@ def get_classifications(
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
             name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
+            rockset_result["full_name"] = name
+
             if rockset_result["head_sha"] == head_sha:
                 insert(
                     head_sha_jobs,
@@ -1651,6 +1678,11 @@ def get_classifications(
                     rockset_result,
                     overwrite_failed_run_attempt=False,
                 )
+
+    # Get the failure classification from Dr.CI, which is the source of truth
+    # going forward
+    drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
+    print(f"From Dr.CI: {json.dumps(drci_classifications)}")
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
@@ -1671,6 +1703,9 @@ def get_classifications(
         name_no_suffix = remove_job_name_suffix(name)
         head_sha_job = head_sha_jobs.get(name_no_suffix, {}).get(name)
 
+        # NB: It's important to note that when it comes to ghstack and broken trunk classification,
+        # the current implementation of trymerge uses the base of the current PR in the stack, i.e.
+        # gh/user/xx/base, while Dr.CI uses the base of the whole stack. Both works though
         if is_broken_trunk(head_sha_job, merge_base_jobs.get(name_no_suffix)):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
@@ -1682,9 +1717,22 @@ def get_classifications(
             )
             continue
 
-        elif any(rule.matches(head_sha_job) for rule in flaky_rules):
+        elif is_flaky(head_sha_job, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id, check.title
+            )
+            continue
+        elif is_invalid_cancel(head_sha_job, drci_classifications):
+            # NB: Create a new category here for invalid cancelled signals because
+            # there are usually many of them when they happen. So, they shouldn't
+            # be counted toward ignorable failures threshold
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "INVALID_CANCEL",
+                check.job_id,
+                check.title,
             )
             continue
 
@@ -1864,6 +1912,8 @@ def categorize_checks(
             # ignored anyway. This is useful to not need to wait for scarce resources
             # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
+        elif classification == "INVALID_CANCEL":
+            continue
         elif not is_passing_status(check_runs[checkname].status):
             target = (
                 ignorable_failed_checks[classification]
@@ -1974,7 +2024,6 @@ def merge(
     start_time = time.time()
     last_exception = ""
     elapsed_time = 0.0
-    flaky_rules = read_flaky_rules()
     ignore_current_checks = [
         x[0] for x in ignore_current_checks_info
     ]  # convert to List[str] for convenience
@@ -2007,10 +2056,11 @@ def merge(
 
             checks = pr.get_checkrun_conclusions()
             checks = get_classifications(
+                pr.pr_num,
+                pr.project,
                 checks,
                 pr.last_commit()["oid"],
                 pr.get_merge_base(),
-                flaky_rules,
                 ignore_current_checks=ignore_current_checks,
             )
             pending, failing, _ = categorize_checks(

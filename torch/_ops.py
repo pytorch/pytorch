@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -233,6 +234,15 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
 _global_higher_order_ops = {}
 _higher_order_ops = {}
 
+_HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
+    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
+    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.ADInplaceOrView,
+    DispatchKey.BackendSelect,
+    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+]
+
 
 class HigherOrderOperator(OperatorBase):
     # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
@@ -263,6 +273,14 @@ class HigherOrderOperator(OperatorBase):
             self_name_space = "." + self.namespace if self.namespace else ""
             self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+        for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
+            self.fallthrough(dispatch_key)
+
+    def py_impl(self, k):
+        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
+        return super().py_impl(k)
 
     @property
     def namespace(self):
@@ -872,6 +890,25 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def import_module(self, module):
+        """
+        Imports a Python module that has torch.library registrations.
+
+        Generally, to extend PyTorch with custom operators, a user will
+        create a Python module whose import triggers registration of
+        the custom operators via a torch.ops.load_library call or a call
+        to one or more torch.library.* APIs.
+
+        It is unexpected for Python modules to have side effects, so some
+        linters and formatters will complain. Use this API to import Python
+        modules that contain these torch.library side effects.
+
+        Args:
+            module (str): The name of the Python module to import
+
+        """
+        importlib.import_module(module)
 
     def load_library(self, path):
         """

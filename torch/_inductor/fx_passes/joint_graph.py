@@ -1,6 +1,7 @@
 import logging
+import typing
 from collections import Counter
-from typing import Set
+from typing import Dict, Set
 
 import torch
 import torch._guards
@@ -120,7 +121,7 @@ class UniformValueConstantFolder(ConstantFolder):
     def __init__(self, gm, skip_constructors=False):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
-        self.constant_data_ptrs: Counter[int, int] = Counter()
+        self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         # TODO - we could also Tensors which get replaced with arange here
@@ -137,7 +138,7 @@ class UniformValueConstantFolder(ConstantFolder):
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def constant_fold_uniform_value(gm):
+def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
     aten = torch.ops.aten
 
@@ -155,7 +156,7 @@ def constant_fold_uniform_value(gm):
 
     # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
     # so just constant-ify if a Tensor is unaliased
-    constant_data_ptr_count = Counter()
+    constant_data_ptr_count: typing.Counter[StorageWeakRef] = Counter()
 
     for node in cf.node_replacements:
         constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
@@ -238,7 +239,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     ),
     pass_dict=patterns,
 )
-def pointless_convert(match: Match, arg, dtype1, dtype2):
+def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtype):
     """Remove chain of dtype conversions often created by AMP"""
     graph = match.graph
     node = match.output_node()

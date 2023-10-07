@@ -139,20 +139,24 @@ class CacheBase:
         except ModuleNotFoundError:
             triton_version = None
 
-        system: Dict[str, Any] = {
-            "device": {
-                "name": torch.cuda.get_device_properties(
-                    torch.cuda.current_device()
-                ).name,
-            },
-            "version": {
-                "cuda": torch.version.cuda,
-                "triton": triton_version,
-            },
-            "other": {
-                "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-            },
-        }
+        try:
+            system: Dict[str, Any] = {
+                "device": {
+                    "name": torch.cuda.get_device_properties(
+                        torch.cuda.current_device()
+                    ).name,
+                },
+                "version": {
+                    "cuda": torch.version.cuda,
+                    "triton": triton_version,
+                },
+                "other": {
+                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+                },
+            }
+        except (AssertionError, RuntimeError):
+            # If cuda is not installed, none of the above config is relevant.
+            system = {}
 
         system["hash"] = hashlib.sha256(
             json.dumps(system, sort_keys=True).encode("utf-8")
@@ -688,7 +692,7 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
 
 
 def cpp_wrapper_flags() -> str:
@@ -726,7 +730,14 @@ def use_custom_generated_macros() -> str:
 def use_fb_internal_macros() -> str:
     if config.is_fbcode():
         openmp_lib = build_paths.openmp_lib()
-        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        preprocessor_flags = " ".join(
+            (
+                "-D C10_USE_GLOG",
+                "-D C10_USE_MINIMAL_GLOG",
+                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+            )
+        )
+        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
     else:
         return ""
 
@@ -782,10 +793,6 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode:
-        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
-        cuda = True
-
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -812,17 +819,18 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
-                # This is a special treatment for Meta internal cuda-12 where all libs
-                # are in lib/cuda-12 and lib/cuda-12/stubs
-                for i, path in enumerate(lpaths):
-                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
-                        f"{path}/libcudart_static.a"
-                    ):
-                        for root, dirs, files in os.walk(path):
-                            if "libcudart_static.a" in files:
-                                lpaths[i] = os.path.join(path, root)
-                                lpaths.append(os.path.join(lpaths[i], "stubs"))
-                                break
+                if cuda:
+                    # This is a special treatment for Meta internal cuda-12 where all libs
+                    # are in lib/cuda-12 and lib/cuda-12/stubs
+                    for i, path in enumerate(lpaths):
+                        if path.startswith(
+                            os.environ["CUDA_HOME"]
+                        ) and not os.path.exists(f"{path}/libcudart_static.a"):
+                            for root, dirs, files in os.walk(path):
+                                if "libcudart_static.a" in files:
+                                    lpaths[i] = os.path.join(path, root)
+                                    lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                    break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -854,6 +862,8 @@ def get_include_and_linking_paths(
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.dirname(cpp_prefix_path())]
         lpaths = []
         if sys.platform == "darwin":
             # only Apple builtin compilers (Apple Clang++) require openmp
@@ -908,12 +918,13 @@ def get_include_and_linking_paths(
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
         ipaths.append(build_paths.gcc_install_tools_include())
+        ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
     static_link_libs = []
-    if aot_mode and config.is_fbcode():
+    if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
         static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
@@ -1009,8 +1020,7 @@ class AotCodeCache:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> Callable[..., Any]:
-        # TODO: update cpp_compile_command for different platforms
-        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
@@ -1096,13 +1106,13 @@ class AotCodeCache:
                     log.debug("aot constant bin removal command: %s", cmd)
                     run_command_and_check(cmd)
 
-                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    body = re.sub(r"[\W]", "_", consts_path)
                     symbol_list = []
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
                     )
                     symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_size {consts_o}"
+                        f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
                     )
                     symbol_list.append(
                         f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
@@ -1726,6 +1736,27 @@ class TritonFuture:
         return kernel
 
 
+# If this process dies abnormally (e.g. segfault)
+# it will not shut down the workers. Instead
+# the workers will have their parent reassigned to the
+# init process. This launches a separate thread to
+# watch for the worker getting reassigned,
+# and cleans it up in this case.
+#
+# This function cannot be an inner function since otherwise mp_context="spawn" would
+# not work for ProcessPoolExecutor since inner functions cannot be pickled.
+def _async_compile_initializer(orig_ppid) -> None:
+    def run() -> None:
+        while True:
+            sleep(1)
+            if orig_ppid != os.getppid():
+                os.kill(os.getpid(), signal.SIGKILL)
+
+    global _watchdog_thread
+    _watchdog_thread = Thread(target=run, daemon=True)
+    _watchdog_thread.start()
+
+
 _watchdog_thread: Optional[Thread] = None
 
 
@@ -1748,28 +1779,11 @@ class AsyncCompile:
         assert config.compile_threads > 1
         orig_ppid = os.getpid()
 
-        # if this process dies abnormally (e.g. segfault)
-        # it will not shut down the workers. Instead
-        # the workers will have their parent reassigned to the
-        # init process. This launches a separate thread to
-        # watch for the worker getting reassigned,
-        # and cleans it up in this case.
-        def init() -> None:
-            def run() -> None:
-                while True:
-                    sleep(1)
-                    if orig_ppid != os.getppid():
-                        os.kill(os.getpid(), signal.SIGKILL)
-
-            global _watchdog_thread
-            _watchdog_thread = Thread(target=run, daemon=True)
-            _watchdog_thread.start()
-
-        # we rely on 'fork' because we cannot control whether users
-        # have an `if __name__ == '__main__'` in their main process.
-        fork_context = multiprocessing.get_context("fork")
+        ctx = multiprocessing.get_context(config.worker_start_method)
         pool = ProcessPoolExecutor(
-            config.compile_threads, mp_context=fork_context, initializer=init
+            config.compile_threads,
+            mp_context=ctx,
+            initializer=partial(_async_compile_initializer, orig_ppid),
         )
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
