@@ -37,14 +37,18 @@ bin_ops_under_test = [
     torch._foreach_sub,
     torch._foreach_div,
     torch._foreach_maximum,
+    torch._foreach_minimum,
+    torch._foreach_clamp_max,
+    torch._foreach_clamp_min,
     aten._foreach_copy,
 ]
 
 un_ops_under_test = [
     torch._foreach_reciprocal,
     torch._foreach_neg,
-    torch._foreach_abs,
     torch._foreach_sign,
+    torch._foreach_abs,
+    torch._foreach_sqrt,
 ]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
