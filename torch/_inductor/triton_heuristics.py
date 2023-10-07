@@ -424,7 +424,8 @@ class CachingAutotuner(KernelInterface):
         else:
             grid_x, grid_y, grid_z = grid
 
-        key = launcher.fn.fn.__qualname__  # unique kernel name
+        key = self.meta.get("kernel_name", None)  # unique kernel name
+        assert key is not None, "kernel_name can not be None"
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,

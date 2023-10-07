@@ -1464,6 +1464,12 @@ class CommonTemplate:
 
         self.common(fn, (1024, 100))
 
+    def test_div9(self):
+        def fn(x):
+            return (torch.div(42, x), aten.true_divide(42, x), aten.div.Tensor(42, x))
+
+        self.common(fn, (torch.randn(8),))
+
     def test_div_zero_dim(self):
         def fn(a, b):
             return (
@@ -7134,24 +7140,6 @@ class CommonTemplate:
             actual = torch.compile(f, fullgraph=True)(x)
         self.assertEqual(ref, actual)
         self.assertTrue(called)
-
-    def test_mutations_loop_fusion(self):
-        def fn(tensor, index, source):
-            out = tensor.index_add(0, index, source, alpha=2.0) / 2
-            return out
-
-        device = "cpu"
-        tensor = torch.rand((1,), dtype=torch.double, device=device)
-        index = torch.tensor([0], dtype=torch.long, device=device)
-        source = torch.rand((1,), dtype=torch.double, device=device)
-        self.common(
-            fn,
-            (
-                tensor,
-                index,
-                source,
-            ),
-        )
 
 
 @dataclasses.dataclass

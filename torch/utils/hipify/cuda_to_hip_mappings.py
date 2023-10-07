@@ -8610,6 +8610,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
         ("cuda::CUDAAllocatorConfig", ("hip::HIPAllocatorConfig", API_C10)),
         ("CUDAAllocatorConfig", ("HIPAllocatorConfig", API_C10)),
+        ("pinned_use_cuda_host_register", ("pinned_use_hip_host_register", API_C10)),
         ("c10::cuda::CUDAAllocator", ("c10::hip::HIPAllocator", API_C10)),
         ("cuda::CUDAAllocator", ("hip::HIPAllocator", API_C10)),
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
