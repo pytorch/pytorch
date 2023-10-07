@@ -25,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     NUM_DEVICES,
     with_comms,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
@@ -136,6 +137,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self._test_mlp_training_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_mlp_inference(self):
         with torch.inference_mode():
             self._test_mlp_inference()
