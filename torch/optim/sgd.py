@@ -218,6 +218,10 @@ def sgd(params: List[Tensor],
     See :class:`~torch.optim.SGD` for details.
     """
 
+    # Respect when the user inputs False/True for foreach or fused. We only want to change
+    # the default when neither have been user-specified. Note that we default to foreach
+    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
+    # bake-in time before making it the default, even if it is typically faster.
     if foreach is None and fused is None:
         # why must we be explicit about an if statement for torch.jit.is_scripting here?
         # because JIT can't handle Optionals nor fancy conditionals when scripting
@@ -394,8 +398,8 @@ def _fused_sgd(
         for i, g in enumerate(grads):
             momentum_buffer_list[i] = torch.empty_like(g)
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list], with_indices=True)
-    for (device, dtype), ((device_params, device_grads, device_momentum_buffer_list), indices) in grouped_tensors.items():
+        [params, grads, momentum_buffer_list], with_indices=False)
+    for (device, dtype), ((device_params, device_grads, device_momentum_buffer_list), _) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
