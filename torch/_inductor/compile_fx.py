@@ -297,7 +297,7 @@ def compile_fx_inner(
     """
     Inductor API that compiles a single graph.
 
-    If you change the argument list for this funtion, make sure you
+    If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     if dynamo_utils.count_calls(gm.graph) == 0:
@@ -361,7 +361,7 @@ def compile_fx_inner(
 
         # doesnt work for non-trees because the warmup run would apply mutation twice
         if config.triton.cudagraph_trees:
-            # checking if mutation is only on paramameters/static inputs
+            # checking if mutation is only on parameters/static inputs
             has_mutation = not all(
                 idx < num_fixed for idx in compiled_graph.mutated_input_idxs
             )
@@ -903,12 +903,12 @@ def fw_compiler_freezing(
 
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.get()
-    assert tracing_context is not None
-    params_flat = tracing_context.params_flat
-    assert params_flat is not None
-    for i in range(len(params_flat)):
-        if i not in preserved_arg_indices:
-            params_flat[i] = None
+    if tracing_context is not None:
+        params_flat = tracing_context.params_flat
+        assert params_flat is not None
+        for i in range(len(params_flat)):
+            if i not in preserved_arg_indices:
+                params_flat[i] = None
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -962,8 +962,6 @@ def compile_fx(
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
-                # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
-                "triton.unique_kernel_names": True,
             }
         ), V.set_real_inputs(
             example_inputs_
@@ -1076,9 +1074,9 @@ def compile_fx(
             # For training
             #   len(orig_model_outputs) <= len(model_outputs)
             # During training, most of the time the model_outputs starts with
-            # orignal module's outputs followed by saved activations.
+            # original module's outputs followed by saved activations.
             # But this can be not true if the model have inplace updated tensors.
-            # AOTAutograd will make those tensors being returned before the orignal
+            # AOTAutograd will make those tensors being returned before the original
             # module's output.
             # To make things safe, we'll use original_output_start_index field
             # set by AOTAutograd to decide where the original module outputs start.
