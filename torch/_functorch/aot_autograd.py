@@ -437,6 +437,8 @@ class OutputAliasInfo:
     base_idx: Optional[int]
     # If it is a Tensor, what the dynamic dims are (otherwise is None)
     dynamic_dims: Optional[Set[int]]
+    # requires_grad
+    requires_grad: bool
 
 
 # This class tells us info about user inputs.
@@ -445,6 +447,7 @@ class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
     mutates_metadata: bool
+    requires_grad: bool
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
@@ -816,7 +819,8 @@ def run_functionalized_fw_and_collect_metadata(
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
-                mutates_metadata=mutates_metadata
+                mutates_metadata=mutates_metadata,
+                requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediiate,
@@ -958,11 +962,10 @@ def run_functionalized_fw_and_collect_metadata(
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
+                requires_grad=isinstance(o, torch.Tensor) and o.requires_grad
             )
             output_info.append(out_info)
-            output_requires_grad_info.append(
-                isinstance(o, torch.Tensor) and o.requires_grad
-            )
+            output_requires_grad_info.append(out_info.requires_grad)
 
         # Our autograd.Function.forward returns both mutated inputs and outputs,
         # so we need grad info on all of them.
@@ -1174,11 +1177,12 @@ def maybe_to_fresh_input(idx, t, meta):
     if idx in meta.mutated_inp_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
         mutated_inp_idx = meta.mutated_inp_indices.index(idx)
-        if meta.requires_grad_info[mutated_inp_idx] and meta.input_info[idx].mutates_data:
+        assert meta.input_info[idx].requires_grad == meta.requires_grad_info[mutated_inp_idx]
+        if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation
             return t.clone()
-        if meta.requires_grad_info[mutated_inp_idx] and meta.input_info[idx].mutates_metadata:
+        if meta.input_info[idx] and meta.input_info[idx].mutates_metadata:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the metadata mutation
             return t.view(t.shape)
@@ -2014,7 +2018,8 @@ def remove_dupe_metadata(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
                 dynamic_dims=o.dynamic_dims,
-                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx]
+                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
+                requires_grad=o.requires_grad
             )
             for o in m.output_info
         ],
@@ -2071,13 +2076,16 @@ def create_synthetic_base_metadata(
             mutates_data=True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data,
             mutates_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata,
             is_leaf=any_leaf,
+            requires_grad=any(m.input_info[x].requires_grad for x in outer_indices)
         )
         input_infos.append(inpt_info)
         # requires_grad_info consists of (mutated_inputs, forward_outputs).
         # For any mutated inputs that correspond to aliased inputs,
         # Need to replace them with their mutated synthetic base
         if inpt_info.mutates_data or inpt_info.mutates_metadata:
-            mutated_inp_require_grad_info.append(any(m.requires_grad_info[x] for x in outer_indices))
+            for x in outer_indices:
+                assert m.requires_grad_info[x] == m.input_info[x].requires_grad
+            mutated_inp_require_grad_info.append(any(m.input_info[x].requires_grad for x in outer_indices))
 
     # Find any inputs that fulfill the following criteria:
     # (1) They are part of a synthetic base (because they alias another input,
@@ -2090,7 +2098,8 @@ def create_synthetic_base_metadata(
 
     # grab the original requires grad info on the outputs, except the ones from the mutated inputs
     num_original_input_data_mutations = len([x for x in m.input_info if x.mutates_data or x.mutates_metadata])
-    output_grad_info = m.requires_grad_info[num_original_input_data_mutations:]
+    output_grad_info = [x.requires_grad for x in m.output_info]
+    assert output_grad_info == m.requires_grad_info[num_original_input_data_mutations:]
     input_metadata_mutation_grad_info = [
         outer_args[outer_idx].requires_grad for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     input_metadata_output_info = [
@@ -2099,6 +2108,7 @@ def create_synthetic_base_metadata(
             raw_type=FunctionalTensor,
             dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
+            requires_grad=outer_args[outer_idx].requires_grad
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
         OutputAliasInfo(
@@ -2109,7 +2119,10 @@ def create_synthetic_base_metadata(
             base_idx=None if o.base_idx is None
             else synthetic_base_info[o.base_idx]
             if isinstance(synthetic_base_info[o.base_idx], int)
-            else synthetic_base_info[o.base_idx][0])
+            else synthetic_base_info[o.base_idx][0],
+            requires_grad=o.requires_grad
+        )
+
         for o in m.output_info]
 
     num_outer_mutated_data_inps = len([x for x in m.input_info if x.mutates_data])
@@ -2682,7 +2695,13 @@ def create_runtime_wrapper(
                     o_ = o.alias
                 else:
                     o_ = o
-                o_grad = runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i]
+                assert (
+                    runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i]
+                    ==
+                    runtime_metadata.output_info[i].requires_grad
+                )
+
+                o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
                     aliased_base_tensor = args[info.base_idx]
                     regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
@@ -3114,11 +3133,19 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # invariant: intermediate bases always require gradients, so we don't have to
             # consider marking them as non-differentiable.
             raw_returns_not_including_intermediate_bases = raw_returns[:num_mutated_inputs + num_outputs]
+
+            raw_returns_meta = (
+                [x for x in CompiledFunction.metadata.input_info if x.mutates_data or x.mutates_metadata]
+                + CompiledFunction.metadata.output_info
+            )
+
+            for (i, x) in enumerate(raw_returns_not_including_intermediate_bases):
+                assert CompiledFunction.metadata.requires_grad_info[i] == raw_returns_meta[i].requires_grad
             fw_outs_not_requiring_grad = [
                 x
                 for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
                 if isinstance(x, torch.Tensor)
-                and not CompiledFunction.metadata.requires_grad_info[i]
+                and not raw_returns_meta[i].requires_grad
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
@@ -3426,7 +3453,12 @@ fw_metadata={str(fw_metadata)}""")
             # This should be rare, and is tricky to get right. When we trace the backward,
             # we currently trace with autograd.grad instead of .backward(), which makes it difficult
             # to ensure that we run autograd all the way through the input **before** it saw the mutation.
-            if len([x for x in fw_metadata.requires_grad_info[:fw_metadata.num_mutated_inputs] if x]) != 0:
+            assert (
+                len([x for x in fw_metadata.input_info if x.requires_grad and x.mutates_data])
+                ==
+                len([x for x in fw_metadata.requires_grad_info[:fw_metadata.num_mutated_inputs] if x])
+            )
+            if len([x for x in fw_metadata.input_info if x.requires_grad and x.mutates_data]) != 0:
                 raise RuntimeError(f"""\
 Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
