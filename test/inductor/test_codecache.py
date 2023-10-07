@@ -3,7 +3,7 @@ import functools
 import pickle
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
@@ -11,7 +11,6 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import (
     AsyncCompile,
-    FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     TensorMetadata,
