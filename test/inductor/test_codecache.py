@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import (
     AsyncCompile,
@@ -73,12 +74,15 @@ class TestFxGraphCache(TestCase):
         cls.cache_dir_patch.stop()
         cls.tmpdir.cleanup()
 
+    def setUp(self):
+        counters.clear()
+
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
     @parametrize("dtype", (torch.float, torch.bfloat16))
-    def test_cache_load(self, device, dtype):
+    def test_cache_load_function(self, device, dtype):
         """
-        Verify that we can populate and load CompiledFxGraphs from the cache.
+        Verify that we can populate and load functions from the cache.
         """
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("requires CUDA")
@@ -86,44 +90,72 @@ class TestFxGraphCache(TestCase):
         def fn(x, y):
             return (x * 2, y @ y)
 
-        a = torch.rand([25], dtype=dtype, device=device)
-        b = torch.rand([5, 5], dtype=dtype, device=device)
+        a = torch.rand(25, dtype=dtype, device=device)
+        b = torch.rand(5, 5, dtype=dtype, device=device)
         c = a.view(5, 5)
-
-        # Spy on these methods so we can verify they are called.
-        mock_save_graph = Mock(wraps=FxGraphCache.save_graph)
-        mock_load_graph = Mock(wraps=FxGraphCache.load_graph)
-        FxGraphCache.save_graph = mock_save_graph
-        FxGraphCache.load_graph = mock_load_graph
 
         compiled_fn = torch.compile(fn, dynamic=False)
 
         # A first call shold miss in the cache.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(mock_save_graph.call_count, 1)
-        self.assertEqual(mock_load_graph.call_count, 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
         torch._dynamo.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(mock_save_graph.call_count, 1)
-        self.assertEqual(mock_load_graph.call_count, 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
         # But we expect different code if the tensors are aliased.
         torch._dynamo.reset()
         self.assertEqual(fn(a, c), compiled_fn(a, c))
-        self.assertEqual(mock_save_graph.call_count, 2)
-        self.assertEqual(mock_load_graph.call_count, 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @config.patch({"fx_graph_cache": True})
+    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("dtype", (torch.float, torch.bfloat16))
+    def test_cache_load_model(self, device, dtype):
+        """
+        Verify that we can populate and load models from the cache.
+        """
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("requires CUDA")
+
+        model = MyModel().to(device)
+        if dtype == torch.float:
+            model = model.float()
+        elif dtype == torch.bfloat16:
+            model = model.bfloat16()
+
+        a = torch.rand(10, 10, dtype=dtype, device=device)
+
+        compiled_model = torch.compile(model, dynamic=False)
+
+        # A first call shold miss in the cache.
+        self.assertEqual(model(a), compiled_model(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        torch._dynamo.reset()
+        self.assertEqual(model(a), compiled_model(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+
+class TestFxGraphCacheHashing(TestCase):
     def test_tensor_constants(self):
         """
         Test the handling of small vs. large tensor constants.
         """
-        data = FxGraphCachePickler.dumps(torch.tensor([i for i in range(9)]))
+        data = FxGraphCachePickler.dumps(torch.tensor(list(range(9))))
         self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
-        data = FxGraphCachePickler.dumps(torch.tensor([i for i in range(8)]))
+        data = FxGraphCachePickler.dumps(torch.tensor(list(range(8))))
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
     def test_hash_fake_tensors(self):

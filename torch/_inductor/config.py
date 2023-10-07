@@ -51,7 +51,7 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
-# register custom graph optimizatin pass hook. so far, pre/post passes are
+# register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
 # def my_custom_pre_pass(graph: torch.fx.graph.Graph):
@@ -191,6 +191,10 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
+
+# we always add constants into graph.constants without
+# performing any constant-inlining optimization
+always_keep_tensor_constants = False
 
 
 def is_fbcode():
@@ -426,7 +430,7 @@ class triton:
     # the max number of spills we allow for the configs we benchmark.
     # Setting this to 0 means we skip a config if it spills even a single
     # register.
-    # Settting it to a larger value allows a config spilling a small amount
+    # Setting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.

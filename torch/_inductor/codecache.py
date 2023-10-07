@@ -46,9 +46,11 @@ from torch._dynamo.device_interface import (
     get_interface_for_device,
     get_registered_device_interfaces,
 )
+from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
+from torch._prims_common import suggest_memory_format
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -144,20 +146,24 @@ class CacheBase:
         except ModuleNotFoundError:
             triton_version = None
 
-        system: Dict[str, Any] = {
-            "device": {
-                "name": torch.cuda.get_device_properties(
-                    torch.cuda.current_device()
-                ).name,
-            },
-            "version": {
-                "cuda": torch.version.cuda,
-                "triton": triton_version,
-            },
-            "other": {
-                "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-            },
-        }
+        try:
+            system: Dict[str, Any] = {
+                "device": {
+                    "name": torch.cuda.get_device_properties(
+                        torch.cuda.current_device()
+                    ).name,
+                },
+                "version": {
+                    "cuda": torch.version.cuda,
+                    "triton": triton_version,
+                },
+                "other": {
+                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+                },
+            }
+        except (AssertionError, RuntimeError):
+            # If cuda is not installed, none of the above config is relevant.
+            system = {}
 
         system["hash"] = hashlib.sha256(
             json.dumps(system, sort_keys=True).encode("utf-8")
@@ -396,16 +402,23 @@ class TensorMetadata:
     shape: torch.Size
     stride: Tuple[Any, ...]
     device: torch.device
-    requires_grad: bool
-    storage_offset: int
+    layout: torch.layout
     memory_format: Optional[torch.memory_format]
+    storage_offset: int
+    requires_grad: bool
     is_quantized: bool
+    is_conj: bool
+    is_neg: bool
+    is_coalesced: bool
+    dense_dim: int
+    sparse_dim: int
 
 
 @dataclasses.dataclass
 class TensorMetadataAndValues:
     """
     TensorMetadata plus the elements as a list of raw values.
+    Used for hashing inlined constants.
     """
 
     tensor_metadata: TensorMetadata
@@ -427,29 +440,25 @@ def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     if not all(isinstance(e, int) for e in t.shape):
         raise DynamicShapeError()
 
-    # Note the order here matters since is_contiguous() can be True
-    # for more than one memory format.
-    memory_formats = [
-        torch.contiguous_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    ]
-
-    memory_format = None
-    for fmt in memory_formats:
-        if t.is_contiguous(memory_format=fmt):
-            memory_format = fmt
-            break
+    memory_format = suggest_memory_format(t)
+    if not t.is_contiguous(memory_format=memory_format):
+        memory_format = None
 
     return TensorMetadata(
         dtype=t.dtype,
         shape=t.shape,
-        stride=t.stride(),
+        stride=t.stride() if t.layout == torch.strided else (),
         device=t.device,
-        requires_grad=t.requires_grad,
-        storage_offset=t.storage_offset(),
+        layout=t.layout,
         memory_format=memory_format,
+        storage_offset=t.storage_offset(),
+        requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
+        is_conj=t.is_conj(),
+        is_neg=t.is_neg(),
+        is_coalesced=t.is_coalesced() if t.is_sparse else False,
+        dense_dim=t.dense_dim() if t.is_sparse else False,
+        sparse_dim=t.sparse_dim() if t.is_sparse else False,
     )
 
 
@@ -476,7 +485,7 @@ def _reduce_tensor(t):
     # Large constannts are effectively treated as inputs and we consider only
     # their metadata.
     metadata = extract_tensor_metadata(t)
-    if len(t.shape) == 0 or (len(t.shape) == 1 and t.shape[0] <= 8):
+    if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
         return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
     else:
         return (_ident, (metadata,))
@@ -614,7 +623,8 @@ class FxGraphCache:
             key = compiled_fx_graph_hash(fx_args, fx_kwargs)
         except DynamicShapeError:
             # TODO(masnresral): support dynamic shapes
-            log.debug("fx graph cache: skipping caching due to dynamic shapes")
+            log.debug("fx graph cache skip due to dynamic shapes")
+            counters["inductor"]["fxgraph_cache_skip"] += 1
             return compile_fx_fn(*fx_args, **fx_kwargs)
 
         lock_dir = get_lock_dir()
@@ -622,13 +632,14 @@ class FxGraphCache:
         with lock:
             _, _, cg_path = get_path(key, "cg")
             if not os.path.exists(cg_path):
-                log.debug("fx graph cache: on-disk miss for key %s", key)
+                log.debug("fx graph cache miss for key %s", key)
+                counters["inductor"]["fxgraph_cache_miss"] += 1
                 compiled_graph: CompiledFxGraph = compile_fx_fn(*fx_args, **fx_kwargs)
                 cls.save_graph(key, compiled_graph)
-                log.debug("fx graph cache: wrote on-disk entry for key %s", key)
             else:
                 # Load required info from disk; recreation of compiled model will be on first run
-                log.debug("fx graph cache: on-disk hit for key %s", key)
+                log.debug("fx graph cache hit for key %s", key)
+                counters["inductor"]["fxgraph_cache_hit"] += 1
                 compiled_graph = cls.load_graph(cg_path)
 
             return compiled_graph
