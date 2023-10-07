@@ -32,6 +32,7 @@ struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
   TORCH_API friend bool operator==(
       const AdamWOptions& lhs,
       const AdamWOptions& rhs);
+  ~AdamWOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -49,6 +50,7 @@ struct TORCH_API AdamWParamState
   TORCH_API friend bool operator==(
       const AdamWParamState& lhs,
       const AdamWParamState& rhs);
+  ~AdamWParamState() override = default;
 };
 
 class TORCH_API AdamW : public Optimizer {

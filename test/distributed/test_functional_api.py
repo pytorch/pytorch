@@ -12,9 +12,8 @@ import torch.distributed._functional_collectives_impl as ft_c_impl
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
-from functorch import make_fx
 from torch.testing import FileCheck
-from torch.utils._triton import has_triton
+from functorch import make_fx
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -458,17 +457,6 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
-
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(WORLD_SIZE)
-    @requires_nccl()
-    @with_comms()
-    def test_tracing(self):
-        def allreduce(t, pg):
-            return ft_c.all_reduce(t, "sum", pg)
-
-        compiled_allreduce = torch.compile(allreduce, fullgraph=True)
-        compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
 
 
 class TestOpWaitiness(MultiThreadedTestCase):
