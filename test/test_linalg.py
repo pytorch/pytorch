@@ -6326,6 +6326,13 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             expm(torch.randn(3, 2, 1))
 
+        # check empty tensor
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            expm(torch.tensor([]))
+
+        x = torch.tensor([[]])
+        self.assertEqual(expm(x), x)
+
         # check 1x1 matrices
         x = torch.randn(3, 3, 1, 1)
         self.assertEqual(expm(x), x.exp())

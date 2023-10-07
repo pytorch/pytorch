@@ -126,12 +126,15 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
 static inline void checkIsMatrix(const Tensor& A, const char* const f_name, const char* const arg_name = "A") {
   TORCH_CHECK(A.dim() >= 2, f_name, ": The input tensor ", arg_name, " must have at least 2 dimensions.");
 }
-static inline void squareCheckInputs(const Tensor& self, const char* const f_name, const char* const arg_name = "A") {
-  checkIsMatrix(self, f_name, arg_name);
+static inline void checkIsSquareSize(const Tensor& self, const char* const f_name, const char* const arg_name = "A") {
   TORCH_CHECK(self.sym_size(-1) == self.sym_size(-2),
               f_name,
               ": ", arg_name, " must be batches of square matrices, "
               "but they are ", self.sym_size(-2), " by ", self.sym_size(-1), " matrices");
+}
+static inline void squareCheckInputs(const Tensor& self, const char* const f_name, const char* const arg_name = "A") {
+  checkIsMatrix(self, f_name, arg_name);
+  checkIsSquareSize(self, f_name, arg_name);
 }
 
 static inline void checkInputsSolver(const Tensor& A,

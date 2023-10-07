@@ -2678,8 +2678,8 @@ Tensor backward_analytic_function_of_a_matrix(
 // Mathematics 2019, 7, 1174.
 //
 Tensor linalg_matrix_exp(const Tensor& a) {
-  squareCheckInputs(a, "linalg.matrix_exp");
-  checkFloatingOrComplex(a, "matrix_exp");
+  checkIsMatrix(a, "linalg.matrix_exp");
+  checkFloatingOrComplex(a, "linalg.matrix_exp");
 
   NoTF32Guard disable_tf32;
 
@@ -2687,7 +2687,9 @@ Tensor linalg_matrix_exp(const Tensor& a) {
   const auto n = a.size(-1);
   if (n == 0) {
     return a.clone();
-  } else if (n == 1) {
+  }
+  checkIsSquareSize(a, "linalg.matrix_exp");
+   if (n == 1) {
     return a.exp();
   } else {
     return at::native::mexp(a);
