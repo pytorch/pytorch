@@ -176,7 +176,8 @@ static void general_trace_function(
     tracer::recordSourceLocation(node);
     const auto& args = op.schema().arguments();
     int i = 0;
-    for (auto iter = stack->end() - input_size; iter != stack->end();
+    for (auto iter = stack->end() - static_cast<std::ptrdiff_t>(input_size);
+         iter != stack->end();
          ++iter, ++i) {
       // TODO we need to refactor graph APIs (e.g., addInputs)
       // appropriately; after that, we can get rid of the giant if-else
@@ -266,7 +267,8 @@ static void general_trace_function(
   if (tracer_state) {
     tracer::setTracingState(std::move(tracer_state));
     int i = 0;
-    for (auto iter = stack->end() - output_size; iter != stack->end();
+    for (auto iter = stack->end() - static_cast<std::ptrdiff_t>(output_size);
+         iter != stack->end();
          ++iter, ++i) {
       const auto& type = op.schema().returns()[i].type();
       if (type->isSubtypeOf(*TensorType::get())) {

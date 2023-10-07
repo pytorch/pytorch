@@ -3,8 +3,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 enum TorchFunctionDisabledState { ENABLED, SUBCLASSES_DISABLED, ALL_DISABLED };
 
@@ -32,5 +31,4 @@ struct TORCH_API PythonTorchFunctionTLS {
 
 TORCH_API bool torch_function_mode_enabled();
 
-} // namespace impl
-} // namespace at
+} // namespace at::impl

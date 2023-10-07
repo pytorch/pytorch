@@ -21,7 +21,7 @@ static std::unordered_map<std::string, int64_t>& passes_to_current_counter() {
 
 static int parseOptLimit(const std::string& opt_limit) {
   try {
-    int64_t n = c10::stoi(opt_limit);
+    int64_t n = std::stoi(opt_limit);
     return n;
   } catch (...) {
     return -1;

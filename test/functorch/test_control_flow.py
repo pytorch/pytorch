@@ -5,13 +5,43 @@ import unittest
 from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 import torch
 import torch.utils._pytree as pytree
-from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
+from torch._subclasses.functional_tensor import FunctionalTensor
+
+# TODO: pull these helpers from AOTAutograd later
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
+
+def to_fun_old(t):
+    if isinstance(t, torch.Tensor) and not torch._is_functional_tensor(t):
+        out = torch._to_functional_tensor(t)
+        torch._mirror_autograd_meta_to(t, out)
+        return out
+    return t
+
+def from_fun_old(t):
+    # quick sanity assert
+    if isinstance(t, torch.Tensor):
+        assert torch._is_functional_tensor(t)
+        torch._sync(t)
+        return torch._from_functional_tensor(t)
+    return t
 
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
@@ -481,7 +511,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(4, 5)
         try:
-            example_input_func = to_fun(example_input)
+            example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
                 f(example_input_func)
@@ -519,7 +549,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(5, 5)
         try:
-            example_input_func = to_fun(example_input)
+            example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
                 f(example_input_func)
@@ -531,8 +561,10 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    func_args = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
                     return func(*func_args, **func_kwargs)
                 finally:
                     torch._disable_functionalization()
@@ -561,9 +593,11 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
-                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
+                    func_args = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(from_fun_old, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1000,7 +1034,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun_old, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1064,7 +1098,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun_old, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1429,9 +1463,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
-                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
+                    func_args = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(from_fun_old, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1465,7 +1501,7 @@ def forward(self, arg0_1, arg1_1):
             return x * x.sin()
 
         def foo(x):
-            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
         inp = torch.randn([4, 3])
         gm, _ = torch._dynamo.export(foo)(inp)
 
@@ -1476,7 +1512,7 @@ def forward(self, arg0_1, arg1_1):
 
 
         checked_ops = {"add", "mul", "sin", "cos"}
-        checked_meta = ["source_fn", "stack_trace"]
+        checked_meta = ["source_fn_stack", "stack_trace"]
         all_source_fns = collect_meta_for_filtered_nodes(gm, checked_ops, checked_meta)
         new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
         self.assertEqual(all_source_fns, new_source_fns)
@@ -1498,6 +1534,47 @@ def forward(self, arg0_1, arg1_1):
             self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
         self.assertEqual(counters["stats"]["calls_captured"], iter_n)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
+
+    def test_cond_with_consecutive_make_fx_symbolic(self):
+        def true_fn(x):
+            return x - x.cos()
+
+        def false_fn(x):
+            return x + x.sin()
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        exp_graph = """\
+class foo(torch.nn.Module):
+    def forward(self, x_1: f32[s0, s1]):
+        # No stacktrace found for following nodes
+        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
+        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        conditional: f32[s0, s1] = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
+eq = true_graph_0 = false_graph_0 = x_1 = None
+        return conditional
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: f32[s0, s1]):
+            # No stacktrace found for following nodes
+            cos: f32[s0, s1] = torch.ops.aten.cos.default(arg0_1)
+            sub: f32[s0, s1] = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
+            return sub
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: f32[s0, s1]):
+            # No stacktrace found for following nodes
+            sin: f32[s0, s1] = torch.ops.aten.sin.default(arg0_1)
+            add: f32[s0, s1] = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
+            return add
+"""
+        inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
+        for inp in inps:
+            gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
+            self._expected_inline_normalized(gm.print_readable(print_output=False), exp_graph)
 
 if __name__ == '__main__':
     run_tests()

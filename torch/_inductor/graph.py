@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
+from torch._logging import LazyString
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     magic_methods,
@@ -230,6 +231,7 @@ class GraphLowering(torch.fx.Interpreter):
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs = False
+        self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.init_backend_registration()
 
     @staticmethod
@@ -344,7 +346,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
         #
-        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
+        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
         # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
         # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
         # bringing perf gains.
@@ -486,7 +488,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if (
                     not hasattr(value, "data")
                     or not isinstance(value.data, ir.IRNode)
-                    or not isinstance(value.data.data, ir.IRNode)
+                    or not (
+                        hasattr(value.data, "data")
+                        and isinstance(value.data.data, ir.IRNode)
+                    )
                 ):
                     return
 
@@ -524,6 +529,16 @@ class GraphLowering(torch.fx.Interpreter):
 
             if name is None:
                 name = f"constant{len(self.constants)}"
+            if name[0].isdigit():
+                name = f"constant_{name}"
+            # We may generate a var name for each constant in the codegen.
+            # Let's only keep sane characters.
+            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            name = prefix
+            cnt = 0
+            while name in self.constants:
+                name = f"{prefix}_{cnt}"
+                cnt += 1
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
@@ -628,7 +643,7 @@ class GraphLowering(torch.fx.Interpreter):
         # this is a constant
         value = getattr(self.module, target)
 
-        if unsupported_output_tensor(value):
+        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
@@ -669,7 +684,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
-            assert isinstance(value, (TensorBox, sympy.Expr))
+            assert isinstance(
+                value, (TensorBox, sympy.Expr)
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -692,7 +709,7 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
-            self.graph_id,
+            self.graph_id if self.graph_id is not None else -1,
         )
 
     def finalize(self):
@@ -700,6 +717,7 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
+        log.debug("lowering %s", LazyString(lambda: n.format_node()))
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -902,7 +920,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
+        # check the device of the buffers.
         for buffer in self.buffers:
             device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
@@ -922,6 +940,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
+        V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()

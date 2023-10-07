@@ -18,6 +18,8 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.placement_types import TensorMeta
 
+aten = torch.ops.aten
+
 
 class ShardingPropagator:
     def __init__(self) -> None:
@@ -64,9 +66,9 @@ class ShardingPropagator:
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
-            torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default,
-            torch.ops.aten.is_same_size.default,
+            aten._local_scalar_dense.default,
+            aten.equal.default,
+            aten.is_same_size.default,
         ]
         if op_schema.op in skip_prop_list:
             return None
@@ -181,8 +183,20 @@ class ShardingPropagator:
                 reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                 suggestion_schema = [reshard_schema]
 
+            if op_schema.return_type_tuple_tensors():
+                # for ops return multiple tensors, make output spec return same spec
+                # returned from the op strategy
+                output_spec: OutputSpecType = tuple(
+                    [
+                        output_strategy.output_spec
+                        for _ in range(len(op_schema.op._schema.returns))
+                    ]
+                )
+            else:
+                output_spec = output_strategy.output_spec
+
             output_sharding = OutputSharding(
-                output_strategy.output_spec,
+                output_spec,
                 suggestion_schema,
                 needs_redistribute=needs_redistribute,
             )

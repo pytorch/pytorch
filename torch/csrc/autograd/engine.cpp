@@ -639,6 +639,7 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
@@ -953,6 +954,7 @@ static variable_list call_function(
   });
 
   if (has_post_hooks) {
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
@@ -1227,7 +1229,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();

@@ -2,6 +2,7 @@ import collections
 import functools
 import inspect
 import itertools
+import operator
 import sys
 import types
 from typing import Dict, List
@@ -80,9 +81,11 @@ class SuperVariable(VariableTracker):
             ):
                 tx.output.guards.update(options.get("guards", set()))
                 tx.output.side_effects.store_attr(
-                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                    objvar,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
-                return variables.ConstantVariable(None)
+                return variables.ConstantVariable.create(None)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
@@ -200,7 +203,7 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.ConstantVariable(None)
+        return variables.ConstantVariable.create(None)
 
 
 class ClosureVariable(UnknownVariable):
@@ -491,7 +494,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self._saved_tensors.append(arg)
-        return variables.ConstantVariable(None, **options)
+        return variables.ConstantVariable.create(None, **options)
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
@@ -628,11 +631,60 @@ class GetAttrVariable(VariableTracker):
             and isinstance(self.obj, InspectSignatureVariable)
             and self.name == "parameters"
         ):
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+class MethodWrapperVariable(VariableTracker):
+    def __init__(self, method_wrapper, **kwargs):
+        super().__init__(**kwargs)
+        self.method_wrapper = method_wrapper
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if (
+            self.method_wrapper.__name__ == "__get__"
+            and isinstance(self.method_wrapper.__self__, types.GetSetDescriptorType)
+            and self.method_wrapper.__self__.__objclass__ is torch._C._TensorBase
+            and isinstance(args[0], variables.TensorVariable)
+        ):
+            assert len(args) == 1 and len(kwargs) == 0
+
+            return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
+
+        super().call_function(tx, args, kwargs)
+
+    def is_python_constant(self):
+        return True
+
+    def as_python_constant(self):
+        return self.method_wrapper
+
+
+class GetSetDescriptorVariable(VariableTracker):
+    def __init__(self, desc, **kwargs):
+        super().__init__(**kwargs)
+        self.desc = desc
+
+    def var_getattr(self, tx, name):
+        if name == "__get__" and self.source:
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
+                self.desc.__get__
+            )
+        else:
+            return super().var_getattr(tx, name)
+
+    def is_python_constant(self):
+        return True
+
+    def as_python_constant(self):
+        return self.desc
 
 
 class PythonModuleVariable(VariableTracker):
@@ -645,9 +697,10 @@ class PythonModuleVariable(VariableTracker):
 
 
 class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, reason, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.reason = reason
 
     def python_type(self):
         return type(self.value)
@@ -740,20 +793,12 @@ class SkipFilesVariable(VariableTracker):
         elif self.value is itertools.accumulate and not kwargs:
             from .builtin import BuiltinVariable
 
-            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+            if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-
-                def func(tx, item, acc):
-                    return BuiltinVariable(sum).call_function(tx, [item, acc], {})
-
-            elif (
-                len(args) == 2
-                and args[0].has_unpack_var_sequence(tx)
-                and args[1].is_callable(tx)
-            ):
-                seq = args[0].unpack_var_sequence(tx)
-                func = args[1].call_function
-
+                if len(args) == 1:
+                    func = BuiltinVariable(operator.add).call_function
+                elif len(args) == 2:
+                    func = args[1].call_function
             else:
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
 
@@ -764,7 +809,7 @@ class SkipFilesVariable(VariableTracker):
                     acc = item
                 else:
                     try:
-                        acc = func(tx, item, acc)
+                        acc = func(tx, [acc, item], {})
                     except Exception:
                         raise unimplemented(
                             f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
@@ -830,7 +875,7 @@ class SkipFilesVariable(VariableTracker):
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
             unimplemented(
-                f"call_function {self.value.__qualname__} in skip_files {path}"
+                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
             )
 
 
@@ -847,7 +892,7 @@ class TypingVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__" and len(args) == 1:
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.value[args[0].as_python_constant()],
                 **VariableTracker.propagate(self, args),
             )

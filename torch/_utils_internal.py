@@ -1,7 +1,6 @@
 import logging
 import os
 import tempfile
-from contextlib import nullcontext
 from typing import Any, Dict
 
 import torch
@@ -48,6 +47,14 @@ def resolve_library_path(path: str) -> str:
     return os.path.realpath(path)
 
 
+def throw_abstract_impl_not_imported_error(opname, module, context):
+    raise NotImplementedError(
+        f"{opname}: We could not find the abstract impl for this operator. "
+        f"The operator specified that you need to import the '{module}' Python "
+        f"module to load the abstract impl. {context}"
+    )
+
+
 # Meta only, see
 # https://www.internalfb.com/intern/wiki/ML_Workflow_Observability/User_Guides/Adding_instrumentation_to_your_code/
 #
@@ -67,44 +74,6 @@ def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
 
 def log_compilation_event(metrics):
     log.info("%s", metrics)
-
-
-def _functionalize_sync(t):
-    # This code lives in python instead of C++ since conditioning on a certain python subclass
-    # is much more of a pain in C++.
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-        maybe_disable_functional_mode,
-    )
-
-    ctx = (
-        maybe_disable_functional_mode
-        if isinstance(t, FunctionalTensor)
-        else nullcontext
-    )
-    if isinstance(t, FunctionalTensor):
-        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
-        # when we sync our inner tensor.
-        # Why?
-        # (1) If there are input mutations in the graph, then they will be re-applied during
-        #     AOTAutograd when we call _sync() from inside of our functionalization kernels.
-        # (2) _sync() causes us to regenerate our updated the tensor from the updated base,
-        #     which dispatches to a bunch of view ops
-        # (3) The input to these view ops is our inner FunctionalTensorWrapper
-        #     (since the sync was called from C++), not the python FunctionalTensor
-        # (4) if a python FunctionalTensorMode is active, it will complain when it intercepts
-        #     the view op, since it will see an input that is a C++ FunctionalTensorWrapper
-        #     (aka a normal torch.Tensor) instead of a python `FunctionalTensor).
-        maybe_functional_mode = torch._C._unset_dispatch_mode(
-            torch._C._TorchDispatchModeKey.FUNCTIONAL
-        )
-        try:
-            torch._functionalize_sync(t.elem)
-        finally:
-            if maybe_functional_mode is not None:
-                torch._C._set_dispatch_mode(maybe_functional_mode)
-    else:
-        torch._functionalize_sync(t)
 
 
 TEST_MASTER_ADDR = "127.0.0.1"

@@ -111,23 +111,6 @@ class RandomValueSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
-
-
-@dataclasses.dataclass(frozen=True)
 class GlobalSource(Source):
     global_name: str
 
@@ -139,18 +122,6 @@ class GlobalSource(Source):
 
     def name(self):
         return f"G[{repr(self.global_name)}]"
-
-
-@dataclasses.dataclass(frozen=True)
-class DummyGlobalSource(Source):
-    def reconstruct(self, codegen):
-        raise NotImplementedError()
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-    def name(self):
-        return ""
 
 
 @dataclasses.dataclass(frozen=True)

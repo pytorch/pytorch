@@ -3,6 +3,10 @@
 """Test functions for matrix module
 
 """
+import functools
+
+from unittest import expectedFailure as xfail, skipIf as skipif
+
 import pytest
 
 import torch._numpy as np
@@ -31,6 +35,14 @@ from torch._numpy.testing import (
     assert_array_equal,  # assert_array_max_ulp,
     assert_equal,
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+skip = functools.partial(skipif, True)
 
 
 def get_mat(n):
@@ -40,7 +52,7 @@ def get_mat(n):
     return data
 
 
-class TestEye:
+class TestEye(TestCase):
     def test_basic(self):
         assert_equal(
             eye(4), array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
@@ -89,7 +101,7 @@ class TestEye:
     def test_bool(self):
         assert_equal(eye(2, 2, dtype=bool), [[True, False], [False, True]])
 
-    @pytest.mark.xfail(reason="TODO: implement order=non-default")
+    @xfail  # (reason="TODO: implement order=non-default")
     def test_order(self):
         mat_c = eye(4, 3, k=-1)
         mat_f = eye(4, 3, k=-1, order="F")
@@ -100,7 +112,7 @@ class TestEye:
         assert mat_f.flags.f_contiguous
 
 
-class TestDiag:
+class TestDiag(TestCase):
     def test_vector(self):
         vals = (100 * arange(5)).astype("l")
         b = zeros((5, 5))
@@ -130,7 +142,7 @@ class TestDiag:
             b[k] = vals[k + 2, k]
         assert_equal(diag(vals, -2), b[:3])
 
-    @pytest.mark.xfail(reason="TODO implement orders")
+    @xfail  # (reason="TODO implement orders")
     def test_fortran_order(self):
         vals = array((100 * get_mat(5) + 1), order="F", dtype="l")
         self.test_matrix(vals)
@@ -148,7 +160,7 @@ class TestDiag:
         assert_raises((ValueError, RuntimeError), diag, [[[1]]])
 
 
-class TestFliplr:
+class TestFliplr(TestCase):
     def test_basic(self):
         assert_raises((ValueError, RuntimeError), fliplr, ones(4))
         a = get_mat(4)
@@ -160,7 +172,7 @@ class TestFliplr:
         assert_equal(fliplr(a), b)
 
 
-class TestFlipud:
+class TestFlipud(TestCase):
     def test_basic(self):
         a = get_mat(4)
         # b = a[::-1, :]
@@ -171,7 +183,8 @@ class TestFlipud:
         assert_equal(flipud(a), b)
 
 
-class TestHistogram2d:
+@instantiate_parametrized_tests
+class TestHistogram2d(TestCase):
     def test_simple(self):
         x = array([0.41702200, 0.72032449, 1.1437481e-4, 0.302332573, 0.146755891])
         y = array([0.09233859, 0.18626021, 0.34556073, 0.39676747, 0.53881673])
@@ -238,7 +251,7 @@ class TestHistogram2d:
         # assert_array_max_ulp(a, np.zeros((4, 4)))
         assert_allclose(a, np.zeros((4, 4)), atol=1e-15)
 
-    @pytest.mark.xfail(reason="pytorch does not support bins = [int, array]")
+    @xfail  # (reason="pytorch does not support bins = [int, array]")
     def test_binparameter_combination(self):
         x = array([0, 0.09207008, 0.64575234, 0.12875982, 0.47390599, 0.59944483, 1])
         y = array([0, 0.14344267, 0.48988575, 0.30558665, 0.44700682, 0.15886423, 1])
@@ -272,156 +285,151 @@ class TestHistogram2d:
         assert_array_equal(H, answer)
         assert_array_equal(xe, array([0.0, 0.25, 0.5, 0.75, 1]))
 
-    @pytest.mark.parametrize(("x_len", "y_len"), [(10, 11), (20, 19)])
+    @parametrize("x_len, y_len", [(10, 11), (20, 19)])
     def test_bad_length(self, x_len, y_len):
         x, y = np.ones(x_len), np.ones(y_len)
         with pytest.raises(ValueError, match="x and y must have the same length."):
             histogram2d(x, y)
 
 
-class TestTri:
+class TestTri(TestCase):
     def test_dtype(self):
         out = array([[1, 0, 0], [1, 1, 0], [1, 1, 1]])
         assert_array_equal(tri(3), out)
         assert_array_equal(tri(3, dtype=bool), out.astype(bool))
 
+    def test_tril_triu_ndim2(self):
+        for dtype in np.typecodes["AllFloat"] + np.typecodes["AllInteger"]:
+            a = np.ones((2, 2), dtype=dtype)
+            b = np.tril(a)
+            c = np.triu(a)
+            assert_array_equal(b, [[1, 0], [1, 1]])
+            assert_array_equal(c, b.T)
+            # should return the same dtype as the original array
+            assert_equal(b.dtype, a.dtype)
+            assert_equal(c.dtype, a.dtype)
 
-def test_tril_triu_ndim2():
-    for dtype in np.typecodes["AllFloat"] + np.typecodes["AllInteger"]:
-        a = np.ones((2, 2), dtype=dtype)
-        b = np.tril(a)
-        c = np.triu(a)
-        assert_array_equal(b, [[1, 0], [1, 1]])
-        assert_array_equal(c, b.T)
-        # should return the same dtype as the original array
-        assert_equal(b.dtype, a.dtype)
-        assert_equal(c.dtype, a.dtype)
+    def test_tril_triu_ndim3(self):
+        for dtype in np.typecodes["AllFloat"] + np.typecodes["AllInteger"]:
+            a = np.array(
+                [
+                    [[1, 1], [1, 1]],
+                    [[1, 1], [1, 0]],
+                    [[1, 1], [0, 0]],
+                ],
+                dtype=dtype,
+            )
+            a_tril_desired = np.array(
+                [
+                    [[1, 0], [1, 1]],
+                    [[1, 0], [1, 0]],
+                    [[1, 0], [0, 0]],
+                ],
+                dtype=dtype,
+            )
+            a_triu_desired = np.array(
+                [
+                    [[1, 1], [0, 1]],
+                    [[1, 1], [0, 0]],
+                    [[1, 1], [0, 0]],
+                ],
+                dtype=dtype,
+            )
+            a_triu_observed = np.triu(a)
+            a_tril_observed = np.tril(a)
+            assert_array_equal(a_triu_observed, a_triu_desired)
+            assert_array_equal(a_tril_observed, a_tril_desired)
+            assert_equal(a_triu_observed.dtype, a.dtype)
+            assert_equal(a_tril_observed.dtype, a.dtype)
 
+    def test_tril_triu_with_inf(self):
+        # Issue 4859
+        arr = np.array([[1, 1, np.inf], [1, 1, 1], [np.inf, 1, 1]])
+        out_tril = np.array([[1, 0, 0], [1, 1, 0], [np.inf, 1, 1]])
+        out_triu = out_tril.T
+        assert_array_equal(np.triu(arr), out_triu)
+        assert_array_equal(np.tril(arr), out_tril)
 
-def test_tril_triu_ndim3():
-    for dtype in np.typecodes["AllFloat"] + np.typecodes["AllInteger"]:
-        a = np.array(
-            [
-                [[1, 1], [1, 1]],
-                [[1, 1], [1, 0]],
-                [[1, 1], [0, 0]],
-            ],
-            dtype=dtype,
+    def test_tril_triu_dtype(self):
+        # Issue 4916
+        # tril and triu should return the same dtype as input
+        for c in np.typecodes["All"]:
+            arr = np.zeros((3, 3), dtype=c)
+            assert_equal(np.triu(arr).dtype, arr.dtype)
+            assert_equal(np.tril(arr).dtype, arr.dtype)
+
+    @xfail  # (reason="TODO: implement mask_indices")
+    def test_mask_indices(self):
+        # simple test without offset
+        iu = mask_indices(3, np.triu)
+        a = np.arange(9).reshape(3, 3)
+        assert_array_equal(a[iu], array([0, 1, 2, 4, 5, 8]))
+        # Now with an offset
+        iu1 = mask_indices(3, np.triu, 1)
+        assert_array_equal(a[iu1], array([1, 2, 5]))
+
+    @xfail  # (reason="np.tril_indices == our tuple(tril_indices)")
+    def test_tril_indices(self):
+        # indices without and with offset
+        il1 = tril_indices(4)
+        il2 = tril_indices(4, k=2)
+        il3 = tril_indices(4, m=5)
+        il4 = tril_indices(4, k=2, m=5)
+
+        a = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]])
+        b = np.arange(1, 21).reshape(4, 5)
+
+        # indexing:
+        assert_array_equal(a[il1], array([1, 5, 6, 9, 10, 11, 13, 14, 15, 16]))
+        assert_array_equal(b[il3], array([1, 6, 7, 11, 12, 13, 16, 17, 18, 19]))
+
+        # And for assigning values:
+        a[il1] = -1
+        assert_array_equal(
+            a,
+            array([[-1, 2, 3, 4], [-1, -1, 7, 8], [-1, -1, -1, 12], [-1, -1, -1, -1]]),
         )
-        a_tril_desired = np.array(
-            [
-                [[1, 0], [1, 1]],
-                [[1, 0], [1, 0]],
-                [[1, 0], [0, 0]],
-            ],
-            dtype=dtype,
+        b[il3] = -1
+        assert_array_equal(
+            b,
+            array(
+                [
+                    [-1, 2, 3, 4, 5],
+                    [-1, -1, 8, 9, 10],
+                    [-1, -1, -1, 14, 15],
+                    [-1, -1, -1, -1, 20],
+                ]
+            ),
         )
-        a_triu_desired = np.array(
-            [
-                [[1, 1], [0, 1]],
-                [[1, 1], [0, 0]],
-                [[1, 1], [0, 0]],
-            ],
-            dtype=dtype,
+        # These cover almost the whole array (two diagonals right of the main one):
+        a[il2] = -10
+        assert_array_equal(
+            a,
+            array(
+                [
+                    [-10, -10, -10, 4],
+                    [-10, -10, -10, -10],
+                    [-10, -10, -10, -10],
+                    [-10, -10, -10, -10],
+                ]
+            ),
         )
-        a_triu_observed = np.triu(a)
-        a_tril_observed = np.tril(a)
-        assert_array_equal(a_triu_observed, a_triu_desired)
-        assert_array_equal(a_tril_observed, a_tril_desired)
-        assert_equal(a_triu_observed.dtype, a.dtype)
-        assert_equal(a_tril_observed.dtype, a.dtype)
+        b[il4] = -10
+        assert_array_equal(
+            b,
+            array(
+                [
+                    [-10, -10, -10, 4, 5],
+                    [-10, -10, -10, -10, 10],
+                    [-10, -10, -10, -10, -10],
+                    [-10, -10, -10, -10, -10],
+                ]
+            ),
+        )
 
 
-def test_tril_triu_with_inf():
-    # Issue 4859
-    arr = np.array([[1, 1, np.inf], [1, 1, 1], [np.inf, 1, 1]])
-    out_tril = np.array([[1, 0, 0], [1, 1, 0], [np.inf, 1, 1]])
-    out_triu = out_tril.T
-    assert_array_equal(np.triu(arr), out_triu)
-    assert_array_equal(np.tril(arr), out_tril)
-
-
-def test_tril_triu_dtype():
-    # Issue 4916
-    # tril and triu should return the same dtype as input
-    for c in np.typecodes["All"]:
-        arr = np.zeros((3, 3), dtype=c)
-        assert_equal(np.triu(arr).dtype, arr.dtype)
-        assert_equal(np.tril(arr).dtype, arr.dtype)
-
-
-@pytest.mark.xfail(reason="TODO: implement mask_indices")
-def test_mask_indices():
-    # simple test without offset
-    iu = mask_indices(3, np.triu)
-    a = np.arange(9).reshape(3, 3)
-    assert_array_equal(a[iu], array([0, 1, 2, 4, 5, 8]))
-    # Now with an offset
-    iu1 = mask_indices(3, np.triu, 1)
-    assert_array_equal(a[iu1], array([1, 2, 5]))
-
-
-@pytest.mark.xfail(reason="np.tril_indices == our tuple(tril_indices)")
-def test_tril_indices():
-    # indices without and with offset
-    il1 = tril_indices(4)
-    il2 = tril_indices(4, k=2)
-    il3 = tril_indices(4, m=5)
-    il4 = tril_indices(4, k=2, m=5)
-
-    a = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]])
-    b = np.arange(1, 21).reshape(4, 5)
-
-    # indexing:
-    assert_array_equal(a[il1], array([1, 5, 6, 9, 10, 11, 13, 14, 15, 16]))
-    assert_array_equal(b[il3], array([1, 6, 7, 11, 12, 13, 16, 17, 18, 19]))
-
-    # And for assigning values:
-    a[il1] = -1
-    assert_array_equal(
-        a, array([[-1, 2, 3, 4], [-1, -1, 7, 8], [-1, -1, -1, 12], [-1, -1, -1, -1]])
-    )
-    b[il3] = -1
-    assert_array_equal(
-        b,
-        array(
-            [
-                [-1, 2, 3, 4, 5],
-                [-1, -1, 8, 9, 10],
-                [-1, -1, -1, 14, 15],
-                [-1, -1, -1, -1, 20],
-            ]
-        ),
-    )
-    # These cover almost the whole array (two diagonals right of the main one):
-    a[il2] = -10
-    assert_array_equal(
-        a,
-        array(
-            [
-                [-10, -10, -10, 4],
-                [-10, -10, -10, -10],
-                [-10, -10, -10, -10],
-                [-10, -10, -10, -10],
-            ]
-        ),
-    )
-    b[il4] = -10
-    assert_array_equal(
-        b,
-        array(
-            [
-                [-10, -10, -10, 4, 5],
-                [-10, -10, -10, -10, 10],
-                [-10, -10, -10, -10, -10],
-                [-10, -10, -10, -10, -10],
-            ]
-        ),
-    )
-
-
-@pytest.mark.xfail(reason="np.triu_indices == our tuple(triu_indices)")
-class TestTriuIndices:
+@xfail  # (reason="np.triu_indices == our tuple(triu_indices)")
+class TestTriuIndices(TestCase):
     def test_triu_indices(self):
         iu1 = triu_indices(4)
         iu2 = triu_indices(4, k=2)
@@ -486,21 +494,21 @@ class TestTriuIndices:
         )
 
 
-class TestTrilIndicesFrom:
+class TestTrilIndicesFrom(TestCase):
     def test_exceptions(self):
         assert_raises(ValueError, tril_indices_from, np.ones((2,)))
         assert_raises(ValueError, tril_indices_from, np.ones((2, 2, 2)))
         # assert_raises(ValueError, tril_indices_from, np.ones((2, 3)))
 
 
-class TestTriuIndicesFrom:
+class TestTriuIndicesFrom(TestCase):
     def test_exceptions(self):
         assert_raises(ValueError, triu_indices_from, np.ones((2,)))
         assert_raises(ValueError, triu_indices_from, np.ones((2, 2, 2)))
         # assert_raises(ValueError, triu_indices_from, np.ones((2, 3)))
 
 
-class TestVander:
+class TestVander(TestCase):
     def test_basic(self):
         c = np.array([0, 1, -2, 3])
         v = vander(c)
@@ -531,6 +539,4 @@ class TestVander:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()
