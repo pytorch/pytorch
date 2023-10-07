@@ -188,6 +188,19 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_small_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"always_keep_tensor_constants": True}):
+            self.check_model(Model().to(self.device), example_inputs)
+
     def test_output_path(self):
         class Model(torch.nn.Module):
             def __init__(self):
