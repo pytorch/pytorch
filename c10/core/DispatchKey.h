@@ -369,6 +369,10 @@ enum class DispatchKey : uint16_t {
   // go here.
 
   FuncTorchBatched, // See Note [Out-of-tree vmap+grad prototype]
+
+  // Dispatch key for BatchedTensorImpl wrapping a nested tensor.
+  BatchedNestedTensor,
+
   FuncTorchVmapMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // This is the dispatch key for BatchedTensorImpl, which is used to implement

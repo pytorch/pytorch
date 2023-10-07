@@ -124,7 +124,7 @@ cpu_adaptive_max_pool_channels_last(
     int64_t size = channels;
     int64_t len = size - (size % Vec::size());
     // temp buffer holding index with integer_t
-    std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
+    auto index_buffer = std::make_unique<integer_t []>(len);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t ih0 = start_index(oh, output_height, input_height);
@@ -240,9 +240,9 @@ cpu_adaptive_max_pool_channels_last(
     int64_t size = channels;
     int64_t len = size - (size % bVec::size());
     // temp buffer holding index with integer_t
-    std::unique_ptr<int32_t []> index_buffer(new int32_t[len]);
+    auto index_buffer = std::make_unique<int32_t []>(len);
     // temp buffer holding max value with float
-    std::unique_ptr<param_t []> max_arr(new param_t[size]);
+    auto max_arr = std::make_unique<param_t []>(size);
     param_t* max = max_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {
@@ -303,7 +303,7 @@ cpu_adaptive_max_pool_channels_last(
           }
           for (; d2 < size; d2++) {
             int64_t index = ih * input_width + iw;
-            param_t val = param_t(in[d2]);
+            auto val = static_cast<param_t>(in[d2]);
             int64_t maxindex = ind[d2];
             param_t maxval = max[d2];
 
@@ -444,11 +444,7 @@ void adaptive_max_pool2d_kernel_impl(
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_max_pool2d", [&] {
         using param_t = at::opmath_type<scalar_t>;
-        if (at::isReducedFloatingType(input.scalar_type())) {
-          cpu_adaptive_max_pool<scalar_t, /*opmath_t*/param_t>(output, indices, input, output_size);
-        } else {
-          cpu_adaptive_max_pool<scalar_t, scalar_t>(output, indices, input, output_size);
-        }
+        cpu_adaptive_max_pool<scalar_t, /*opmath_t*/param_t>(output, indices, input, output_size);
       });
       break;
     }

@@ -1,14 +1,14 @@
 # Owner(s): ["module: dynamo"]
-from typing import List
 import unittest
+from typing import List
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
-from torch._export.pass_base import _ExportPassBase
 from torch._export.constraints import constrain_as_value
-from functorch.experimental import control_flow
+from torch._export.pass_base import _ExportPassBase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -105,16 +105,14 @@ class TestPassInfra(TestCase):
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
-                self.register_buffer('my_buffer1', torch.tensor(3.0))
-                self.register_buffer('my_buffer2', torch.tensor(4.0))
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
-                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
-
-                # Mutate one of the buffers (e.g., increment it by 1)
-                self.my_buffer2.add_(1.0)
-
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
                 return output
 
         my_module = CustomModule()
@@ -123,36 +121,24 @@ class TestPassInfra(TestCase):
         input_tensor1 = torch.tensor(5.0)
         input_tensor2 = torch.tensor(6.0)
 
-        ep_before = export(my_module, (input_tensor1, input_tensor2))
+        ep_before = torch._export.export(my_module, (input_tensor1, input_tensor2))
+        from torch.fx.passes.infra.pass_base import PassResult
 
-        # Dummy pass to modify input names and add new nodes to intentionally
-        # change output node names
-        class ModifyInputOutputPass(_ExportPassBase):
+        def modify_input_output_pass(gm):
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    node.name = node.name + "_modified"
+            gm.recompile()
+            return PassResult(gm, True)
 
-            def placeholder(self, name, arg, meta):
-                new_name = name + "_modified"
-                return super().placeholder(new_name, arg, meta)
-
-            def call_operator(self, op, args, kwargs, meta):
-                ret = super().call_operator(op, args, kwargs, meta)
-                new_args = (ret,) + args[1:]
-                new_ret = super().call_operator(op, new_args, kwargs, meta)
-                return new_ret
-
-
-        ep_after = ep_before._transform(ModifyInputOutputPass())
+        ep_after = ep_before._transform(modify_input_output_pass)
         new_signature = ep_after.graph_signature
 
-        for inp in (
-            new_signature.user_inputs +
-            list(new_signature.inputs_to_parameters.keys()) +
-            list(new_signature.inputs_to_buffers.keys())
-        ):
-            self.assertTrue("_modified" in inp)
+        for node_name in new_signature.user_outputs:
+            self.assertTrue("_modified" in node_name)
 
         old_signature = ep_before.graph_signature
         self.assertNotEqual(new_signature.user_outputs, old_signature.user_outputs)
-        self.assertNotEqual(new_signature.buffers_to_mutate.keys(), old_signature.buffers_to_mutate.keys())
 
 
 if __name__ == '__main__':

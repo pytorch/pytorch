@@ -325,12 +325,7 @@ class TestFFT(TestCase):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
-        # FIXME: https://github.com/pytorch/pytorch/issues/108204
-        default_msg = (
-            r"(Unsupported dtype|"
-            r"FFT doesn't support (tensors*|transforms) of type|"
-            r"expected scalar type \w+ but found|)"
-        )
+        default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
         elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
@@ -451,7 +446,7 @@ class TestFFT(TestCase):
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
         # FIXME: https://github.com/pytorch/pytorch/issues/108205
-        errMsg = r"(dims must be unique|duplicate value in the list of dims)"
+        errMsg = "dims must be unique"
         with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))
 

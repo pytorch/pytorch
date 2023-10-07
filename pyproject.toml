@@ -29,7 +29,7 @@ ignore = [
     "B007", "B008", "B017",
     "B018", # Useless expression
     "B019", "B020",
-    "B023", "B024", "B026",
+    "B023", "B026",
     "B028", # No explicit `stacklevel` keyword argument found
     "B904",
     "E402",
@@ -74,6 +74,14 @@ select = [
     "PIE807",
     "PIE810",
     "PLE",
+    "PLR1722", # use sys exit
+    "PLW3301", # nested min max
+    "PT006", # TODO: enable more PT rules
+    "PT022",
+    "PT023",
+    "PT024",
+    "PT025",
+    "PT026",
     "RUF017",
     "TRY302",
 ]

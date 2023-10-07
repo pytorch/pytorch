@@ -81,7 +81,7 @@ class TORCH_API SGDParamGroup {
 class TORCH_API SGD {
  public:
   explicit SGD(
-      std::vector<torch::jit::mobile::SGDParamGroup> param_groups,
+      const std::vector<torch::jit::mobile::SGDParamGroup>& param_groups,
       SGDOptions defaults)
       : defaults_(std::make_unique<SGDOptions>(defaults)) {
     for (const auto& param_group : param_groups) {
@@ -103,8 +103,7 @@ class TORCH_API SGD {
   }
 
   explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      : SGD({std::move(SGDParamGroup(params))}, defaults) {}
+      : SGD({SGDParamGroup(std::move(params))}, defaults) {}
 
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const SGDParamGroup& param_group);
@@ -122,7 +121,7 @@ class TORCH_API SGD {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<SGDParamGroup> param_groups_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ska::flat_hash_map<std::string, std::unique_ptr<SGDParamState>> state_;
+  ska::flat_hash_map<void*, std::unique_ptr<SGDParamState>> state_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<SGDOptions> defaults_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
