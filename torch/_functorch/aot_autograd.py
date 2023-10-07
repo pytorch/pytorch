@@ -3144,6 +3144,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 + CompiledFunction.metadata.output_info
             )
 
+            for (i, x) in enumerate(raw_returns_not_including_intermediate_bases):
+                assert CompiledFunction.metadata.requires_grad_info[i] == raw_returns_meta[i].requires_grad
             fw_outs_not_requiring_grad = [
                 x
                 for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
@@ -3447,6 +3449,11 @@ fw_metadata={str(fw_metadata)}""")
             # This should be rare, and is tricky to get right. When we trace the backward,
             # we currently trace with autograd.grad instead of .backward(), which makes it difficult
             # to ensure that we run autograd all the way through the input **before** it saw the mutation.
+            assert (
+                len([x for x in fw_metadata.input_info if x.requires_grad and x.mutates_data])
+                ==
+                len([x for x in fw_metadata.requires_grad_info[:fw_metadata.num_mutated_inputs] if x])
+            )
             if len([x for x in fw_metadata.input_info if x.requires_grad and x.mutates_data]) != 0:
                 raise RuntimeError(f"""\
 Found a graph input that requires gradients, and received a mutation.

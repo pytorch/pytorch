@@ -1,6 +1,5 @@
 import copy
 import dataclasses
-from enum import auto, Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
@@ -15,8 +14,9 @@ from torch.fx.passes.infra.pass_manager import PassManager
 
 
 __all__ = [
-    "ArgumentKind",
-    "ArgumentSpec",
+    "TensorArgument",
+    "ConstantArgument",
+    "SymIntArgument",
     "ExportBackwardSignature",
     "ExportedProgram",
     "ExportGraphSignature",
@@ -171,20 +171,22 @@ class ExportGraphSignature:
         )
 
 
-class ArgumentKind(Enum):
-    Tensor = auto()
-    SymInt = auto()
-    Constant = auto()
+@dataclasses.dataclass
+class TensorArgument:
+    name: str
 
 
 @dataclasses.dataclass
-class ArgumentSpec:
-    kind: ArgumentKind
-    value: Any
+class SymIntArgument:
+    name: str
 
-    def __post_init__(self):
-        if self.kind in (ArgumentKind.Tensor, ArgumentKind.SymInt):
-            assert isinstance(self.value, str)
+
+@dataclasses.dataclass
+class ConstantArgument:
+    value: Union[int, float, bool, None]
+
+
+ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
 
 
 @dataclasses.dataclass
@@ -699,6 +701,8 @@ def _get_updated_range_constraints(
     if shape_env is None:
         return {}
     range_constraints = {
-        k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
+        k: RangeConstraint(v.lower, v.upper)
+        for k, v in shape_env.var_to_range.items()
+        if k not in shape_env.replacements
     }
     return range_constraints
