@@ -1120,8 +1120,7 @@ class BuiltinVariable(VariableTracker):
                     ):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
-                        unimplemented(f"unexpected sourceless type bases: {bases}")
-
+                        tuple_args = [ConstantVariable.create(b) for b in bases]
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
                 pass

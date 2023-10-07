@@ -574,6 +574,31 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_support_bases(self):
+        import abc
+
+        import torch.fx._symbolic_trace
+
+        class Meta(abc.ABCMeta, torch.fx._symbolic_trace.ProxyableClassMeta):
+            def __new__(cls, name, bases, dct):
+                x = super().__new__(cls, name, bases, dct)
+                x.attr = 100
+                return x
+
+        class Multistreamable(abc.ABC):
+            pass
+
+        class Foo(Multistreamable, metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            typ = type(Foo())
+            typ.__bases__
+            return typ.__bases__
+
+        self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
