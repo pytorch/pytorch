@@ -370,7 +370,7 @@ def _bytecode_src_hook(code: types.CodeType, new_code: types.CodeType):
                 "which could not be found on this machine. Run `pip "
                 "install depyf` to install the library."
             )
-            raise
+            return
 
         try:
             decompiled_src = depyf.decompile(new_code)
