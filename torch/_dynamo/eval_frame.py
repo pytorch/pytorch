@@ -522,7 +522,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or skipfiles.check_file(frame.f_code.co_filename).skipped
+            or skipfiles.check_func(frame.f_code).skipped
             or config.disable
         ):
             log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)

@@ -222,7 +222,7 @@ if torch.distributed.is_available():
 def get_func_inlinelist():
     inlinelist = set()
     for f in FUNC_INLINELIST:
-        inlinelist.add(eval(f))
+        inlinelist.add(eval(f).__code__)
     return inlinelist
 
 
@@ -230,9 +230,7 @@ def get_func_inlinelist():
 def get_filename_inlinelist():
     inlinelist = set()
     for f in FILENAME_INLINELIST:
-        inlinelist.add(
-            _module_dir(torch) + f.lstrip("torch.").replace(".", "/") + ".py"
-        )
+        inlinelist.add(_module_dir(torch) + f.lstrip("torch.").replace(".", "/"))
     return inlinelist
 
 
@@ -301,7 +299,7 @@ def _check_verbose_inner(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
-    if filename in get_filename_inlinelist():
+    if any(filename.startswith(d) for d in get_filename_inlinelist()):
         return SkipResult(
             False,
             "inlined according skipfiles.FILENAME_INLINELIST",
@@ -334,18 +332,20 @@ def check_file(filename, allow_torch=False, extra_check=False):
         return result
 
 
-def check_func(func, allow_torch=False, extra_check=False):
+def check_func(obj, allow_torch=False, extra_check=False):
     if isinstance(
-        func, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
-        filename = func.get_filename()
+        filename = obj.get_filename()
         try:
-            func = func.get_function()
+            obj = obj.get_function().__code__
         except NotImplementedError:
             func = None
+    elif inspect.iscode(obj):
+        filename = obj.co_filename
     else:
-        filename = getfile(func)
-    if func in get_func_inlinelist():
+        filename = getfile(obj)
+    if obj in get_func_inlinelist():
         return SkipResult(
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
