@@ -39,7 +39,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -558,7 +558,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert arg.fake_tensor is not None
 
         def bind_symint(s, prop):
-            if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
+            if not (
+                isinstance(s, torch.SymInt) and isinstance(s.node.expr, sympy.Symbol)
+            ):
                 return
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
