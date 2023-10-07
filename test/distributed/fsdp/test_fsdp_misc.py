@@ -195,6 +195,12 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             for _ in range(5):
                 loss = model(x, y)
 
+        model.train()
+        for _ in range(5):
+            loss = model(x, y)
+            loss = loss.sum()
+            loss.backward()
+
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
     @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
