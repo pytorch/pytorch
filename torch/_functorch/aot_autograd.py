@@ -776,8 +776,6 @@ def run_functionalized_fw_and_collect_metadata(
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
-        input_requires_grad_info: List[bool] = []
-        output_requires_grad_info: List[bool] = []
 
         flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
@@ -817,9 +815,6 @@ def run_functionalized_fw_and_collect_metadata(
         # to return to the user. Why? The backend compiler is free to (incorrectly) not set requires_grad
         # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
 
-        num_mutated_inps = len(
-            [x for x in input_info if x.mutates_data or x.mutates_metadata]
-        )
         inp_storage_refs = {
             StorageWeakRef(inpt.untyped_storage()): idx
             for idx, inpt in enumerate(flat_f_args)
@@ -2065,8 +2060,6 @@ def create_synthetic_base_metadata(
     ]
 
     # grab the original requires grad info on the outputs, except the ones from the mutated inputs
-    num_original_input_data_mutations = len([x for x in m.input_info if x.mutates_data or x.mutates_metadata])
-    output_grad_info = [x.requires_grad for x in m.output_info]
     input_metadata_output_info = [
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
