@@ -105,13 +105,11 @@ def export__RC__(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
                     f"got {dynamic_shapes} instead",
-                    case_names=[],
                 )
             if len(combined_args) != len(dynamic_shapes):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
-                    case_names=[],
                 )
             for i, shape in enumerate(dynamic_shapes):
                 yield from tree_zip(combined_args[i], shape)
@@ -121,13 +119,11 @@ def export__RC__(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
                     f"got {dynamic_shapes} instead",
-                    case_names=[],
                 )
             if len(combined_args) != len(dynamic_shapes):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
-                    case_names=[],
                 )
             for k, shape in dynamic_shapes.items():
                 yield from tree_zip(combined_args[k], shape)
@@ -137,7 +133,6 @@ def export__RC__(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
                     f"got {dynamic_shapes} instead",
-                    case_names=[],
                 )
             for f in dataclasses.fields(combined_args):
                 yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
@@ -149,7 +144,6 @@ def export__RC__(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dynamic_shapes of a {type(combined_args)} to be None, "
                     f"got {dynamic_shapes} instead",
-                    case_names=[],
                 )
 
     def to_constraint(dim, tensor, i):
@@ -191,7 +185,6 @@ def export__RC__(
                             UserErrorType.INVALID_INPUT,
                             f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
                             "try None instead",
-                            case_names=[],
                         )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
@@ -204,7 +197,6 @@ def export__RC__(
                             UserErrorType.INVALID_INPUT,
                             f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
                             "try None instead",
-                            case_names=[],
                         )
         else:
             if shape is not None:
@@ -212,7 +204,6 @@ def export__RC__(
                     UserErrorType.INVALID_INPUT,
                     f"Unexpected dynamic_shape {shape} of Tensor, "
                     "try None instead",
-                    case_names=[],
                 )
 
     if isinstance(f, ExportedProgram):
@@ -244,23 +235,20 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     if not isinstance(t, torch.Tensor):
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
-            f"Expected tensor as input to dynamic_dim but got {type(t)}",
-            case_names=[],
+            f"Expected tensor as input to dynamic_dim but got {type(t)}"
         )
 
     if t.dim() < 1:
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
-            "Cannot mark 0-dimension tensors to be dynamic",
-            case_names=[],
+            "Cannot mark 0-dimension tensors to be dynamic"
         )
 
     if index >= t.dim():
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
             f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
-            f" but got {index}, which is out of bounds for the given tensor.",
-            case_names=[],
+            f" but got {index}, which is out of bounds for the given tensor."
         )
 
     return _create_constraint(
@@ -520,11 +508,8 @@ def _export(
     kwargs = kwargs or {}
 
     if not isinstance(args, tuple):
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
-            case_names=[],
-        )
+        raise UserError(UserErrorType.INVALID_INPUT,
+                        f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}")
 
     # We convert to nn.Module because __call__ of ExportedProgram
     # is untracable right now.
@@ -532,8 +517,7 @@ def _export(
         if len(constraints) > 0:
             raise UserError(
                 UserErrorType.INVALID_INPUT,
-                "Cannot provide constraints for already exported program.",
-                case_names=[],
+                "Cannot provide constraints for already exported program."
             )
         f = f.module()
 
@@ -545,8 +529,7 @@ def _export(
                 if len(constraints) > 0:
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
-                        "Cannot provide constraints for already exported program.",
-                        case_names=[],
+                        "Cannot provide constraints for already exported program."
                     )
                 gm_torch_level = f
             else:
@@ -561,12 +544,12 @@ def _export(
                         **kwargs,
                     )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e), case_names=[])
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}",
-                case_names=["constrain_as_value_example", "constrain_as_size_example"],
+                case_name="constrain_as_size_example",
             )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
