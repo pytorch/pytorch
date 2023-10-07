@@ -318,7 +318,7 @@ class TensorVariable(VariableTracker):
                 dyn_length = self.call_method(
                     tx, "size", [ConstantVariable.create(0)], {}
                 )
-                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values prouced through
+                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
                 # symbolic_shapes, but that end up as int/sympy.Integer
                 assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
                 if isinstance(dyn_length, SymNodeVariable):
@@ -501,9 +501,9 @@ class TensorVariable(VariableTracker):
                 )
             # We don't check that the tensor is on CPU when force is False, as this
             # allows us to execute NumPy code on CUDA.
-            # We don't check that requires_grad=False as we are curently doing an
+            # We don't check that requires_grad=False as we are currently doing an
             # unconditional detach.
-            # TODO: We may want to avoid detching if `requires_grad=True`
+            # TODO: We may want to avoid detaching if `requires_grad=True`
             #       and `force=False` to allow computing gradients.
             force = "force" in kwargs and kwargs["force"].as_python_constant()
             proxy = tx.output.create_proxy(
@@ -669,6 +669,9 @@ class TensorVariable(VariableTracker):
             assert len(args) == 1
             fn_var = args[0]
 
+            # Guards from the fn_var
+            options.update(VariableTracker.propagate(fn_var))
+
             if isinstance(fn_var, variables.NestedUserFunctionVariable):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
                 # This should not be onerous to support when needed.
@@ -695,8 +698,10 @@ class TensorVariable(VariableTracker):
                 ):
                     src = fn_var.func.source
 
-                if src:
-                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                if not src:
+                    unimplemented("No source for register_hook target fn")
+
+                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
                 if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):
@@ -704,6 +709,16 @@ class TensorVariable(VariableTracker):
                     # python state.
                     # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
                     # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
+                    #
+                    # Discussion point 1 - Should we bypass this if nopython/fullgraph = True?
+                    #   No. Because this was going to be a graph break anyway - this check does not
+                    # introduce new graph breaks where there were none.
+                    #
+                    # Discussion point 2 - Should we defer this check to backwards?
+                    #   No. Because compiled autograd is not yet ready for prime time. As such, if we defer, a user
+                    # would have no recourse - their forward traces just fine, but will fail at backwards unless
+                    # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
+                    # then they have nothing they can do except disable compile.
                     unimplemented(
                         "Compilation of intermediate hooks requires compiled autograd"
                     )
@@ -729,6 +744,10 @@ class TensorVariable(VariableTracker):
 
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
+        elif name == "requires_grad_" and self.as_proxy().node.meta[
+            "example_value"
+        ].requires_grad != (args[0].value if len(args) > 0 else True):
+            unimplemented("Tensor.requires_grad_")
 
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),

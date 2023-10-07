@@ -36,7 +36,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 
-from . import comptime, external_utils
+from . import comptime, external_utils, polyfill
 
 """
 A note on skipfiles:
@@ -154,6 +154,7 @@ FILENAME_INLINELIST = {
     torch.utils._content_store.__file__,
     external_utils.__file__,
     comptime.__file__,
+    polyfill.__file__,
     torch.optim._functional.__file__,
     torch.utils._foreach_utils.__file__,
     _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
