@@ -488,7 +488,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if (
                     not hasattr(value, "data")
                     or not isinstance(value.data, ir.IRNode)
-                    or not isinstance(value.data.data, ir.IRNode)
+                    or not (
+                        hasattr(value.data, "data")
+                        and isinstance(value.data.data, ir.IRNode)
+                    )
                 ):
                     return
 
@@ -675,7 +678,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.graph_inputs.items():
             assert isinstance(
                 value, (TensorBox, sympy.Expr)
-            ), "Unsupported inductor graph input type: " + type(value)
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
