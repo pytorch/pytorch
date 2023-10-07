@@ -57,6 +57,7 @@ from .utils import (
     CleanupManager,
     CompilationMetrics,
     counters,
+    cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
@@ -405,6 +406,13 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
+@maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
