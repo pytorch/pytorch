@@ -539,8 +539,8 @@ namespace detail {
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
 
-namespace c10::detail{
-  extern bool TORCH_RUNTIME_DEBUG;
+namespace c10::detail {
+extern bool TORCH_RUNTIME_DEBUG;
 } // namespace c10::detail
 
 // This Macro is used to check conditions that are potentially expensive to

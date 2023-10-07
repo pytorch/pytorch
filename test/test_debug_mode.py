@@ -43,7 +43,10 @@ class TestDebugMode(TestCase):
             with self.assertRaisesRegex(error_type, error_message):
                 e(x)
         with debug_mode(True):
-            debug_error_message = r"IndexError embedding index out of bounds, value: 10 at index 0, is out of bounds of size : \[10\]"
+            debug_error_message = (
+                r"IndexError embedding index out of bounds, "
+                r"value: 10 at index 0, is out of bounds of size : \[10\]"
+            )
             with self.assertRaisesRegex(RuntimeError, debug_error_message):
                 e(x)
 
