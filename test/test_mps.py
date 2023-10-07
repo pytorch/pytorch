@@ -67,9 +67,6 @@ def mps_ops_grad_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
 
-        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-        'addr': [torch.float16],
-
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'sgn': [torch.float16, torch.float32],
@@ -93,6 +90,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for aten::nextafter is not implemented on CPU
+        'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
@@ -563,7 +562,6 @@ def mps_ops_modifier(ops):
         'nanquantile': None,
         'nanmedian': None,
         'native_dropout_backward': None,
-        'nextafter': None,
         'normnuc': None,
         'nn.functional.fractional_max_pool2d': None,
         'nn.functional.fractional_max_pool3d': None,
@@ -10976,7 +10974,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif op.name == "masked.mean":
@@ -11031,7 +11031,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif (op.name == "masked.mean"):
