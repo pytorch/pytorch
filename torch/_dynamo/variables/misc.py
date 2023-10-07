@@ -796,9 +796,7 @@ class SkipFilesVariable(VariableTracker):
             if any(key not in ["initial", "func"] for key in kwargs.keys()):
                 raise unimplemented("Unsupported kwarg for itertools.accumulate")
 
-            acc = None
-            if "initial" in kwargs:
-                acc = kwargs["initial"]
+            acc = kwargs.get("initial")
 
             if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
