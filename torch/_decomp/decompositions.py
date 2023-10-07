@@ -209,7 +209,7 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @register_decomposition(aten.threshold_backward)
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
-    return torch.where(self <= threshold, 0.0, grad_output)
+    return torch.where(self <= threshold, 0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -4209,6 +4209,27 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
 @out_wrapper()
 def floor_divide(self, other):
     return torch.div(self, other, rounding_mode="floor")
+
+
+@register_decomposition([aten.sum.default, aten.sum.out])
+def sum_default(
+    self: Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    if out is None:
+        return aten.sum.dim_IntList(self, [], dtype=dtype)
+    else:
+        return aten.sum.IntList_out(self, [], dtype=dtype, out=out)
+
+
+@register_decomposition([aten.squeeze.default, aten.squeeze.dim])
+def squeeze_default(self: Tensor, dim: Optional[int] = None):
+    if dim is None:
+        return aten.squeeze.dims(self, list(range(self.dim())))
+    else:
+        return aten.squeeze.dims(self, [dim])
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

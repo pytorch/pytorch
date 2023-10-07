@@ -577,3 +577,8 @@ API Reference
 .. autoclass:: ExportGraphSignature
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.export.exported_program
