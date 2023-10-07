@@ -109,6 +109,7 @@ class MyOptimizer(torch.optim.Optimizer):
 
     def step(self):
         ret = self._init_group()
+        # Assert that init group can return the actual value
         assert self.val == ret
         return ret
 
@@ -165,12 +166,12 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         optimizer.step(fn)
 
     def test_init_group(self):
-        # Test can handle
-        for val, alt in [
-            (1, (False, 10.0)),
-            ([10, False], 1),
-            ((0.1, False), [5, 0.0]),
-            ([0.2, 0.4, True], [0]),
+        # Test only literals
+        for val in [
+            1,
+            True,
+            [10, False],
+            (0.2, 0.4, True),
         ]:
             opt = MyOptimizer([Parameter(torch.randn(10, 5), requires_grad=False)], val)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(opt.step)
