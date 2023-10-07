@@ -995,6 +995,7 @@ def _make_elementwise_binary_reference(
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
     supports_two_python_scalars=False,
+    should_register_decomposition=True,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op, name
@@ -1035,7 +1036,7 @@ def _make_elementwise_binary_reference(
         _ref.__name__ = name
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, name)
-        if aten_op is not None:
+        if aten_op is not None and should_register_decomposition:
             register_decomposition(aten_op)(_ref)
 
         return _ref
@@ -1268,6 +1269,7 @@ def float_power(
 @_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_two_python_scalars=True,
+    should_register_decomposition=False,
 )
 def floor_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
@@ -2224,20 +2226,21 @@ py_all = all
 @out_wrapper()
 def all(
     a: TensorLikeType,
-    dim: Optional[DimsType] = None,
+    dim: Optional[int] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    # Computes nelem
-    if isinstance(dim, Dim):
-        dim = (dim,)  # type: ignore[assignment]
+    # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
+    # case must be handled separately.
+    if dim is None:
+        assert not keepdim
+        result = torch.logical_not(torch.any(torch.logical_not(a)))
+    else:
+        result = torch.logical_not(
+            torch.any(torch.logical_not(a), dim, keepdim=keepdim)
+        )
 
-    a_ = _maybe_convert_to_dtype(a, torch.bool)
-    # avoid comparison with symbolic number of elements to make this op symint friendly
-    result = eq(sum(logical_not(a_), dim=dim, keepdim=keepdim), 0)
-
-    # Preserves uint8 -- probably a legacy mask thing
-    if a.dtype is torch.uint8:
-        return prims.convert_element_type(result, torch.uint8)
+    if a.dtype == torch.uint8:
+        result = result.to(dtype=torch.uint8)
 
     return result
 
