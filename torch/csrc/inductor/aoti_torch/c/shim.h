@@ -92,6 +92,7 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int8();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
