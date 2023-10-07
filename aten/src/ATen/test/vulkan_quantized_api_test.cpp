@@ -3018,6 +3018,29 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_random_params_int8_int32) {
       /* groups */ 1);
 }
 
+TEST_F(VulkanAPITest, quantized_tensor_get_scale_zero_point) {
+  const auto in_cpu =
+      at::rand({2, 13, 12, 27}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto cpu_quantized = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto vulkan_quantized = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+
+  double cpu_quantized_scale = cpu_quantized.q_scale();
+  int64_t cpu_quantized_zero_point = cpu_quantized.q_zero_point();
+  double vulkan_quantized_scale = vulkan_quantized.q_scale();
+  int64_t vulkan_quantized_zero_point = vulkan_quantized.q_zero_point();
+
+  ASSERT_TRUE(cpu_quantized_scale == vulkan_quantized_scale &&
+      cpu_quantized_zero_point == vulkan_quantized_zero_point);
+}
+
 } // namespace
 
 #endif /* USE_VULKAN_API */

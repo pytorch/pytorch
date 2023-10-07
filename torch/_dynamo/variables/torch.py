@@ -24,6 +24,7 @@ from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    has_torch_function,
     is_rng_state_getter_or_setter,
     istype,
     product,
@@ -51,11 +52,11 @@ tensor_dunder_fns = [
     torch.Tensor.__rpow__,
     torch.Tensor.__rsub__,
     torch.Tensor.__rdiv__,
-    torch._C._TensorBase.__radd__,
-    torch._C._TensorBase.__rmul__,
-    torch._C._TensorBase.__ror__,
-    torch._C._TensorBase.__rxor__,
-    torch._C._TensorBase.__rand__,
+    torch._C.TensorBase.__radd__,
+    torch._C.TensorBase.__rmul__,
+    torch._C.TensorBase.__ror__,
+    torch._C.TensorBase.__rxor__,
+    torch._C.TensorBase.__rand__,
 ]
 
 torch_special_class_types = (torch._C.Generator,)
@@ -81,6 +82,7 @@ constant_fold_functions = [
     torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
+    torch.promote_types,
     torch._C._get_privateuse1_backend_name,
 ]
 
@@ -97,31 +99,31 @@ if torch.distributed.is_available():
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
-    return torch._C._TensorBase.__radd__(*args)
+    return torch._C.TensorBase.__radd__(*args)
 
 
 def remap_as_fn___rmul__(*args):
-    return torch._C._TensorBase.__rmul__(*args)
+    return torch._C.TensorBase.__rmul__(*args)
 
 
 def remap_as_fn___ror__(*args):
-    return torch._C._TensorBase.__ror__(*args)
+    return torch._C.TensorBase.__ror__(*args)
 
 
 def remap_as_fn___rxor__(*args):
-    return torch._C._TensorBase.__rxor__(*args)
+    return torch._C.TensorBase.__rxor__(*args)
 
 
 def remap_as_fn___rand__(*args):
-    return torch._C._TensorBase.__rand__(*args)
+    return torch._C.TensorBase.__rand__(*args)
 
 
 tensor_dunder_fns_remap = {
-    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
-    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
-    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
-    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
-    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+    torch._C.TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C.TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C.TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C.TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C.TensorBase.__rand__: remap_as_fn___rand__,
 }
 
 
@@ -222,6 +224,7 @@ class TorchVariable(VariableTracker):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            InferenceModeVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -330,6 +333,10 @@ class TorchVariable(VariableTracker):
             return DeterministicAlgorithmsVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
+        elif self.value is torch.inference_mode:
+            return InferenceModeVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
         elif self.value is torch.are_deterministic_algorithms_enabled:
             assert not (args or kwargs)
             return ConstantVariable.create(
@@ -354,6 +361,14 @@ class TorchVariable(VariableTracker):
             )
             assert len(args) == 1
             return CUDAStreamContextVariable.create(tx, args[0], **options)
+        elif self.value in (
+            torch.overrides.has_torch_function_variadic,
+            torch.overrides.has_torch_function_unary,
+        ):
+            assert not kwargs
+            return ConstantVariable.create(
+                any(has_torch_function(a) for a in args), **options
+            )
         elif self.value is torch.cuda.streams.Stream:
             return wrap_fx_proxy_cls(
                 CUDAStreamVariable,
@@ -471,6 +486,9 @@ class TorchVariable(VariableTracker):
             # these setter or getter functions, producing an incorrect graph
             # when it comes to rng states.
             unimplemented(f"RNG state getter/setter function - {self.value}")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         elif (
             self.value == torch.numel
             and len(args) == 1
@@ -530,7 +548,7 @@ class TorchVariable(VariableTracker):
             invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
             # the space of invoking functions in the middle of the guard chain is very iffy. As such,
-            # guard propagaiton via options is the best we can do.
+            # guard propagation via options is the best we can do.
             from .builder import SourcelessBuilder
 
             return SourcelessBuilder()(tx, invocation_result).add_options(options)

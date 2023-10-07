@@ -21,7 +21,7 @@ GEMM_TEMPLATE = r"""
 {{template.globals().getvalue()}}
 {{instance_definition}}
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
-// Otherwise, compuates the Gemm kernel using the given workspace ptr.
+// Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
 {{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   try {
