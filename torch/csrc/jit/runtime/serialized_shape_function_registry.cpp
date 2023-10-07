@@ -3246,7 +3246,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
  static const OperatorMap<std::string> shape_mappings {
     {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary"},
     {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
-    {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
+    {"aten::dropout(Tensor input, float p=0.5, bool? train=True) -> Tensor", "unary"},
     {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
     {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
     {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},

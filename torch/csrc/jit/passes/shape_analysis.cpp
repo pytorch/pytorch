@@ -836,7 +836,7 @@ class ShapePropagator : public PropertyPropBase {
             "aten::cos(Tensor self) -> Tensor",
             "aten::cosh(Tensor self) -> Tensor",
             "aten::digamma(Tensor self) -> Tensor",
-            "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+            "aten::dropout(Tensor input, float p=0.5, bool? train=True) -> Tensor",
             "aten::elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale) -> Tensor",
             "aten::erf(Tensor self) -> Tensor",
             "aten::erfc(Tensor self) -> Tensor",

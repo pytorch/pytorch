@@ -1218,7 +1218,7 @@ add_shape_compute_mapping(
     "aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", unary
 )
 add_shape_compute_mapping(
-    "aten::dropout(Tensor input, float p, bool train) -> Tensor", unary
+    "aten::dropout(Tensor input, float p=0.5, bool? train=True) -> Tensor", unary
 )
 add_shape_compute_mapping(
     "aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor",

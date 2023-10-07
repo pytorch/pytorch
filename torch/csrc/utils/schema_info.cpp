@@ -114,7 +114,7 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
 
 bool SchemaInfo::is_nondeterministic() const {
   static const c10::FunctionSchema dropout_schema = torch::jit::parseSchema(
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor");
+      "aten::dropout(Tensor input, float p=0.5, bool? train=True) -> Tensor");
   if (dropout_schema == schema_ && value_map_.count("train") &&
       !value_map_.at("train").toBool()) {
     return false;
@@ -234,7 +234,7 @@ void SchemaInfo::ensureConservativity(
 std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   // This list of nondeterministic ops is copied from JIT ir.cpp.
   static const std::vector<std::string> nondeterministic_op_strings = {
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+      "aten::dropout(Tensor input, float p=0.5, bool? train=True) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
       "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
