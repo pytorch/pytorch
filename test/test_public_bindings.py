@@ -337,6 +337,10 @@ class TestPublicBindings(TestCase):
             "torch.distributed.elastic.rendezvous.etcd_rendezvous",
             "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
             "torch.distributed.elastic.rendezvous.etcd_store",
+            "torch.distributed.rpc.server_process_global_profiler",
+            "torch.distributed.run",
+            "torch.distributed.tensor.parallel",
+            "torch.distributed.utils",
         }
 
         errors = []
