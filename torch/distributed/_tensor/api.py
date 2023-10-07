@@ -105,16 +105,24 @@ class _FromTorchTensor(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: Tuple[Placement, ...],
         run_check: bool,
+        shape: Optional[torch.Size] = None,
+        stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
-        # if it's not by default run_check, we assume user is certain that each
-        # rank has the same tensor shape, and we just use that to calculate the
-        # global shape
-        tensor_shape, tensor_stride = compute_global_tensor_info(
-            input, device_mesh, placements
-        )
+        if shape and stride:
+            tensor_shape = shape
+            tensor_stride = stride
+        else:
+            # if it's not by default run_check, we assume user is certain that each
+            # rank has the same tensor shape, and we just use that to calculate the
+            # global shape
+            tensor_shape, tensor_stride = compute_global_tensor_info(
+                input, device_mesh, placements
+            )
+            tensor_shape = torch.Size(tensor_shape)
+            tensor_stride = tuple(tensor_stride)
 
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
@@ -136,12 +144,12 @@ class _FromTorchTensor(torch.autograd.Function):
             input.view_as(input),
             device_mesh,
             placements,
-            shape=torch.Size(tensor_shape),
+            shape=tensor_shape,
             dtype=input.dtype,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
             requires_grad=input.requires_grad,
-            stride=tuple(tensor_stride),
+            stride=tensor_stride,
         )
         return dist_tensor
 
@@ -279,6 +287,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         placements: Optional[Sequence[Placement]] = None,
         *,
         run_check: bool = True,
+        shape: Optional[torch.Size] = None,
+        stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -323,11 +333,19 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if placements is None:
             placements = [Replicate() for _ in range(device_mesh.ndim)]
 
+        if (shape is not None) != (stride is not None):
+            raise RuntimeError("Please pass both shape and stride at the same time.")
+
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
         # function to construct the dist tensor instead.
         return _FromTorchTensor.apply(  # pyre-ignore[16]: autograd func
-            local_tensor, device_mesh, tuple(placements), run_check
+            local_tensor,
+            device_mesh,
+            tuple(placements),
+            run_check,
+            shape,
+            stride,
         )
 
     def to_local(

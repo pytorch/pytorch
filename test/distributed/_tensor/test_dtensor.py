@@ -7,7 +7,12 @@ import torch.nn.functional as F
 from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    init_device_mesh
+)
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 
