@@ -190,13 +190,12 @@ class GraphModuleOpUpgrader:
         args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for
                              arg in args]
         assert exported_program.call_spec.in_spec is not None
-        args, kwargs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
-        assert kwargs == {}
+        inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
 
         for _pass in self.upgrader_passes:
             upgraded_program = exported_program._transform(_pass)
             # NB: we have to retrace the graph_module instead of ep because of some failure.
-            exported_program = export(upgraded_program.module(), args, kwargs)
+            exported_program = export(upgraded_program.module(), inputs, {})
             exported_program._call_spec = upgraded_program.call_spec
 
         return exported_program

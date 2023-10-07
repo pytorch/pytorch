@@ -13,6 +13,7 @@
 #include <ATen/ops/full.h>
 #include <ATen/ops/meshgrid.h>
 #include <ATen/ops/stack.h>
+#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <vector>
