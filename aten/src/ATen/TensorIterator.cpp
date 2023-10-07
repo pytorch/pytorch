@@ -22,7 +22,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>

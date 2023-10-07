@@ -6,6 +6,9 @@ import torch
 # add some debug printouts
 debug = False
 
+# add inf and NaN checkers
+debug_check_inf_and_nan = False
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
@@ -45,7 +48,7 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
-# register custom graph optimizatin pass hook. so far, pre/post passes are
+# register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
 # def my_custom_pre_pass(graph: torch.fx.graph.Graph):
@@ -192,8 +195,7 @@ def is_fbcode():
 
 
 # constant folding on the joint graph
-# Turn off constant folding due to issue #108388
-joint_graph_constant_folding = not is_fbcode()
+joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
@@ -201,6 +203,11 @@ debug_index_asserts = False
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
+
+# The multiprocessing start method to use for inductor workers in the codecache.
+# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
+# the default to spawn.
+worker_start_method = "fork"
 
 
 def decide_compile_threads():
@@ -416,7 +423,7 @@ class triton:
     # the max number of spills we allow for the configs we benchmark.
     # Setting this to 0 means we skip a config if it spills even a single
     # register.
-    # Settting it to a larger value allows a config spilling a small amount
+    # Setting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.

@@ -3,7 +3,7 @@
 #include <vector>
 
 #include <c10/cuda/CUDAStream.h>
-#include <torch/csrc/inductor/aot_runtime/interface.h>
+#include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/torch.h>
 

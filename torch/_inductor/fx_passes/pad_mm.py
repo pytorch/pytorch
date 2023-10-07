@@ -1,6 +1,6 @@
 import functools
 from itertools import chain
-from typing import Optional
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -8,12 +8,17 @@ from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import inference_graph, register_replacement, training_graph
+from ..pattern_matcher import (
+    inference_graph,
+    Match,
+    register_replacement,
+    training_graph,
+)
 
 aten = torch.ops.aten
 
 
-def fetch_fake_tensors(match, kwarg_names):
+def fetch_fake_tensors(match, kwarg_names) -> List[Tensor]:
     kwargs = match.kwargs
     return [kwargs[name].meta["val"] for name in kwarg_names]
 
@@ -29,7 +34,7 @@ def unwrap_fake_args(*arg_names):
     return decorator
 
 
-def get_alignment_size(x):
+def get_alignment_size(x: Tensor) -> int:
     if x.dtype == torch.float16 or x.dtype == torch.half or x.dtype == torch.bfloat16:
         return 8
     elif x.dtype == torch.float32 or x.dtype == torch.float:
@@ -38,25 +43,27 @@ def get_alignment_size(x):
         return 0
 
 
-def check_device(a: Tensor, b: Tensor):
+def check_device(a: Tensor, b: Tensor) -> bool:
     return a.is_cuda and b.is_cuda
 
 
-def check_dtype(a: Tensor, b: Tensor):
+def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def is_symbolic(a: Optional[Tensor]):
+def is_symbolic(a: Optional[Tensor]) -> bool:
     return a is not None and any(
         isinstance(x, torch.SymInt) for x in chain(a.size(), a.stride())
     )
 
 
-def any_is_symbolic(*args):
+def any_is_symbolic(*args: Optional[Tensor]) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def should_pad_common(mat1, mat2, input=None):
+def should_pad_common(
+    mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
+) -> bool:
     return (
         torch._inductor.config.shape_padding
         and check_device(mat1, mat2)
@@ -65,31 +72,35 @@ def should_pad_common(mat1, mat2, input=None):
     )
 
 
-def get_padded_length(x, alignment_size):
+def get_padded_length(x: Tensor, alignment_size) -> int:
     if alignment_size == 0 or x % alignment_size == 0:
         return 0
     return int((x // alignment_size + 1) * alignment_size) - x
 
 
-def pad_dim(x, padded_length, dim):
+def pad_dim(x: Tensor, padded_length: int, dim: int) -> Tensor:
     if padded_length == 0:
         return x
     pad = x.new_zeros(*x.shape[:dim], padded_length, *x.shape[dim + 1 :])
     return torch.cat([x, pad], dim=dim)
 
 
-def addmm_pattern(input, mat1, mat2, beta, alpha):
+def addmm_pattern(
+    input: Tensor, mat1: Tensor, mat2: Tensor, beta: float, alpha: float
+) -> Tensor:
     return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
 
-def should_pad_addmm(match):
+def should_pad_addmm(match: Match) -> bool:
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     return should_pad_common(mat1, mat2, input) and should_pad_bench(
         mat1, mat2, torch.ops.aten.addmm, input=input
     )
 
 
-def addmm_replace(input, mat1, mat2, beta=1.0, alpha=1.0):
+def addmm_replace(
+    input: Tensor, mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
+) -> Tensor:
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
@@ -110,12 +121,12 @@ def addmm_replace(input, mat1, mat2, beta=1.0, alpha=1.0):
 
 
 def pad_addmm(
-    input,
-    mat1,
-    mat2,
-    m_padded_length,
-    k_padded_length,
-    n_padded_length,
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
     beta=1.0,
     alpha=1.0,
 ):
@@ -149,7 +160,7 @@ def pad_addmm(
         ]
 
 
-def is_mm_compute_bound(M, K, N, dtype):
+def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     denominator = M * K + N * K + M * N
     if denominator == 0:
         return False
@@ -186,7 +197,9 @@ def set_cached_should_pad(key, value):
     return get_pad_cache().set_value(key, value=value)
 
 
-def should_pad_bench_key(mat1, mat2, op, input=None):
+def should_pad_bench_key(
+    mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
+) -> str:
     def tensor_key(t):
         return (t.shape, t.stride(), t.dtype)
 
@@ -204,7 +217,9 @@ def should_pad_bench_key(mat1, mat2, op, input=None):
     return str(key)
 
 
-def should_pad_bench(mat1, mat2, op, input=None):
+def should_pad_bench(
+    mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
+) -> bool:
     if not has_triton():
         return False
 
@@ -307,18 +322,18 @@ def should_pad_bench(mat1, mat2, op, input=None):
         return should_pad
 
 
-def mm_pattern(mat1, mat2):
+def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
     return aten.mm(mat1, mat2)
 
 
-def should_pad_mm(match):
+def should_pad_mm(match: Match) -> bool:
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
         mat1, mat2, torch.ops.aten.mm
     )
 
 
-def mm_replace(mat1, mat2):
+def mm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
@@ -326,7 +341,13 @@ def mm_replace(mat1, mat2):
     return pad_mm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length)
 
 
-def pad_mm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+def pad_mm(
+    mat1: Tensor,
+    mat2: Tensor,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
+) -> Tensor:
     # mm_replace will go through pad_mm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 1)
@@ -340,18 +361,18 @@ def pad_mm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
         return torch.ops.aten.mm(mat1, mat2)[:-m_padded_length, :]
 
 
-def bmm_pattern(mat1, mat2):
+def bmm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
     return aten.bmm(mat1, mat2)
 
 
-def should_pad_bmm(match):
+def should_pad_bmm(match: Match) -> bool:
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
         mat1, mat2, torch.ops.aten.bmm
     )
 
 
-def bmm_replace(mat1, mat2):
+def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
@@ -362,7 +383,13 @@ def bmm_replace(mat1, mat2):
     return aten.bmm(mat1, mat2)
 
 
-def pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+def pad_bmm(
+    mat1: Tensor,
+    mat2: Tensor,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
+) -> Tensor:
     # bmm_replace will go through pad_bmm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 2)
@@ -425,6 +452,7 @@ def _pad_mm_init():
             should_pad_addmm,
         ),
     ]:
+        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
         args = [*args, *workaround.values()]
         register_replacement(
             pattern,
