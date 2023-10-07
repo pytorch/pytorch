@@ -339,9 +339,6 @@ class TestPublicBindings(TestCase):
             "torch.distributed.elastic.rendezvous.etcd_store",
         }
 
-        print("Modules which failed to import")
-        print("\n".join(map(str, failures)))
-
         errors = []
         for mod, excep_type in failures:
             if mod in public_allowlist:
