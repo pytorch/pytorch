@@ -25,7 +25,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     NUM_DEVICES,
     with_comms,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
@@ -108,7 +107,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
-    def _test_mlp_inference(self):
+    def _test_mlp_inference(self, device_mesh):
         inp_size = [8, 10]
         # Ensure all tp ranks have same input.
         torch.manual_seed(0)
@@ -120,10 +119,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self._check_module(model, model_tp)
 
         # Shard module and initialize optimizer.
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
         model_tp = parallelize_module(model_tp, device_mesh, PairwiseParallel())
 
         output = model(inp)
@@ -134,13 +129,19 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("recompute_activation", [True, False])
     def test_mlp_training(self, is_seq_parallel, recompute_activation):
-        self._test_mlp_training_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
+        self._test_mlp_training_e2e(
+            is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation
+        )
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
     def test_mlp_inference(self):
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
         with torch.inference_mode():
-            self._test_mlp_inference()
+            self._test_mlp_inference(device_mesh)
+
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
 
