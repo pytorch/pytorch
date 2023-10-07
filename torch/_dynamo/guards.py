@@ -715,6 +715,7 @@ class GuardBuilder(GuardBuilderBase):
                     "device",
                     "requires_grad",
                     "ndimension()",
+                    "layout",
                 ]
 
                 for term in terms:
