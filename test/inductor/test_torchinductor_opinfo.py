@@ -211,7 +211,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -239,9 +238,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
+    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.triplet_margin_loss": {f16},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "rand_like": {f16, f32, f64},
@@ -257,6 +255,7 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
+    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
 
@@ -344,6 +343,11 @@ inductor_override_kwargs = {
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {
+        "atol": 1e-4,
+        "rtol": 0.02,
+    },
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},

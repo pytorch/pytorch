@@ -8,8 +8,8 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map, cond
 from torch import Tensor
-from torch.export import Constraint
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export, capture_pre_autograd_graph
+from torch.export import Constraint, Dim, export
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import (
     get_buffer,
@@ -144,7 +144,7 @@ class TestExport(TestCase):
 
         orig_eager = MyModule()
         inps = torch.rand(2, 3), torch.rand(2, 3)
-        ep = export(
+        ep = _export(
             orig_eager,
             inps,
             {},
@@ -1436,6 +1436,23 @@ class TestExport(TestCase):
                     else:
                         self.assertIsInstance(s, int)
 
+    def test_multiple_definitions_same_name_dim(self):
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        A = torch.export.Dim("C", min=3)
+        B = torch.export.Dim("C", max=12)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Found different definitions Dim\\(.*min=3\\) and Dim\\(.*max=12\\) "
+            "for the same symbolic dimension",
+        ):
+            torch.export.export(
+                foo,
+                (torch.randn(10, 10), torch.randn(10, 10)),
+                dynamic_shapes={"x": (A, B), "y": (B, A)},
+            )
+
     def test_export_with_wrong_inputs(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -1446,6 +1463,62 @@ class TestExport(TestCase):
             TypeError, "Trying to flatten user inputs with exported input tree spec"
         ):
             exported_program(torch.rand(2, 3), torch.rand(2, 3))
+
+    def test_export_decomps_simple(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inp = (torch.randn(5, 10),)
+        m = M()
+        with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
+            ep = export(m, inp)
+
+
+        FileCheck().check_count(
+            "torch.ops.aten.t.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+        self.assertTrue(torch.allclose(ep(*inp), m(*inp)))
+
+        core_aten_ep = ep.run_decompositions()
+        FileCheck().check_count(
+            "torch.ops.aten.permute.default", 1, exactly=True
+        ).run(core_aten_ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.t.default", 0, exactly=True
+        ).run(core_aten_ep.graph_module.code)
+        self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
+
+    def test_export_decomps_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inp = (torch.randn(5, 10),)
+        m = M()
+        with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
+            ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
+
+        core_aten_ep = ep.run_decompositions()
+
+        input_node = [node for node in core_aten_ep.graph.nodes if node.op == "placeholder"][-1]
+        self.assertTrue(isinstance(input_node.meta["val"].shape[0], torch.SymInt))
+
+        FileCheck().check_count(
+            "torch.ops.aten.permute.default", 1, exactly=True
+        ).run(core_aten_ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.t.default", 0, exactly=True
+        ).run(core_aten_ep.graph_module.code)
+        self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
 
 if __name__ == '__main__':
     run_tests()

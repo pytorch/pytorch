@@ -1623,7 +1623,6 @@ class TestMathBits(TestCase):
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -1646,7 +1645,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.double,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1666,7 +1664,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
