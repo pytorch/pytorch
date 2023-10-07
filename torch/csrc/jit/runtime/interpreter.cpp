@@ -50,8 +50,12 @@ C10_DEFINE_bool(
     false,
     "enable rethrowing caught exception");
 
-namespace torch {
-namespace jit {
+C10_DEFINE_bool(
+    torch_jit_enable_expanded_stacks,
+    false,
+    "When true we will attemps to pre-expand node stacks and cache expanded stacks.");
+
+namespace torch::jit {
 
 using CodeImpl = interpreter::CodeImpl;
 
@@ -1202,5 +1206,4 @@ void InterpreterContinuation::operator()() {
 #endif
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
