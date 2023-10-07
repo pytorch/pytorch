@@ -3785,7 +3785,7 @@ def _is_integer(x) -> bool:
     """
     if isinstance(x, (int, torch.SymInt)):
         return True
-    if np is not None and isinstance(x, np.ndarray) and np.issubdtype(x.dtype, np.integer):
+    if np is not None and isinstance(x, np.integer):
         return True
     return isinstance(x, Tensor) and not x.is_floating_point()
 
