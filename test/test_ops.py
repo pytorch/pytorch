@@ -676,7 +676,7 @@ class TestCommon(TestCase):
             # gh-110790: Don't use functools partial here. It's currently bugged under Dynamo.
 
             def op_out(out):
-                op(sample.input, *sample.args, **sample.kwargs, out=out)
+                return op(sample.input, *sample.args, **sample.kwargs, out=out)
 
             # Short-circuits if output is not a single tensor or an
             #   iterable of tensors
