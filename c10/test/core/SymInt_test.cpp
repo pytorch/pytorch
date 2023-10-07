@@ -39,15 +39,65 @@ TEST(SymIntTest, SingletonSymNode) {
   ASSERT_FALSE(a == c);
   ASSERT_TRUE(a != c);
 
-  // Tentaively throw an error when comparing with a non-singleton, this is not
-  // necessarily the right behavior.
-  ASSERT_THROW((void)(a == d), c10::Error);
-  ASSERT_THROW((void)(a != d), c10::Error);
-  ASSERT_THROW((void)(d == a), c10::Error);
-  ASSERT_THROW((void)(d != a), c10::Error);
+  ASSERT_FALSE(a == d);
+  ASSERT_TRUE(a != d);
+  ASSERT_FALSE(d == a);
+  ASSERT_TRUE(d != a);
 
-  ASSERT_THROW((void)(a >= b), c10::Error); // "not supported by..."
-  ASSERT_THROW((void)(a >= d), c10::Error); // "not supported by..."
-  ASSERT_THROW((void)(d >= a), c10::Error); // "NYI"
+  // ge
+  ASSERT_TRUE(a >= a);
+  ASSERT_TRUE(a >= b);
+  ASSERT_TRUE(b >= a);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a >= c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c >= a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c >= 3), c10::Error);
+  ASSERT_TRUE(c >= 2);
+  ASSERT_TRUE(c >= 1);
+  ASSERT_FALSE(1 >= c);
+
+  // lt
+  ASSERT_FALSE(a < a);
+  ASSERT_FALSE(a < b);
+  ASSERT_FALSE(b < a);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a < c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c < a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(3 < a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(2 < a), c10::Error);
+  ASSERT_TRUE(1 < a);
+
+  // le
+  ASSERT_TRUE(a <= a);
+  ASSERT_TRUE(b <= a);
+  ASSERT_TRUE(a <= b);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a <= c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c <= a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(3 <= c), c10::Error);
+  ASSERT_TRUE(2 <= c);
+  ASSERT_TRUE(1 <= c);
+  ASSERT_FALSE(c <= 1);
+
+  // gt
+  ASSERT_FALSE(a > a);
+  ASSERT_FALSE(b > a);
+  ASSERT_FALSE(a > b);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a > c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c > a), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a > 3), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(a > 2), c10::Error);
+  ASSERT_TRUE(a > 1);
 }
 #endif

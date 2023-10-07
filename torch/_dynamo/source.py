@@ -9,13 +9,22 @@ from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr
 
+# It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
+# so those cases are omitted intentionally
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
-    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
+}
+
+_GUARD_SOURCE_FSDP_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL: GuardSource.GLOBAL_FSDP_MODULE,
+    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
     GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_NOT_NN_MODULE = {
@@ -102,23 +111,6 @@ class RandomValueSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
-
-
-@dataclasses.dataclass(frozen=True)
 class GlobalSource(Source):
     global_name: str
 
@@ -130,18 +122,6 @@ class GlobalSource(Source):
 
     def name(self):
         return f"G[{repr(self.global_name)}]"
-
-
-@dataclasses.dataclass(frozen=True)
-class DummyGlobalSource(Source):
-    def reconstruct(self, codegen):
-        raise NotImplementedError()
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-    def name(self):
-        return ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -259,6 +239,21 @@ class NegateSource(ChainedSource):
     def name(self):
         # NB: use method call so that function stripping regexes work
         return f"{self.base.name()}.__neg__()"
+
+
+@dataclasses.dataclass(frozen=True)
+class ConvertIntSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"cast_symbool_to_symint_guardless({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -449,7 +444,7 @@ class NotNNModuleSource(NNModuleSource):
 @dataclasses.dataclass(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)

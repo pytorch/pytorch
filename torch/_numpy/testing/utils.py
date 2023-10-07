@@ -195,6 +195,10 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         else:
             return True
 
+    if isinstance(desired, str) and isinstance(actual, str):
+        assert actual == desired
+        return
+
     if isinstance(desired, dict):
         if not isinstance(actual, dict):
             raise AssertionError(repr(type(actual)))
@@ -209,6 +213,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         for k in range(len(desired)):
             assert_equal(actual[k], desired[k], f"item={k!r}\n{err_msg}", verbose)
         return
+
     from torch._numpy import imag, iscomplexobj, isscalar, ndarray, real, signbit
 
     if isinstance(actual, ndarray) or isinstance(desired, ndarray):
