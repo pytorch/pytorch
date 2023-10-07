@@ -585,7 +585,7 @@ class GraphModule(torch.nn.Module):
                 x.attr = 100
                 return x
 
-        class Multistreamable(abc.ABC):
+        class Multistreamable(abc.ABC):  # noqa: B024
             pass
 
         class Foo(Multistreamable, metaclass=Meta):
