@@ -531,7 +531,7 @@ class ListOf(PatternExpr):
         if not isinstance(node, (list, tuple)) or len(node) == 0:
             return FailedMatch("non_list")
         m = Match(self)
-        # Propogating patterns with multiple users will ensure we don't revisit
+        # Propagating patterns with multiple users will ensure we don't revisit
         # the same nodes
         pattern_to_node = ctx.filter_multi_user_patterns()
         matched = False
@@ -851,7 +851,7 @@ def register_replacement(
     """
     Create a replacement rule based on example functions that get traced
     to create patterns.  This supports both training and inference when
-    run on a joint foward+backward graph.
+    run on a joint forward+backward graph.
 
     Args:
         search_fn: traced to give original pattern
