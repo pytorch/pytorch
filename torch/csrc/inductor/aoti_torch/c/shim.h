@@ -92,6 +92,7 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int8();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
@@ -152,6 +153,30 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    double scale,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3, // returns new reference
+    int64_t* ret4,
+    int64_t* ret5,
+    AtenTensorHandle* ret6, // returns new reference
+    AtenTensorHandle* ret7, // returns new reference
+    AtenTensorHandle* ret8 // returns new reference
+);
+
+// This function will create a new uninitialized tensor object
+// and its pointer is returned through *ret.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
@@ -172,6 +197,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_check_inf_and_nan(AtenTensorHandle tensor);
 
 #ifdef USE_CUDA
 
@@ -195,7 +223,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_ints,
     int64_t* flatten_int_args,
     int num_tensors,
-    void** flatten_tensor_args);
+    AtenTensorHandle* flatten_tensor_args);
 
 #ifdef __cplusplus
 } // extern "C"

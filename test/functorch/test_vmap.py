@@ -3751,27 +3751,19 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: Expected all tensors to be on the same device,
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
-        xfail('_upsample_bilinear2d_aa'),
         xfail('argsort'),  # aten::argsort.stable hit the vmap fallback which is currently disabled
         xfail('searchsorted'),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
         inplace_failures = (
-            'abs',
-            'acos',
-            'acosh',
             'addbmm',
             'addcdiv',
             'addcmul',
             'addmm',
             'addmv',
             'addr',
-            'asin',
-            'asinh',
             'atan2',
-            'atan',
-            'atanh',
             'baddbmm',
             'clamp',
             'conj_physical',
