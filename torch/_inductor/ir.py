@@ -2038,7 +2038,7 @@ class Layout(IRNode):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
-        device = f"'{self.device.type'}" if self.device else None
+        device = f"'{self.device.type}'" if self.device else None
         return (
             f"{type(self).__name__}({device}, {self.dtype}, "
             f"size={self.size}, stride={self.stride}{offset})"
