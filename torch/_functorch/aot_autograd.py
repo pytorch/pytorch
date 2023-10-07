@@ -1683,12 +1683,22 @@ def create_joint(
                         allow_unused=True,
                     )
                 else:
+                    """
+                    if dist.get_rank() == 0:
+                        breakpoint()
+                    else:
+                        time.sleep(9999999)
+                    """
+                    torch.autograd.backward(needed_outs, needed_tangents)
+                    backward_out = [g.grad for g in grad_primals]
+                    """
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
                         grad_outputs=needed_tangents,
                         allow_unused=True,
                     )
+                    """
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
