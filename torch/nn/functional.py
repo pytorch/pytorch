@@ -4,6 +4,11 @@ import math
 import warnings
 import importlib
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 import torch
 from torch import _VF
 from torch import sym_int as _sym_int
@@ -3780,7 +3785,7 @@ def _is_integer(x) -> bool:
     """
     if isinstance(x, (int, torch.SymInt)):
         return True
-    if isinstance(x, np.ndarray) and np.issubdtype(x.dtype. np.integer):
+    if np is not None and isinstance(x, np.ndarray) and np.issubdtype(x.dtype. np.integer):
         return True
     return isinstance(x, Tensor) and not x.is_floating_point()
 
