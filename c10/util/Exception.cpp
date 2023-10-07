@@ -112,8 +112,12 @@ void torchInternalAssertFail(
   torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
 }
 
-TORCH_API bool TORCH_RUNTIME_DEBUG =
-    (std::getenv("TORCH_RUNTIME_DEBUG") != nullptr);
+bool env_flag_set(const char* env_var_name) {
+  const char* const env_string = std::getenv(env_var_name);
+  return (env_string == nullptr) ? false : std::strcmp(env_string, "0");
+}
+
+C10_EXPORT bool TORCH_RUNTIME_DEBUG = env_flag_set("TORCH_RUNTIME_DEBUG");
 
 } // namespace detail
 

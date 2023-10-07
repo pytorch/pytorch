@@ -57,6 +57,7 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/full_like.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -502,6 +503,58 @@ inline void validate_sdpa_input(
   }
   return;
 }
+
+double get_min_value(caffe2::TypeMeta dtype){
+  if (dtype == at::kFloat){
+    return std::numeric_limits<float>::lowest();
+  } else if (dtype == at::kDouble){
+    return std::numeric_limits<double>::lowest();
+  } else if (dtype == at::kHalf){
+    return std::numeric_limits<Half>::lowest();
+  } else if (dtype == at::kBFloat16){
+    return std::numeric_limits<BFloat16>::lowest();
+  } else {
+    TORCH_CHECK(false, "Unsupported dtype: ", dtype);
+  }
+}
+
+template <bool le_or_equal_to>
+at::Tensor row_mask(const Tensor& attn_mask, caffe2::TypeMeta dtype) {
+  double min_value = get_min_value(dtype);
+  at::Tensor less_then_min;
+  if (le_or_equal_to) {
+    less_then_min = (attn_mask <= at::full_like(attn_mask, min_value));
+  } else {
+    less_then_min = (attn_mask < at::full_like(attn_mask, min_value));
+  }
+  at::Tensor all_less_then_min = less_then_min.all(-1);
+  return all_less_then_min;
+}
+template <bool le_or_equal_to>
+bool any_masked_out_row(const Tensor& attn_mask, caffe2::TypeMeta dtype){
+  at::Tensor all_less_then_min = row_mask<le_or_equal_to>(attn_mask, dtype);
+  return all_less_then_min.any().item().to<bool>();
+}
+
+template <bool le_or_equal_to>
+std::string masked_out_rows(const Tensor& attn_mask, caffe2::TypeMeta dtype) {
+  at::Tensor all_less_then_min = row_mask<le_or_equal_to>(attn_mask, dtype);
+
+  std::string masked_out_rows_str;
+  for (auto i : c10::irange(all_less_then_min.size(-1))) {
+    // TODO this is wrong since it doesn't account for bsz and num_heads
+    if (all_less_then_min.select(-1, i).item().to<bool>()) {
+      masked_out_rows_str += std::to_string(i);
+      masked_out_rows_str += ", ";
+    }
+  }
+  // We know there is at least one element in the string
+  if(masked_out_rows_str.substr(masked_out_rows_str.length() - 2) == ", "){
+    masked_out_rows_str = masked_out_rows_str.substr(0, masked_out_rows_str.length() - 2);
+  }
+  return masked_out_rows_str;
+}
+
 // This function is used to produce an attn_mask
 // in a standard format that can be consumed by both
 // the math and memory efficient attn_mask implementation
@@ -663,13 +716,21 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
+        TORCH_DEBUG_CHECK(
+            !any_masked_out_row<true>(attn_mask.value(), query_.dtype()),
+            "Attn Mask contains a row that is completely masked. This will cause NaNs in the output. ",
+            "Masked out row indexes: [", masked_out_rows<true>(attn_mask.value(), query_.dtype()), "].");
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
+      TORCH_DEBUG_CHECK(
+            !any_masked_out_row<false>(attn_mask.value(), query_.dtype()),
+            "Attn Mask contains a row that is completely masked. This will cause NaNs in the output. ",
+            "Masked out row indexes: [", masked_out_rows<false>(attn_mask.value(), query_.dtype()), "].");
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
