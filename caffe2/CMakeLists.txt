@@ -822,6 +822,12 @@ if(BUILD_CAFFE2 AND NOT MSVC)
   target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
 endif()
 
+# Ignore Wdeprecated-XXX errors from third-party libraries
+if(NOT MSVC)
+  set_source_files_properties(${PROJECT_SOURCE_DIR}/aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
+  set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
+endif()
+
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
