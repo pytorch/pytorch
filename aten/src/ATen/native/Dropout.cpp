@@ -131,16 +131,17 @@ Tensor native_dropout_backward(const Tensor& grad, const Tensor& mask, double sc
   return result;
 }
 
-Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(const Tensor& input, double p, c10::optional<bool> train) {
   auto result = [&]() {
     NoNamesGuard guard;
+    bool _train = train.value_or(true);
     // TODO: we can remove this is_nested() code smell in the future
     //       if we find a way to support _dropout for nested tensor
     //       e.g. make it an op (at::_dropout) to use dispatcher?
-    if (input.is_nested() || (train && is_fused_kernel_acceptable(input, p))) {
-      return std::get<0>(at::native_dropout(input, p, train));
+    if (input.is_nested() || (_train && is_fused_kernel_acceptable(input, p))) {
+      return std::get<0>(at::native_dropout(input, p, _train));
     }
-    return _dropout<false>(input, p, train);
+    return _dropout<false>(input, p, _train);
   }();
   namedinference::propagate_names(result, input);
   return result;

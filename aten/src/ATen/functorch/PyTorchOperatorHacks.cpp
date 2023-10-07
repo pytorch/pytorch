@@ -253,13 +253,14 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-static Tensor dropout(const Tensor& input, double p, bool train) {
+static Tensor dropout(const Tensor& input, double p, c10::optional<bool> train) {
   auto result = [&]() {
     NoNamesGuard guard;
-    if (train && is_fused_kernel_acceptable(input, p)) {
-      return std::get<0>(at::native_dropout(input, p, train));
+    bool _train = train.value_or(true);
+    if (_train && is_fused_kernel_acceptable(input, p)) {
+      return std::get<0>(at::native_dropout(input, p, _train));
     }
-    return _dropout<false>(input, p, train);
+    return _dropout<false>(input, p, _train);
   }();
   namedinference::propagate_names(result, input);
   return result;
