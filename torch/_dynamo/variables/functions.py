@@ -645,12 +645,12 @@ class TritonKernelVariable(VariableTracker):
     def __init__(self, kernel, kernel_idx, grid, **kwargs):
         super().__init__(**kwargs)
 
-        from torch._higher_order_ops.triton_kernel_wrap import add_kernel_to_table
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         assert kernel is not None
 
         self.kernel = kernel
-        self.kernel_idx = add_kernel_to_table(kernel)
+        self.kernel_idx = kernel_side_table.add_kernel(kernel)
 
         assert kernel_idx is None or self.kernel_idx == kernel_idx
 

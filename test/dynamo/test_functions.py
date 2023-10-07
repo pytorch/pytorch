@@ -1210,6 +1210,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    def test_tensor_size_indexed_by_symint(self):
+        def fn(x, y):
+            index = x.shape[-1]
+            return x + y.shape[index]
+
+        x = torch.rand(10, 2)
+        y = torch.rand(10, 8, 6)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
     def test_partials_as_input_partials_lambda(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)
@@ -1527,9 +1537,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     @requires_triton()
     def test_triton_kernel_higher_order_func(self):
-        from torch._higher_order_ops.triton_kernel_wrap import add_kernel_to_table
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-        add_kernel_id = add_kernel_to_table(add_kernel)
+        add_kernel_id = kernel_side_table.add_kernel(add_kernel)
 
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
@@ -1578,21 +1588,18 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_triton_kernel_functionalize(self):
         import functorch
         from functorch import make_fx
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            add_kernel_to_table,
-            reset_kernel_table,
-        )
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
 
-        reset_kernel_table()
+        kernel_side_table.reset_table()
 
         def f(x, output):
             out = triton_kernel_wrapper_functional(
-                kernel_idx=add_kernel_to_table(mul2_kernel),
+                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
                 grid=(x.numel(),),
                 kwargs={
                     "in_ptr0": x,

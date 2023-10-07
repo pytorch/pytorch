@@ -15,7 +15,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     skipMeta,
-    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
@@ -1116,15 +1115,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "split_with_sizes expects split_sizes to sum exactly to 20",
             lambda: torch.split_with_sizes(nt, bad_split_sizes, dim=-1))
-
-        # Failure when calling backward on a split_with_sizes
-        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        nt_grad = torch.nested.as_nested_tensor([a, b])
-        split_sizes = [2, 6, 4]
-        splits = torch.split_with_sizes(nt_grad, split_sizes, dim=-1)
-        self.assertRaisesRegex(RuntimeError, "the derivative for 'aten::split_with_sizes' is not implemented",
-                               lambda: splits[0].backward(splits[0].clone()))
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
@@ -2695,6 +2685,22 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    def test_split_with_sizes_flow_through(self, device):
+        a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            splits = nt.split_with_sizes([2, 3], dim=-1)
+            unbound = splits[1].unbind()
+            d = unbound[0]
+            d = torch.pow(d, 2)
+            return d
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
     def test_indexing_backward(self, device):
         x0 = torch.randn((2, 5))
         x1 = torch.randn((3, 4))
@@ -2851,7 +2857,7 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, coeff=1)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -2941,20 +2947,6 @@ class TestNestedTensorSubclass(TestCase):
             # should be conceptually equal but not necessarily metadata equivalent
             self.assertEqual(b, nt_contiguous)
             self.assertEqual(b, nt_noncontiguous)
-
-    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
-    @onlyCUDA
-    def test_pin_memory(self, device):
-        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
-        for nt in [nt_contiguous, nt_noncontiguous]:
-            self.assertFalse(nt.is_pinned())
-            pinned = nt.pin_memory(device)
-            self.assertTrue(pinned.is_pinned())
-            self.assertEqual(nt, pinned)
-            self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
-            # test that pin_memory on already pinned tensor has no effect
-            self.assertIs(pinned, pinned.pin_memory())
-            self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
 
 instantiate_parametrized_tests(TestNestedTensor)

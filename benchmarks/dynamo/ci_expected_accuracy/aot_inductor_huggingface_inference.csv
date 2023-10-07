@@ -19,10 +19,10 @@ DistilBertForQuestionAnswering,pass,0
 DistillGPT2,pass,0
 ElectraForCausalLM,pass,0
 ElectraForQuestionAnswering,pass,0
-GPT2ForSequenceClassification,fail_to_run,0
+GPT2ForSequenceClassification,pass,0
 GoogleFnet,pass,0
 LayoutLMForMaskedLM,pass,0
-LayoutLMForSequenceClassification,fail_to_run,0
+LayoutLMForSequenceClassification,pass,0
 M2M100ForConditionalGeneration,pass,0
 MBartForCausalLM,pass,0
 MBartForConditionalGeneration,pass,0

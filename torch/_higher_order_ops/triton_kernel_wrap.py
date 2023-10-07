@@ -1,4 +1,5 @@
 import threading
+from typing import Any, Dict
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -16,36 +17,41 @@ from torch.fx.experimental.proxy_tensor import (
 ###############################################################################
 # Kernel Side Table
 
+
 # We cannot put Triton Kernels into the FX graph as the graph nodes
 # do not support arbitrary functions.
 # Use a side table.
-# We use two dict so that fetching both the kernel and id are O(1)
-kernel_side_table = threading.local()
-kernel_side_table.id_to_kernel = dict()
-kernel_side_table.kernel_to_id = dict()
+# We use two dicts so that fetching both the kernel and id are O(1)
+class KernelSideTable:
+    id_to_kernel: Dict[int, Any] = dict()
+    kernel_to_id: Dict[Any, int] = dict()
+    lock = threading.Lock()
+
+    # Returns index on the table
+    def add_kernel(self, kernel) -> int:
+        with self.lock:
+            if kernel in self.kernel_to_id:
+                return self.kernel_to_id[kernel]
+
+            idx = len(self.id_to_kernel)
+            self.id_to_kernel[idx] = kernel
+            self.kernel_to_id[kernel] = idx
+            return idx
+
+    # Returns the triton kernel at the given index
+    def get_kernel(self, idx: int):
+        # No need to lock here as fetching from dict is atomic
+        assert idx in self.id_to_kernel
+        return self.id_to_kernel[idx]
+
+    # Resets the table (only meant to be used in unit tests)
+    # This is only safe assuming single threaded execution
+    def reset_table(self) -> None:
+        self.id_to_kernel = dict()
+        self.kernel_to_id = dict()
 
 
-# Returns index on the table
-def add_kernel_to_table(kernel) -> int:
-    if kernel in kernel_side_table.kernel_to_id:
-        return kernel_side_table.kernel_to_id[kernel]
-
-    idx = len(kernel_side_table.id_to_kernel)
-    kernel_side_table.id_to_kernel[idx] = kernel
-    kernel_side_table.kernel_to_id[kernel] = idx
-    return idx
-
-
-# Returns the triton kernel at the given index
-def get_kernel_from_table(idx: int):
-    assert idx in kernel_side_table.id_to_kernel
-    return kernel_side_table.id_to_kernel[idx]
-
-
-# Resets the table (only meant to be used in unit tests)
-def reset_kernel_table() -> None:
-    kernel_side_table.id_to_kernel = dict()
-    kernel_side_table.kernel_to_id = dict()
+kernel_side_table = KernelSideTable()
 
 
 ###############################################################################
@@ -72,7 +78,7 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
-    kernel = get_kernel_from_table(kernel_idx)
+    kernel = kernel_side_table.get_kernel(kernel_idx)
     kernel[grid](**kwargs)
 
 
