@@ -1249,7 +1249,10 @@ class BuiltinVariable(VariableTracker):
             if name_var.is_python_constant() and isinstance(
                 val, variables.ConstantVariable
             ):
-                return obj.var_setattr(tx, name_var, val)
+                setattr(
+                    obj.obj, name_var.as_python_constant(), val.as_python_constant()
+                )
+                return ConstantVariable(None)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
