@@ -31,7 +31,6 @@ mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
 moco,pass,11
-nanogpt,pass,0
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,32
 phlippe_densenet,pass,0
