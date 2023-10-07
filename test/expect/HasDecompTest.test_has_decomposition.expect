@@ -763,6 +763,8 @@ aten::frexp.Tensor
 aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
+aten::full.names
+aten::full.names_out
 aten::full_like
 aten::full_like.out
 aten::gather

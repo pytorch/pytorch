@@ -2,21 +2,22 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, Optional
+from typing import cast, List, Optional
 
 import torch._guards
 
 from . import config
-from .config import is_fbcode
 
 from .utils import counters
 
-if is_fbcode():
-    from torch.fb.exportdb.logging import exportdb_error_message
-else:
 
-    def exportdb_error_message(case_name):
-        return ""
+def exportdb_error_message(case_names):
+    case_names_str = "\n  ".join(
+        "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+        + case_name.replace("_", "-")
+        for case_name in case_names
+    )
+    return f"\nFor more information about this error, see:\n  {case_names_str}"
 
 
 import logging
@@ -117,24 +118,24 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
-    CONSTRAIN_VIOLATION = auto()
+    CONSTRAINT_VIOLATION = auto()
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
 
 
 class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg, case_name=None):
+    def __init__(self, error_type: UserErrorType, msg: str, case_names: List[str]):
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
         The error message should tell user about next actions.
 
         error_type: Type of user error
         msg: Actionable error message
-        case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
+        case_name: Unique names (snake case) for relevant examples in exportdb.
         """
-        if case_name is not None:
-            assert isinstance(case_name, str)
-            msg += exportdb_error_message(case_name)
+        if case_names:
+            assert all(isinstance(case_name, str) for case_name in case_names)
+            msg += exportdb_error_message(case_names)
         super().__init__(msg)
         self.error_type = error_type
         self.message = msg
@@ -313,6 +314,6 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
         msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"
+ line {code.co_firstlineno} \ndue to: \n{format_exc()}"
 
     return msg

@@ -10,16 +10,15 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_nested_from_padded_native.h>
-#include <ATen/ops/narrow_native.h>
+#include <ATen/ops/_nested_from_padded.h>
 #endif
 
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/native/nested/NestedTensorTransformerUtils.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <ATen/native/nested/cuda/NestedTensorTransformerUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
 namespace at {
@@ -221,8 +220,8 @@ std::tuple<
     Tensor,
     Tensor,
     Tensor,
-    int64_t,
-    int64_t,
+    c10::SymInt,
+    c10::SymInt,
     Tensor,
     Tensor,
     Tensor>
