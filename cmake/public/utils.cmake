@@ -435,6 +435,7 @@ function(torch_compile_options libname)
     list(APPEND private_compile_options
       -Wall
       -Wextra
+      -Wdeprecated
       -Wno-unused-parameter
       -Wno-unused-function
       -Wno-unused-result

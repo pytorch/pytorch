@@ -1520,5 +1520,12 @@ class TestExport(TestCase):
         ).run(core_aten_ep.graph_module.code)
         self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
 
+    def test_nonzero_2(self):
+        def f(x):
+            return torch.nonzero(x)
+        ep = export(f, (torch.ones(2),))
+        inp = torch.randn(2)
+        self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
+
 if __name__ == '__main__':
     run_tests()
