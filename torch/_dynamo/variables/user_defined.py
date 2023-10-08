@@ -274,7 +274,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
                     [
-                        ConstantVariable.create(k, **options, source=self.source)
+                        ConstantVariable.create(k, **options)
                         for k in keys
                     ],
                     **options,
