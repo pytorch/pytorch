@@ -1524,8 +1524,11 @@ TORCH_IMPL_FUNC(softshrink_out_mps)
   }
 }
 
-TORCH_IMPL_FUNC(softshrink_backward_out_mps)
-(const Tensor& grad_output, const Tensor& self, const Scalar& lambd, const Tensor& grad_input) {
+static void shrink_backward_out_mps(const Tensor& grad_output,
+                                    const Tensor& self,
+                                    const Scalar& lambd,
+                                    const Tensor& grad_input,
+                                    std::string op_name) {
   using namespace mps;
   TORCH_CHECK(self.is_mps());
 
@@ -1545,8 +1548,7 @@ TORCH_IMPL_FUNC(softshrink_backward_out_mps)
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key =
-        "softshrink_backward_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(lambd.to<double>());
+    string key = op_name + ":" + getTensorsStringKey({self}) + ":" + std::to_string(lambd.to<double>());
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
@@ -1588,7 +1590,13 @@ TORCH_IMPL_FUNC(softshrink_backward_out_mps)
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    return;
   }
+}
+
+TORCH_IMPL_FUNC(softshrink_backward_out_mps)
+(const Tensor& grad_output, const Tensor& self, const Scalar& lambd, const Tensor& grad_input) {
+  return shrink_backward_out_mps(grad_output, self, lambd, grad_input, "softshrink_backward_out_mps");
 }
 
 Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
