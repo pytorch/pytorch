@@ -1949,7 +1949,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1992,7 +1992,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         if arch not in valid_arch_strings:
             raise ValueError(f"Unknown CUDA arch ({arch}) or GPU not supported")
         else:
-            num = arch[0] + arch[2]
+            num = arch[0] + arch[2:].split("+")[0]
             flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')

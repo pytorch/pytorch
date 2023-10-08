@@ -2,10 +2,8 @@
 
 #include <ATen/core/dispatch/OperatorOptions.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using AliasAnalysisKind = c10::AliasAnalysisKind;
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -6209,7 +6209,9 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((0, 0), (S, 0, 0)),
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
-                  ((M,), (S, S, M, S)))
+                  ((M,), (S, S, M, S)),
+                  ((S, S, S), (1, S, S))
+                  )
     for lhs_shape, rhs_shape in test_cases:
         lhs = make_arg(lhs_shape)
         rhs = make_arg(rhs_shape)
@@ -7618,7 +7620,7 @@ def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwarg
     for mode, padding_mode, align_corners in itertools.product(modes, padding_modes, align_cornerss):
         yield SampleInput(
             _make_tensor((batch_size, num_channels, S, L)),
-            _make_tensor((batch_size, num_channels, M, 2)),
+            _make_tensor((batch_size, M + 3, M, 2)),
             mode,
             padding_mode,
             align_corners,
@@ -12279,7 +12281,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
