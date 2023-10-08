@@ -101,11 +101,12 @@ def main(compiled_fwd, compiled_bwd, aot_eager):
 
     with ctx:
         if compiled_fwd:
-                torch_log.warning("RUNNING COMPILE")
-                torch._dynamo.config.capture_dynamic_output_shape_ops = True
-                torch._dynamo.config.capture_scalar_outputs = True
-                model = torch._dynamo.optimize("aot_eager" if aot_eager else "eager", nopython=True, dynamic=False)(model)
-                res = run(model, optim)
+            backend = "aot_eager" if aot_eager else "eager"
+            torch_log.warning("RUNNING COMPILE with backend %s", backend)
+            torch._dynamo.config.capture_dynamic_output_shape_ops = True
+            torch._dynamo.config.capture_scalar_outputs = True
+            model = torch._dynamo.optimize(backend, nopython=True, dynamic=False)(model)
+            res = run(model, optim)
         else:
             res = run(model, optim)
     return res
@@ -116,9 +117,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--compiled-fwd', action='store_true')
-    parser.add_argument('--compiled-bwd', action='store_true')
-    parser.add_argument('--aot-eager', action='store_true')
+    parser.add_argument('--compiled-fwd', action='store_true', default=True)
+    parser.add_argument('--no-compiled-fwd', action='store_false', dest='compiled_fwd')
+    parser.add_argument('--compiled-bwd', action='store_true', default=False)
+    parser.add_argument('--no-compiled-bwd', action='store_false', dest='compiled_bwd')
+    parser.add_argument('--aot-eager', action='store_true', default=True)
+    parser.add_argument('--no-aot-eager', action='store_false', dest='aot_eager')
     args = parser.parse_args()
 
     dist.init_process_group(backend="nccl")
