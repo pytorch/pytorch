@@ -6673,7 +6673,7 @@ def ___make_guard_fn():
     def test_list_hasattr2(self):
         def fn():
             x = [torch.zeros(3)]
-            if hasattr(x, "foo"):
+            if hasattr(x, "__len__"):
                 return x[0] + 1
             return x[0] - 1
 
