@@ -58,43 +58,39 @@ def run(model, optim):
         optim.zero_grad(set_to_none=True)
         inp = torch.randn((2, 3), device="cuda")
         torch.storage.resize_count_and_loc = {}
-        if gpu_id == 0:
-            print("FORWARD")
+        torch_log.warning("FORWARD")
         for p in model.parameters():
             torch_log.warning(f"PRE STATE: {p.shape}")
         out = model(inp)
-        if gpu_id == 0:
-            print("END FORWARD")
+        torch_log.warning("END FORWARD")
         # torch.storage.resize_count_and_loc = {}
         loss = out.sum()
         losses.append(loss)
         torch.storage.resize_count_and_loc = {}
         for p in model.parameters():
             torch_log.warning(f"POST STATE: {p.shape}")
-        if gpu_id == 0:
-            print("BACKWARD")
+        torch_log.warning("BACKWARD")
         loss.backward()
-        if gpu_id == 0:
-            print("END BACKWARD")
+        torch_log.warning("END BACKWARD")
         optim.step()
     return losses
 
 
-def main(compiled_fwd, compiled_bwd):
+def main(compiled_fwd, compiled_bwd, aot_eager):
     model, optim = init()
 
     def compiler_fn(gm):
-        print("Compiling autograd?")
+        torch_log.warning("Compiling autograd?")
         return torch.compile(gm, backend="eager", fullgraph=True, dynamic=False)
 
     ctx = compiled_autograd.enable(compiler_fn) if compiled_bwd else contextlib.nullcontext()
 
     with ctx:
         if compiled_fwd:
-                print("RUNNING COMPILE")
+                torch_log.warning("RUNNING COMPILE")
                 torch._dynamo.config.capture_dynamic_output_shape_ops = True
                 torch._dynamo.config.capture_scalar_outputs = True
-                model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
+                model = torch._dynamo.optimize("aot_eager" if aot_eager else "eager", nopython=True, dynamic=False)(model)
                 res = run(model, optim)
         else:
             res = run(model, optim)
@@ -108,10 +104,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--compiled-fwd', action='store_true')
     parser.add_argument('--compiled-bwd', action='store_true')
+    parser.add_argument('--aot-eager', action='store_true')
     args = parser.parse_args()
 
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    res = main(compiled_fwd=args.compiled_fwd, compiled_bwd=args.compiled_bwd)
-    print("res:", res)
+    res = main(compiled_fwd=args.compiled_fwd, compiled_bwd=args.compiled_bwd, aot_eager=args.aot_eager)
+    torch_log.warning("res: %s", res)
