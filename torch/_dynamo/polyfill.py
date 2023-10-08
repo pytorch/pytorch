@@ -9,8 +9,10 @@ def all(iterator):
             return False
     return True
 
-def index(iterator, match, start=0, end=-1):
+
+def index(iterator, item, start=0, end=-1):
     for i, elem in enumerate(list(iterator))[start:end]:
-        if match == elem:
+        if item == elem:
             return i
-    raise ValueError(f"{match} is not in {type(iterator)}")
+    # This will not run in dynamo
+    raise ValueError(f"{item} is not in {type(iterator)}")
