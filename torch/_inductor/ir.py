@@ -2341,6 +2341,10 @@ class MutationLayout(Layout):
             isinstance(src.data, Buffer)
             and isinstance(src.get_layout(), FlexibleLayout)
         ):
+            # Skip the copy when
+            # 1. If src is_user_of dst, we suppose it has been realize in previous
+            #    step of: V.graph.mark_buffer_mutated(dst.get_name())
+            # 2. The src must be FlexibleLayout, since it will be changed to MutationLayout with dst
             need_copy = False
         elif not isinstance(src, StorageBox) or src.is_zero_elements():
             need_copy = True
