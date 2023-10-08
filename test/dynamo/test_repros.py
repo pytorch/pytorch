@@ -36,6 +36,8 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
 
+from .utils import some_global_fn as some_global_fn_other
+
 
 _orig_module_call = torch.nn.Module.__call__
 
@@ -51,6 +53,10 @@ requires_cuda = functools.partial(
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+
+
+def some_global_fn(x):
+    return torch.sin(x) + 20
 
 
 def exists(val):
@@ -3461,6 +3467,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         x = torch.rand(4)
         self.assertTrue(same(fn(x), opt_fn(x)))
+
+    def test_global_fn_guards(self):
+        global some_global_fn
+        org_func = some_global_fn
+
+        def renamed_global_fn(x):
+            return torch.sin(x) + 20
+
+        def updated_global_fn(x):
+            return torch.exp(x)
+
+        for updated in [renamed_global_fn, updated_global_fn, some_global_fn_other]:
+            try:
+
+                def foo(x, y):
+                    return some_global_fn(x) + y
+
+                x = torch.ones(1)
+                y = torch.ones(1)
+
+                expected = foo(x, y)
+
+                counter = CompileCounter()
+                opt_foo = torch.compile(foo, fullgraph=True, backend=counter)
+                actual = opt_foo(x, y)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertEqual(actual, expected)
+
+                some_global_fn = updated
+
+                expected = foo(x, y)
+                actual = opt_foo(x, y)
+                self.assertEqual(counter.frame_count, 2)  # check recompile
+                self.assertEqual(actual, expected)
+            finally:
+                some_global_fn = org_func
 
 
 if __name__ == "__main__":

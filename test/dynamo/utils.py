@@ -20,3 +20,7 @@ def outer_func(func):
         return torch.sin(a + 1), inner_func()
 
     return wrapped
+
+
+def some_global_fn(x):
+    return torch.sin(x) + 20
