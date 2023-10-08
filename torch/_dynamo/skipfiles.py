@@ -64,10 +64,10 @@ Dynamo skip/inline rules & priorities are defined as follows:
     * BUILTIN_SKIPLIST contains builtin python modules, such as abc, collections, etc.
     * THIRDPARTY_SKIPLIST contains common third party libraries, such as numpy, pandas, etc.
 * Functions in these two SKIPLISTs are always skipped, except when they are explicitly
-    put into the two INLINELIST: FILE_INLINELIST and SUBMODULE_INLINELIST.
+    put into the three INLINELIST: FUNC_INLINELIST, FILE_INLINELIST and SUBMODULE_INLINELIST.
 * PyTorch(torch) is in the BUILTIN_SKIPLIST by default, but there are many cases
     where we want inline the functions under torch namespace. We should add them
-    into FILE_INLINELIST or SUBMODULE_INLINELIST to make dynamo inline those functions.
+    into one of the three *_INLINELIST to make dynamo inline those functions.
 * If you call functions under skipped modules/files, Dynamo will wrap these functions
     as SkipFilesVariable. There are a few functions(e.g, collections.OrderedDict) that
     we have special handling at SkipFilesVariable.call_function.
@@ -75,11 +75,18 @@ Dynamo skip/inline rules & priorities are defined as follows:
 Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT (inline)
 
 To figure out what the behavior is, check the following list in order:
+* FUNC_INLINELIST (Inline if YES)
 * FILE_INLINELIST (Inline if YES)
 * SUBMODULE_INLINELIST (Inline if YES)
 * BUILTIN_SKIPLIST & THIRDPARTY_SKIPLIST (Skip if YES)
 * Inline by default
 
+In general, if you want to force inline a function or module, please consider adding
+the function's file or python module to FILE_INLINELIST first.
+Use the FUNC_INLINELIST only when there are other functions under the same file that
+you don't want to inline.
+In the future, we will consolidate FILE_INLINELIST and SUBMODULE_INLINELIST into one list
+as we use the same logic (filename.startswith) to determine if a file or module is skipped.
 """
 
 
@@ -155,7 +162,9 @@ FUNC_INLINELIST = {
 }
 
 
-# Force inline functions in these files, even the files is in *_SKIPLIST.
+# Force inline functions in these files or directories, even they are in *_SKIPLIST.
+# We are using python module name instead of file or directory object to avoid circular dependency.
+# Please keep this sorted alphabetically.
 FILE_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
@@ -196,6 +205,7 @@ FILE_INLINELIST |= {
 }
 
 
+# TODO: consolidate SUBMODULE_INLINELIST and FILE_INLINELIST into one list
 # Force inline functions under these modules, even the modules is in *_SKIPLIST.
 SUBMODULE_INLINELIST = {
     "torch._refs",
@@ -228,7 +238,7 @@ def get_func_inlinelist():
 def get_file_inlinelist():
     inlinelist = set()
     for f in FILE_INLINELIST:
-        inlinelist.add(_module_dir(torch) + f.lstrip("torch.").replace(".", "/"))
+        inlinelist.add(_module_dir(torch) + f[len("torch.") :].replace(".", "/"))
     return inlinelist
 
 
@@ -236,7 +246,7 @@ def get_file_inlinelist():
 def get_submodule_inlinelist():
     inlinelist = set()
     for m in SUBMODULE_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m.lstrip("torch.").replace(".", "/"))
+        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
     return inlinelist
 
 
@@ -292,8 +302,8 @@ class SkipResult:
     reason: Optional[str]
 
 
-# TODO(ybliang): This is a temp function, we should consolidate this with check_verbose.
-def _check_verbose_inner(filename, allow_torch=False):
+# TODO(ybliang): This is a temp function, we should consolidate this with check_file.
+def _check_file_inner(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -320,7 +330,7 @@ def _check_verbose_inner(filename, allow_torch=False):
 
 
 def check_file(filename, allow_torch=False, extra_check=False):
-    result = _check_verbose_inner(filename, allow_torch)
+    result = _check_file_inner(filename, allow_torch)
     if extra_check and result.skipped and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
@@ -330,7 +340,7 @@ def check_file(filename, allow_torch=False, extra_check=False):
         return result
 
 
-def check_func(obj, allow_torch=False, extra_check=False):
+def check_verbose(obj, allow_torch=False, extra_check=False):
     if isinstance(obj, (UserFunctionVariable, UserMethodVariable)):
         filename = obj.get_filename()
         obj = obj.get_function().__code__
@@ -339,6 +349,9 @@ def check_func(obj, allow_torch=False, extra_check=False):
         obj = obj.get_code()
     elif inspect.iscode(obj):
         filename = obj.co_filename
+    elif isinstance(obj, (types.FunctionType, types.MethodType)):
+        filename = getfile(obj)
+        obj = obj.__code__
     else:
         filename = getfile(obj)
     if obj in get_func_inlinelist():
@@ -347,6 +360,10 @@ def check_func(obj, allow_torch=False, extra_check=False):
             "inlined according skipfiles.FUNC_INLINELIST",
         )
     return check_file(filename, allow_torch, extra_check)
+
+
+def check(obj, allow_torch=False, extra_check=False):
+    return check_verbose(obj, allow_torch, extra_check).skipped
 
 
 # skip common third party libs

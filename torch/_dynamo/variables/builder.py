@@ -533,12 +533,12 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check_func(value, allow_torch=True).skipped
+            and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
                 value,
-                skipfiles.check_func(value, allow_torch=True).reason,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
