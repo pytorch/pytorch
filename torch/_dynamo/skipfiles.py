@@ -340,6 +340,34 @@ def check_file(filename, allow_torch=False, extra_check=False):
         return result
 
 
+"""
+This is the main entry point to determine whether an object (function) should be inlined or skipped.
+Let's illustrate the logic with an example:
+    @torch.compile
+    def f1(x, y):
+        ......
+        f2(x, y)
+        ......
+
+    def f2(x, y):
+        ......
+        f3(x, y)
+        ......
+
+    def f3(x, y):
+        ......
+
+There are mainly three call sites of check/check_verbose:
+* The compile region entrance (like function f1), the correspoinding code is located at eval_frame.py.
+* When tracing the recursively called functions (like function f2 and f3).
+    * Dynamo decides inline/skip everytime it encounters a new recursively function call, and the call site
+      is in InliningInstructionTranslator.check_inlineable of symbolic_convert.py.
+    * If f2 is skipped by Dynamo, when evaluating the frame of f3, Dynamo need the inline/skip check again
+      and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
+* For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
+"""
+
+
 def check_verbose(obj, allow_torch=False, extra_check=False):
     if isinstance(
         obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
