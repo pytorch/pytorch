@@ -583,7 +583,6 @@ def mps_ops_modifier(ops):
         'nn.functional.avg_pool3d': None,
         'nn.functional.ctc_loss': None,
         'nn.functional.embedding_bag': None,
-        'nn.functional.hardshrink': None,
         'nn.functional.max_pool3d': None,
         'nn.functional.max_unpool1d': None,
         'nn.functional.max_unpool2d': None,
