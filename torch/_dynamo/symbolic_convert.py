@@ -2381,6 +2381,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
+        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
+
         log.debug("DONE INLINING %s", code)
 
         if is_generator(code):
