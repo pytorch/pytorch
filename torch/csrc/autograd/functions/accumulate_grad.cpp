@@ -19,7 +19,9 @@ namespace autograd {
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
+  LOG(WARNING) << "add_input_metadata before";
   add_input_metadata(variable);
+  LOG(WARNING) << "add_input_metadata after";
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {

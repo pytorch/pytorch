@@ -70,6 +70,8 @@ def run(model, optim):
         for p in model.parameters():
             torch_log.warning(f"POST STATE: {p.shape}")
         torch_log.warning("BACKWARD")
+        from torchviz import make_dot
+        torch_log.warning("OUT GRAPH\n%s", make_dot(loss))
         loss.backward()
         torch_log.warning("END BACKWARD")
         optim.step()

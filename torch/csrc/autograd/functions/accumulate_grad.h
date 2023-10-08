@@ -27,14 +27,14 @@ namespace autograd {
           "grad and param do not obey the gradient layout contract. "      \
           "This is not an error, but may impair performance.\n"            \
           "grad.sizes() = ",                                               \
-          RESULT.sizes(),                                                  \
+          RESULT.sym_sizes(),                                                  \
           ", strides() = ",                                                \
-          RESULT.strides(),                                                \
+          RESULT.sym_strides(),                                                \
           "\n",                                                            \
           "param.sizes() = ",                                              \
-          VAR.sizes(),                                                     \
+          VAR.sym_sizes(),                                                     \
           ", strides() = ",                                                \
-          VAR.strides());                                                  \
+          VAR.sym_strides());                                                  \
     }                                                                      \
   }
 

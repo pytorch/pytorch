@@ -208,7 +208,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   uint32_t add_input_metadata(const at::Tensor& t) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    LOG(WARNING) << "add_input_metadata " << name() << " " << input_nr << " " << t.sizes();
+    LOG(WARNING) << "add_input_metadata " << name() << " " << input_nr << " " << t.sym_sizes();
     input_metadata_.emplace_back(t);
     return input_nr;
   }
