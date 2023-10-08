@@ -106,6 +106,7 @@ CLOSURE_VARS = collections.OrderedDict(
             lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode,
         ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
+        ("___defaultdict_getitem", collections.defaultdict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
         ("___dict_version", dict_version),
@@ -400,7 +401,9 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(
                 val,
                 ok_types,
-            ), t.__name__
+                # Enums are special, they are isinstance of Enum but not actually
+                # an enum type themselves (this is due to metaclass wizardry in CPython)!
+            ) or isinstance(val, enum.Enum), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
@@ -434,6 +437,9 @@ class GuardBuilder(GuardBuilderBase):
 
         if istype(val, torch.Size):
             val = tuple(val)
+
+        if isinstance(val, enum.Enum):
+            val = val.value
 
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking

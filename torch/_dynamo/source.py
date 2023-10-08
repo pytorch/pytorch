@@ -394,6 +394,33 @@ class ODictGetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class DefaultDictGetItemSource(ChainedSource):
+    index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return [
+            codegen._create_load_const(collections.defaultdict.__getitem__),
+            *reconstruct_getitem(self, codegen, index_is_slice=False),
+            *create_call_function(2, True),
+        ]
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        if isinstance(self.index, type):
+            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
+            return f"___defaultdict_getitem({self.base.name()}, {rep})"
+        elif isinstance(self.index, Source):
+            return f"___defaultdict_getitem({self.base.name()}, {self.index.name()})"
+        else:
+            return f"___defaultdict_getitem({self.base.name()}, {self.index!r})"
+
+
+@dataclasses.dataclass(frozen=True)
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen)

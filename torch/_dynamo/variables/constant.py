@@ -1,3 +1,4 @@
+import enum
 import operator
 from typing import Dict, List
 
@@ -57,6 +58,10 @@ class ConstantVariable(VariableTracker):
                 items, regen_guards=True, **kwargs
             )
 
+        # Routing for enums members
+        if is_literal and isinstance(value, enum.Enum):
+            return EnumVariable(value)
+
         return ConstantVariable(value, **kwargs)
 
     def __init__(self, value, **kwargs):
@@ -107,6 +112,9 @@ class ConstantVariable(VariableTracker):
         # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
+        # Enum member, not the Enum itself.
+        if isinstance(obj, enum.Enum) and ConstantVariable.is_literal(obj.value):
+            return True
         return False
 
     def unpack_var_sequence(self, tx):

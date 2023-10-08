@@ -932,6 +932,8 @@ def dict_const_keys_repr(const_keys, *, local):
         const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
+    elif any(istype(k, (tuple,)) for k in const_keys):
+        return str(tuple(dict_const_keys_repr(k, local=local) for k in const_keys))
     else:
         const_keys_str = f"{const_keys!r}"
     return const_keys_str

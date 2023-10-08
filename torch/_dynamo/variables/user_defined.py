@@ -18,7 +18,12 @@ from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import (
+    AttrSource,
+    DefaultDictGetItemSource,
+    ODictGetItemSource,
+    RandomValueSource,
+)
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -259,14 +264,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None, **options)
 
-            if method is collections.OrderedDict.keys and self.source:
+            if (
+                method is collections.OrderedDict.keys
+                or method is collections.defaultdict.keys
+            ) and self.source:
                 # subclass of OrderedDict
                 assert not (args or kwargs)
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
-                    [ConstantVariable.create(k, **options) for k in keys], **options
-                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                    [
+                        ConstantVariable.create(k, **options, source=self.source)
+                        for k in keys
+                    ],
+                    **options,
+                ).add_guard(
+                    self.source.make_guard(
+                        GuardBuilder.ODICT_KEYS
+                        if method is collections.OrderedDict.keys
+                        else GuardBuilder.DICT_KEYS
+                    )
+                )
 
             if (
                 method in (collections.OrderedDict.__contains__, dict.__contains__)
@@ -284,6 +302,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method is collections.OrderedDict.items
                 and isinstance(self.value, collections.OrderedDict)
                 and self.source
+            ) or (
+                method is collections.defaultdict.items
+                and isinstance(self.value, collections.defaultdict)
+                and self.source
             ):
                 assert not (args or kwargs)
                 items = []
@@ -292,7 +314,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for key in keys.unpack_var_sequence(tx):
                     items.append(
                         TupleVariable(
-                            [key, self.odict_getitem(tx, key)],
+                            [
+                                key,
+                                self.odict_getitem(
+                                    tx,
+                                    key,
+                                    dct=collections.OrderedDict
+                                    if method is collections.OrderedDict.items
+                                    else collections.defaultdict,
+                                ),
+                            ],
                             **options,
                         )
                     )
@@ -583,7 +614,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except AttributeError:
             return variables.ConstantVariable.create(False, **options)
 
-    def odict_getitem(self, tx, key):
+    def odict_getitem(self, tx, key, dct=collections.OrderedDict):
         from .builder import VariableBuilder
 
         index = (
@@ -592,11 +623,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else key.as_python_constant()
         )
 
+        ctor = (
+            ODictGetItemSource
+            if dct is collections.OrderedDict
+            else DefaultDictGetItemSource
+        )
+        getitem = (
+            collections.OrderedDict.__getitem__
+            if dict is collections.OrderedDict
+            else collections.defaultdict.__getitem__
+        )
         return VariableBuilder(
             tx,
-            ODictGetItemSource(self.source, index),
+            ctor(self.source, index),
         )(
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
+            getitem(self.value, key.as_python_constant())
         ).add_options(key, self)
 
 

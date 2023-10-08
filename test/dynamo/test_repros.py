@@ -3462,6 +3462,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertTrue(same(fn(x), opt_fn(x)))
 
+    def test_no_graph_break_defaultdict_enums(self):
+        from enum import Enum
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+            BLUE = 3
+
+        class Shape(Enum):
+            RECTANGLE = 4
+            SQUARE = 5
+
+        d = collections.defaultdict(int)
+
+        d[(Color.RED, Shape.RECTANGLE)] = 2
+
+        def fn(x):
+            for v in d.values():
+                x = x * v
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

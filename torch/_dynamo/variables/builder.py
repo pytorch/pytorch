@@ -388,7 +388,6 @@ class VariableBuilder:
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
-
         elif value is torch.utils._pytree.SUPPORTED_NODES:
             result = {
                 k: UserDefinedObjectVariable(
@@ -430,6 +429,10 @@ class VariableBuilder:
             def index_source(key):
                 if self.tensor_can_be_dict_key(key):
                     return GlobalWeakRefSource(global_key_name(key))
+                elif istype(key, (tuple,)):
+                    return tuple([index_source(e) for e in key])
+                elif isinstance(key, enum.Enum):
+                    return f"{type(key).__name__}.{key.name}"
                 else:
                     return key
 
