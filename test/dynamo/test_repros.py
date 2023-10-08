@@ -3067,6 +3067,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
+    def test_list_index(self):
+        for index in ([], [2], [0, 3]):
+            def f(t):
+                xs = ["bar", "foo", "baz", "buzz"]
+                res = xs.index("baz", *index)
+                return t + res
+
+            res = torch._dynamo.optimize(backend="eager", nopython=True)(f)(torch.zeros(1))
+        
+            self.assertEqual(res, torch.tensor([2.0]))
+
     def test_hf_xsoftmax_inference(self):
         def fn(input, mask):
             return XSoftmax.apply(input + 1, mask, 1) + 2
