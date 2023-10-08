@@ -36,9 +36,12 @@
 #include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/reciprocal_native.h>
+#include <ATen/ops/reshape.h>
 #include <ATen/ops/round_native.h>
 #include <ATen/ops/rsqrt_native.h>
+#include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
+#include <ATen/ops/sign.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
@@ -47,6 +50,8 @@
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh_native.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -451,6 +456,88 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
+}
+
+TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
+  using namespace mps;
+
+  if (!self.is_complex()) {
+    Tensor output_copy = output.alias();
+    at::sign_out(output_copy, self);
+    output.copy_(output_copy);
+    return;
+  }
+
+  if (!output.is_same_size(self)) {
+    output.resize_(self.sizes());
+  }
+
+  Tensor flatInput = self.flatten();
+  Tensor flatOutput = output.flatten();
+  Tensor realInput = at::view_as_real(flatInput);
+  Tensor realOutput = at::view_as_real(flatOutput);
+
+  auto complex_sgn_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> MPSGraphTensor* {
+    NSArray<MPSGraphTensor*>* complexNumberComponents = [mpsGraph splitTensor:inputTensor numSplits:2 axis:1 name:nil];
+
+    MPSGraphTensor* realPartTensor = complexNumberComponents[0];
+    MPSGraphTensor* imaginaryPartTensor = complexNumberComponents[1];
+
+    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                        shape:realPartTensor.shape
+                                                     dataType:realPartTensor.dataType];
+
+    MPSGraphTensor* complexZeroTensor = [mpsGraph constantWithScalar:0.0
+                                                               shape:inputTensor.shape
+                                                            dataType:realPartTensor.dataType];
+
+    MPSGraphTensor* isRealZero = [mpsGraph equalWithPrimaryTensor:realPartTensor secondaryTensor:zeroTensor name:nil];
+
+    MPSGraphTensor* isImaginaryZero = [mpsGraph equalWithPrimaryTensor:imaginaryPartTensor
+                                                       secondaryTensor:zeroTensor
+                                                                  name:nil];
+
+    MPSGraphTensor* isComplexZero = [mpsGraph logicalANDWithPrimaryTensor:isRealZero
+                                                          secondaryTensor:isImaginaryZero
+                                                                     name:nil];
+
+    MPSGraphTensor* sgnDenomReal = [mpsGraph squareWithTensor:realPartTensor name:nil];
+
+    MPSGraphTensor* sgnDenomImaginary = [mpsGraph squareWithTensor:imaginaryPartTensor name:nil];
+
+    MPSGraphTensor* sgnDenomSum = [mpsGraph additionWithPrimaryTensor:sgnDenomReal
+                                                      secondaryTensor:sgnDenomImaginary
+                                                                 name:nil];
+
+    MPSGraphTensor* sgnDenom = [mpsGraph squareRootWithTensor:sgnDenomSum name:nil];
+
+    MPSGraphTensor* sgnRealTensor = [mpsGraph divisionWithPrimaryTensor:realPartTensor
+                                                        secondaryTensor:sgnDenom
+                                                                   name:nil];
+
+    MPSGraphTensor* sgnImaginaryTensor = [mpsGraph divisionWithPrimaryTensor:imaginaryPartTensor
+                                                             secondaryTensor:sgnDenom
+                                                                        name:nil];
+
+    MPSGraphTensor* sgnComplexTensor = [mpsGraph concatTensors:@[ sgnRealTensor, sgnImaginaryTensor ]
+                                                     dimension:1
+                                                          name:nil];
+
+    MPSGraphTensor* sgnTensor = [mpsGraph selectWithPredicateTensor:isComplexZero
+                                                truePredicateTensor:complexZeroTensor
+                                               falsePredicateTensor:sgnComplexTensor
+                                                               name:nil];
+    return sgnTensor;
+  };
+
+  unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
+
+  std::vector<long long> realSize = self.sizes().vec();
+  realSize.push_back(2);
+
+  Tensor originalShape = realOutput.reshape(realSize);
+  Tensor complexOutput = at::view_as_complex(originalShape);
+  output.copy_(complexOutput);
 }
 
 } // namespace at::native
