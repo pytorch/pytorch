@@ -13,6 +13,7 @@ import operator
 import os
 import random
 import sys
+import tempfile
 import threading
 import traceback
 import typing
@@ -44,7 +45,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
+from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -1780,7 +1781,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
-        from torch._dynamo.utils import counters
 
         counters.clear()
 
@@ -7241,43 +7241,63 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    def test_itertools_accumulate_symint_default_sum(self):
+        # https://github.com/pytorch/pytorch/issues/110287
+        counters.clear()
+
+        def fn(x):
+            r = itertools.accumulate([x.size(0), x.size(1)])
+            for i in r:
+                x *= i
+            return x
+
+        x = torch.randn(2, 3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_accumulate_tensors_default_sum(self):
+        counters.clear()
+
         def fn(a, b, c, d, x):
             l = [a, b, c, d, x]
             for i, t in enumerate(l):
                 l[i] = t * x
             return itertools.accumulate(l)
 
-        t_list = [torch.tensor([i]) for i in range(4)]
-        x = torch.randn([2, 2])
+        t_list = [torch.tensor([i + 1]) for i in range(4)]
+        x = torch.tensor([[1, 2], [3, 4]])
         eager = fn(*t_list, x)
 
-        counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(*t_list, x)
 
         self.assertEqual(list(eager), list(compiled))
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_accumulate_tensors_builtins(self):
         for builtin_op in [operator.mul, operator.sub, operator.pow]:
+            counters.clear()
 
             def fn(a, b, c, d, x):
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return itertools.accumulate(l, func=builtin_op)
+                return itertools.accumulate(l, builtin_op)
 
-            t_list = [torch.tensor([i]) for i in range(4)]
-            x = torch.randn([2, 2])
+            t_list = [torch.tensor([i + 1]) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
-            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
@@ -7296,24 +7316,24 @@ def ___make_guard_fn():
             return a * len(seen)
 
         for udo_fn in [udo_fn_0, udo_fn_1, udo_fn_2]:
+            counters.clear()
             torch._dynamo.reset()
 
             def fn(a, b, c, d, x):
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return itertools.accumulate(l, func=udo_fn)
+                return itertools.accumulate(l, udo_fn)
 
             t_list = [torch.tensor([i]) for i in range(4)]
-            x = torch.randn([2, 2])
+            x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
-            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_pure_python_accumulate(self):
         def accumulate(iterable, func=lambda x, y: x + y):
@@ -7654,6 +7674,70 @@ ShapeEnv not equal: field values don't match:
         self.assertTrue(
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
+        )
+
+    def test_funcname_cache(self):
+        src = """\
+import torch
+if True:
+    test = 3
+
+class AAA:
+    class DUMMY:
+        class DUMMY2:
+            pass
+
+    def dummy(self):
+        def dummy2():
+            pass
+    class BBB:
+        @staticmethod
+        def CCC():
+            class DDD:
+                if True:
+                    @staticmethod
+                    def EEE():
+                        x = [torch.ones(3, 3) for _ in range(5)]
+                        return x
+            return DDD
+def fn():
+    return 3
+"""
+        with tempfile.NamedTemporaryFile(mode="w") as f:
+            f.write(src)
+            f.flush()
+            from torch._dynamo.funcname_cache import get_funcname
+
+            names = [get_funcname(f.name, i + 1) for i in range(src.count("\n") + 1)]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+
+
+
+
+AAA
+AAA.DUMMY
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.dummy
+AAA.dummy.dummy2
+AAA.dummy.dummy2
+AAA.BBB
+AAA.BBB
+AAA.BBB.CCC
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC
+fn
+fn
+""",
         )
 
 

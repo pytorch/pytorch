@@ -68,35 +68,38 @@ def _gather_state_dict(
     Given a state_dict, this API gathers all the ShardedTensors or DTensors in the state_dict.
     """
     new_state_dict = {}
-    for key, tensor in state_dict.items():
-        if isinstance(tensor, ShardedTensor):
+    for key, value in state_dict.items():
+        if isinstance(value, ShardedTensor):
             # ShardedTensor does not seem to record the original device type.
             # So if the tensor is moved to CPU, we won't know the original type.
             # As a result, we have to rely on the user to tell us the correct one.
-            output_tensor = _all_gather_sharded_tensor(tensor, pg, device)
+            output_tensor = _all_gather_sharded_tensor(value, pg, device)
             local_shard_device = (
-                tensor.local_shards()[0].tensor.device
-                if tensor.local_shards()
+                value.local_shards()[0].tensor.device
+                if value.local_shards()
                 else torch.device("cpu")
             )
             with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
                 if output_tensor.device != local_shard_device:
-                    tensor = output_tensor.to(local_shard_device)
+                    value = output_tensor.to(local_shard_device)
                 else:
-                    tensor = output_tensor
-        elif isinstance(tensor, DTensor):
-            if tensor.device != tensor.device_mesh.device_type:
-                tensor = tensor.to(tensor.device_mesh.device_type)
+                    value = output_tensor
+        elif isinstance(value, DTensor):
+            if value.device != value.device_mesh.device_type:
+                value = value.to(value.device_mesh.device_type)
             # FSDP all_gather: [Shard(0)] -> [Replicate()]
             # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
-            placements = list(copy.deepcopy(tensor.placements))
+            placements = list(copy.deepcopy(value.placements))
             placements[-1] = Replicate()
-            tensor = tensor.redistribute(
-                device_mesh=tensor.device_mesh,
+            value = value.redistribute(
+                device_mesh=value.device_mesh,
                 placements=placements,
             )
-            tensor = tensor.to_local()
-        new_state_dict[key] = tensor
+            value = value.to_local()
+        elif isinstance(value, dict):
+            value = _gather_state_dict(value, pg, device)
+
+        new_state_dict[key] = value
     return new_state_dict
 
 

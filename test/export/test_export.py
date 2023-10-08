@@ -1443,6 +1443,23 @@ class TestExport(TestCase):
                     else:
                         self.assertIsInstance(s, int)
 
+    def test_multiple_definitions_same_name_dim(self):
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        A = torch.export.Dim("C", min=3)
+        B = torch.export.Dim("C", max=12)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Found different definitions Dim\\(.*min=3\\) and Dim\\(.*max=12\\) "
+            "for the same symbolic dimension",
+        ):
+            torch.export.export(
+                foo,
+                (torch.randn(10, 10), torch.randn(10, 10)),
+                dynamic_shapes={"x": (A, B), "y": (B, A)},
+            )
+
     def test_export_with_wrong_inputs(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -1509,6 +1526,13 @@ class TestExport(TestCase):
             "torch.ops.aten.t.default", 0, exactly=True
         ).run(core_aten_ep.graph_module.code)
         self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
+
+    def test_nonzero_2(self):
+        def f(x):
+            return torch.nonzero(x)
+        ep = export(f, (torch.ones(2),))
+        inp = torch.randn(2)
+        self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
 if __name__ == '__main__':
     run_tests()

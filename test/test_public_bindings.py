@@ -3,25 +3,12 @@
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
 import pkgutil
 import torch
-import sys
+import importlib
 from typing import Callable
 import inspect
 import json
 import os
 import unittest
-
-
-# TODO(jansel): we should remove this workaround once this is fixed:
-# https://github.com/pytorch/pytorch/issues/86619
-NOT_IMPORTED_WHEN_TEST_WRITTEN = {
-    "torch.fx.experimental.normalize",
-    "torch.fx.experimental.proxy_tensor",
-    "torch.fx.experimental.schema_type_annotation",
-    "torch.fx.experimental.symbolic_shapes",
-    "torch.fx.passes.backends.cudagraphs",
-    "torch.fx.passes.infra.partitioner",
-    "torch.fx.passes.utils.fuser_utils",
-}
 
 
 class TestPublicBindings(TestCase):
@@ -261,7 +248,14 @@ class TestPublicBindings(TestCase):
 
         def test_module(modname):
             split_strs = modname.split('.')
-            mod = sys.modules.get(modname)
+            try:
+                if "__main__" in modname:
+                    return
+                mod = importlib.import_module(modname)
+            except Exception:
+                # It is ok to ignore here as we have a test above that ensures
+                # this should never happen
+                return
             for elem in split_strs:
                 if elem.startswith("_"):
                     return
@@ -293,8 +287,6 @@ class TestPublicBindings(TestCase):
                     why_not_looks_public = f"because it starts with `_` (`{elem}`)"
 
                 if is_public != looks_public:
-                    if modname in NOT_IMPORTED_WHEN_TEST_WRITTEN:
-                        return
                     if modname in allow_dict and elem in allow_dict[modname]:
                         return
 
@@ -331,18 +323,17 @@ class TestPublicBindings(TestCase):
                     failure_list.append(f"    - To make it{looks_public_str} public: {fix_is_public}")
                     failure_list.append(f"    - To make it{is_public_str} look public: {fix_looks_public}")
 
-
             if hasattr(mod, '__all__'):
                 public_api = mod.__all__
                 all_api = dir(mod)
                 for elem in all_api:
                     check_one_element(elem, modname, mod, is_public=elem in public_api, is_all=True)
-
             else:
                 all_api = dir(mod)
                 for elem in all_api:
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
+
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 
