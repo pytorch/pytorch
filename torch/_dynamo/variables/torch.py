@@ -243,6 +243,12 @@ class TorchVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
         elif self.value in config.constant_functions:
             assert not args and not kwargs
+            # See: https://github.com/pytorch/pytorch/issues/110765
+            if self.value in [
+                torch._utils.is_compiling, 
+                torch._dynamo.external_utils.is_compiling
+            ]:
+                tx.mark_may_have_side_effects()
             return ConstantVariable.create(
                 config.constant_functions[self.value], **options
             )

@@ -7,6 +7,27 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
 
+_variable = 0
+_variable_2 = 0
+
+class MyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_forward_pre_hook(self.pre_forward, with_kwargs=True)
+
+    def pre_forward(self, module, args, kwargs):
+        # There may be side effects when compiling, 
+        # this will force commiting the graph
+        if torch._utils.is_compiling():
+            global _variable
+            _variable += 1
+        else:
+            global _variable_2
+            _variable_2 += 1
+        return args, kwargs
+    
+    def forward(self, x):
+        return x
 
 class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
     def test_add_tensor1(self):
@@ -105,6 +126,24 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             fn(x)
 
         assert counter.op_count == 0
+
+    def test_do_not_skip_side_effects(self):
+        global _variable, _variable_2
+        _variable = 0
+        _variable_2 = 0
+
+        mod = MyModule()
+        model = torch.compile(mod, backend="eager")
+        assert _variable == 0
+        assert _variable_2 == 0
+
+        model(torch.tensor([1]))
+        assert _variable == 1
+        assert _variable_2 == 0
+
+        model(torch.tensor([1]))
+        assert _variable == 2
+        assert _variable_2 == 0
 
 
 if __name__ == "__main__":
