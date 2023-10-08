@@ -1,6 +1,7 @@
 from typing import Any, Dict, Union
 
 import torch
+from torch.streambase import EventBase, StreamBase
 
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -20,16 +21,11 @@ class DeviceInterface:
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
 
-    class Event:
-        def __new__(cls, *args, **kwargs):
-            raise NotImplementedError()
+    Event = EventBase
+    Stream = StreamBase
 
     class device:
         def __new__(cls, device: _device_t):
-            raise NotImplementedError()
-
-    class Stream:
-        def __new__(cls, device=None, priority=0, **kwargs):
             raise NotImplementedError()
 
     class Worker:
