@@ -1451,7 +1451,7 @@ if(MSVC AND NOT BUILD_SHARED_LIBS)
   #   1. Write out a config.h header which stores whether or not
   #      you are linking statically or dynamically.
   #
-  #   2. Force all of users to set the the macro themselves.  If they
+  #   2. Force all of users to set the macro themselves.  If they
   #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
   #      compile option, in which case cmake will automatically
   #      add the macro for you.
