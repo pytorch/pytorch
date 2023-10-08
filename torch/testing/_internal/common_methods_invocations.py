@@ -6298,7 +6298,7 @@ def skips_mvlgamma(skip_redundant=False):
     )
     if skip_redundant:
         # Redundant tests
-        skips = skips + (  # type: ignore[assignment]
+        skips = skips + (
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
@@ -9797,16 +9797,6 @@ op_db: List[OpInfo] = [
                         DecorateInfo(
                             toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
                             'TestDecomp', 'test_quick', device_type='cpu'),
-                    ),
-                    skips=(
-                        DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
-                                     'test_reference_numerics',
-                                     dtypes=(torch.uint8,)),
-                        DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
-                                     'test_reference_numerics_small_values',
-                                     dtypes=(torch.uint8,)),
                     )),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
@@ -10265,8 +10255,6 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        # https://github.com/pytorch/pytorch/issues/70904
-                        DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -10864,7 +10852,7 @@ op_db: List[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
                     )),
     BinaryUfuncInfo('fmin',
                     op=torch.fmin,
@@ -10874,7 +10862,7 @@ op_db: List[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
                     )),
     BinaryUfuncInfo('fmod',
                     ref=np.fmod,
@@ -10887,18 +10875,16 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=None,
                     rhs_make_tensor_kwargs={'exclude_zero': True},
                     decorators=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        # unexpected NaN values
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_contig_vs_every_other',
-                                     dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     device_type='cpu', dtypes=(torch.bfloat16,)),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_non_contig',
-                                     dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     device_type='cpu', dtypes=(torch.bfloat16,)),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_reference_numerics',
-                                     dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
-                                     'test_reference_numerics_small_values',
-                                     dtypes=(torch.uint8,)),
+                                     device_type='cpu', dtypes=(torch.bfloat16,)),
                     )),
     BinaryUfuncInfo('remainder',
                     ref=np.remainder,
@@ -10914,18 +10900,17 @@ op_db: List[OpInfo] = [
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs={'exclude_zero': True},
                     decorators=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        # unexpected NaN values
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_contig_vs_every_other',
-                                     dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     device_type='cpu', dtypes=(torch.bfloat16,)),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_non_contig',
-                                     dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     device_type='cpu', dtypes=(torch.bfloat16,)),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_reference_numerics',
-                                     dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
-                                     'test_reference_numerics_small_values',
-                                     dtypes=(torch.uint8,)),
+                                     device_type='cpu', dtypes=(torch.bfloat16,)),
+
                         DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo',
                                      'test_nnc_correctness',
                                      dtypes=(torch.bfloat16,)),
@@ -11166,7 +11151,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    skips=(
                        # skips below tests as torch.frexp returns tuple-like (mantissa, exponent) as outputs,
-                       # while theses tests currently requires output to a single tensor.
+                       # while these tests currently require output to a single tensor.
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_batch_vs_slicing'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_contig_vs_every_other'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_contig_vs_transposed'),
@@ -17978,11 +17963,6 @@ op_db: List[OpInfo] = [
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
-        skips=(
-            # FIXME: keepdim parameter is ignored when dim=None
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-        ),
     ),
     ReductionOpInfo(
         'argmin',
@@ -17991,11 +17971,6 @@ op_db: List[OpInfo] = [
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
-        skips=(
-            # FIXME: keepdim parameter is ignored when dim=None
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-        ),
     ),
     ReductionOpInfo(
         'count_nonzero',
@@ -18145,8 +18120,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input', dtypes=[torch.float16]),
             # NumPy is giving NaN for this
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
         ),
@@ -18229,11 +18203,11 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float32]),
         ),
     ),
