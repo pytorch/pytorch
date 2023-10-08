@@ -113,10 +113,10 @@ If you want to understand better what TorchDynamo is doing, you can run your cod
    TORCH_LOGS="+dynamo,guards,bytecode"
 
 If you are not familiar with Python bytecode, you can add a decompiler hook
- to decompile the bytecode into human-readable source code. One available
- tool is [`depyf`](https://github.com/youkaichao/depyf). If you don't have
- ``depyf`` already installed, run ``pip install depyf``. Then, add the
- following code to install decompilation hooks before you run any code.
+to decompile the bytecode into human-readable source code. One available
+tool is `depyf <https://github.com/youkaichao/depyf>`__. If you don't have
+``depyf`` already installed, run ``pip install depyf``. Then, add the
+following code to install decompilation hooks before you run any code.
 
 .. code-block:: python
 
@@ -219,7 +219,7 @@ of these functions take the form:
        JUMP_ABSOLUTE <offset> into toy_example
        ... original bytecode of toy_example ...
 
-By generating this `resume_at` function, we force the remainder of the
+By generating this ``resume_at`` function, we force the remainder of the
 function to be executed in a new Python frame which recursively
 triggers TorchDynamo to restart its capture once execution reaches that
 point for the first time.
@@ -267,8 +267,8 @@ For the compiled code, we cannot directly access its source but have to decompil
 
 .. code-block:: python
 
-   import depyf
-   print(depyf.decompile(code))
+   from depyf import decompile
+   print(decompile(code))
 
 The output is:
 
