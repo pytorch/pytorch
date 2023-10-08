@@ -126,6 +126,7 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         assert counter.op_count == 0
 
     def test_do_not_skip_side_effects(self):
+        # https://github.com/pytorch/pytorch/issues/110765
         global _variable, _variable_2
         _variable = 0
         _variable_2 = 0
