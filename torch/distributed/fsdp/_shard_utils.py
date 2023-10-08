@@ -183,7 +183,7 @@ def _create_chunk_dtensor(
     # FSDP placements: [Shard(0)]
     # HSDP placements: [Replicate(), Shard(0)]
     replicate_placements = (Replicate() for _ in range(device_mesh.ndim))
-    shard_placements = list((Replicate() for _ in range(device_mesh.ndim)))
+    shard_placements = [Replicate() for _ in range(device_mesh.ndim)]
     shard_placements[-1] = DShard(0)  # type: ignore[call-overload]
     shard_placements = tuple(shard_placements)
 
