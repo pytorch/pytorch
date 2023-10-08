@@ -2338,8 +2338,15 @@ class MutationLayout(Layout):
             src = src.data
 
         if (
+            src.is_user_of(dst.get_name()) 
+            and (
+                isinstance(src.data, Buffer)
+                and isinstance(src.get_layout(), FlexibleLayout)
+            )
+        ):
+            need_copy = False
+        elif (
             not isinstance(src, StorageBox)
-            or src.is_user_of(dst.get_name())
             or src.is_zero_elements()
         ):
             need_copy = True
