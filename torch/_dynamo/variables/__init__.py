@@ -8,6 +8,7 @@ from .ctx_manager import (
     GradModeVariable,
     StreamContextVariable,
     StreamVariable,
+    InferenceModeVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (

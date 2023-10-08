@@ -309,17 +309,19 @@ def _multi_tensor_adamax(
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
-        grouped_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_params]
-        grouped_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_grads]
-        grouped_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_avgs]
-        grouped_exp_infs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_infs]
+        for i in range(len(grouped_params)):
+            if torch.is_complex(grouped_params[i]):
+                grouped_params[i] = torch.view_as_real(grouped_params[i])
+                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
+                grouped_exp_infs[i] = torch.view_as_real(grouped_exp_infs[i])
 
         # Update steps
         torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
             if maximize:
-                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)

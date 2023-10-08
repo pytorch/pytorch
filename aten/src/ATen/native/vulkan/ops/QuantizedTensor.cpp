@@ -155,6 +155,18 @@ Tensor dequantize_helper(
   return convert(v_output);
 }
 
+double q_scale(const Tensor& self) {
+  TORCH_CHECK(self.is_vulkan(), "Expecting a vulkan tensor for q_scale");
+  const vTensor& v_input = convert(self);
+  return v_input.get_scale();
+}
+
+int64_t q_zero_point(const Tensor& self) {
+  TORCH_CHECK(self.is_vulkan(), "Expecting a vulkan tensor for q_zero_point");
+  const vTensor& v_input = convert(self);
+  return v_input.get_zero_point();
+}
+
 Tensor dequantize(const Tensor& self) {
   double q_scale = convert(self).get_scale();
   int64_t zero_point = convert(self).get_zero_point();
@@ -169,6 +181,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::quantize_per_tensor.tensor_qparams"),
       quantize_per_tensor_tensor_qparams);
+  m.impl(TORCH_SELECTIVE_NAME("aten::q_scale"), q_scale);
+  m.impl(TORCH_SELECTIVE_NAME("aten::q_zero_point"), q_zero_point);
   m.impl(TORCH_SELECTIVE_NAME("aten::dequantize.self"), dequantize);
 }
 
