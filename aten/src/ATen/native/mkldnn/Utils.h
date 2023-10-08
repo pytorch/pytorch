@@ -71,13 +71,34 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 #endif // AT_MKLDNN_ENABLED()
 };
 
+#if defined(__aarch64__)
+inline bool mkldnn_bf16_device_check_arm() {
+  return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
+}
+#else
+constexpr bool mkldnn_bf16_device_check_arm() {
+  return false;
+}
+#endif
+
 #if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
-  return ideep::has_bf16_type_support() || (cpuinfo_initialize() && cpuinfo_has_arm_bf16());
+#if defined(__x86_64__)
+  // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
+  return ideep::has_bf16_type_support();
+#else
+  return mkldnn_bf16_device_check_arm();
+#endif
 }
+
 inline bool mkldnn_fp16_device_check() {
+#if defined(__x86_64__)
   return ideep::has_fp16_type_support();
+#else
+  return false;
+#endif
 }
+
 #else
 inline bool mkldnn_bf16_device_check() {
   return false;
@@ -100,15 +121,5 @@ inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
         ": fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 }
-
-#if defined(__aarch64__)
-inline bool mkldnn_bf16_device_check_arm() {
-  return (cpuinfo_initialize() && cpuinfo_has_arm_bf16());
-}
-#else
-constexpr bool mkldnn_bf16_device_check_arm() {
-  return false;
-}
-#endif
 
 }

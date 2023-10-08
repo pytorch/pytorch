@@ -1,7 +1,5 @@
 blas=1.0
 cmake=3.22.1
-mkl=2022.1.0
-mkl-include=2022.1.0
 ninja=1.10.2
 numpy=1.23.3
 pyyaml=6.0

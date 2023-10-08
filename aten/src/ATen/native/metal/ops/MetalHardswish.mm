@@ -15,7 +15,7 @@ namespace metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
-static Tensor& hardswish_(Tensor& input) {
+Tensor& hardswish_(Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   IntArrayRef outputSize = input.sizes();
@@ -47,7 +47,7 @@ static Tensor& hardswish_(Tensor& input) {
   return input;
 }
 
-static Tensor hardswish(const at::Tensor& input) {
+Tensor hardswish(const at::Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   IntArrayRef outputSize = input.sizes();
   MetalTensorImplStorage mt{outputSize.vec()};

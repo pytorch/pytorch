@@ -4,6 +4,7 @@
   - .ci/onnx/*
   - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
+  - benchmarks/dynamo/**
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
@@ -15,6 +16,7 @@
   - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
   - torch/_C/_onnx.pyi
+  - torch/_logging/**
   - torch/csrc/jit/passes/onnx.*
   - torch/csrc/jit/passes/onnx/**
   - torch/csrc/jit/serialization/export.*
@@ -24,8 +26,6 @@
   - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
-  - benchmarks/dynamo/_onnx/**
-  - torch/_logging/**
   approved_by:
   - BowenBao
   - abock

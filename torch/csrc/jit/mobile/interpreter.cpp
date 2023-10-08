@@ -128,7 +128,10 @@ bool InterpreterState::run(Stack& stack) {
               mobile_debug_info->setOpIdx(pc);
             }
           }
-
+          if (inst.X < 0 ||
+              static_cast<size_t>(inst.X) >= code.operators_.size()) {
+            throw JITException("Invalid OP Instruction");
+          }
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
           code.operators_[inst.X](stack);

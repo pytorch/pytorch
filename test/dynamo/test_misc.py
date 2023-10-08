@@ -13,6 +13,7 @@ import operator
 import os
 import random
 import sys
+import tempfile
 import threading
 import traceback
 import typing
@@ -45,6 +46,7 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
+from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -59,6 +61,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
@@ -68,7 +71,11 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    IS_FBCODE,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -518,6 +525,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             guard_failure.reason,
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
         )
+
+    def test_builtin_abs(self):
+        def fn(x, y):
+            return abs(x) + abs(y)
+
+        sample = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+
+        for sample in [
+            (torch.randn(10, 10), torch.randn(10, 10)),
+            (-10, make_tensor(10, dtype=torch.int64, device="cpu")),
+            (-0.1, torch.randn(10)),
+        ]:
+            expect = fn(*sample)
+            actual = opt_fn(*sample)
+            self.assertEqual(expect, actual)
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -2002,14 +2025,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_manual_seed(self):
-        def fn(a, b):
-            x = a + b
-            torch.manual_seed(9000)
-            return x + 1
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
-
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod
@@ -2488,20 +2503,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
+        from torch._dynamo.utils import counters
+
         cnts = torch._dynamo.testing.CompileCounter()
+        counters.clear()
 
         def fn(x):
             attention_seed = int(torch.seed() % sys.maxsize)
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(100, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        # Python code is needed here, since torch.manual_seed graph-breaks.
+        # Refs: https://github.com/pytorch/pytorch/issues/107187
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
+        # Only the torch.seed call is turned into an FX graph.
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+        # Graph breaks at manual_seed.
+        self.assertEqual(len(counters["graph_break"]), 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -6097,37 +6122,41 @@ def fn():
         finally:
             torch.set_grad_enabled(prior)
 
-    def test_determinstic_algorithms_mutated(self):
+    def test_deterministic_algorithms_mutated(self):
         prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         value = None
+        warn_only = None
         cnt = CompileCounter()
 
         @torch._dynamo.allow_in_graph
         def check_state():
             nonlocal value
+            nonlocal warn_only
             value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
-            torch.use_deterministic_algorithms(False)
+            torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
+        def run_fn():
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            fn(torch.randn(10))
+            assert value is True
+            assert warn_only is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+            assert torch.is_deterministic_algorithms_warn_only_enabled() is False
+
         try:
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
-            value = None
-            torch.use_deterministic_algorithms(True)
-            fn(torch.randn(10))
-            assert value is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
             assert cnt.frame_count == 1
         finally:
-            torch.use_deterministic_algorithms(prior)
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
@@ -7606,10 +7635,91 @@ ShapeEnv not equal: field values don't match:
 
             inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
 
-        torch.set_default_dtype(torch.float)
-        foo()
-        torch.set_default_dtype(torch.double)
-        foo()
+        with set_default_dtype(torch.float):
+            foo()
+        with set_default_dtype(torch.double):
+            foo()
+
+    def test_torch_dynamo_codegen_pow(self):
+        def pow(x):
+            return x**2
+
+        x = np.arange(8)
+        pow_opt = torch.compile(pow)
+
+        actual, source_code = run_and_get_code(pow_opt, x)
+        expect = pow(x)
+
+        self.assertEqual(expect, actual)
+
+        self.assertTrue(
+            all("aten.pow" not in code for code in source_code),
+            msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
+        )
+
+    def test_funcname_cache(self):
+        src = """\
+import torch
+if True:
+    test = 3
+
+class AAA:
+    class DUMMY:
+        class DUMMY2:
+            pass
+
+    def dummy(self):
+        def dummy2():
+            pass
+    class BBB:
+        @staticmethod
+        def CCC():
+            class DDD:
+                if True:
+                    @staticmethod
+                    def EEE():
+                        x = [torch.ones(3, 3) for _ in range(5)]
+                        return x
+            return DDD
+def fn():
+    return 3
+"""
+        with tempfile.NamedTemporaryFile(mode="w") as f:
+            f.write(src)
+            f.flush()
+            from torch._dynamo.funcname_cache import get_funcname
+
+            names = [get_funcname(f.name, i + 1) for i in range(src.count("\n") + 1)]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+
+
+
+
+AAA
+AAA.DUMMY
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.dummy
+AAA.dummy.dummy2
+AAA.dummy.dummy2
+AAA.BBB
+AAA.BBB
+AAA.BBB.CCC
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC
+fn
+fn
+""",
+        )
 
 
 class TestTracer(JitTestCase):
