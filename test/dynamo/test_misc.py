@@ -7317,10 +7317,10 @@ def ___make_guard_fn():
 
             t_list = [torch.tensor([i + 1]) for i in range(4)]
             x = torch.tensor([[1, 2], [3, 4]])
-            eager = fn(*t_list, x)
 
             compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
+            eager = fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)

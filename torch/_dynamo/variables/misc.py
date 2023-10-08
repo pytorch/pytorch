@@ -794,7 +794,10 @@ class SkipFilesVariable(VariableTracker):
             from .builtin import BuiltinVariable
 
             if any(key not in ["initial", "func"] for key in kwargs.keys()):
-                raise unimplemented("Unsupported kwarg for itertools.accumulate")
+                unimplemented(
+                    "Unsupported kwargs for itertools.accumulate: "
+                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}"
+                )
 
             acc = kwargs.get("initial")
 
@@ -809,11 +812,11 @@ class SkipFilesVariable(VariableTracker):
                     # Default to operator.add
                     func = BuiltinVariable(operator.add).call_function
                 else:
-                    raise unimplemented(
+                    unimplemented(
                         "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
                     )
             else:
-                raise unimplemented("Unsupported arguments for itertools.accumulate")
+                unimplemented("Unsupported arguments for itertools.accumulate")
 
             items = []
             if acc is not None:
