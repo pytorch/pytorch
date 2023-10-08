@@ -6706,6 +6706,32 @@ def ___make_guard_fn():
         compiled_out = compiled_fn(x)
         self.assertTrue(same(fn_out, compiled_out))
 
+    def test_list_hasattr1(self):
+        def fn(x):
+            if hasattr(x, "foo"):
+                return x[0] + 1
+            return x[0] - 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = [torch.randn(3)]
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
+
+    def test_list_hasattr2(self):
+        def fn():
+            x = [torch.zeros(3)]
+            if hasattr(x, "__len__"):
+                return x[0] + 1
+            return x[0] - 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertTrue(same(fn_out, compiled_out))
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
@@ -7319,6 +7345,32 @@ def ___make_guard_fn():
 
             compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_accumulate_tensors_kwargs(self):
+        from torch._dynamo.utils import counters
+
+        for kwargs in [
+            {"func": operator.mul},
+            {"initial": 100},
+            {"func": operator.sub, "initial": -1},
+        ]:
+            counters.clear()
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, **kwargs)
+
+            t_list = [torch.tensor([i + 1]) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]])
+
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+            compiled = compiled_fn(*t_list, x)
+            eager = fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
