@@ -28,7 +28,7 @@ class MyModule(torch.nn.Module):
         self.register_forward_pre_hook(self.pre_forward, with_kwargs=True)
 
     def pre_forward(self, module, args, kwargs):
-        if self.mode == 0:
+        if self.mode == 5:
             if user_function():
                 global _variable
                 _variable += 1
@@ -37,12 +37,11 @@ class MyModule(torch.nn.Module):
     def forward(self, x):
         global _variable
         global _variable_2
-        # There may be side-effects inconsistent with eager when
-        # compiling, this will force dynamo to commit the graph
-        if self.mode == 0:
-            # modify the variable
-            x += 1
-        elif self.mode == 1:
+        # By invoking torch._utils.is_compiling(),
+        # there may be side-effects inconsistent with eager when
+        # compiling. Thus we force dynamo to commit the graph,
+        # even if it does not perform any tensor operation
+        if self.mode == 1:
             if torch._utils.is_compiling():
                 _variable += 1
             else:
@@ -58,6 +57,12 @@ class MyModule(torch.nn.Module):
             for cond in user_generator():
                 if cond:
                     _variable += 1
+        elif self.mode == 5:
+            x += 1
+        elif self.mode == 6:
+            if user_function():
+                torch._dynamo.graph_break()
+                _variable += 1
         return x
 
 
@@ -163,12 +168,12 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/110765
         global _variable, _variable_2
 
-        for mode in (0, 1, 2, 3, 4):
+        for mode in range(1, 7):
             _variable = 0
             _variable_2 = 0
 
             mod = MyModule(mode=mode)
-            model = torch.compile(mod, backend="eager")
+            model = torch._dynamo.optimize(backend="eager", nopython=mode!=6)(mod)
             assert _variable == 0
             assert _variable_2 == 0
 
