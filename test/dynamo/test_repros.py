@@ -36,8 +36,6 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
 
-from .utils import some_global_fn as some_global_fn_other
-
 
 _orig_module_call = torch.nn.Module.__call__
 
@@ -3469,6 +3467,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
 
     def test_global_fn_guards(self):
+        from .utils import some_global_fn as some_global_fn_other
+
         global some_global_fn
         org_func = some_global_fn
 
