@@ -14,20 +14,14 @@ _variable_2 = 0
 class MyModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.register_forward_pre_hook(self.pre_forward, with_kwargs=True)
 
-    def pre_forward(self, module, args, kwargs):
-        # There may be side effects when compiling,
-        # this will force commiting the graph
+    def forward(self, x):
         if torch._utils.is_compiling():
             global _variable
             _variable += 1
         else:
             global _variable_2
             _variable_2 += 1
-        return args, kwargs
-
-    def forward(self, x):
         return x
 
 
