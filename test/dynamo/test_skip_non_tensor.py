@@ -16,6 +16,8 @@ class MyModule(torch.nn.Module):
         super().__init__()
 
     def forward(self, x):
+        # There may be side-effects inconsistent with eager when
+        # compiling, this will force dynamo to commit the graph
         if torch._utils.is_compiling():
             global _variable
             _variable += 1
