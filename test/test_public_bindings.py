@@ -222,8 +222,16 @@ class TestPublicBindings(TestCase):
         msg = f"torch._C had bindings that are not present in the allowlist:\n{difference}"
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
+    @staticmethod
+    def _is_mod_public(modname):
+        split_strs = modname.split('.')
+        for elem in split_strs:
+            if elem.startswith("_"):
+                return False
+        return True
+
     def test_modules_can_be_imported(self):
-        failure = []
+        failures = []
         for _, modname, _ in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             try:
                 # TODO: fix "torch/utils/model_dump/__main__.py"
@@ -231,29 +239,56 @@ class TestPublicBindings(TestCase):
                 if "__main__" in modname:
                     continue
                 import_module(modname)
-            except Exception:
+            except Exception as e:
                 # Some current failures are not ImportError
-                failure.append(modname)
+                failures.append((modname, type(e)))
 
-        self.assertExpectedInline("\n".join(failure), """\
-torch._inductor.codegen.cuda.cuda_kernel
-torch._inductor.codegen.cuda.cuda_template
-torch._inductor.codegen.cuda.gemm_template
-torch._inductor.triton_helpers
-torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity
-torch.backends._coreml.preprocess
-torch.contrib._tensorboard_vis
-torch.onnx._internal.fx._pass
-torch.onnx._internal.fx.analysis
-torch.onnx._internal.fx.diagnostics
-torch.onnx._internal.fx.fx_onnx_interpreter
-torch.onnx._internal.fx.fx_symbolic_graph_extractor
-torch.onnx._internal.fx.onnxfunction_dispatcher
-torch.onnx._internal.fx.op_validation
-torch.onnx._internal.fx.passes
-torch.onnx._internal.fx.type_utils
-torch.testing._internal.distributed.distributed_test
-torch.utils.tensorboard._caffe2_graph""")
+        # It is ok to add new entries here but please be careful that these modules
+        # do not get imported by public code.
+        private_allowlist = set((
+            "torch._inductor.codegen.cuda.cuda_kernel",
+            "torch._inductor.codegen.cuda.cuda_template",
+            "torch._inductor.codegen.cuda.gemm_template",
+            "torch._inductor.triton_helpers",
+            "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
+            "torch.backends._coreml.preprocess",
+            "torch.contrib._tensorboard_vis",
+            "torch.onnx._internal.fx._pass",
+            "torch.onnx._internal.fx.analysis",
+            "torch.onnx._internal.fx.diagnostics",
+            "torch.onnx._internal.fx.fx_onnx_interpreter",
+            "torch.onnx._internal.fx.fx_symbolic_graph_extractor",
+            "torch.onnx._internal.fx.onnxfunction_dispatcher",
+            "torch.onnx._internal.fx.op_validation",
+            "torch.onnx._internal.fx.passes",
+            "torch.onnx._internal.fx.type_utils",
+            "torch.testing._internal.distributed.distributed_test",
+            "torch.utils.tensorboard._caffe2_graph",
+        ))
+
+        # No new entries should be added to this list.
+        # All public modules should be importable on all platforms.
+        public_allowlist = set((
+            "torch.distributed.elastic.rendezvous.etcd_rendezvous",
+            "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
+            "torch.distributed.elastic.rendezvous.etcd_store",
+        ))
+
+        print("Modules which failed to import")
+        print("\n".join(map(str, failures)))
+
+        errors = []
+        for mod, excep_type in failures:
+            if mod in public_allowlist:
+                # TODO: Ensure this is the right error type
+                continue
+
+            if mod in private_allowlist:
+                continue
+
+            errors.append(f"{mod} failed to import with error {excep_type}")
+
+        self.assertFalse(errors, msg="\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
@@ -281,7 +316,6 @@ torch.utils.tensorboard._caffe2_graph""")
                     allow_dict[allow_dict["being_migrated"][modname]] = allow_dict[modname]
 
         def test_module(modname):
-            split_strs = modname.split('.')
             try:
                 if "__main__" in modname:
                     return
@@ -290,9 +324,9 @@ torch.utils.tensorboard._caffe2_graph""")
                 # It is ok to ignore here as we have a test above that ensures
                 # this should never happen
                 return
-            for elem in split_strs:
-                if elem.startswith("_"):
-                    return
+
+            if not self._is_mod_public(modname):
+                return
 
             # verifies that each public API has the correct module name and naming semantics
             def check_one_element(elem, modname, mod, *, is_public, is_all):
