@@ -6,9 +6,9 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     GradModeVariable,
+    InferenceModeVariable,
     StreamContextVariable,
     StreamVariable,
-    InferenceModeVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (

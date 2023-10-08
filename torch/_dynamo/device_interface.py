@@ -1,3 +1,4 @@
+import inspect
 from typing import Any, Dict, Union
 
 import torch
@@ -15,14 +16,25 @@ caching_worker_device_properties: Dict[str, Any] = {}
 caching_worker_current_devices: Dict[str, int] = {}
 
 
-class DeviceInterface:
+class DeviceInterfaceMeta(type):
+    def __new__(cls, *args, **kwargs):
+        class_member = args[2]
+        if "Event" in class_member:
+            assert inspect.isclass(class_member["Event"]) and issubclass(
+                class_member["Event"], EventBase
+            ), "DeviceInterface member Event should be inherit from EventBase"
+        if "Stream" in class_member:
+            assert inspect.isclass(class_member["Stream"]) and issubclass(
+                class_member["Stream"], StreamBase
+            ), "DeviceInterface member Stream should be inherit from StreamBase"
+        return super().__new__(cls, *args, **kwargs)
+
+
+class DeviceInterface(metaclass=DeviceInterfaceMeta):
     """
     This is a simple device runtime interface for Inductor. It enables custom
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
-
-    Event = EventBase
-    Stream = StreamBase
 
     class device:
         def __new__(cls, device: _device_t):
@@ -98,8 +110,11 @@ class DeviceInterface:
 
 
 class CudaInterface(DeviceInterface):
-    Event = torch.cuda.Event
     device = torch.cuda.device
+
+    # register Event and Stream class into the backend interface
+    # make sure Event and Stream are implemented and inherited from the EventBase and StreamBase
+    Event = torch.cuda.Event
     Stream = torch.cuda.Stream
 
     class Worker:
