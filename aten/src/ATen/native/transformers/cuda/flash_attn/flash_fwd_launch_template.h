@@ -231,14 +231,16 @@ void run_mha_fwd_hdim224(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T>
 void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr int Headdim = 256;
-    int device;
+    int device = -1;
     cudaGetDevice(&device);
-    int max_smem_per_sm, max_smem_per_block;
+    int max_smem_per_sm = 0, max_smem_per_block = 0;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_sm, cudaDevAttrMaxSharedMemoryPerMultiprocessor, device);
+    C10_CUDA_CHECK(status_);
     status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
     // printf("max_smem_per_sm = %d, max_smem_per_block = %d\n", max_smem_per_sm, max_smem_per_block);
+    C10_CUDA_CHECK(status_);
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         BOOL_SWITCH(params.is_causal, Is_causal, [&] {
             // For A100, we want to run with 128 x 64 (128KB smem).
