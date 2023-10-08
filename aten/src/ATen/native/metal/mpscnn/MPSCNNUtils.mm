@@ -5,7 +5,7 @@ namespace native {
 namespace metal {
 namespace mpscnn {
 
-static auto divRoundUp(uint x, uint y) -> uint {
+auto divRoundUp(uint x, uint y) -> uint {
   return (x + y - 1) / y;
 }
 

@@ -167,6 +167,7 @@ class GraphLowering(torch.fx.Interpreter):
         user_visible_outputs=frozenset(),
         layout_opt=None,
         extern_node_serializer=None,
+        is_inference=False,
     ):
         super().__init__(gm)
 
@@ -174,6 +175,7 @@ class GraphLowering(torch.fx.Interpreter):
             layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
         )
         self.num_channels_last_conv = 0
+        self.is_inference = is_inference
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -346,7 +348,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
         #
-        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
+        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
         # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
         # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
         # bringing perf gains.
@@ -526,6 +528,8 @@ class GraphLowering(torch.fx.Interpreter):
 
             if name is None:
                 name = f"constant{len(self.constants)}"
+            if name[0].isdigit():
+                name = f"constant_{name}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
@@ -671,7 +675,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
-            assert isinstance(value, (TensorBox, sympy.Expr))
+            assert isinstance(
+                value, (TensorBox, sympy.Expr)
+            ), "Unsupported inductor graph input type: " + type(value)
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -905,7 +911,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
+        # check the device of the buffers.
         for buffer in self.buffers:
             device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
@@ -928,7 +934,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
-        return self.wrapper_code.generate()
+        return self.wrapper_code.generate(self.is_inference)
 
     def count_bytes(self):
         from .scheduler import Scheduler

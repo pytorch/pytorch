@@ -243,9 +243,9 @@ class Empty(AllocationTreeNode):
 
 
 class MemorySplitProtocol(Protocol):
-    get_live_ranges: CachedFunction
-    get_size_hint: CachedFunction
-    get_symbolic_size: CachedFunction
+    get_live_ranges: CachedFunction[LiveRanges]
+    get_size_hint: CachedFunction[int]
+    get_symbolic_size: CachedFunction[sympy.Expr]
 
     def _allocate(self, block: "Allocation", is_last: bool) -> bool:
         ...
@@ -306,13 +306,13 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
                 self.allocations.append(block)
             elif slot_size > block_size:
                 self.allocations.append(
-                    SpacialSplit.create(block, slot_size - block_size)
+                    SpatialSplit.create(block, slot_size - block_size)
                 )
             else:  # grow this allocation
                 assert is_last
                 self.allocations = [
                     *(
-                        SpacialSplit.create(a, block_size - slot_size)
+                        SpatialSplit.create(a, block_size - slot_size)
                         for a in self.allocations
                     ),
                     block,
@@ -351,7 +351,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
 
 
 @dataclasses.dataclass
-class SpacialSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
+class SpatialSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     """
     Contains two allocations, left and right, that do not overlap in space.
     Right will be allocated immediately after left in memory.
@@ -364,7 +364,7 @@ class SpacialSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     def create(left, extra_space):
         assert isinstance(left, AllocationTreeNode)
         assert isinstance(extra_space, int) and extra_space >= 1
-        return SpacialSplit(TemporalSplit([left]), TemporalSplit([Empty(extra_space)]))
+        return SpatialSplit(TemporalSplit([left]), TemporalSplit([Empty(extra_space)]))
 
     def _allocate(self, block: "Allocation", is_last: bool):
         return self.left.allocate(block, False) or self.right.allocate(block, is_last)
@@ -428,7 +428,7 @@ class AllocationPool:
 
     def allocate_at_end(self, block):
         block.mark_allocated()
-        self.root = TemporalSplit([SpacialSplit(self.root, TemporalSplit([block]))])
+        self.root = TemporalSplit([SpatialSplit(self.root, TemporalSplit([block]))])
         return True
 
     def finalize(self, name):
