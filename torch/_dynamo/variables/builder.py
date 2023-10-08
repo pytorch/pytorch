@@ -511,6 +511,14 @@ class VariableBuilder:
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             }
 
+            # This is unusual - generally, we want to defer guards to function
+            # invocation time. However, partials is special because its a stored
+            # object with bound arguments - if the bound arguments change across
+            # a graph break or compile region, we must recompile.
+            #
+            # A more robust implementation would be to protect leaf guards with their
+            # attribute guards. See discussion in (abandoned) PR https://github.com/pytorch/pytorch/pull/110772
+            self.tx.output.guards.update(guards)
             return FunctoolsPartialVariable(
                 func_obj, args, keywords, original=value, guards=guards
             )
