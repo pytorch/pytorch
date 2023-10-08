@@ -817,20 +817,37 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
-        elif self.value is itertools.accumulate and not kwargs:
+        elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
+
+            if any(key not in ["initial", "func"] for key in kwargs.keys()):
+                unimplemented(
+                    "Unsupported kwargs for itertools.accumulate: "
+                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}"
+                )
+
+            acc = kwargs.get("initial")
 
             if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-                if len(args) == 1:
-                    func = BuiltinVariable(operator.add).call_function
+
+                if "func" in kwargs and len(args) == 1:
+                    func = kwargs["func"].call_function
                 elif len(args) == 2:
                     func = args[1].call_function
+                elif len(args) == 1:
+                    # Default to operator.add
+                    func = BuiltinVariable(operator.add).call_function
+                else:
+                    unimplemented(
+                        "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
+                    )
             else:
-                raise unimplemented("Unsupported arguments for itertools.accumulate")
+                unimplemented("Unsupported arguments for itertools.accumulate")
 
             items = []
-            acc = None
+            if acc is not None:
+                items.append(acc)
             for item in seq:
                 if acc is None:
                     acc = item

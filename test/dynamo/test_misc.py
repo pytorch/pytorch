@@ -7349,6 +7349,32 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_accumulate_tensors_kwargs(self):
+        from torch._dynamo.utils import counters
+
+        for kwargs in [
+            {"func": operator.mul},
+            {"initial": 100},
+            {"func": operator.sub, "initial": -1},
+        ]:
+            counters.clear()
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, **kwargs)
+
+            t_list = [torch.tensor([i + 1]) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]])
+
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+            compiled = compiled_fn(*t_list, x)
+            eager = fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
             return -1
