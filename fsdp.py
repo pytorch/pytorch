@@ -54,12 +54,14 @@ def run(model, optim):
     losses = []
     inp = torch.randn((2, 3), device="cuda")
 
-    for _ in range(4):
+    for _ in range(1):
         optim.zero_grad(set_to_none=True)
         inp = torch.randn((2, 3), device="cuda")
         torch.storage.resize_count_and_loc = {}
         if gpu_id == 0:
             print("FORWARD")
+        for p in model.parameters():
+            torch_log.warning(f"PRE STATE: {p.shape}")
         out = model(inp)
         if gpu_id == 0:
             print("END FORWARD")
@@ -67,6 +69,8 @@ def run(model, optim):
         loss = out.sum()
         losses.append(loss)
         torch.storage.resize_count_and_loc = {}
+        for p in model.parameters():
+            torch_log.warning(f"POST STATE: {p.shape}")
         if gpu_id == 0:
             print("BACKWARD")
         loss.backward()
@@ -99,9 +103,15 @@ def main(compiled_fwd, compiled_bwd):
 
 if __name__ == "__main__":
     import time
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--compiled-fwd', action='store_true')
+    parser.add_argument('--compiled-bwd', action='store_true')
+    args = parser.parse_args()
 
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    res = main(compiled_fwd=True, compiled_bwd=False)
+    res = main(compiled_fwd=args.compiled_fwd, compiled_bwd=args.compiled_bwd)
     print("res:", res)
