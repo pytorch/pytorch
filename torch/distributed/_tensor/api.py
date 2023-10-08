@@ -30,6 +30,8 @@ from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
 
+aten = torch.ops.aten
+
 
 # NOTE [Autograd interaction between torch.Tensor]
 #
@@ -253,6 +255,16 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # This is mostly for inference mode when we want to
+        # decompose CompositeImplicitAutograd ops.
+        # For the long run, we need to think of a better way to handle it.
+        # TODO: We can benchmark this decompose further to see if we can
+        # completely remove the check and apply it for all DTensor Ops.
+        if func == aten.linear.default:
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         return op_dispatch.operator_dispatch(
             func,
             args,

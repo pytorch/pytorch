@@ -4021,7 +4021,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             exported_args = None
             args = None
-            if config.is_fbcode():
+            if config.is_fbcode() and V.graph.cpp_wrapper:
                 exported_args = self.export_extern_kernel_node()
             else:
                 args = [*self.codegen_args(), *self.codegen_kwargs()]
