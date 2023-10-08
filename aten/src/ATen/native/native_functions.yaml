@@ -4957,6 +4957,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: hardshrink_out
+    MPS: hardshrink_out_mps
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: hardshrink.out
@@ -4968,6 +4969,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: hardshrink_backward_out
+    MPS: hardshrink_backward_out_mps
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: hardshrink_backward.grad_input

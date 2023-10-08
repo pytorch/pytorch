@@ -17,6 +17,8 @@
 #include <ATen/ops/gelu_native.h>
 #include <ATen/ops/glu_backward_native.h>
 #include <ATen/ops/glu_native.h>
+#include <ATen/ops/hardshrink_backward_native.h>
+#include <ATen/ops/hardshrink_native.h>
 #include <ATen/ops/hardsigmoid_backward_native.h>
 #include <ATen/ops/hardsigmoid_native.h>
 #include <ATen/ops/hardswish_backward_native.h>
@@ -1524,6 +1526,68 @@ TORCH_IMPL_FUNC(softshrink_out_mps)
   }
 }
 
+TORCH_IMPL_FUNC(hardshrink_out_mps)
+(const Tensor& self, const Scalar& lambd, const Tensor& result) {
+  using namespace mps;
+  TORCH_CHECK(self.is_mps());
+
+  if (result.numel() == 0)
+    return;
+
+  MPSScalar lambd_scalar = getMPSScalar(lambd, self.scalar_type());
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+    MPSGraphTensor* lambdTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = "hardshrink_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(lambd.to<double>());
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      MPSGraphTensor* lambdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
+
+      MPSGraphTensor* negativeLambdTensor = [mpsGraph negativeWithTensor:lambdTensor name:nil];
+      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
+      MPSGraphTensor* positiveLambdPredicateTensor = [mpsGraph greaterThanOrEqualToWithPrimaryTensor:inputTensor
+                                                                                     secondaryTensor:lambdTensor
+                                                                                                name:nil];
+      MPSGraphTensor* negativeLambdPredicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                                         secondaryTensor:negativeLambdTensor
+                                                                                    name:nil];
+      MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:positiveLambdPredicateTensor
+                                                     truePredicateTensor:inputTensor
+                                                    falsePredicateTensor:zeroTensor
+                                                                    name:nil];
+      outputTensor = [mpsGraph selectWithPredicateTensor:negativeLambdPredicateTensor
+                                     truePredicateTensor:inputTensor
+                                    falsePredicateTensor:outputTensor
+                                                    name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->lambdTensor_ = lambdTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      cachedGraph->lambdTensor_ : getMPSGraphTensorFromScalar(stream, lambd_scalar),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+}
+
 static void shrink_backward_out_mps(const Tensor& grad_output,
                                     const Tensor& self,
                                     const Scalar& lambd,
@@ -1597,6 +1661,10 @@ static void shrink_backward_out_mps(const Tensor& grad_output,
 TORCH_IMPL_FUNC(softshrink_backward_out_mps)
 (const Tensor& grad_output, const Tensor& self, const Scalar& lambd, const Tensor& grad_input) {
   return shrink_backward_out_mps(grad_output, self, lambd, grad_input, "softshrink_backward_out_mps");
+
+TORCH_IMPL_FUNC(hardshrink_backward_out_mps)
+(const Tensor& grad_output, const Tensor& self, const Scalar& lambd, const Tensor& grad_input) {
+  return shrink_backward_out_mps(grad_output, self, lambd, grad_input, "hardshrink_backward_out_mps");
 }
 
 Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
