@@ -157,9 +157,9 @@ def _module_dir(m: types.ModuleType):
     return _strip_init_py(m.__file__)
 
 
-FUNC_INLINELIST = {
-    "torch.autograd.function.once_differentiable",
-}
+# TODO: Add a decoractor for easily adding functions to FUNC_INLINELIST
+# after resolving all circular import issues.
+FUNC_INLINELIST = set()
 
 
 # Force inline functions in these files or directories, even they are in *_SKIPLIST.
@@ -341,13 +341,12 @@ def check_file(filename, allow_torch=False, extra_check=False):
 
 
 def check_verbose(obj, allow_torch=False, extra_check=False):
-    if isinstance(obj, (UserFunctionVariable, UserMethodVariable)):
-        filename = obj.get_filename()
-        obj = obj.get_function().__code__
-    elif isinstance(obj, NestedUserFunctionVariable):
+    if isinstance(
+        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+    ):
         filename = obj.get_filename()
         obj = obj.get_code()
-    elif inspect.iscode(obj):
+    elif isinstance(obj, types.CodeType):
         filename = obj.co_filename
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         filename = getfile(obj)

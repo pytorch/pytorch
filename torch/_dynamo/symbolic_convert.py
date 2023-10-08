@@ -2247,6 +2247,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
+        # breakpoint()
         result = skipfiles.check_verbose(func, extra_check=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
