@@ -53,12 +53,12 @@ T = TypeVar("T")
 
 
 class MLPModule(torch.nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, bias=True):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
+        self.net1 = torch.nn.Linear(10, 16, device=device, bias=bias)
         self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 10, device=device)
+        self.net2 = torch.nn.Linear(16, 10, device=device, bias=bias)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))

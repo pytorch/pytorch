@@ -260,7 +260,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # For the long run, we need to think of a better way to handle it.
         # TODO: We can benchmark this decompose further to see if we can
         # completely remove the check and apply it for all DTensor Ops.
-        if func == aten.linear.default:
+        if func in [aten.linear.default, aten.matmul.default]:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
                 return r

@@ -107,13 +107,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
-    def _test_mlp_inference(self, device_mesh):
+    def _test_mlp_inference(self, device_mesh, bias):
         inp_size = [8, 10]
         # Ensure all tp ranks have same input.
         torch.manual_seed(0)
         inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
-        model_tp = MLPModule(self.device_type)
+        model = MLPModule(self.device_type, bias=bias)
+        model_tp = MLPModule(self.device_type, bias=bias)
 
         # Ensure model are initialized the same way.
         self._check_module(model, model_tp)
@@ -134,13 +134,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_mlp_inference(self):
+    @parametrize("bias", [True, False])
+    def test_mlp_inference(self, bias):
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, NUM_DEVICES),
         )
         with torch.inference_mode():
-            self._test_mlp_inference(device_mesh)
+            self._test_mlp_inference(device_mesh, bias)
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
