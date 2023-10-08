@@ -10,13 +10,16 @@ from torch._dynamo.testing import CompileCounter
 _variable = 0
 _variable_2 = 0
 
+
 def user_function():
     return torch._utils.is_compiling()
+
 
 def user_generator():
     for _ in range(1):
         yield torch._utils.is_compiling()
     return
+
 
 class MyModule(torch.nn.Module):
     def __init__(self, mode: int):
@@ -48,7 +51,7 @@ class MyModule(torch.nn.Module):
             if user_function():
                 _variable += 1
         elif self.mode == 3:
-            lambda_f = lambda : torch._utils.is_compiling()
+            lambda_f = lambda: torch._utils.is_compiling()  # noqa: E731
             if lambda_f():
                 _variable += 1
         elif self.mode == 4:
@@ -176,6 +179,7 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             model(torch.tensor([1]))
             assert _variable == 2
             assert _variable_2 == 0
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
