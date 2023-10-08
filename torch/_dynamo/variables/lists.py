@@ -380,6 +380,12 @@ class ListVariable(CommonListMethodsVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not list:
+            return super().call_hasattr(tx, name)
+        options = VariableTracker.propagate(self)
+        return variables.ConstantVariable.create(hasattr([], name), **options)
+
 
 class DequeVariable(CommonListMethodsVariable):
     def python_type(self):
