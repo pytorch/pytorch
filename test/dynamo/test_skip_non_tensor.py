@@ -35,8 +35,7 @@ class MyModule(torch.nn.Module):
         return args, kwargs
 
     def forward(self, x):
-        global _variable
-        global _variable_2
+        global _variable, _variable_2
         # By invoking torch._utils.is_compiling(),
         # there may be side-effects inconsistent with eager when
         # compiling. Thus we force dynamo to commit the graph,
