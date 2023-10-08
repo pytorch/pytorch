@@ -352,41 +352,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 
-import types
-
-
-def _bytecode_src_hook(code: types.CodeType, new_code: types.CodeType):
-    bytecode_src_log = torch._logging.getArtifactLogger(
-        "torch._dynamo.convert_frame", "bytecode_src"
-    )
-    import logging
-
-    if bytecode_src_log.isEnabledFor(logging.DEBUG):
-        try:
-            import depyf  # type: ignore[import]
-        except ImportError:
-            bytecode_src_log.debug(
-                "Decompilation relies on the library `depyf`, "
-                "which could not be found on this machine. Run `pip "
-                "install depyf` to install the library."
-            )
-            return
-
-        try:
-            decompiled_src = depyf.decompile(new_code)
-            bytecode_src_log.debug("possible source code:")
-            bytecode_src_log.debug(decompiled_src)
-        except Exception as e:
-            bytecode_src_log.debug("Decompilation fails due to: %s", str(e))
-        finally:
-            bytecode_src_log.debug(
-                "If you find the decompiled code is wrong,"
-                "please submit an issue at "
-                "https://github.com/youkaichao/depyf/issues."
-            )
-
-
-output_bytecode_hooks = [_bytecode_src_hook]
+output_bytecode_hooks = []
 
 from .config_utils import install_config_module
 
