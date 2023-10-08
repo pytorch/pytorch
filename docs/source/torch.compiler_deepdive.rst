@@ -296,7 +296,7 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
 .. code-block:: python
 
    print("source code of __compiled_fn_0:")
-   print(innermost_fn(__compiled_fn_0).__self__)
+   print(innermost_fn(__compiled_fn_0).__self__.code)
    print("=" * 60)
    print("source code of __resume_at_30_1:")
    print(decompile(__resume_at_30_1))
@@ -307,9 +307,6 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
 ::
 
    source code of __compiled_fn_0:
-   GraphModule()
-
-
 
    def forward(self, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
        l_a_ = L_a_
