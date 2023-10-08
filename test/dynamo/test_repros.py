@@ -3081,6 +3081,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(res, torch.tensor([2.0]))
 
+    def test_list_index_not_found(self):
         def f(t):
             xs = ["bar", "foo", "baz", "buzz"]
             res = xs.index("non-existent")
@@ -3092,7 +3093,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize(backend="eager", nopython=True)(f)(torch.zeros(1))
 
-    def test_list_index_tensor(self):
+    def test_list_index_tensor_unsupported(self):
         for index in ([], [2], [0, 3]):
 
             def f(t):
