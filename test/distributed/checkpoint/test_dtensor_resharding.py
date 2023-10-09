@@ -8,11 +8,7 @@ from torch.distributed._tensor import (
     Shard,
     zeros,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -52,99 +48,102 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @parametrize("one_d_to_one_d_placements", ONE_D_TO_ONE_D_PLACEMENTS)
     @with_temp_dir
-    def test_1d_to_1d_reshard_placement_change(self, one_d_to_one_d_placements) -> None:
+    def test_1d_to_1d_reshard_placement_change(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
-        original_placement, new_placement = one_d_to_one_d_placements
 
-        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-        mesh_shape = (self.world_size,)
-        device_mesh = init_device_mesh(self.device_type, mesh_shape)
-        dtensor = distribute_tensor(
-            global_tensor, device_mesh, placements=original_placement
-        )
-        state_dict_to_save = {"dtensor": dtensor}
+        for one_d_to_one_d_placements in ONE_D_TO_ONE_D_PLACEMENTS:
+            original_placement, new_placement = one_d_to_one_d_placements
 
-        dist_cp.save_state_dict(
-            state_dict=state_dict_to_save,
-            storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
-            planner=dist_cp.DefaultSavePlanner(),
-        )
+            global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+            mesh_shape = (self.world_size,)
+            device_mesh = init_device_mesh(self.device_type, mesh_shape)
+            dtensor = distribute_tensor(
+                global_tensor, device_mesh, placements=original_placement
+            )
+            state_dict_to_save = {"dtensor": dtensor}
 
-        zero_dtensor = zeros([4, 4], device_mesh=device_mesh, placements=new_placement)
-        state_dict_to_load = {"dtensor": zero_dtensor}
+            dist_cp.save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
+                planner=dist_cp.DefaultSavePlanner(),
+            )
 
-        dist_cp.load_state_dict(
-            state_dict=state_dict_to_load,
-            storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-            planner=dist_cp.DefaultLoadPlanner(),
-        )
+            zero_dtensor = zeros(
+                [4, 4], device_mesh=device_mesh, placements=new_placement
+            )
+            state_dict_to_load = {"dtensor": zero_dtensor}
 
-        # materialzie the whole tensor to compare with the original global_tensor
-        state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
-            device_mesh,
-            placements=[Replicate()],
-        )
-        self.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
+            dist_cp.load_state_dict(
+                state_dict=state_dict_to_load,
+                storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
+                planner=dist_cp.DefaultLoadPlanner(),
+            )
 
-        # redistribute the tensor back to its original placment for comparison.
-        state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
-            device_mesh,
-            placements=original_placement,
-        )
-        self.assertEqual(
-            state_dict_to_save["dtensor"].to_local(),
-            state_dict_to_load["dtensor"].to_local(),
-        )
+            # materialzie the whole tensor to compare with the original global_tensor
+            state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
+                device_mesh,
+                placements=[Replicate()],
+            )
+            self.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
+
+            # redistribute the tensor back to its original placment for comparison.
+            state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
+                device_mesh,
+                placements=original_placement,
+            )
+            self.assertEqual(
+                state_dict_to_save["dtensor"].to_local(),
+                state_dict_to_load["dtensor"].to_local(),
+            )
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
-    @parametrize("two_d_to_two_d_placements", TWO_D_TO_TWO_D_PLACEMENTS)
+    @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_2d_to_2d_reshard_placement_change(self, two_d_to_two_d_placements) -> None:
+    def test_2d_to_2d_reshard_placement_change(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
-        original_placement, new_placement = two_d_to_two_d_placements
+        for two_d_to_two_d_placements in TWO_D_TO_TWO_D_PLACEMENTS:
+            original_placement, new_placement = two_d_to_two_d_placements
 
-        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-        mesh_shape = (2, self.world_size // 2)
-        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
-        dtensor = distribute_tensor(
-            global_tensor,
-            mesh_2d,
-            placements=original_placement,
-        )
-        state_dict_to_save = {"dtensor": dtensor}
+            global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+            mesh_shape = (2, self.world_size // 2)
+            mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+            dtensor = distribute_tensor(
+                global_tensor,
+                mesh_2d,
+                placements=original_placement,
+            )
+            state_dict_to_save = {"dtensor": dtensor}
 
-        dist_cp.save_state_dict(
-            state_dict=state_dict_to_save,
-            storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
-            planner=dist_cp.DefaultSavePlanner(),
-        )
+            dist_cp.save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
+                planner=dist_cp.DefaultSavePlanner(),
+            )
 
-        zero_dtensor = zeros([4, 4], device_mesh=mesh_2d, placements=new_placement)
-        state_dict_to_load = {"dtensor": zero_dtensor}
+            zero_dtensor = zeros([4, 4], device_mesh=mesh_2d, placements=new_placement)
+            state_dict_to_load = {"dtensor": zero_dtensor}
 
-        dist_cp.load_state_dict(
-            state_dict=state_dict_to_load,
-            storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-            planner=dist_cp.DefaultLoadPlanner(),
-        )
+            dist_cp.load_state_dict(
+                state_dict=state_dict_to_load,
+                storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
+                planner=dist_cp.DefaultLoadPlanner(),
+            )
 
-        state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
-            mesh_2d,
-            placements=[Replicate(), Replicate()],
-        )
-        self.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
+            state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
+                mesh_2d,
+                placements=[Replicate(), Replicate()],
+            )
+            self.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
 
-        state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
-            mesh_2d,
-            placements=original_placement,
-        )
-        self.assertEqual(
-            state_dict_to_save["dtensor"].to_local(),
-            state_dict_to_load["dtensor"].to_local(),
-        )
+            state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
+                mesh_2d,
+                placements=original_placement,
+            )
+            self.assertEqual(
+                state_dict_to_save["dtensor"].to_local(),
+                state_dict_to_load["dtensor"].to_local(),
+            )
 
 
 class TestDTensorReshardMeshChange(DTensorTestBase):
@@ -200,7 +199,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_2d_to_1d_reshard_mesh_change(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
         for placements_2d in TWO_D_PLACEMENTS:
@@ -247,7 +246,5 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
 # TODO: Add dtensor resharding test when world size changes.
 
-
-instantiate_parametrized_tests(TestDTensorReshardPlacementChange)
 if __name__ == "__main__":
     run_tests()
