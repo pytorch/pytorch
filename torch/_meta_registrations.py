@@ -3221,6 +3221,26 @@ def meta__int_mm(a, b):
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
+@register_meta([aten._convert_weight_to_int4pack])
+def meta__convert_weight_to_int4pack(a, inner_k_tiles):
+    out_features = a.size(0)
+    in_features = a.size(1)
+    torch.empty(
+        (
+            out_features // 8,
+            in_features // (inner_k_tiles * 16),
+            32,
+            inner_k_tiles // 2,
+        ),
+        dtype=torch.int32,
+    )
+
+
+@register_meta([aten._weight_int4pack_mm])
+def meta__weight_int4pack_mm(a, b, q_group_size, q_scale_and_zeros):
+    torch.empty(a.size(0), b.size(0) * 8, dtype=torch.bfloat16)
+
+
 @register_meta(aten._cdist_forward.default)
 def meta_cdist_forward(x1, x2, p, compute_mode):
     torch._check(
