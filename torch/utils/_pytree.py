@@ -146,18 +146,18 @@ def _register_pytree_node(
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
-    # if _register_cxx_pytree_node:
-    #     from ._cxx_pytree import register_pytree_node as maybe_cxx_register_pytree_node
+    if _register_cxx_pytree_node:
+        from ._cxx_pytree import register_pytree_node as maybe_cxx_register_pytree_node
 
-    #     if maybe_cxx_register_pytree_node is not _register_pytree_node:
-    #         maybe_cxx_register_pytree_node(
-    #             typ,
-    #             flatten_fn,
-    #             unflatten_fn,
-    #             to_dumpable_context=to_dumpable_context,
-    #             from_dumpable_context=from_dumpable_context,
-    #             _register_python_pytree_node=False,
-    #         )
+        if maybe_cxx_register_pytree_node is not _register_pytree_node:
+            maybe_cxx_register_pytree_node(
+                typ,
+                flatten_fn,
+                unflatten_fn,
+                to_dumpable_context=to_dumpable_context,
+                from_dumpable_context=from_dumpable_context,
+                _register_python_pytree_node=False,
+            )
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
