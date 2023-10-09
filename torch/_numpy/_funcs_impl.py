@@ -497,7 +497,7 @@ def zeros_like(
 
 
 def _xy_helper_corrcoef(x_tensor, y_tensor=None, rowvar=True):
-    """Prepate inputs for cov and corrcoef."""
+    """Prepare inputs for cov and corrcoef."""
 
     # https://github.com/numpy/numpy/blob/v1.24.0/numpy/lib/function_base.py#L2636
     if y_tensor is not None:
@@ -891,7 +891,7 @@ def put(
     if ind.numel() > v.numel():
         ratio = (ind.numel() + v.numel() - 1) // v.numel()
         v = v.unsqueeze(0).expand((ratio,) + v.shape)
-    # Trim unnecessary elements, regarldess if v was expanded or not. Note
+    # Trim unnecessary elements, regardless if v was expanded or not. Note
     # np.put() trims v to match ind by default too.
     if ind.numel() < v.numel():
         v = v.flatten()
@@ -1479,7 +1479,7 @@ def reshape(a: ArrayLike, newshape, order: NotImplementedType = "C"):
 
 
 def transpose(a: ArrayLike, axes=None):
-    # numpy allows both .tranpose(sh) and .transpose(*sh)
+    # numpy allows both .transpose(sh) and .transpose(*sh)
     # also older code uses axes being a list
     if axes in [(), None, (None,)]:
         axes = tuple(reversed(range(a.ndim)))
