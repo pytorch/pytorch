@@ -39,6 +39,21 @@ from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
 
+original_zip = zip
+
+def strict_zip(*iterables, strict=True, **kwargs):
+    if not strict:
+        return original_zip(*iterables, **kwargs)
+
+    shortest_length = min(len(it) for it in iterables)
+    for iterable in iterables:
+        if len(iterable) != shortest_length:
+            raise ValueError("The iterables have different lengths and strict mode is enabled.")
+
+    return original_zip(*iterables, **kwargs)
+
+zip = strict_zip
+
 log = logging.getLogger(__name__)
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -1019,7 +1034,7 @@ class GraphSignature:
         to its parameter/buffer FQN in the original nn.Module.
     (3) If there are input mutations, these are represented as extra outputs
         in the fx GraphModule. We provide a mapping from these
-        extra output names to the names of the the actual inputs.
+        extra output names to the names of the actual inputs.
     (4) The pytree metadata on how to flatten/unflatten inputs and outputs.
         The corresponding FX GraphModule only accepts and returns
         pytree-flattened inputs/outputs.
@@ -1862,7 +1877,7 @@ def merge_view_inputs(
         # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
         # and error out. We can fix them later.
         # These checks are transitive, so we don't need to check every pair.
-        for idx1, idx2 in zip(aliased_input_indices, aliased_input_indices[1:]):
+        for idx1, idx2 in zip(aliased_input_indices, aliased_input_indices[1:], strict=False):
             view1 = fwd_inputs[idx1]
             view2 = fwd_inputs[idx2]
             # The "inputs that are aliased but have different differentiable bases" case
@@ -2923,7 +2938,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
                 adjusted_flat_args.extend([seed, offset])
                 # We are not clearing flat_args here because
-                # 1) There is a check in the the debug compiler at the end
+                # 1) There is a check in the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
 
             if torch._guards.TracingContext.get():

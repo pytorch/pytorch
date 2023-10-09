@@ -431,6 +431,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sgn_out
+    MPS: sgn_out_mps
     SparseCPU, SparseCUDA: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA: sgn_sparse_csr_out
   tags: pointwise
@@ -1971,6 +1972,7 @@
   dispatch:
     CPU: ctc_loss_cpu
     CUDA: ctc_loss_gpu
+    Meta: ctc_loss_meta
   autogen: _ctc_loss.out
   tags: dynamic_output_shape  # the shape of second output is data dependent
 
@@ -4405,7 +4407,7 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    NestedTensorCUDA, CUDA: is_pinned_cuda
+    CUDA: is_pinned_cuda
     MPS: is_pinned_mps
     CompositeExplicitAutograd: is_pinned_default
 
@@ -4419,7 +4421,6 @@
   dispatch:
     CUDA: _pin_memory_cuda
     MPS: _pin_memory_mps
-    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
@@ -6294,6 +6295,7 @@
   dispatch:
     CPU: _efficientzerotensor
     CUDA: _efficientzerotensor_cuda
+    MPS: _efficientzerotensor_mps
     Meta: _efficientzerotensor_meta
   autogen: _efficientzerotensor.out
 
@@ -7130,7 +7132,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    CompositeImplicitAutogradNestedTensor: NestedTensor_unbind
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method

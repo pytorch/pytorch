@@ -923,7 +923,7 @@ def get_class_name_lineno(method) -> Tuple[str, int]:
     return class_name, line_no
 
 
-# At the the point the decorator is applied to class methods the method
+# At the point the decorator is applied to class methods the method
 # has no reference to its owning class. _qualified_name would not include
 # the class it is defined in, so any methods with the same name in the same file
 # would have the same _qualified_name, even if they were defined in different
@@ -1181,7 +1181,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # if getattr(sys.modules[module_name], name) is not obj:
     #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
-    #                        f"the attr {name} on module {module_name} is not the the class")
+    #                        f"the attr {name} on module {module_name} is not the class")
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
