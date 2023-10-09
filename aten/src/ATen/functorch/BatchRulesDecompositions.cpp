@@ -149,8 +149,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(hsplit, array);
   OP_DECOMPOSE(hstack);
   m.impl("index_select_backward", native::index_select_backward_symint);
+  OP_DECOMPOSE(imag);
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(inverse);
+  OP_DECOMPOSE(isfinite);
+  OP_DECOMPOSE(isreal);
   OP_DECOMPOSE(concatenate);
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
@@ -181,6 +184,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(cumprod_backward);
   OP_DECOMPOSE(linalg_matrix_power);
   OP_DECOMPOSE(linalg_vecdot);
+  OP_DECOMPOSE(log_sigmoid);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
@@ -215,6 +219,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(positive);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
+  OP_DECOMPOSE(real);
   m.impl("repeat_interleave.self_int", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_int))>(native::repeat_interleave_symint));
   m.impl("repeat_interleave.self_Tensor", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_Tensor))>(native::repeat_interleave_symint));
   m.impl("reshape", native::reshape_symint);
