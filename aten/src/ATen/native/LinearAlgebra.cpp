@@ -2518,27 +2518,26 @@ Tensor compute_T18(const Tensor& A) {
 }
 
 template <typename scalar_t>
-void compute_T18_scale_square(
-  Tensor& mexp_out,
+Tensor compute_T18_scale_square(
   const Tensor& a,
   const Tensor& norm,
   scalar_t theta
 ) {
   // Scale
   // We eventually need to do the matrix multiplication to calculate the result.
-  // For exampe, if we have `norm` equal to [27, 6, 6, 0.05], we will end up to
+  // For example, if we have `norm` equal to [27, 6, 6, 0.05], we will end up to
   // get `s` as [4, 1, 1, 0], so we can use it to get the result by calculating
   // matrix[0]^(2^4), matrix[1]^(2^1) and matrix[2]^(2^1) one by one to get the
   // result, such "one by one calculation" will be quite slow.
-  const auto s = (at::floor(at::log2(norm / theta)) + 1).clamp(/*min=*/0);
+  const auto s = (at::ceil(at::log2(norm / theta))).clamp(/*min=*/0);
   const auto pow2s = at::pow(2, -s);
   const auto a_scaled = a * pow2s.view({-1, 1, 1});
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
 
   // Sort:
-  // Consider inputs are squre matrix, so if we first power `martix 0,1,2`, then
-  // the ramain thing will only be multiply `matrix 0` by (2^4 - 1) times, which
-  // gives us a opportunity to calculate the matrix multiplication in a batch.
+  // Consider inputs are square matrix, so if we first power `martix 0,1,2`, then
+  // the remain thing will only be multiply `matrix 0` by (2^4 - 1) times, which
+  // gives us an opportunity to calculate the matrix multiplication in a batch.
   // The first thing we need to do is sort tensor `s`, which will be helpful to
   // do the matrix multiplication by range.
   Tensor sorted_s, sorted_s_inds;
@@ -2550,7 +2549,7 @@ void compute_T18_scale_square(
   auto split_counts = std::get<2>(at::unique_consecutive(sorted_s, true, /*return_counts=*/true));
   auto split_counts_cpu = split_counts.to(at::kCPU);
   // We also need to know the index of the last element of each split, so we can
-  // know how many times we need to do the multiplication for each splited matrix.
+  // know how many times we need to do the multiplication for each split matrix.
   // Notice that, we will not need to calculate the actual pows, because we will
   // use the cumulative matrix multiplication.
   // With about example, `mul_times` will be [0, 1, 3].
@@ -2565,10 +2564,10 @@ void compute_T18_scale_square(
   auto pts = mul_times.data_ptr<int64_t>();
 
   // We now will do the matrix muplication in a batch, with above example:
-  // 1. Multiply all matrixs by 0 (`mul_times[0]`) times, then do `slice`
-  // to get the remain matrixs by acc[1:] (`split_counts[0]`),
-  // 2. Multiply reamin matrixs by 1 times and slice to acc[2:]
-  // 3. Multiply reamin matrixs by 3 times and slice to acc[1:]
+  // 1. Multiply all matrixes by 0 (`mul_times[0]`) times, then do `slice`
+  // to get the remain matrixes by acc[1:] (`split_counts[0]`),
+  // 2. Multiply remain matrixes by 1 times and slice to acc[2:]
+  // 3. Multiply remain matrixes by 3 times and slice to acc[1:]
   // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
@@ -2582,8 +2581,7 @@ void compute_T18_scale_square(
 
   // Compose the result back
   auto output = at::cat(output_pieces, 0);
-  output = output.index_select(0, at::argsort(sorted_s_inds));
-  mexp_out.copy_(output);
+  return output.index_select(0, at::argsort(sorted_s_inds));
 }
 
 template <typename scalar_t>
@@ -2607,9 +2605,9 @@ Tensor mexp_impl(
   // (instead of 6), and better performance overall (benchmarked).
   // For large batch size, the cost of the above decision on CPU will be quite
   // expensive (compared to the synchronization overhead from GPU to CPU), so
-  // here we have a threshold to determine whether or not to move norm to CPU.
+  // here we have a threshold to determine whether to move norm to CPU.
   const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA)
-    && a.size(0) >= large_batch_threshold) ? norm.to(at::kCPU) : norm;
+    && a.size(0) <= large_batch_threshold) ? norm.to(at::kCPU) : norm;
 
   if (!compute_highest_degree_approx) {
     constexpr std::array<
@@ -2647,10 +2645,7 @@ Tensor mexp_impl(
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
       auto large_norm_subset = at::index_select(norm, 0, idx_to_device);
-      auto mexp_out = at::empty_like(a_large_norm);
-
-      compute_T18_scale_square(
-        mexp_out,
+      auto mexp_out = compute_T18_scale_square(
         a_large_norm,
         large_norm_subset,
         thetas[total_n_degs - 1]
@@ -2661,12 +2656,10 @@ Tensor mexp_impl(
     return res;
   }
 
-  compute_T18_scale_square(
-    res, a, norm,
+  return compute_T18_scale_square(
+    a, norm,
     thetas[total_n_degs - 1]
   );
-
-  return res;
 }
 
 // matrix exponential
