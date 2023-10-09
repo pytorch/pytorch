@@ -2123,8 +2123,6 @@ class ShapePropagator : public PropertyPropBase {
       auto strides = input_type->strides().concrete_sizes().value();
       int64_t dim = node->get<int64_t>(attr::dim).value();
       int64_t chunks = node->get<int64_t>(attr::chunks).value();
-      auto redistribute = node->get<bool>(attr::redistribute);
-      auto drop_remainder = node->get<bool>(attr::drop_remainder);
       sizes[dim] /= chunks;
       for (Value* output : node->outputs()) {
         output->setType(input_type->withSizesStrides(sizes, strides));
