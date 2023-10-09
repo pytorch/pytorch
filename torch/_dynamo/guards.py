@@ -117,7 +117,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("utils_device", torch.utils._device),
         ("device", torch.device),
         ("__as_tensor", torch.as_tensor),
-        ("___basename", os.path.basename)
+        ("___basename", os.path.basename),
     ]
 )
 
@@ -507,14 +507,17 @@ class GuardBuilder(GuardBuilderBase):
 
         if hasattr(value, "__code__") and isinstance(value.__code__, types.CodeType):
             code = list()
-            code.append(f"hash({ref}.__code__.co_code) == {hash(value.__code__.co_code)}")
+            code.append(
+                f"hash({ref}.__code__.co_code) == {hash(value.__code__.co_code)}"
+            )
             code.append(f"{ref}.__code__.co_name == '{value.__code__.co_name}'")
-            code.append(f"___basename({ref}.__code__.co_filename)"
-                        f" == '{os.path.basename(value.__code__.co_filename)}'")
+            code.append(
+                f"___basename({ref}.__code__.co_filename)"
+                f" == '{os.path.basename(value.__code__.co_filename)}'"
+            )
 
             # TODO(jon-chuang): Below may be too strict for export?
-            # If we want to ensure recompilation if the users' library version
-            # changes, then we'd uncomment below. Else, lineno is probably too strict.
+            # lineno is probably too strict.
             # filename basename might still be fine, but full path is probably too strict.
 
             # code.append(
