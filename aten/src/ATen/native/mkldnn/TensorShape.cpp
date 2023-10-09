@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/SymIntArrayRef.h>
 
