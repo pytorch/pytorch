@@ -183,5 +183,45 @@ class TestMatcher(JitTestCase):
                 if n == name_node_map["conv"]:
                     assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
 
+    def test_matcher_with_name_node_map(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                linear = self.linear(x)
+                # Note: we can put "weight": self.linear.weight in dictionary since
+                # nn.Parameter is not an allowed output type in dynamo
+                return linear, {"linear": linear, "x": x}
+
+        from torch._export import capture_pre_autograd_graph
+        example_inputs = (
+            torch.randn(3, 5),
+        )
+        pattern_gm = capture_pre_autograd_graph(Pattern(), example_inputs)
+        matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
+        target_gm = capture_pre_autograd_graph(M(), example_inputs)
+        internal_matches = matcher.match(target_gm.graph)
+        for internal_match in internal_matches:
+            name_node_map = internal_match.name_node_map
+            assert "linear" in name_node_map
+            assert "x" in name_node_map
+            name_node_map["linear"].meta["custom_annotation"] = "annotation"
+            # check if we correctly annotated the target graph module
+            for n in target_gm.graph.nodes:
+                if n == name_node_map["linear"]:
+                    assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
+
 if __name__ == "__main__":
     run_tests()
