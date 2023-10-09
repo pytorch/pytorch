@@ -3209,6 +3209,8 @@ def _separable_upsample_bilinear2d_aa_single_dim(
     interp_size = 2  # bilinear
     in_size = in_tensor.shape[interp_dim]
 
+    memory_format = utils.suggest_memory_format(in_tensor)
+
     n_idx = torch.arange(n, device=in_tensor.device).view(n, 1, 1, 1)
     c_idx = torch.arange(c, device=in_tensor.device).view(1, c, 1, 1)
 
@@ -3228,7 +3230,9 @@ def _separable_upsample_bilinear2d_aa_single_dim(
         src_idx_min = src_idx_min.view(1, 1, 1, out_size)
 
         in_tensor_list = [
-            in_tensor[n_idx, c_idx, in_y, torch.clamp(src_idx_min + k, max=in_w - 1)]
+            in_tensor[
+                n_idx, c_idx, in_y, torch.clamp(src_idx_min + k, max=in_w - 1)
+            ].contiguous(memory_format=memory_format)
             for k in range(max_interp_size)
         ]
     else:
@@ -3238,7 +3242,9 @@ def _separable_upsample_bilinear2d_aa_single_dim(
         src_idx_min = src_idx_min.view(1, 1, out_size, 1)
 
         in_tensor_list = [
-            in_tensor[n_idx, c_idx, torch.clamp(src_idx_min + k, max=in_h - 1), in_x]
+            in_tensor[
+                n_idx, c_idx, torch.clamp(src_idx_min + k, max=in_h - 1), in_x
+            ].contiguous(memory_format=memory_format)
             for k in range(max_interp_size)
         ]
         weights = weights.unsqueeze(-1)

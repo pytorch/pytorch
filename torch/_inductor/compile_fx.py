@@ -1143,7 +1143,7 @@ def compile_fx(
             assert num_orig_model_outputs <= num_model_outputs
 
             # Note [User Outputs in the inductor graph]
-            # We makes the following assumption
+            # We make the following assumption
             # For inference
             #   len(orig_model_outputs) == len(model_outputs)
             # For training
