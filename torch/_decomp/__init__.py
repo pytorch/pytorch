@@ -443,6 +443,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._unsafe_view,
             aten.upsample_bilinear2d,
             aten.upsample_nearest2d_backward,
+            aten.var_mean,
             aten.view_as_complex,
             aten.xlogy,
             aten.xlogy_,
