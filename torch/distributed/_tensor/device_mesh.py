@@ -212,7 +212,7 @@ class DeviceMesh:
             )
 
         # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type)
+        self_mesh = self.mesh.to(self.device_type).contiguous()
         mesh_tensor = funcol.all_gather_tensor(
             self_mesh, gather_dim=0, group=_get_default_group()
         )
