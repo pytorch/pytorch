@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import logging
 from enum import auto, Enum
@@ -244,13 +245,29 @@ def _share_state_and_init_handle_attrs(
             "set yet or should have been set to `False`",
         )
         fsdp_state._is_root = False
-        fsdp_state._unshard_stream = root_state._unshard_stream
-        fsdp_state._post_backward_stream = root_state._post_backward_stream
-        fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
-        fsdp_state._all_reduce_stream = root_state._all_reduce_stream
-        fsdp_state._default_stream = root_state._default_stream
+        # We skip streams during tracing
+        compiling = torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        fsdp_state._unshard_stream = (
+            root_state._unshard_stream if not compiling else None
+        )
+        fsdp_state._post_backward_stream = (
+            root_state._post_backward_stream if not compiling else None
+        )
+        fsdp_state._pre_unshard_stream = (
+            root_state._pre_unshard_stream if not compiling else None
+        )
+        fsdp_state._all_reduce_stream = (
+            root_state._all_reduce_stream if not compiling else None
+        )
+        fsdp_state._default_stream = (
+            root_state._default_stream if not compiling else None
+        )
+        fsdp_state._free_event_queue = (
+            root_state._free_event_queue if not compiling else None
+        )
+
         fsdp_state._exec_order_data = root_state._exec_order_data
-        fsdp_state._free_event_queue = root_state._free_event_queue
+
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
@@ -280,23 +297,38 @@ def _init_streams(
         fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES
         for fsdp_state in state._all_fsdp_states
     )
+    compiling = torch.distributed._functional_collectives.is_torchdynamo_compiling()
     # Prioritize all-gathers/reduce-scatters over async all-reduce for HSDP and
     # preserve the default priority of 0 otherwise
     high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
-    state._default_stream = state._device_handle.current_stream()
+    state._default_stream = (
+        state._device_handle.current_stream() if not compiling else None
+    )
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves
-    state._unshard_stream = state._device_handle.Stream(priority=high_priority)
+    state._unshard_stream = (
+        state._device_handle.Stream(priority=high_priority) if not compiling else None
+    )
     # Stream for overlapping gradient reduction with the backward pass gradient
     # computation
-    state._post_backward_stream = state._device_handle.Stream(priority=high_priority)
+    state._post_backward_stream = (
+        state._device_handle.Stream(priority=high_priority) if not compiling else None
+    )
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast)
-    state._pre_unshard_stream = state._device_handle.Stream(priority=high_priority)
+    state._pre_unshard_stream = (
+        state._device_handle.Stream(priority=high_priority) if not compiling else None
+    )
     # Stream to run HSDP's all-reduce as async (if using HSDP)
     state._all_reduce_stream = (
-        state._device_handle.Stream() if uses_hybrid_sharding else state._default_stream
+        (
+            state._device_handle.Stream()
+            if uses_hybrid_sharding
+            else state._default_stream
+        )
+        if not compiling
+        else None
     )
 
 
@@ -317,18 +349,30 @@ def _unshard(
     """
     if not handle:
         return
-    with state._device_handle.stream(pre_unshard_stream):
+    compiling = torch.distributed._functional_collectives.is_torchdynamo_compiling()
+    context = (
+        state._device_handle.stream(pre_unshard_stream)
+        if not compiling
+        else contextlib.nullcontext()
+    )
+    with context:
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
-        unshard_stream.wait_stream(pre_unshard_stream)
-    if state.limit_all_gathers:
+        if not compiling:
+            unshard_stream.wait_stream(pre_unshard_stream)
+    if state.limit_all_gathers and not compiling:
         event = state._free_event_queue.dequeue_if_needed()
         if event:
             with torch.profiler.record_function(
                 "FullyShardedDataParallel.rate_limiter"
             ):
                 event.synchronize()
-    with state._device_handle.stream(unshard_stream):
+    context = (
+        state._device_handle.stream(unshard_stream)
+        if not compiling
+        else contextlib.nullcontext()
+    )
+    with context:
         handle.unshard()
         handle.post_unshard()
 
@@ -599,11 +643,12 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
-        _wait_for_computation_stream(
-            state._device_handle.current_stream(),
-            state._unshard_stream,
-            state._pre_unshard_stream,
-        )
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            _wait_for_computation_stream(
+                state._device_handle.current_stream(),
+                state._unshard_stream,
+                state._pre_unshard_stream,
+            )
         _reset_flat_param_grad_info_if_needed(state._all_handles)
 
         # Prepares the forward inputs by moving them to ``compute_device``
@@ -751,9 +796,18 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient computation) to
         # finish before reduce-scattering the gradient
-        state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+        compiling = torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        if not compiling:
+            state._post_backward_stream.wait_stream(
+                state._device_handle.current_stream()
+            )
 
-        with state._device_handle.stream(state._post_backward_stream):
+        context = (
+            state._device_handle.stream(state._post_backward_stream)
+            if not compiling
+            else contextlib.nullcontext()
+        )
+        with context:
             autograd_computed_grad = flat_param.grad.data
             if (
                 not _low_precision_hook_enabled(state)
@@ -770,9 +824,10 @@ def _post_backward_hook(
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
-            _no_dispatch_record_stream(
-                autograd_computed_grad, state._post_backward_stream
-            )
+            if not compiling:
+                _no_dispatch_record_stream(
+                    autograd_computed_grad, state._post_backward_stream
+                )
 
 
 def _post_backward_reshard(
@@ -841,12 +896,26 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             group=state.process_group,
         )
         if uses_hybrid_sharded_strategy:
-            state._all_reduce_stream.wait_stream(state._post_backward_stream)
-            with state._device_handle.stream(state._all_reduce_stream):
+            compiling = (
+                torch.distributed._functional_collectives.is_torchdynamo_compiling()
+            )
+
+            def _stream_context():
+                if compiling:
+                    return contextlib.nullcontext()
+                else:
+                    state._all_reduce_stream.wait_stream(state._post_backward_stream)
+                    return state._device_handle.stream(state._all_reduce_stream)
+
+            with _stream_context():
                 # Since the new sharded gradient is produced in the post-
                 # backward stream and consumed in the all-reduce stream,
                 # inform the caching allocator
-                _no_dispatch_record_stream(new_sharded_grad, state._all_reduce_stream)
+                if not compiling:
+                    _no_dispatch_record_stream(
+                        new_sharded_grad, state._all_reduce_stream
+                    )
+
                 dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
                 _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
                 grad_to_offload = _accumulate_sharded_grad(
@@ -966,7 +1035,8 @@ def _offload_grad(
     # Since the gradient being offloaded may have been produced in the
     # computation stream and is being consumed here in the post-backward
     # stream, inform the caching allocator
-    _no_dispatch_record_stream(grad_to_offload.data, state._post_backward_stream)
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        _no_dispatch_record_stream(grad_to_offload.data, state._post_backward_stream)
 
 
 @no_type_check
@@ -1075,18 +1145,19 @@ def _post_backward_final_callback(
     root_state = state
 
     if root_state._sync_gradients:
-        current_stream = state._device_handle.current_stream()
-        # TODO (rohan-varma): this also waits for the overlapped optimizer step to finish
-        # since it currently runs in the post-backward stream. That can be
-        # pushed to the next forward if run in a different stream
-        current_stream.wait_stream(root_state._post_backward_stream)
-        if root_state._all_reduce_stream is not current_stream:  # uses HSDP
-            current_stream.wait_stream(root_state._all_reduce_stream)
-        if root_state.cpu_offload.offload_params:
-            # Wait for non-blocking GPU -> CPU sharded gradient copies from the
-            # post-backward hooks to finish explicitly since CPU gradients do
-            # not automatically synchronize with the GPU
-            state._device_handle.current_stream().synchronize()
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            current_stream = state._device_handle.current_stream()
+            # TODO (rohan-varma): this also waits for the overlapped optimizer step to finish
+            # since it currently runs in the post-backward stream. That can be
+            # pushed to the next forward if run in a different stream
+            current_stream.wait_stream(root_state._post_backward_stream)
+            if root_state._all_reduce_stream is not current_stream:  # uses HSDP
+                current_stream.wait_stream(root_state._all_reduce_stream)
+            if root_state.cpu_offload.offload_params:
+                # Wait for non-blocking GPU -> CPU sharded gradient copies from the
+                # post-backward hooks to finish explicitly since CPU gradients do
+                # not automatically synchronize with the GPU
+                state._device_handle.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
     for fsdp_state in state._all_fsdp_states:
