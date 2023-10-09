@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
@@ -152,6 +152,14 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
             return _listlike_contains_helper(self.items, args[0], tx, options)
+        elif name == "index":
+            from .builder import SourcelessBuilder
+
+            assert len(kwargs) == 0
+            assert len(args) > 0 and len(args) <= 3
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
