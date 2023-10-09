@@ -459,8 +459,6 @@ TORCH_IMPL_FUNC(cumprod_out_mps)
 }
 
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
-  using namespace mps;
-
   if (!self.is_complex()) {
     Tensor output_copy = output.alias();
     at::sign_out(output_copy, self);
@@ -472,72 +470,20 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
     output.resize_(self.sizes());
   }
 
-  Tensor flatInput = self.flatten();
-  Tensor flatOutput = output.flatten();
-  Tensor realInput = at::view_as_real(flatInput);
-  Tensor realOutput = at::view_as_real(flatOutput);
+  Tensor realInput = at::view_as_real(self);
+  Tensor realOutput = at::view_as_real(output);
 
   auto complex_sgn_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> MPSGraphTensor* {
-    NSArray<MPSGraphTensor*>* complexNumberComponents = [mpsGraph splitTensor:inputTensor numSplits:2 axis:1 name:nil];
-
-    MPSGraphTensor* realPartTensor = complexNumberComponents[0];
-    MPSGraphTensor* imaginaryPartTensor = complexNumberComponents[1];
-
-    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
-                                                        shape:realPartTensor.shape
-                                                     dataType:realPartTensor.dataType];
-
-    MPSGraphTensor* complexZeroTensor = [mpsGraph constantWithScalar:0.0
-                                                               shape:inputTensor.shape
-                                                            dataType:realPartTensor.dataType];
-
-    MPSGraphTensor* isRealZero = [mpsGraph equalWithPrimaryTensor:realPartTensor secondaryTensor:zeroTensor name:nil];
-
-    MPSGraphTensor* isImaginaryZero = [mpsGraph equalWithPrimaryTensor:imaginaryPartTensor
-                                                       secondaryTensor:zeroTensor
-                                                                  name:nil];
-
-    MPSGraphTensor* isComplexZero = [mpsGraph logicalANDWithPrimaryTensor:isRealZero
-                                                          secondaryTensor:isImaginaryZero
-                                                                     name:nil];
-
-    MPSGraphTensor* sgnDenomReal = [mpsGraph squareWithTensor:realPartTensor name:nil];
-
-    MPSGraphTensor* sgnDenomImaginary = [mpsGraph squareWithTensor:imaginaryPartTensor name:nil];
-
-    MPSGraphTensor* sgnDenomSum = [mpsGraph additionWithPrimaryTensor:sgnDenomReal
-                                                      secondaryTensor:sgnDenomImaginary
-                                                                 name:nil];
-
-    MPSGraphTensor* sgnDenom = [mpsGraph squareRootWithTensor:sgnDenomSum name:nil];
-
-    MPSGraphTensor* sgnRealTensor = [mpsGraph divisionWithPrimaryTensor:realPartTensor
-                                                        secondaryTensor:sgnDenom
-                                                                   name:nil];
-
-    MPSGraphTensor* sgnImaginaryTensor = [mpsGraph divisionWithPrimaryTensor:imaginaryPartTensor
-                                                             secondaryTensor:sgnDenom
-                                                                        name:nil];
-
-    MPSGraphTensor* sgnComplexTensor = [mpsGraph concatTensors:@[ sgnRealTensor, sgnImaginaryTensor ]
-                                                     dimension:1
-                                                          name:nil];
-
-    MPSGraphTensor* sgnTensor = [mpsGraph selectWithPredicateTensor:isComplexZero
-                                                truePredicateTensor:complexZeroTensor
-                                               falsePredicateTensor:sgnComplexTensor
-                                                               name:nil];
-    return sgnTensor;
+    MPSGraphTensor* squares = [mpsGraph squareWithTensor:inputTensor name:nil];
+    MPSGraphTensor* sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
+    MPSGraphTensor* norm = [mpsGraph squareRootWithTensor:sumSquares name:nil];
+    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:norm.dataType];
+    MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:norm secondaryTensor:zero name:nil];
+    MPSGraphTensor* sgnTensor = [mpsGraph divisionWithPrimaryTensor:inputTensor secondaryTensor:norm name:nil];
+    return [mpsGraph selectWithPredicateTensor:isZero truePredicateTensor:zero falsePredicateTensor:sgnTensor name:nil];
   };
 
-  unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
-
-  std::vector<long long> realSize = self.sizes().vec();
-  realSize.push_back(2);
-
-  Tensor originalShape = realOutput.reshape(realSize);
-  Tensor complexOutput = at::view_as_complex(originalShape);
-  output.copy_(complexOutput);
+  mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
 }
 
 } // namespace at::native
