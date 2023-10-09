@@ -6,6 +6,7 @@ import collections
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import itertools
@@ -120,6 +121,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("device", torch.device),
         ("__as_tensor", torch.as_tensor),
         ("___basename", os.path.basename),
+        ("___hash", lambda x: hashlib.md5(x).hexdigest()),
     ]
 )
 
@@ -234,12 +236,6 @@ class GuardBuilder(GuardBuilderBase):
         # Builtins are globals from the perspective of CPython
         # We do merge them into globals to make them visible to guards
         # However, we currently offer no mechanism for guarding on builtins
-        if not local:
-            global_scope = builtins.__dict__.copy()
-            global_scope.update(
-                scope["G"]
-            )  # Global defs take precedence over builtins'
-            scope["G"] = global_scope
         self.scope: Dict[str, Dict[str, object]] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
@@ -291,7 +287,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        # name = replace_patched_builtins(name, self.scope)
+        name = replace_patched_builtins(name, self.scope)
         return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the
@@ -312,7 +308,7 @@ class GuardBuilder(GuardBuilderBase):
                     log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
-        # name = replace_patched_builtins(name, self.scope)
+        name = replace_patched_builtins(name, self.scope)
         return name
 
     def TYPE_MATCH(self, guard: Guard):
@@ -539,7 +535,7 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def CODE_MATCH(self, guard: Guard):
-        """Checks that the `__code__` of two functions are likely equal"""
+        """Checks that the `__code__` of two functions are equal"""
         ref = self.arg_ref(guard)
         # Cannot guard with local var deps
         if re.match(r"^(.*)L\[.*\](.*)$", ref) or "L[" in ref:
@@ -550,7 +546,7 @@ class GuardBuilder(GuardBuilderBase):
             code = list()
             code.append(f"hasattr({ref}, '__code__')")
             code.append(
-                f"hash({ref}.__code__.co_code) == {hash(value.__code__.co_code)}"
+                f"___hash({ref}.__code__.co_code) == '{hashlib.md5(value.__code__.co_code).hexdigest()}'"
             )
             code.append(f"{ref}.__code__.co_name == '{value.__code__.co_name}'")
             code.append(
@@ -1296,6 +1292,10 @@ class CheckFunctionManager:
             set_guard_fail_hook(guard_fail_hook)
 
         out: Dict[str, Any] = dict()
+        # Remove the cached copy of `__builtins__` from the guard fn
+        # We need to do this because unlike globals, the builtins dict
+        # is copied when constructing the guarded code.
+        global_builder.scope.pop("__builtins__") 
         exec(pycode, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars

@@ -3475,12 +3475,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def renamed_global_fn(x):
             return torch.sin(x) + 20
 
-        def updated_global_fn(x):
-            return torch.exp(x)
-
-        for updated in [renamed_global_fn, updated_global_fn, some_global_fn_other]:
+        for updated in [renamed_global_fn, some_global_fn_other, None]:
             try:
-
+                torch._dynamo.reset() # clear the cache
                 def foo(x, y):
                     return some_global_fn(x) + y
 
@@ -3495,7 +3492,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(counter.frame_count, 1)
                 self.assertEqual(actual, expected)
 
-                some_global_fn = updated
+                if updated is None:
+                    def some_global_fn(x):
+                        return torch.exp(x)
+                else:
+                    some_global_fn = updated
 
                 expected = foo(x, y)
                 actual = opt_foo(x, y)

@@ -5165,13 +5165,12 @@ def fn():
             self.assertTrue(same(ref, x + 1))
             self.assertTrue(same(res, x - 1))
 
-            # Builtin functions are not guarded
-            # Hence, this would not trigger recompile
-            # This behaviour may change if and when
-            # we start guarding builtins
+            # we guard on builtins being modified
             builtins.isinstance = patched_isinstance_2
+            assert(id(builtins.isinstance) == id(patched_isinstance_2))
+            assert(builtins.isinstance.__code__.co_name == "patched_isinstance_2")
             res2 = opt_fn(x, y)
-            self.assertTrue(same(res2, x - 1))
+            self.assertTrue(same(res2, x + 1))
         finally:
             builtins.isinstance = builtin_isinstance
 
