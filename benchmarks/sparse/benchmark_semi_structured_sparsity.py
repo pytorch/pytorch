@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.sparse import to_sparse_semi_structured
+from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 from tqdm import tqdm
 
 
@@ -61,6 +61,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     ).blocked_autorange()
 
     dense_output = model(input_tensor)
+    print(dense_output.shape)
 
     # sparsify weights
     model.linear.weight = nn.Parameter(
@@ -70,6 +71,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     )
 
     sparse_output = model(input_tensor)
+    print(sparse_output.shape)
 
     sparse_measurement = benchmark.Timer(
         stmt="model(input_tensor)",

@@ -228,8 +228,8 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       at::Tensor* ret3_tensor = new at::Tensor(std::move(r3));
       *ret3 = tensor_pointer_to_tensor_handle(ret3_tensor);
     }
-    *ret4 = r4;
-    *ret5 = r5;
+    *ret4 = r4.expect_int();
+    *ret5 = r5.expect_int();
     at::Tensor* ret6_tensor = new at::Tensor(std::move(r6));
     *ret6 = tensor_pointer_to_tensor_handle(ret6_tensor);
     at::Tensor* ret7_tensor = new at::Tensor(std::move(r7));
