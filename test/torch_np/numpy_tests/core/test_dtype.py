@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
 import operator
 
 import pickle
@@ -8,11 +9,22 @@ import types
 from itertools import permutations
 from typing import Any
 
+from unittest import expectedFailure as xfail, skipIf as skipif
+
 import pytest
 
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_, assert_equal
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
+
+skip = functools.partial(skipif, True)
 
 
 def assert_dtype_equal(a, b):
@@ -27,8 +39,9 @@ def assert_dtype_not_equal(a, b):
     assert_(hash(a) != hash(b), "two different types hash to the same value !")
 
 
-class TestBuiltin:
-    @pytest.mark.parametrize("t", [int, float, complex, np.int32])
+@instantiate_parametrized_tests
+class TestBuiltin(TestCase):
+    @parametrize("t", [int, float, complex, np.int32])
     def test_run(self, t):
         """Only test hash runs at all."""
         dt = np.dtype(t)
@@ -81,9 +94,7 @@ class TestBuiltin:
         assert not np.dtype(np.int32) == 7, "dtype richcompare failed for =="
         assert np.dtype(np.int32) != 7, "dtype richcompare failed for !="
 
-    @pytest.mark.parametrize(
-        "operation", [operator.le, operator.lt, operator.ge, operator.gt]
-    )
+    @parametrize("operation", [operator.le, operator.lt, operator.ge, operator.gt])
     def test_richcompare_invalid_dtype_comparison(self, operation):
         # Make sure TypeError is raised for comparison operators
         # for invalid dtypes. Here 7 is an invalid dtype.
@@ -91,7 +102,7 @@ class TestBuiltin:
         with pytest.raises(TypeError):
             operation(np.dtype(np.int32), 7)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "dtype",
         [
             "Bool",
@@ -125,8 +136,8 @@ class TestBuiltin:
             np.dtype(dtype)
 
 
-@pytest.mark.skip(reason="dtype attributes not yet implemented")
-class TestDtypeAttributeDeletion:
+@skip(reason="dtype attributes not yet implemented")
+class TestDtypeAttributeDeletion(TestCase):
     def test_dtype_non_writable_attributes_deletion(self):
         dt = np.dtype(np.double)
         attr = [
@@ -154,7 +165,8 @@ class TestDtypeAttributeDeletion:
             assert_raises(AttributeError, delattr, dt, s)
 
 
-class TestPickling:
+@instantiate_parametrized_tests
+class TestPickling(TestCase):
     def check_pickling(self, dtype):
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
             buf = pickle.dumps(dtype, proto)
@@ -176,12 +188,17 @@ class TestPickling:
             assert_equal(x, y)
             assert_equal(x[0], y[0])
 
-    @pytest.mark.parametrize("t", [int, float, complex, np.int32, bool])
+    @parametrize("t", [int, float, complex, np.int32, bool])
     def test_builtin(self, t):
         self.check_pickling(np.dtype(t))
 
-    @pytest.mark.parametrize(
-        "DType", [type(np.dtype(t)) for t in np.typecodes["All"]] + [np.dtype]
+    @parametrize(
+        "DType",
+        [
+            subtest(type(np.dtype(t)), name=f"{np.dtype(t).name}")
+            for t in np.typecodes["All"]
+        ]
+        + [np.dtype],
     )
     def test_pickle_types(self, DType):
         # Check that DTypes (the classes/types) roundtrip when pickling
@@ -190,14 +207,14 @@ class TestPickling:
             assert roundtrip_DType is DType
 
 
-@pytest.mark.skip(reason="XXX: value-based promotions, we don't have.")
-class TestPromotion:
+@skip(reason="XXX: value-based promotions, we don't have.")
+class TestPromotion(TestCase):
     """Test cases related to more complex DType promotions.  Further promotion
     tests are defined in `test_numeric.py`
     """
 
-    @pytest.mark.parametrize(
-        ["other", "expected", "expected_weak"],
+    @parametrize(
+        "other, expected, expected_weak",
         [
             (2**16 - 1, np.complex64, None),
             (2**32 - 1, np.complex128, np.complex64),
@@ -222,8 +239,8 @@ class TestPromotion:
         res = np.minimum(other, np.ones(3, dtype=min_complex)).dtype
         assert res == expected
 
-    @pytest.mark.parametrize(
-        ["other", "expected"],
+    @parametrize(
+        "other, expected",
         [
             (np.bool_, np.complex128),
             (np.int64, np.complex128),
@@ -244,7 +261,7 @@ class TestPromotion:
         res = np.minimum(np.ones(3, dtype=other), complex_scalar).dtype
         assert res == expected
 
-    @pytest.mark.parametrize("val", [2, 2**32, 2**63, 2**64, 2 * 100])
+    @parametrize("val", [2, 2**32, 2**63, 2**64, 2 * 100])
     def test_python_integer_promotion(self, val):
         # If we only path scalars (mainly python ones!), the result must take
         # into account that the integer may be considered int32, int64, uint64,
@@ -254,8 +271,8 @@ class TestPromotion:
         # For completeness sake, also check with a NumPy scalar as second arg:
         assert np.result_type(val, np.int8(0)) == expected_dtype
 
-    @pytest.mark.parametrize(
-        ["dtypes", "expected"],
+    @parametrize(
+        "dtypes, expected",
         [
             # These promotions are not associative/commutative:
             ([np.int16, np.float16], np.float32),
@@ -280,19 +297,25 @@ class TestPromotion:
             assert np.result_type(*perm) == expected
 
 
-def test_dtypes_are_true():
-    # test for gh-6294
-    assert bool(np.dtype("f8"))
-    assert bool(np.dtype("i8"))
+class TestMisc(TestCase):
+    def test_dtypes_are_true(self):
+        # test for gh-6294
+        assert bool(np.dtype("f8"))
+        assert bool(np.dtype("i8"))
+
+    @xfail  # (reason="No keyword arg for dtype ctor.")
+    def test_keyword_argument(self):
+        # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
+        assert np.dtype(dtype=np.float64) == np.dtype(np.float64)
+
+    @skipif(sys.version_info >= (3, 9), reason="Requires python 3.9")
+    def test_class_getitem_38(self) -> None:
+        match = "Type subscription requires python >= 3.9"
+        with pytest.raises(TypeError):  # , match=match):
+            np.dtype[Any]
 
 
-@pytest.mark.xfail(reason="No keyword arg for dtype ctor.")
-def test_keyword_argument():
-    # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
-    assert np.dtype(dtype=np.float64) == np.dtype(np.float64)
-
-
-class TestFromDTypeAttribute:
+class TestFromDTypeAttribute(TestCase):
     def test_simple(self):
         class dt:
             dtype = np.dtype("f8")
@@ -300,7 +323,7 @@ class TestFromDTypeAttribute:
         assert np.dtype(dt) == np.float64
         assert np.dtype(dt()) == np.float64
 
-    @pytest.mark.skip(
+    @skip(
         reason="We simply require the .name attribute, so this "
         "fails with an AttributeError."
     )
@@ -318,22 +341,22 @@ class TestFromDTypeAttribute:
             np.dtype(dt_instance)
 
 
-@pytest.mark.skip(reason="Parameteric dtypes, our stuff is simpler.")
-@pytest.mark.skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
-class TestClassGetItem:
+@skip(reason="Parameteric dtypes, our stuff is simpler.")
+@skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
+class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:
         alias = np.dtype[Any]
         assert isinstance(alias, types.GenericAlias)
         assert alias.__origin__ is np.dtype
 
-    @pytest.mark.parametrize("code", np.typecodes["All"])
+    @parametrize("code", np.typecodes["All"])
     def test_dtype_subclass(self, code: str) -> None:
         cls = type(np.dtype(code))
         alias = cls[Any]
         assert isinstance(alias, types.GenericAlias)
         assert alias.__origin__ is cls
 
-    @pytest.mark.parametrize("arg_len", range(4))
+    @parametrize("arg_len", range(4))
     def test_subscript_tuple(self, arg_len: int) -> None:
         arg_tup = (Any,) * arg_len
         if arg_len == 1:
@@ -346,14 +369,5 @@ class TestClassGetItem:
         assert np.dtype[Any]
 
 
-@pytest.mark.skipif(sys.version_info >= (3, 9), reason="Requires python 3.9")
-def test_class_getitem_38() -> None:
-    match = "Type subscription requires python >= 3.9"
-    with pytest.raises(TypeError):  # , match=match):
-        np.dtype[Any]
-
-
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

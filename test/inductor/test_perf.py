@@ -183,6 +183,12 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10),)
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
+        def f(a, b):
+            return torch.cat([torch.mm(a, a), b.sin()])
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
     def test_index(self):
         def f(a, b):
             return a[b]
@@ -468,6 +474,14 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(20, 1, grad=True), T(1, 20, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """220""")
+
+    def test_partitioning_cat(self):
+        def f(a, b):
+            a = torch.tanh(a)
+            return torch.cat([a, b])
+
+        inp = (T(10, grad=True), T(10, grad=True))
+        self.assertExpectedInline(count_numel_train(f, *inp), """70""")
 
 
 def unfusible(x):

@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import itertools
+from unittest import expectedFailure as xfail, skipIf as skip
 
 import pytest
 
@@ -10,8 +11,16 @@ import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
 
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
 
-class TestIndexing:
+
+class TestIndexing(TestCase):
     def test_indexing_simple(self):
         a = np.array([[1, 2, 3], [4, 5, 6]])
 
@@ -26,7 +35,7 @@ class TestIndexing:
         assert_equal(a, [[8, 2, 3], [4, 5, 6]])
 
 
-class TestReshape:
+class TestReshape(TestCase):
     def test_reshape_function(self):
         arr = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
@@ -75,7 +84,7 @@ class TestReshape:
 #
 
 
-class TestTranspose:
+class TestTranspose(TestCase):
     def test_transpose_function(self):
         arr = [[1, 2], [3, 4], [5, 6]]
         tgt = [[1, 3, 5], [2, 4, 6]]
@@ -95,7 +104,7 @@ class TestTranspose:
         assert a.transpose().tensor._base is a.tensor
 
 
-class TestRavel:
+class TestRavel(TestCase):
     def test_ravel_function(self):
         a = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -111,7 +120,7 @@ class TestRavel:
         assert a.ravel().tensor._base is a.tensor
 
 
-class TestNonzero:
+class TestNonzero(TestCase):
     def test_nonzero_trivial(self):
         assert_equal(np.nonzero(np.array([])), ([],))
         assert_equal(np.array([]).nonzero(), ([],))
@@ -161,7 +170,8 @@ class TestNonzero:
         assert_equal(m.nonzero(), tgt)
 
 
-class TestArgmaxArgminCommon:
+@instantiate_parametrized_tests
+class TestArgmaxArgminCommon(TestCase):
     sizes = [
         (),
         (3,),
@@ -179,16 +189,21 @@ class TestArgmaxArgminCommon:
         (256,),
     ]
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "size, axis",
-        itertools.chain(
-            *[
-                [(size, axis) for axis in list(range(-len(size), len(size))) + [None]]
-                for size in sizes
-            ]
+        list(
+            itertools.chain(
+                *[
+                    [
+                        (size, axis)
+                        for axis in list(range(-len(size), len(size))) + [None]
+                    ]
+                    for size in sizes
+                ]
+            )
         ),
     )
-    @pytest.mark.parametrize("method", [np.argmax, np.argmin])
+    @parametrize("method", [np.argmax, np.argmin])
     def test_np_argmin_argmax_keepdims(self, size, axis, method):
         # arr = np.random.normal(size=size)
         arr = np.empty(shape=size)
@@ -257,8 +272,8 @@ class TestArgmaxArgminCommon:
             with pytest.raises(ValueError):
                 method(arr.T, axis=axis, out=wrong_outarray, keepdims=True)
 
-    @pytest.mark.skipif(reason="XXX: need ndarray.chooses")
-    @pytest.mark.parametrize("method", ["max", "min"])
+    @skip(True, reason="XXX: need ndarray.chooses")
+    @parametrize("method", ["max", "min"])
     def test_all(self, method):
         # a = np.random.normal(0, 1, (4, 5, 6, 7, 8))
         a = np.arange(4 * 5 * 6 * 7 * 8).reshape((4, 5, 6, 7, 8))
@@ -271,7 +286,7 @@ class TestArgmaxArgminCommon:
             axes.remove(i)
             assert np.all(a_maxmin == aarg_maxmin.choose(*a.transpose(i, *axes)))
 
-    @pytest.mark.parametrize("method", ["argmax", "argmin"])
+    @parametrize("method", ["argmax", "argmin"])
     def test_output_shape(self, method):
         # see also gh-616
         a = np.ones((10, 5))
@@ -296,8 +311,8 @@ class TestArgmaxArgminCommon:
         arg_method(-1, out=out)
         assert_equal(out, arg_method(-1))
 
-    @pytest.mark.parametrize("ndim", [0, 1])
-    @pytest.mark.parametrize("method", ["argmax", "argmin"])
+    @parametrize("ndim", [0, 1])
+    @parametrize("method", ["argmax", "argmin"])
     def test_ret_is_out(self, ndim, method):
         a = np.ones((4,) + (256,) * ndim)
         arg_method = getattr(a, method)
@@ -305,7 +320,7 @@ class TestArgmaxArgminCommon:
         ret = arg_method(axis=0, out=out)
         assert ret is out
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "arr_method, np_method", [("argmax", np.argmax), ("argmin", np.argmin)]
     )
     def test_np_vs_ndarray(self, arr_method, np_method):
@@ -321,7 +336,7 @@ class TestArgmaxArgminCommon:
         assert_equal(arg_method(out=out1, axis=0), np_method(a, out=out2, axis=0))
         assert_equal(out1, out2)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "arr_method, np_method", [("argmax", np.argmax), ("argmin", np.argmin)]
     )
     def test_np_vs_ndarray_positional(self, arr_method, np_method):
@@ -335,7 +350,8 @@ class TestArgmaxArgminCommon:
         assert_equal(out1, out2)
 
 
-class TestArgmax:
+@instantiate_parametrized_tests
+class TestArgmax(TestCase):
     usg_data = [
         ([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], 0),
         ([3, 3, 3, 3, 2, 2, 2, 2], 0),
@@ -380,32 +396,41 @@ class TestArgmax:
         )
     ]
     nan_arr = darr + [
-        ([0, 1, 2, 3, complex(0, np.nan)], 4),
-        ([0, 1, 2, 3, complex(np.nan, 0)], 4),
-        ([0, 1, 2, complex(np.nan, 0), 3], 3),
-        ([0, 1, 2, complex(0, np.nan), 3], 3),
-        ([complex(0, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-        ([complex(0, 0), complex(0, 2), complex(0, 1)], 1),
-        ([complex(1, 0), complex(0, 2), complex(0, 1)], 0),
-        ([complex(1, 0), complex(0, 2), complex(1, 1)], 2),
+        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
+        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
+            decorators=[xfail],
+        ),
+        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xfail]),
         ([False, False, False, False, True], 4),
         ([False, False, False, True, False], 3),
         ([True, False, False, False, False], 0),
         ([True, False, True, False, False], 0),
     ]
 
-    @pytest.mark.parametrize("data", nan_arr)
+    @parametrize("data", nan_arr)
     def test_combinations(self, data):
         arr, pos = data
         #      with suppress_warnings() as sup:
         #          sup.filter(RuntimeWarning,
         #                      "invalid value encountered in reduce")
-        if np.asarray(arr).dtype.kind in "c":
-            pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
+        #        if np.asarray(arr).dtype.kind in "c":
+        #            pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
 
         val = np.max(arr)
 
@@ -438,7 +463,8 @@ class TestArgmax:
         assert_equal(np.argmax(a), 1)
 
 
-class TestArgmin:
+@instantiate_parametrized_tests
+class TestArgmin(TestCase):
     usg_data = [
         ([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], 8),
         ([3, 3, 3, 3, 2, 2, 2, 2], 4),
@@ -483,25 +509,34 @@ class TestArgmin:
         )
     ]
     nan_arr = darr + [
-        ([0, 1, 2, 3, complex(0, np.nan)], 4),
-        ([0, 1, 2, 3, complex(np.nan, 0)], 4),
-        ([0, 1, 2, complex(np.nan, 0), 3], 3),
-        ([0, 1, 2, complex(0, np.nan), 3], 3),
-        ([complex(0, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-        ([complex(0, 0), complex(0, 2), complex(0, 1)], 0),
-        ([complex(1, 0), complex(0, 2), complex(0, 1)], 2),
-        ([complex(1, 0), complex(0, 2), complex(1, 1)], 1),
+        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
+        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
+            decorators=[xfail],
+        ),
+        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 2), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 1), decorators=[xfail]),
         ([True, True, True, True, False], 4),
         ([True, True, True, False, True], 3),
         ([False, True, True, True, True], 0),
         ([False, True, False, True, True], 0),
     ]
 
-    @pytest.mark.parametrize("data", nan_arr)
+    @parametrize("data", nan_arr)
     def test_combinations(self, data):
         arr, pos = data
 
@@ -541,7 +576,7 @@ class TestArgmin:
         assert_equal(np.argmin(a), 1)
 
 
-class TestAmax:
+class TestAmax(TestCase):
     def test_basic(self):
         a = [3, 4, 5, 10, -3, -5, 6.0]
         assert_equal(np.amax(a), 10.0)
@@ -553,7 +588,7 @@ class TestAmax:
         assert_equal(np.amax(arr), arr.max())
 
 
-class TestAmin:
+class TestAmin(TestCase):
     def test_basic(self):
         a = [3, 4, 5, 10, -3, -5, 6.0]
         assert_equal(np.amin(a), -5.0)
@@ -565,22 +600,23 @@ class TestAmin:
         assert_equal(np.amin(arr), arr.min())
 
 
-def test_contains():
-    a = np.arange(12).reshape(3, 4)
-    assert 2 in a
-    assert 42 not in a
+class TestContains(TestCase):
+    def test_contains(self):
+        a = np.arange(12).reshape(3, 4)
+        assert 2 in a
+        assert 42 not in a
 
 
-# make sure ndarray does not carry extra methods/attributes
-# >>> set(dir(a)) - set(dir(a.tensor.numpy()))
-@pytest.mark.parametrize("name", ["fn", "ivar", "method", "name", "plain", "rvar"])
-def test_extra_methods(name):
-    a = np.ones(3)
-    with pytest.raises(AttributeError):
-        getattr(a, name)
+@instantiate_parametrized_tests
+class TestNoExtraMethods(TestCase):
+    # make sure ndarray does not carry extra methods/attributes
+    # >>> set(dir(a)) - set(dir(a.tensor.numpy()))
+    @parametrize("name", ["fn", "ivar", "method", "name", "plain", "rvar"])
+    def test_extra_methods(self, name):
+        a = np.ones(3)
+        with pytest.raises(AttributeError):
+            getattr(a, name)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

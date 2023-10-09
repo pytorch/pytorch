@@ -238,6 +238,7 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
   c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
+  c10::optional<std::string> custom_storage_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -254,17 +255,21 @@ struct C10_API ExtraMeta {
     if (other.custom_data_ptr_error_msg_) {
       custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
     }
+    if (other.custom_storage_error_msg_) {
+      custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    }
   }
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
-      c10::optional<std::string> custom_data_ptr_error_msg = c10::nullopt)
+      c10::optional<std::string> custom_data_ptr_error_msg = c10::nullopt,
+      c10::optional<std::string> custom_storage_access_error_msg = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(std::move(backend_meta)),
-        custom_data_ptr_error_msg_(std::move(custom_data_ptr_error_msg)) {}
+        custom_storage_error_msg_(std::move(custom_storage_access_error_msg)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(*this);
@@ -1668,7 +1673,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void release_storage_and_set_meta_custom_data_ptr_error_msg_(
       c10::optional<std::string> s) {
     storage_ = {};
-    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+    set_storage_access_should_throw();
+    get_extra_meta().custom_data_ptr_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = s;
   }
 
  protected:
