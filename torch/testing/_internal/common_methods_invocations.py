@@ -3156,7 +3156,7 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
 
         # Test broadcasting values
         yield SampleInput(
-           make_arg(S, S),
+           make_arg(S, S),/OpInfo
            (index_variable(2, S, device=device),),
             make_arg((1, 1)),
             accumulate=accumulate)
@@ -3172,7 +3172,6 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
         mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
         yield SampleInput(
             make_arg((S, S)), (mask, ), make_arg((S,)), accumulate=accumulate)
-
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     def small_3d_unique():
@@ -15887,7 +15886,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped"), 'TestBwdGradients', 'test_fn_grad', dtypes=[torch.float64],
                             device_type='cuda', active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
            )),
-   OpInfo('sort',
+    OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
