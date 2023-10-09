@@ -16,7 +16,6 @@ from torch._C import (
 
 xfail_functorch_batched = {
     "aten::flatten.using_ints",
-    "aten::imag",
     "aten::is_nonzero",
     "aten::isfinite",
     "aten::isreal",
@@ -32,7 +31,6 @@ xfail_functorch_batched = {
     "aten::masked_select_backward",
     "aten::movedim.intlist",
     "aten::one_hot",
-    "aten::real",
     "aten::silu_backward",
     "aten::special_xlogy",
     "aten::special_xlogy.other_scalar",
@@ -53,7 +51,6 @@ xfail_functorch_batched_decomposition = {
 }
 
 xfail_not_implemented = {
-    "aten::absolute_",
     "aten::affine_grid_generator_backward",
     "aten::align_as",
     "aten::align_tensors",
@@ -61,13 +58,7 @@ xfail_not_implemented = {
     "aten::align_to.ellipsis_idx",
     "aten::alpha_dropout",
     "aten::alpha_dropout_",
-    "aten::arccos_",
-    "aten::arccosh_",
-    "aten::arcsin_",
-    "aten::arcsinh_",
     "aten::arctan2_",
-    "aten::arctan_",
-    "aten::arctanh_",
     "aten::argwhere",
     "aten::bilinear",
     "aten::can_cast",
@@ -123,7 +114,6 @@ xfail_not_implemented = {
     "aten::histogramdd",
     "aten::histogramdd.TensorList_bins",
     "aten::histogramdd.int_bins",
-    "aten::imag",
     "aten::infinitely_differentiable_gelu_backward",
     "aten::isclose",
     "aten::isfinite",
@@ -197,7 +187,6 @@ xfail_not_implemented = {
     "aten::qr.Q",
     "aten::quantile",
     "aten::quantile.scalar",
-    "aten::real",
     "aten::refine_names",
     "aten::rename",
     "aten::rename_",

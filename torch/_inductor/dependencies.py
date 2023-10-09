@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from .codegen.common import index_prevent_reordering
 from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
@@ -28,6 +29,17 @@ class MemoryDep(typing.NamedTuple):
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
 
+    def _get_numel(self) -> sympy.Expr:
+        if self.is_indirect():
+            numel = V.graph.get_numel(self.name)
+        else:
+            vars = set(self.index.free_symbols)
+            numel = sympy.Integer(1)
+            for var, size in zip(self.var_names, self.size):
+                if var in vars:
+                    numel = numel * size
+        return numel
+
     @property
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
         """{c0: 128, c1: 512, ...}"""
@@ -41,17 +53,12 @@ class MemoryDep(typing.NamedTuple):
         return self
 
     def numbytes_hint(self):
-        if self.is_indirect():
-            numel = V.graph.get_numel(self.name)
-        else:
-            vars = set(self.index.free_symbols)
-            numel = sympy.Integer(1)
-            for var, size in zip(self.var_names, self.size):
-                if var in vars:
-                    numel = numel * size
-        return V.graph.sizevars.size_hint(numel, fallback=8192) * get_dtype_size(
+        return V.graph.sizevars.size_hint(self._get_numel()) * get_dtype_size(
             V.graph.get_dtype(self.name)
         )
+
+    def has_unbacked_symbols(self):
+        return len(free_unbacked_symbols(self._get_numel())) > 0
 
     def is_contiguous(self) -> bool:
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
@@ -80,8 +87,11 @@ class StarDep(typing.NamedTuple):
 
     def numbytes_hint(self):
         return V.graph.sizevars.size_hint(
-            V.graph.get_numel(self.name), fallback=8192
+            V.graph.get_numel(self.name)
         ) * get_dtype_size(V.graph.get_dtype(self.name))
+
+    def has_unbacked_symbols(self):
+        return len(free_unbacked_symbols(V.graph.get_numel(self.name))) > 0
 
     def is_contiguous(self) -> bool:
         return False
@@ -113,6 +123,9 @@ class WeakDep(typing.NamedTuple):
 
     def numbytes_hint(self):
         return 1  # Purely inserted for ordering, not an actual dep
+
+    def has_unbacked_symbols(self):
+        return len(free_unbacked_symbols(V.graph.get_numel(self.name))) > 0
 
     def is_contiguous(self) -> bool:
         return False
@@ -333,7 +346,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 
 def extract_read_writes(
-    fn: Callable[[sympy.Expr], Any],
+    fn: Callable[..., Any],
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",
