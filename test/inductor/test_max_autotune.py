@@ -397,6 +397,7 @@ class TestDoBench(TestCase):
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_relu6_fusion(
         self,
         dynamic: bool = False,
@@ -445,30 +446,35 @@ class TestDoBench(TestCase):
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16(self):
         self._test_max_autotune_cutlass_backend_simple_fusion(
             mixed_precision=False, fp16=True
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion__fp16_fp32acc(self):
         self._test_max_autotune_cutlass_backend_simple_fusion(
             mixed_precision=True, fp16=True
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
         self._test_max_autotune_cutlass_backend_chained_fusion(
             mixed_precision=True, fp16=True
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16(self):
         self._test_max_autotune_cutlass_backend_chained_fusion(
             mixed_precision=False, fp16=True
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
         self._test_max_autotune_cutlass_backend_relu_fusion(
             mixed_precision=True, fp16=True
