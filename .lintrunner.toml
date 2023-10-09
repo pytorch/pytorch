@@ -197,7 +197,6 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/ir.py',
     'torch/_inductor/scheduler.py',
 ]
 command = [
