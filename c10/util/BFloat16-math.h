@@ -43,6 +43,12 @@ inline T atan(T a) {
 template <
     typename T,
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline T atanh(T a) {
+  return std::atanh(float(a));
+}
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T erf(T a) {
   return std::erf(float(a));
 }

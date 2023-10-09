@@ -8,6 +8,7 @@ class Scalar;
 
 namespace at {
 
+struct TensorIterator;
 struct TensorIteratorBase;
 
 namespace native {

@@ -16,14 +16,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/empty_strided_native.h>
-#endif
-
-#include <unordered_map>
-
 namespace torch::jit::tensorexpr {
 
 // A RAII wrapper to manage a variable and name pair in the look-up table.
@@ -1347,6 +1339,7 @@ void CudaCodeGen::CompileToNVRTC(
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
@@ -1360,6 +1353,7 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_NVRTC_CHECK(result);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t ptx_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
@@ -1377,7 +1371,8 @@ void CudaCodeGen::CompileToNVRTC(
   ptx.resize(ptx_size);
   AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
 
-  CUmodule module{nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  CUmodule module;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));

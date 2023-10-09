@@ -822,6 +822,12 @@ if(BUILD_CAFFE2 AND NOT MSVC)
   target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
 endif()
 
+# Ignore Wdeprecated-XXX errors from third-party libraries
+if(NOT MSVC)
+  set_source_files_properties(${PROJECT_SOURCE_DIR}/aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
+  set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
+endif()
+
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
@@ -843,27 +849,10 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS
   endforeach()
 endif()
 
-option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
-if(TORCH_USE_IWYU)
-  find_program(iwyu NAMES include-what-you-use)
-  if(iwyu)
-    set(iwyu_cmd
-        "include-what-you-use"
-        "-Xiwyu"
-        "--transitive_includes_only"
-        "-Xiwyu"
-        "--no_fwd_decls"
-        "-Xiwyu"
-        "--prefix_header_includes=keep"
-        "-Xiwyu"
-        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
-        )
-    set_property(TARGET torch_cpu PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
-  endif()
-endif()
-
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+set_property(SOURCE ${ATen_ATTENTION_KERNEL_SRCS} APPEND
+    PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_NO_OPERATORS")
 
 if(USE_MPS OR USE_PYTORCH_METAL)
   enable_language(OBJC OBJCXX)
@@ -1462,7 +1451,7 @@ if(MSVC AND NOT BUILD_SHARED_LIBS)
   #   1. Write out a config.h header which stores whether or not
   #      you are linking statically or dynamically.
   #
-  #   2. Force all of users to set the the macro themselves.  If they
+  #   2. Force all of users to set the macro themselves.  If they
   #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
   #      compile option, in which case cmake will automatically
   #      add the macro for you.
