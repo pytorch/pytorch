@@ -2525,34 +2525,59 @@ void compute_T18_scale_square(
   scalar_t theta
 ) {
   // Scale
+  // We eventually need to do the matrix multiplication to calculate the result.
+  // For exampe, if we have `norm` equal to [27, 6, 6, 0.05], we will end up to
+  // get `s` as [4, 1, 1, 0], so we can use it to get the result by calculating
+  // matrix[0]^(2^4), matrix[1]^(2^1) and matrix[2]^(2^1) one by one to get the
+  // result, such "one by one calculation" will be quite slow.
   const auto s = (at::floor(at::log2(norm / theta)) + 1).clamp(/*min=*/0);
   const auto pow2s = at::pow(2, -s);
   const auto a_scaled = a * pow2s.view({-1, 1, 1});
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
 
-  // Sort
+  // Sort:
+  // Consider inputs are squre matrix, so if we first power `martix 0,1,2`, then
+  // the ramain thing will only be multiply `matrix 0` by (2^4 - 1) times, which
+  // gives us a opportunity to calculate the matrix multiplication in a batch.
+  // The first thing we need to do is sort tensor `s`, which will be helpful to
+  // do the matrix multiplication by range.
   Tensor sorted_s, sorted_s_inds;
+  // With above example, `sorted_s` is [0, 1, 1, 4], we also will need the index
+  // info, so we can use it to compose the result back.
   std::tie(sorted_s, sorted_s_inds) = at::sort(s, /*dim=*/0);
+  // Then we call `unique_consecutive` and we will use it to split `sorted_s`,
+  // with above example, `split_counts` is [1, 2, 1].
   auto split_counts = std::get<2>(at::unique_consecutive(sorted_s, true, /*return_counts=*/true));
+  auto split_counts_cpu = split_counts.to(at::kCPU);
+  // We also need to know the index of the last element of each split, so we can
+  // know how many times we need to do the multiplication for each splited matrix.
+  // Notice that, we will not need to calculate the actual pows, because we will
+  // use the cumulative matrix multiplication.
+  // With about example, `mul_times` will be [0, 1, 3].
   auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
-  auto split_adv = at::diff(split_edges, 1, -1, /*prepend=*/split_edges.new_zeros({1})).to(at::kCPU);
   auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong);
-  auto diffs = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1})).to(at::kCPU);
+  auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1})).to(at::kCPU);
 
   // Square
-  TORCH_INTERNAL_ASSERT(split_adv.is_contiguous());
-  TORCH_INTERNAL_ASSERT(diffs.is_contiguous());
-  auto idxs = split_adv.data_ptr<int64_t>();
-  auto ps = diffs.data_ptr<int64_t>();
+  TORCH_INTERNAL_ASSERT(split_counts_cpu.is_contiguous());
+  TORCH_INTERNAL_ASSERT(mul_times.is_contiguous());
+  auto scs = split_counts_cpu.data_ptr<int64_t>();
+  auto pts = mul_times.data_ptr<int64_t>();
 
+  // We now will do the matrix muplication in a batch, with above example:
+  // 1. Multiply all matrixs by 0 (`mul_times[0]`) times, then do `slice`
+  // to get the remain matrixs by acc[1:] (`split_counts[0]`),
+  // 2. Multiply reamin matrixs by 1 times and slice to acc[2:]
+  // 3. Multiply reamin matrixs by 3 times and slice to acc[1:]
+  // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
-  for (int64_t i = 0; i < split_adv.numel(); ++i) {
-    for (int64_t j = 0; j < ps[i]; j++) {
+  for (int64_t i = 0; i < split_counts_cpu.numel(); ++i) {
+    for (int64_t j = 0; j < pts[i]; j++) {
         acc = at::matmul(acc, acc);
     }
-    output_pieces.push_back(acc.slice(0, 0, idxs[i] + 1));
-    acc = acc.slice(0, idxs[i] + 1);
+    output_pieces.push_back(acc.slice(0, 0, scs[i]));
+    acc = acc.slice(0, scs[i]);
   }
 
   // Compose the result back
@@ -2569,7 +2594,7 @@ Tensor mexp_impl(
 ) {
   auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
-  const auto norm_max = norm.max().to(at::kCPU).item().toFloat();
+  const auto norm_max = norm.max().to(at::kCPU).item<float>();
   if (std::isnan(norm_max)) {
     res.fill_(std::numeric_limits<double>::quiet_NaN());
     return res;
@@ -2577,13 +2602,13 @@ Tensor mexp_impl(
 
   // `norm_small_to_cpu` is used to decide which Tensors require which
   // approximation based on their norm. This decision may take place on CPU.
-  // It could require moving data back and forth between devices when `a` is on CUDA,
-  // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
-  // and better performance overall (benchmarked).
-  // For large batch size, the cost of the above decision on CPU will be quite 
+  // It could require moving data back and forth between devices when `a` is on
+  // CUDA, but at the cost of only one single CPU-CUDA synchronization
+  // (instead of 6), and better performance overall (benchmarked).
+  // For large batch size, the cost of the above decision on CPU will be quite
   // expensive (compared to the synchronization overhead from GPU to CPU), so
   // here we have a threshold to determine whether or not to move norm to CPU.
-  const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA) 
+  const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA)
     && a.size(0) >= large_batch_threshold) ? norm.to(at::kCPU) : norm;
 
   if (!compute_highest_degree_approx) {
