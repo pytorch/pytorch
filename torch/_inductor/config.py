@@ -345,12 +345,6 @@ class cpp:
     # using atomic_add.
     fallback_scatter_reduce_sum = True
 
-    # Allow the model to cache and reuse outputs across iterations. REQUIRES that the
-    # calling code guarantee it has stopped using previous iterations' outputs before
-    # calling into the model again. Currently needed to enable reusing internal Tensor
-    # allocations generally before we land proper memory planning.
-    allow_unsafe_output_reuse = False
-
 
 # config specific to codegen/triton.py
 class triton:

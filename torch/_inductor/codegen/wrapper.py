@@ -301,6 +301,7 @@ class WrapperCodeGen(CodeGen):
         self.last_seen_device_guard_index = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
+        self.cached_thread_locals = set()
 
         self.write_header()
         self.write_prefix()
@@ -649,11 +650,11 @@ class WrapperCodeGen(CodeGen):
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         return self.codegen_python_shape_tuple(shape)
 
-    def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
+    def codegen_reinterpret_view(self, data, size, stride, offset, writer) -> str:
         size = self.codegen_shape_tuple(size)
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
-        return f"reinterpret_tensor({name}, {size}, {stride}, {offset})"
+        return f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
 
     def codegen_device_copy(self, src, dst):
         self.writeline(f"{dst}.copy_({src})")
@@ -850,12 +851,17 @@ class WrapperCodeGen(CodeGen):
         if old_name not in V.graph.get_output_names():
             del_line = f"; {self.make_buffer_free(old)}"
 
+
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
+            if old_name in self.cached_thread_locals:
+                self.cached_thread_locals.add(new_name)
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old_name, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
         )
+        if reinterpret_view in self.cached_thread_locals:
+            self.cached_thread_locals.add(new_name)
         return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
@@ -1308,9 +1314,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if V.graph.aot_mode:
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
-                    self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = {output}.release();"
-                    )
+                    if output in self.cached_thread_locals:
+                        self.wrapper_call.writeline(
+                            f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
+                        )
+                        self.wrapper_call.writeline(
+                            f"aoti_torch_assign_tensors({output}, output_handles[{idx}]);"
+                        )
+                    else:
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = {output}.release();"
+                        )
 
                 else:
                     self.wrapper_call.writeline(
@@ -1483,16 +1497,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # We are gated off on CUDA because this is intended to reduce overhead in
         # overhead-bound CPU use case.
         return (not self.cuda and config.allow_buffer_reuse and
-                # We currently require this config option because we cannot guarantee
-                # that the buffers we're caching aren't aliased by outputs in the
-                # absence of proper memory planning.
-                config.cpp.allow_unsafe_output_reuse and
                 self.can_prove_buffer_has_static_shape(buffer))
 
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout) or self.can_prove_buffer_has_static_shape(buffer)
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout) or self.can_cache_buffer_in_thread_local(buffer)
             else f"{buffer.get_name()}.reset();"
         )
 
@@ -1574,6 +1584,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
                 )
             if self.can_cache_buffer_in_thread_local(buffer):
+                self.cached_thread_locals.add(buffer.get_name())
                 self.wrapper_call.writeline(f"thread_local AtenTensorHandle {name} = ([&] {{")
                 with self.wrapper_call.indent():
                     gen_alloc(self.wrapper_call, name, args)
@@ -1592,10 +1603,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype}));"
             )
 
-    def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
-        dim = str(len(size))
-        size = self.codegen_shape_tuple(size)
-        stride = self.codegen_shape_tuple(stride)
+    def codegen_reinterpret_view(self, data, size_list, stride_list, offset, writer) -> str:
+        dim = str(len(size_list))
+        size = self.codegen_shape_tuple(size_list)
+        stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
 
         if config.aot_inductor.abi_compatible:
@@ -1604,18 +1615,38 @@ class CppWrapperCodeGen(WrapperCodeGen):
             # of self.generate), the writeline behavior is different in the two passes.
             if writer is None:
                 writer = self
+
             args = [
-                f"{name}",
+                f"{data.get_name()}",
                 dim,
                 self.codegen_int_array_var(size, writer),
                 self.codegen_int_array_var(stride, writer),
                 offset,
                 f"&{tmp_name}",
             ]
-            writer.writeline(f"AtenTensorHandle {tmp_name};")
-            writer.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
-            )
+
+            def gen_reinterpret_call(writer, args):
+                writer.writeline(f"AtenTensorHandle {tmp_name};")
+                writer.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
+                )
+
+            if (self.can_cache_buffer_in_thread_local(data) and
+                all(is_int(x) for x in size_list) and
+                all(is_int(x) for x in stride_list)):
+                self.cached_thread_locals.add(tmp_name)
+                writer.writeline(f"thread_local AtenTensorHandle {tmp_name} = ([&] {{")
+                if hasattr(writer, "indent"):
+                    indent = writer.indent()
+                else:
+                    indent = contextlib.nullcontext()
+                with indent:
+                    gen_reinterpret_call(writer, args)
+                    writer.writeline(f"return {tmp_name};")
+                writer.writeline("})();")
+                return tmp_name
+
+            gen_reinterpret_call(writer, args)
 
             # NB, the return handle here represents a temporary tensor, which will be automatically
             # released.
@@ -1648,7 +1679,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             # ```
             return f"RAIIAtenTensorHandle({tmp_name})"
         else:
-            args = [name, size, stride, offset]
+            args = [data.get_name(), size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
 
     def codegen_device_copy(self, src, dst):
