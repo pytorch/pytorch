@@ -11,12 +11,12 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/complex_native.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/nextafter_native.h>
 #include <ATen/ops/polar_native.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/complex_native.h>
 #endif
 
 namespace at::native {
