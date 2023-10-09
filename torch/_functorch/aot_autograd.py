@@ -1034,7 +1034,7 @@ class GraphSignature:
         to its parameter/buffer FQN in the original nn.Module.
     (3) If there are input mutations, these are represented as extra outputs
         in the fx GraphModule. We provide a mapping from these
-        extra output names to the names of the the actual inputs.
+        extra output names to the names of the actual inputs.
     (4) The pytree metadata on how to flatten/unflatten inputs and outputs.
         The corresponding FX GraphModule only accepts and returns
         pytree-flattened inputs/outputs.
@@ -2938,7 +2938,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
                 adjusted_flat_args.extend([seed, offset])
                 # We are not clearing flat_args here because
-                # 1) There is a check in the the debug compiler at the end
+                # 1) There is a check in the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
 
             if torch._guards.TracingContext.get():

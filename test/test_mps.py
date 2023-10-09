@@ -69,7 +69,6 @@ def mps_ops_grad_modifier(ops):
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
-        'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
