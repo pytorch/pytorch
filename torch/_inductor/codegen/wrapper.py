@@ -1595,11 +1595,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def make_buffer_allocation(self, buffer):
         name = buffer.get_name()
-        device = self.codegen_device(buffer.get_device())
-        dtype = self.codegen_dtype(buffer.get_dtype())
-        size = self.codegen_shape_tuple(tuple(buffer.get_size()))
-        stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
         if config.aot_inductor.abi_compatible:
+            device = self.codegen_device(buffer.get_device())
+            dtype = self.codegen_dtype(buffer.get_dtype())
+            size = self.codegen_shape_tuple(tuple(buffer.get_size()))
+            stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
             device_type, device_id = device.split(",")
             args = [
                 str(len(buffer.get_size())),
@@ -1616,19 +1616,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
         else:
-            if V.graph.aot_mode and device.startswith("c10::Device("):
-                tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
-            else:
-                tensor_device = device
-
-            return self.make_allocation(name, tensor_device, dtype, size, stride)
+            return self.make_allocation(name, buffer.get_device(), buffer.get_dtype(), buffer.get_size(), buffer.get_stride())
 
     def make_allocation(self, name, device, dtype, shape, stride):
+        device_str = self.codegen_device(device)
+        if V.graph.aot_mode and device_str.startswith("c10::Device("):
+            tensor_device = f"{device_str.split(',')[0]}, this->device_idx_)"
+        else:
+            tensor_device = device_str
+
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"at::TensorOptions({self.codegen_device(device)})"
+            f"at::TensorOptions({tensor_device})"
             f".dtype({self.codegen_dtype(dtype)})){self.ending}"
         )
 
