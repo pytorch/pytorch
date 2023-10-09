@@ -2172,7 +2172,7 @@ using array2d = std::array<std::array<scalar_t, COL>, ROW>;
 // we consider 6 Taylor expansions of degree
 // 1, 2, 4, 8, 12, 18
 constexpr int total_n_degs = 6;
-constexpr int large_batch_threshold = 100;
+constexpr int large_batch_threshold = 350;
 
 Tensor operator_1_norm(const Tensor& tensor) {
   return std::get<0>(tensor.abs().sum(-2).max(-1));
@@ -2607,7 +2607,7 @@ Tensor mexp_impl(
   // expensive (compared to the synchronization overhead from GPU to CPU), so
   // here we have a threshold to determine whether to move norm to CPU.
   const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA)
-    && a.size(0) <= large_batch_threshold) ? norm.to(at::kCPU) : norm;
+    && a.size(0) < large_batch_threshold) ? norm.to(at::kCPU) : norm;
 
   if (!compute_highest_degree_approx) {
     constexpr std::array<
