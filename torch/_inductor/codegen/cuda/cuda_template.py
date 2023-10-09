@@ -44,9 +44,9 @@ class CUDATemplate(KernelTemplate):
         self.input_reorder = input_reorder
         self.layout = layout
 
-    def generate(
+    def generate(  # type: ignore[override]
         self,
-        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]
         epilogue_nodes: Optional[List[IRNode]] = None,
         **kwargs,
     ) -> CUDATemplateCaller:
