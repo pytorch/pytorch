@@ -558,7 +558,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             "relu_default_1": "l__self___backbone_relu",
         }
         for n in m.graph.nodes:
-            if n.name in node_name_to_source_partition.keys():
+            if n.name in node_name_to_source_partition:
                 self.assertTrue(
                     "source_fn_stack" in n.meta,
                     "did not find 'source_fn_stack' in node '%s' meta" % n.name,
