@@ -21,11 +21,16 @@ from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     OffsetBasedRNGTracker,
 )
-from torch.distributed._tensor.redistribute import Redistribute
+from torch.distributed._tensor.redistribute import (
+    Redistribute,
+    redistribute_local_tensor,
+)
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
+
+aten = torch.ops.aten
 
 
 # NOTE [Autograd interaction between torch.Tensor]
@@ -54,8 +59,9 @@ __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
 #
 class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input: "DTensor"):  # type: ignore[override]
+    def forward(ctx, input: "DTensor", grad_placements: Optional[Sequence[Placement]]):  # type: ignore[override]
         ctx.dtensor_spec = input._spec
+        ctx.grad_placements = grad_placements
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to polute the Tensor
         # object stored in _local_tensor.
@@ -64,18 +70,30 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         dtensor_spec = ctx.dtensor_spec
+        mesh = dtensor_spec.mesh
+        grad_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
+
+        if grad_placements is not None:
+            grad_spec = DTensorSpec(mesh, grad_placements)
+            grad_output = redistribute_local_tensor(
+                grad_output, grad_spec, dtensor_spec
+            )
+
         _, tensor_stride = compute_global_tensor_info(
-            grad_output, dtensor_spec.mesh, dtensor_spec.placements
+            grad_output, mesh, dtensor_spec.placements
         )
-        return DTensor(
-            grad_output,
-            dtensor_spec.mesh,
-            dtensor_spec.placements,
-            shape=dtensor_meta.shape,
-            dtype=dtensor_meta.dtype,
-            requires_grad=grad_output.requires_grad,
-            stride=tuple(tensor_stride),
+        return (
+            DTensor(
+                grad_output,
+                mesh,
+                dtensor_spec.placements,
+                shape=dtensor_meta.shape,
+                dtype=dtensor_meta.dtype,
+                requires_grad=grad_output.requires_grad,
+                stride=tuple(tensor_stride),
+            ),
+            None,
         )
 
 
@@ -237,6 +255,16 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # This is mostly for inference mode when we want to
+        # decompose CompositeImplicitAutograd ops.
+        # For the long run, we need to think of a better way to handle it.
+        # TODO: We can benchmark this decompose further to see if we can
+        # completely remove the check and apply it for all DTensor Ops.
+        if func == aten.linear.default:
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         return op_dispatch.operator_dispatch(
             func,
             args,
@@ -301,11 +329,24 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             local_tensor, device_mesh, tuple(placements), run_check
         )
 
-    def to_local(self) -> torch.Tensor:
+    def to_local(
+        self, *, grad_placements: Optional[Sequence[Placement]] = None
+    ) -> torch.Tensor:
         """
         Get the local tensor of this DTensor on its current rank. For sharding it returns
         a local shard of the logical tensor view, for replication it returns the replica on
         its current rank.
+
+        Keyword args:
+            grad_placements (List[:class:`Placement`], optional): the placements describes
+                the future layout of any gradient layout of the Tensor returned from this
+                function.
+                `to_local` converts DTensor to local tensor and the returned local tensor
+                might not be used as the original DTensor layout later in the code. This
+                argument is the hint that user can give to autograd in case the gradient
+                layout of the returned tensor does not match the original DTensor layout.
+                If not specified, we will assume the gradient layout remains the same
+                as the original DTensor and use that for gradient computation.
 
         Returns:
             A :class:`torch.Tensor` object that represents the local tensor of its current rank.
@@ -313,7 +354,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
-        return _ToTorchTensor.apply(self)  # pyre-ignore[16]: autograd func
+        return _ToTorchTensor.apply(
+            self, grad_placements
+        )  # pyre-ignore[16]: autograd func
 
     def redistribute(
         self,
