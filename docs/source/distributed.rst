@@ -857,6 +857,8 @@ Distributed components raise custom Exception types derived from `RuntimeError`:
 .. autoclass:: torch.distributed.DistNetworkError
 .. autoclass:: torch.distributed.DistStoreError
 
+.. automodule:: torch.distributed.hooks
+
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.distributed.algorithms
