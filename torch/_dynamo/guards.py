@@ -193,7 +193,7 @@ def replace_patched_builtins(name, scope):
 
     def is_patched_builtin(var):
         return var in BUILTIN_FUNC_NAMES and (
-            var not in scope["G"] if "G" in scope else var not in scope["L"]
+            var not in scope.get("G", {}) and var not in scope.get("L", {})
         )
 
     def replace(match):
