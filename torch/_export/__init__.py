@@ -63,6 +63,7 @@ from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
 from .wrappers import _wrap_submodules
 
 
@@ -90,15 +91,14 @@ def export__RC__(
 
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
-    if dynamic_shapes is None:
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return export(f, args, kwargs)
 
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    from typing import get_origin, get_args
 
-    def assoc_zip(combined_args, dynamic_shapes):
+    def tree_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, (tuple, list)):
             if not isinstance(dynamic_shapes, Sequence):
                 raise UserError(
@@ -112,7 +112,7 @@ def export__RC__(
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
                 )
             for i, shape in enumerate(dynamic_shapes):
-                yield from assoc_zip(combined_args[i], shape)
+                yield from tree_zip(combined_args[i], shape)
         elif isinstance(combined_args, dict):
             if not isinstance(dynamic_shapes, Mapping):
                 raise UserError(
@@ -126,7 +126,7 @@ def export__RC__(
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
                 )
             for k, shape in dynamic_shapes.items():
-                yield from assoc_zip(combined_args[k], shape)
+                yield from tree_zip(combined_args[k], shape)
         elif dataclasses.is_dataclass(combined_args):
             if not type(dynamic_shapes) == type(combined_args):
                 raise UserError(
@@ -135,7 +135,7 @@ def export__RC__(
                     f"got {dynamic_shapes} instead",
                 )
             for f in dataclasses.fields(combined_args):
-                yield from assoc_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
+                yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
         else:
@@ -146,9 +146,6 @@ def export__RC__(
                     f"got {dynamic_shapes} instead",
                 )
 
-    from collections import defaultdict
-    symbols = defaultdict(list)
-
     def to_constraint(dim, tensor, i):
         constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
         if dim.min != 2:
@@ -157,10 +154,30 @@ def export__RC__(
             constraint = constraint <= dim.max
         return constraint
 
+    from collections import defaultdict
+    symbols = defaultdict(list)
+    bounds: Dict[str, Tuple[int, int]] = {}
+
+    def check_same_bounds(dim):
+        if dim.__name__ in symbols:
+            min_, max_ = bounds[dim.__name__]
+            if dim.min != min_ or dim.max != max_:
+                this_ = _Dim.readable(dim.__name__, min_, max_)
+                that_ = _Dim.readable(dim.__name__, dim.min, dim.max)
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Found different definitions {this_} and {that_} "
+                    f"for the same symbolic dimension {dim}!"
+                )
+
+        else:
+            bounds[dim.__name__] = (dim.min, dim.max)
+
     def update_symbols(tensor, shape):
         if isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
+                    check_same_bounds(dim)
                     symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
                     if dim is not None:
@@ -172,6 +189,7 @@ def export__RC__(
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
+                    check_same_bounds(dim)
                     symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
                     if dim is not None:
@@ -188,11 +206,17 @@ def export__RC__(
                     "try None instead",
                 )
 
-    import inspect
-    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
-    combined_args = signature.bind(*args, **kwargs).arguments
+    if isinstance(f, ExportedProgram):
+        combined_args = {
+            k: args[i] if i < len(args) else kwargs[k]
+            for i, k in enumerate(dynamic_shapes)
+        }
+    else:
+        import inspect
+        signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+        combined_args = signature.bind(*args, **kwargs).arguments
 
-    for tensor, shape in assoc_zip(combined_args, dynamic_shapes):
+    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
     constraints = []
@@ -520,11 +544,13 @@ def _export(
                         **kwargs,
                     )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using constrain_as_*(). {str(e)}")
+                f"Consider annotating your code using constrain_as_*(). {str(e)}",
+                case_name="constrain_as_size_example",
+            )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
     for name, param in gm_torch_level.named_parameters(remove_duplicate=False):
@@ -813,6 +839,7 @@ def aot_compile(
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
+    remove_runtime_assertions: bool = False,
 ) -> Tuple[str, ExportedProgram]:
     """
     Note: this function is not stable yet
@@ -839,6 +866,10 @@ def aot_compile(
 
         options: A dictionary of options to control inductor
 
+        remove_runtime_assertions: Whether the runtime assertion fx nodes
+            (and the related fx nodes) inserted by export should be removed
+            from the graph before running _inductor.aot_compile.
+
     Returns:
         Path to the generated shared library, and the exported program
     """
@@ -856,6 +887,10 @@ def aot_compile(
         ep = export(f, args, kwargs, constraints)
     else:
         ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
+
+    if remove_runtime_assertions:
+        ep = ep._transform(_RemoveRuntimeAssertionsPass())
+
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 

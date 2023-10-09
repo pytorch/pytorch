@@ -209,7 +209,7 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @register_decomposition(aten.threshold_backward)
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
-    return torch.where(self <= threshold, 0.0, grad_output)
+    return torch.where(self <= threshold, 0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -2121,10 +2121,6 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
         )
 
-    # TODO: decompose integer path
-    if input.dtype in [torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64]:
-        return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
-
     # Optimisation (we should also do this in the kernel implementation)
     if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
         stride = tuple(i // o for i, o in zip(shape[-2:], output_size))
@@ -2156,14 +2152,14 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         range_max = torch.arange(maxlength, device=device, dtype=torch.int64)
         idx = i0.unsqueeze(-1) + range_max
         if adaptive:
-            # Need to clamp to avoid accesing out-of-bounds memory
+            # Need to clamp to avoid accessing out-of-bounds memory
             # TODO make minimum accept scalars
             maxval = torch.scalar_tensor(
                 in_size - 1, dtype=idx.dtype, device=idx.device
             )
             idx = torch.minimum(idx, maxval)
 
-            # Compute the lenghts
+            # Compute the length
             i1 = end_index(orange, out_size, in_size)
             length = i1 - i0
         else:
@@ -3472,7 +3468,7 @@ def _grid_sampler_2d(
     _expand_grid: bool = True,
 ) -> Tensor:
     # This method is a copy of grid_sampler_2d implementation and introduced with additional arg _expand_grid to
-    # optionaly expand the input grid for performance reasons.
+    # optionally expand the input grid for performance reasons.
     # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
     # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
     # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
@@ -3782,9 +3778,9 @@ def matmul(tensor1, tensor2):
             and dim_tensor2 == 3
             and batch_tensor1[0] != batch_tensor2[0]
         ):
-            if batch_tensor1[0] == 1 and tensor1.requires_grad():
+            if batch_tensor1[0] == 1 and tensor1.requires_grad:
                 return matmul(tensor1.squeeze(0), tensor2)
-            if batch_tensor2[0] == 1 and tensor2.requires_grad():
+            if batch_tensor2[0] == 1 and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
@@ -4140,7 +4136,7 @@ def scaled_dot_product_flash_attention(
     # In pre-dispatch export scaled_dot_product_attention is executed via
     # * flash_attention.
     # flash_attention allocates output tensor as (N, L, H, E)
-    #   it then tranposes that to get (N, H, L, E) which is supposed to be the return
+    #   it then transposes that to get (N, H, L, E) which is supposed to be the return
     # tensor dim for scaled_dot_product_attention
     # assume x: [N, H, L, E] is the output sdpa
     # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
@@ -4159,14 +4155,14 @@ def scaled_dot_product_flash_attention(
     # exactly same as *flash* variant.
     # flash variants output is contiguous as [N, L, H, E]
     # _match variant out is contiguous as [N, H, L, E]
-    # out = out.tranpose(1, 2).contiguous gets output as contiguous
+    # out = out.transpose(1, 2).contiguous gets output as contiguous
     # in [N, L, H, E].
-    # Subsrequent tranpose(1, 2) then returns a view on which
+    # Subsrequent transpose(1, 2) then returns a view on which
     # aforementioned code snippet, as showm below, is valid
     # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
     # x = x.view(L * N, H * E)
 
-    # Really the invairant you want to maintain is:
+    # Really the invariant you want to maintain is:
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
     output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
@@ -4192,9 +4188,9 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
+@register_decomposition([aten.baddbmm])
 @out_wrapper()
 @pw_cast_for_opmath
-@register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
@@ -4213,6 +4209,27 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
 @out_wrapper()
 def floor_divide(self, other):
     return torch.div(self, other, rounding_mode="floor")
+
+
+@register_decomposition([aten.sum.default, aten.sum.out])
+def sum_default(
+    self: Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    if out is None:
+        return aten.sum.dim_IntList(self, [], dtype=dtype)
+    else:
+        return aten.sum.IntList_out(self, [], dtype=dtype, out=out)
+
+
+@register_decomposition([aten.squeeze.default, aten.squeeze.dim])
+def squeeze_default(self: Tensor, dim: Optional[int] = None):
+    if dim is None:
+        return aten.squeeze.dims(self, list(range(self.dim())))
+    else:
+        return aten.squeeze.dims(self, [dim])
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

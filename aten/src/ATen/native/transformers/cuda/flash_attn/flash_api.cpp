@@ -25,22 +25,27 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <cstdint>
 #include <tuple>
 
 
 #ifdef USE_FLASH_ATTENTION
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/reshape.h>
 #include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/sum.h>
 #endif
 
 
