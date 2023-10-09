@@ -1344,12 +1344,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.prefix.writeline("}")
 
-    def generate(self):
+    def generate(self, is_inference):
         if V.graph.aot_mode:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
         self.write_wrapper_decl()
-        return super().generate()
+        return super().generate(is_inference)
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
@@ -2068,13 +2068,13 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         if not cuda:
             return super().define_kernel(name, kernel, metadata, cuda)
 
-    def generate(self):
+    def generate(self, is_inference):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
             for kernel in self.src_to_kernel.values():
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
-        return super().generate()
+        return super().generate(is_inference)
 
     @functools.lru_cache(None)
     def generate_load_kernel_once(
