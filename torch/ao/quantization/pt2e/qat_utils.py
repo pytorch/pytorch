@@ -5,10 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch.fx import Graph, GraphModule, Node
-from torch.fx.subgraph_rewriter import (
-    replace_pattern_with_filters,
-    ReplacedPatterns,
-)
+from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.ao.quantization.quantizer import (

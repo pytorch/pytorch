@@ -590,7 +590,7 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
 
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
-            m = torchvision.nodels.resnet18()
+            m = torchvision.models.resnet18()
             self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     @skip_if_no_torchvision
