@@ -225,41 +225,12 @@ class SparseSemiStructuredTensor(torch.Tensor):
         """
         return (
             f"SparseSemiStructuredTensor(shape={self.shape}, "
-            f"transposed={self.transposed}"
-            f"values={self.values()}"
-            f"metadata={self.indices()})"
+            # f"transposed={self.transposed}"
+            #f"values={self.values()}"
+            #f"metadata={self.indices()})"
         )
 
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        """
-        We overload both __torch_function__ and __torch_dispatch__ because when handling F.linear at the op level,
-        PyTorch miscalculates the size of the sparse tensor by a factor of 4, leading to a RuntimeError: Shape mismatch.
-
-        We handle F.linear as a special case and do our nd-> 2d -> nd folding / unfolding ourselves.
-        Another solution is to run with TORCH_FLATTEN_LINEAR_3D=True to avoid this shape mismatch issue.
-        """
-        if func is torch.nn.functional.linear:
-            input_tensor, weight, bias = args
-            shape = input_tensor.shape
-            if isinstance(weight, cls):
-                if cls._FORCE_CUTLASS:
-                    return torch._sparse_semi_structured_linear(
-                        input_tensor, weight.values(), weight.indices(), bias=bias
-                    )
-                else:
-                    return (
-                        torch._cslt_sparse_mm(
-                            weight.compressed_tensor_cusparselt,  # type: ignore[arg-type]
-                            input_tensor.view(-1, shape[-1]).t(),
-                            bias,
-                        )
-                        .t()
-                        .view(*shape[:-1], -1)
-                    )
-        else:
-            # if not the linear function, then compute as usual (fallback to dispatch)
-            return super().__torch_function__(func, types, args, kwargs)
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
@@ -297,7 +268,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
         if func is torch.ops.aten.t.default:
             return SparseSemiStructuredTensor(
                 args[0].original_tensor,
-                original_shape=args[0].shape,
+                # transpose shape
+                original_shape=(args[0].shape[1], args[0].shape[0]),
                 compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
                 sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
                 meta_tensor_cutlass=args[0].meta_tensor_cutlass,
