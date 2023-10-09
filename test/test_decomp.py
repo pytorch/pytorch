@@ -389,7 +389,6 @@ SKIP_CHECK_DECOMPOSED = {
     # binary min gets decomposed to minimum, for which it is an alias. Therefore check_decomposed
     # will fail for binary min tests since minimum will get called instead of binary min.
     "min",
-    "var",
 }
 
 all_decomposed = set()
