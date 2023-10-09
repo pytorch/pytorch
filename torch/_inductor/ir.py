@@ -1480,6 +1480,16 @@ class Scan(Loops):
                 ranges=size,
             )
             return split_cumsum(x, axis)
+            # return cls.create_multilayer(
+            #     device=device,
+            #     dtype=dtype,
+            #     inner_fn=inner_fn,
+            #     size=size,
+            #     axis=axis,
+            #     scan_op=scan_op,
+            #     reduction_hint=reduction_hint,
+            #     split=num_splits,
+            # )
 
         def reindex(index, scan_index):
             assert len(scan_index) == len(scan_ranges)
@@ -1529,6 +1539,133 @@ class Scan(Loops):
             reduction_type="sum",
             reduction_numel=scan_numel,
         )
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        size: List[Expr],
+        axis: int,
+        scan_op: str,
+        reduction_hint: ReductionHint,
+        split: int,
+    ):
+        """
+        Break a large scan into multiple smaller scans and reductions
+        """
+        assert scan_op in {"sum", "prod"}
+        pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
+        scan_ranges = [size[axis]]
+
+        sizevars = V.graph.sizevars
+        scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+
+        split = sympy.Integer(split)
+        block_size = FloorDiv(scan_numel + (split - 1), split)
+        need_mask = not sizevars.is_expr_static_and_true(
+            sympy.Eq(scan_numel % split, 0)
+        )
+
+        intermediate_dtype = (
+            dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
+        )
+        default = Reduction.default_value(scan_op, intermediate_dtype)
+
+        def wrapper_fn(index, reduction_index):
+            *pw_index, block_idx = index
+            (elem_idx,) = reduction_index
+            scan_index = block_size * block_idx + elem_idx
+            original_idx = [*pw_index[:axis], scan_index, *pw_index[axis:]]
+
+            def body():
+                value = inner_fn(original_idx)
+                if dtype == intermediate_dtype:
+                    return value
+                else:
+                    return ops.to_dtype(value, intermediate_dtype)
+
+            if need_mask:
+                mask = ops.lt(
+                    ops.index_expr(scan_index, torch.int32),
+                    ops.index_expr(scan_numel, torch.int32),
+                )
+                return ops.masked(mask, body, default)
+            else:
+                return body()
+
+        # Scan within each block of elements
+        block_scan = Scan.create(
+            device=device,
+            dtype=intermediate_dtype,
+            inner_fn=lambda idx: wrapper_fn(idx[:-1], idx[-1:]),
+            size=[*size[:axis], split, block_size, *size[axis + 1:]],
+            axis=axis + 1,
+            scan_op=scan_op,
+        )
+
+        # Scan across the total of all blocks
+        block_reduce = SliceView.create(block_scan, dim=axis + 1, start=block_size - 1, end=block_size)
+        intra_block_scan = Scan.create(
+            device=device,
+            dtype=intermediate_dtype,
+            inner_fn=block_reduce.make_loader(),
+            size=block_reduce.get_size(),
+            axis=axis,
+            scan_op=scan_op,
+        )
+
+        # Combine scans to create final result
+        block_scan_loader = block_scan.make_loader()
+        intra_block_scan_loader = intra_block_scan.make_loader()
+        combine_fn = get_reduction_combine_fn(scan_op, dtype)
+
+        def final_combine_fn(idx):
+            elem_idx = ModularIndexing(idx[axis], 1, block_size)
+            block_idx = FloorDiv(idx[axis], block_size)
+            blocked_idx = [*idx[:axis], block_idx, elem_idx, *idx[axis + 1:]]
+
+            a = block_scan_loader(blocked_idx)
+
+            iv_idx = list(blocked_idx)
+            iv_idx[axis] = block_idx - 1
+            iv_idx[axis + 1] = 0
+
+            def load_iv():
+                return intra_block_scan_loader(iv_idx)
+
+            mask = ops.ge(
+                ops.index_expr(block_idx, torch.int64),
+                ops.constant(1, torch.int64)
+            )
+            b = ops.masked(mask, load_iv, default)
+            result = combine_fn(a, b)
+            if intermediate_dtype != dtype:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=final_combine_fn,
+            ranges=list(size),
+        )
+
+
+# This is a hack to manually fuse tha last two steps of a multilayer scan.
+# Currently the scheduler can't fuse loops with different dimensionality, and
+# simple pointwise loops are usually coalesced into 1D loops.
+@dataclasses.dataclass
+class ScanWithInitialValue(Scan):
+    iv_loader: Callable
+
+    def store_reduction(self, output_name, indexer, vars, scan_vars):
+        idx = self.reindex(vars, scan_vars)
+        value = ops.scan(self.dtype, self.scan_op, self.inner_fn(idx))
+        combine_fn = get_reduction_combine_fn(self.scan_op, self.dtype)
+        result = combine_fn(value, self.iv_loader(vars))
+        return ops.store(output_name, indexer(idx), result)
 
 
 def is_storage_and_layout(x):

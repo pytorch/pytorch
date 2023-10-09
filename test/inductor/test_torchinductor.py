@@ -967,6 +967,25 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
+    def test_multilayer_cumsum(self):
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(fn, (torch.rand(10, 3, 352, 352),))
+
+    def test_multilayer_cumsum_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(
+            fn,
+            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
+            reference_in_float=True,
+        )
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest("No CUDA implementation (it returns empty)")
@@ -980,6 +999,7 @@ class CommonTemplate:
         data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
         packed = torch.cat([data, scales, offsets], dim=-1)
         self.common(fn, [packed])
+
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
