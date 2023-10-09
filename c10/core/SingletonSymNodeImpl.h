@@ -5,7 +5,7 @@
 
 namespace c10 {
 
-// The motivating usecase for this is to represent the the ragged size structure
+// The motivating usecase for this is to represent the ragged size structure
 // of a jagged tensor [B, [s_0, s_1, s_2], D] as a single integer j0. This
 // allows us to simply return [B, j0, D] if someone queries for the size of our
 // tensor.
