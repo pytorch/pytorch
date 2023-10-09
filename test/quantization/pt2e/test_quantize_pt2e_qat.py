@@ -528,6 +528,58 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
+    def test_qat_preserve_source_fn_stack(self):
+        """
+        Test whether `source_fn_stack` is preserved after QAT fusion.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.backbone = TestHelperModules.ConvWithBNRelu(relu=True)
+
+            def forward(self, x):
+                return self.backbone(x)
+
+        # QAT prepare + convert
+        m = M()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(get_symmetric_quantization_config(is_qat=True))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+
+        # Assert these nodes have the right source partitions
+        node_name_to_source_partition = {
+            "_param_constant0": "l__self___backbone_conv",
+            "_param_constant1": "l__self___backbone_conv",
+            "conv2d_default_2": "l__self___backbone_conv",
+            "relu_default_1": "l__self___backbone_relu",
+        }
+        for n in m.graph.nodes:
+            if n.name in node_name_to_source_partition.keys():
+                self.assertTrue(
+                    "source_fn_stack" in n.meta,
+                    "did not find 'source_fn_stack' in node '%s' meta" % n.name,
+                )
+                # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
+                actual = n.meta["source_fn_stack"][0][0]
+                expected = node_name_to_source_partition[n.name]
+                self.assertEqual(
+                    actual,
+                    expected,
+                    "expected node '%s' to have source partition '%s', but found '%s'" % (
+                        n.name, expected, actual
+                    ),
+                )
+                del node_name_to_source_partition[n.name]
+
+        # Assert all nodes of interest were found
+        self.assertTrue(
+            len(node_name_to_source_partition) == 0,
+            "did not find the following nodes in the graph: %s" % list(node_name_to_source_partition.keys())
+        )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQATModels(PT2EQATTestCase):
@@ -538,7 +590,7 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
 
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
-            m = torchvision.models.resnet18()
+            m = torchvision.nodels.resnet18()
             self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     @skip_if_no_torchvision
