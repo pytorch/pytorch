@@ -1418,7 +1418,9 @@ def get_fake_value(node, tx):
                 case_names=["constrain_as_value_example", "constrain_as_size_example"],
             )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0], case_names=[]) from e
+            raise UserError(
+                UserErrorType.CONSTRAINT_VIOLATION, e.args[0], case_names=[]
+            ) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
