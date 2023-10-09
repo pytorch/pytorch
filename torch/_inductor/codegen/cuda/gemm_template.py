@@ -1,7 +1,7 @@
 import copy
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import cast, Dict, List, Optional, Tuple
 
 from ...config import cuda as inductor_cuda_config
 from ...ir import Buffer, FixedLayout, IRNode, Layout
@@ -180,7 +180,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def __init__(
         self,
-        input_nodes: List[IRNode],
+        input_nodes: List[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
@@ -584,7 +584,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
-        template_node: IRNode = None,
+        template_node: Buffer,
         epilogue_nodes: Optional[List[IRNode]] = None,
     ) -> str:
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
@@ -612,7 +612,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if template_node is not None:
             self.output_node = template_node
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            self.output_node = epilogue_nodes[-1]
+            self.output_node = cast(Buffer, epilogue_nodes[-1])
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -620,7 +620,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
 
         epilogue_template: Optional[str] = None
-        argument_template: Optional[str] = None
         should_swap_xw: bool = False
         evt_epilogue_args = None
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
@@ -633,7 +632,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 epilogue_template = GEMM_ARGS_CUTLASS_3X_EVT_EPILOGUE
                 evt_epilogue_args = (
                     CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                        template_output_node_name, epilogue_nodes
+                        cast(str, template_output_node_name), epilogue_nodes
                     )
                 )
             else:
@@ -644,7 +643,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             argument_template = GEMM_ARGS_CUTLASS_2X
 
         instance_definition, instance_type = self.define_gemm_instance(
-            op, template_output_node_name, epilogue_nodes
+            op, cast(str, template_output_node_name), epilogue_nodes
         )
         options = dict(
             alpha=self.alpha,
