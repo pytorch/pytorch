@@ -14,14 +14,6 @@
 #include <array>
 #include <bitset>
 
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
-#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
-#endif
-
 namespace at {
 class Tensor;
 class OptionalTensorRef;
@@ -91,6 +83,11 @@ class TORCH_API OpaqueOptionalTensorRef {
 
  public:
   OpaqueOptionalTensorRef();
+  OpaqueOptionalTensorRef(const OpaqueOptionalTensorRef&) = default;
+  OpaqueOptionalTensorRef& operator=(const OpaqueOptionalTensorRef&) = default;
+  OpaqueOptionalTensorRef(OpaqueOptionalTensorRef&&) noexcept = default;
+  OpaqueOptionalTensorRef& operator=(OpaqueOptionalTensorRef&&) noexcept =
+      default;
   ~OpaqueOptionalTensorRef();
 
   OptionalTensorRef* get() {
@@ -130,6 +127,10 @@ struct TORCH_API OperandInfo {
     validate();
   }
 
+  C10_ALWAYS_INLINE OperandInfo(const OperandInfo&) = default;
+  C10_ALWAYS_INLINE OperandInfo& operator=(const OperandInfo&) = default;
+  C10_ALWAYS_INLINE OperandInfo(OperandInfo&&) noexcept = default;
+  C10_ALWAYS_INLINE OperandInfo& operator=(OperandInfo&&) noexcept = default;
   C10_ALWAYS_INLINE ~OperandInfo() = default;
 
   /// The data pointer. This may be different from tensor->data_ptr() if the
@@ -257,14 +258,14 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize = true);
 
   int ndim() const {
-    return shape_.size();
+    return static_cast<int>(shape_.size());
   }
   IntArrayRef shape() const {
     return shape_;
   }
   int64_t numel() const;
   int ntensors() const {
-    return operands_.size();
+    return static_cast<int>(operands_.size());
   }
   int noutputs() const {
     return num_outputs_;
@@ -313,7 +314,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return device(arg).type();
   }
   int64_t element_size(int arg) const {
-    return elementSize(dtype(arg));
+    return static_cast<int64_t>(elementSize(dtype(arg)));
   }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
@@ -462,7 +463,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 
   // Helper functions for advanced stride manipulations (e.g. torch.flip)
   void _unsafe_set_arg_strides(const int arg, IntArrayRef strides) {
-    operands_[arg].stride_bytes = std::move(strides);
+    operands_[arg].stride_bytes = strides;
   }
   void _unsafe_set_arg_data(const int arg, void* data) {
     operands_[arg].data = data;
@@ -984,5 +985,3 @@ struct TORCH_API SplitUntil32Bit {
 };
 
 } // namespace at
-
-C10_CLANG_DIAGNOSTIC_POP()
