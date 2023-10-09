@@ -261,6 +261,8 @@ class OpsWrapper:
 
 ops = OpsWrapper()
 
+_MockHandler = MockHandler
+
 
 class _V:
     MockHandler = MockHandler
@@ -281,7 +283,7 @@ class _V:
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
 
     @property
-    def ops(self) -> MockHandler:  # type: ignore[valid-type]
+    def ops(self) -> _MockHandler:
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 

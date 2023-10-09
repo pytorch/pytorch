@@ -8,6 +8,7 @@ from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
 import torch
 import torch._prims_common as utils
 from torch._prims_common import (
+    CustomOutParamAnnotation,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     Number,
     NumberType,
@@ -194,8 +195,18 @@ def _safe_copy_out(
 
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
-    is_tensor = len(out_names) == 0
-    assert is_tensor or len(out_names) >= 2
+    # The wrapped function needs to convert the output parameters to ensure
+    # compatability between the Python API (which always uses "out" as the
+    # parameter name and may be a tuple) and the Aten API (which may have
+    # multiple output parematers and use different parameter names such as
+    # "grad_input", "indices" or "values".)
+
+    default_out_names = ("out",)
+    if len(out_names) == 0:
+        # Use default in out name
+        out_names = default_out_names
+
+    is_tensor = len(out_names) == 1
 
     def _out_wrapper(fn: Callable) -> Callable:
         """
@@ -282,9 +293,15 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
+
         _fn.__annotations__ = fn.__annotations__
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
+
+        # In the special case of having a single tensor out parameter with a
+        # name other than out, add a special annotation to name the parameter
+        if is_tensor and out_names != default_out_names:
+            _fn.__annotations__[CustomOutParamAnnotation] = out_names[0]
 
         # Add an indicator attribute that can be used in special cases
         # where having a function wrapped by `out_wrapper` is not desirable e.g.
