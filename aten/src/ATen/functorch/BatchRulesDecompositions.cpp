@@ -44,6 +44,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__xor__, Scalar);
   OP_DECOMPOSE(_batch_norm_impl_index);
   OP_DECOMPOSE(absolute);
+  OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
   OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
@@ -53,11 +54,17 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("adaptive_avg_pool3d", native::adaptive_avg_pool3d_symint);
   OP_DECOMPOSE(adjoint);
   OP_DECOMPOSE(arccos);
+  OP_DECOMPOSE(arccos_);
   OP_DECOMPOSE(arccosh);
+  OP_DECOMPOSE(arccosh_);
   OP_DECOMPOSE(arcsin);
+  OP_DECOMPOSE(arcsin_);
   OP_DECOMPOSE(arcsinh);
+  OP_DECOMPOSE(arcsinh_);
   OP_DECOMPOSE(arctan);
+  OP_DECOMPOSE(arctan_);
   OP_DECOMPOSE(arctanh);
+  OP_DECOMPOSE(arctanh_);
   OP_DECOMPOSE(atleast_1d);
   OP_DECOMPOSE2(atleast_1d, Sequence);
   OP_DECOMPOSE(atleast_2d);
