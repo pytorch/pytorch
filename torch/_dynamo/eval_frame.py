@@ -63,7 +63,7 @@ from . import config, convert_frame, external_utils, skipfiles, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import DynamoCallback
+from .types import CacheEntry, DynamoCallback
 from .utils import compile_times
 
 log = logging.getLogger(__name__)
@@ -147,11 +147,6 @@ DONT_WRAP_FILES = {
     inspect.getsourcefile(GraphModule),
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
-
-
-# This class has a `check_fn` field for the guard,
-#  and a `code` field for the code object.
-CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
 def _debug_get_cache_entry_list(
@@ -272,7 +267,7 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
     if enable is None:
         yield
     elif enable:
-        # Assume everything is dynamic by deafult
+        # Assume everything is dynamic by default
         with config.patch(assume_static_by_default=False):
             yield
     else:
@@ -717,7 +712,7 @@ def explain(f, *extra_args, **extra_kwargs):
             nopython=False,
             guard_export_fn=guard_export_print,
         )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
@@ -891,44 +886,46 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
+    supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool)
+
+    def is_supported_type(val):
+        return isinstance(val, supported_types)
+
     def produce_matching(sources, candidates):
         source_types = " or ".join(
             [
-                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
-                for desc, args in sources.items()
+                desc
+                + " of types: ("
+                + ", ".join([str(type(val)) for val in vals])
+                + ")"
+                for desc, vals in sources.items()
             ]
         )
-        source_args = [arg for args in sources.values() for arg in args]
+        source_vals = [val for vals in sources.values() for val in vals]
         matched_elements_positions = []
-        dict_of_source_args = dict()
-        for i, arg in enumerate(source_args):
-            dict_of_source_args[id(arg)] = i
+        dict_of_source_vals = {}
+        for i, val in enumerate(source_vals):
+            dict_of_source_vals[id(val)] = i
 
-        for candidate_desc, candidate_args in candidates.items():
-            for i, arg in enumerate(candidate_args):
-                # 1-element tensor arg can be unspec int/float
-                if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
-                    if id(arg) in dict_of_source_args:
-                        matched_elements_positions.append(dict_of_source_args[id(arg)])
-                    elif id(arg.item()) in dict_of_source_args:
-                        matched_elements_positions.append(
-                            dict_of_source_args[id(arg.item())]
-                        )
+        for candidate_desc, candidate_vals in candidates.items():
+            for i, val in enumerate(candidate_vals):
+                if is_supported_type(val):
+                    if id(val) in dict_of_source_vals:
+                        matched_elements_positions.append(dict_of_source_vals[id(val)])
                     else:
                         raise AssertionError(
-                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                            f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
                         )
                 else:
-                    if id(arg) not in dict_of_source_args:
-                        raise AssertionError(
-                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
-                        )
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    raise AssertionError(
+                        f"{candidate_desc} #{i+1} is {val}, but only "
+                        f"the following types are supported: {supported_types}"
+                    )
 
         return matched_elements_positions
 
     matched_input_elements_positions = produce_matching(
-        sources={"original args": flat_args},
+        sources={"original inputs": flat_args},
         candidates={"graph-captured input": graph_captured_input},
     )
 
@@ -938,9 +935,9 @@ def rewrite_signature(
     matched_output_elements_positions = produce_matching(
         sources={
             "graph-captured outputs": list(graph_captured_output),
-            "original args": flat_args,
+            "original inputs": flat_args,
         },
-        candidates={"traced result": flat_results_traced},
+        candidates={"original output": flat_results_traced},
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1211,7 +1208,7 @@ def export(
                 export=True,
                 export_constraints=constraints,
             )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
             except ConstraintViolationError as e:
@@ -1225,14 +1222,10 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
-            if forced_specializations:
-                msg = (
-                    "Some dynamic dimensions need to be specialized because "
-                    "the constraints inferred for them are too complex to specify.\n"
-                    f"{forced_specializations}\n{msg}"
-                )
+            msg = dim_constraints.prettify_results(
+                original_signature, constraint_violation_error, forced_specializations
+            )
             if constraint_violation_error:
                 constraint_violation_error.args = (
                     constraint_violation_error.args[0] + msg,
@@ -1265,7 +1258,7 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        # This check need to happend before aten_graph
+        # This check need to happened before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx
         if same_signature:
             check_signature_rewritable(graph)
@@ -1293,7 +1286,11 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(
+                        UserErrorType.DYNAMIC_CONTROL_FLOW,
+                        str(e),
+                        case_name="cond_operands",
+                    )
 
         if same_signature:
             flat_args_dynamic_dims = [
@@ -1410,7 +1407,6 @@ class TorchPatcher:
 
         disabled_multi_tensor_opt_modules = {
             adamax,
-            nadam,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
@@ -1464,10 +1460,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
-        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
-        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

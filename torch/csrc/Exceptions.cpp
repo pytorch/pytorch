@@ -286,7 +286,7 @@ PyObject* map_warning_to_python_type(const c10::Warning& warning) {
       return PyExc_DeprecationWarning;
     }
   };
-  return c10::visit(Visitor(), warning.type());
+  return std::visit(Visitor(), warning.type());
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification

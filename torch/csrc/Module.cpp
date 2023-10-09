@@ -28,6 +28,7 @@
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
+#include <iostream>
 #include <unordered_map>
 
 #include <ATen/ThreadLocalPythonObjects.h>
@@ -1239,21 +1240,15 @@ void THCPGraph_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
-namespace torch {
-namespace cuda {
-
+namespace torch::cuda {
 void initModule(PyObject* module);
-
-}
-} // namespace torch
+} // namespace torch::cuda
 #endif
 
 #ifdef USE_ITT
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 void initIttBindings(PyObject* module);
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler
 #endif
 
 static std::vector<PyMethodDef> methods;

@@ -8,6 +8,7 @@ import unittest
 
 import torch
 from torch import nn
+from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
 
 # Make the helper files in test/ importable
@@ -158,6 +159,7 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
+    @inductor_config.patch({"freezing": True})
     def test_conv_bn_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):

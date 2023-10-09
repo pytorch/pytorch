@@ -10,7 +10,7 @@ retry () {
 
 # A bunch of custom pip dependencies for ONNX
 pip_install \
-  beartype==0.10.4 \
+  beartype==0.15.0 \
   filelock==3.9.0 \
   flatbuffers==2.0 \
   mock==5.0.1 \
@@ -32,7 +32,7 @@ pip_install coloredlogs packaging
 retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230912006
 
 pip_install onnx==1.14.1
-pip_install onnxscript-preview==0.1.0.dev20230828 --no-deps
+pip_install onnxscript==0.1.0.dev20230912 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
