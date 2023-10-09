@@ -1,7 +1,8 @@
 from typing import Dict, List, Tuple
 
-from torch.fx._compatibility import compatibility
 from torch.fx import Graph, GraphModule, Node
+
+from torch.fx._compatibility import compatibility
 from .matcher_utils import InternalMatch, SubgraphMatcher
 
 __all__ = ["SubgraphMatcherWithNameNodeMap"]
@@ -36,6 +37,7 @@ def _split_to_graph_and_name_node_map(
             )
     gm.recompile()
     return gm, name_node_map
+
 
 @compatibility(is_backward_compatible=False)
 class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
