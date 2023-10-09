@@ -1,4 +1,3 @@
-import shutil
 
 import torch
 from torch._export import aot_compile, dynamic_dim
@@ -26,21 +25,19 @@ with torch.no_grad():
         dynamic_dim(x, 0) <= 1024,
         dynamic_dim(x, 0) == dynamic_dim(y, 0),
     ]
-    lib_path, module = aot_compile(model, (x, y), constraints=constraints)
-
-shutil.copy(lib_path, "libmodel.so")
-
+    model_so_path, _ = aot_compile(model, (x, y), constraints=constraints)
 
 # Use this to communicate tensors to the cpp code
 class Serializer(torch.nn.Module):
-    def __init__(self, tensors):
+    def __init__(self, data):
         super().__init__()
-        for key in tensors:
-            setattr(self, key, tensors[key])
+        for key in data:
+            setattr(self, key, data[key])
 
-io_tensors = {
+data = {
+    "model_so_path": model_so_path,
     "inputs": [x, y],
     "outputs": [ref_output],
 }
 
-torch.jit.script(Serializer(io_tensors)).save("io_tensors.pt")
+torch.jit.script(Serializer(data)).save("data.pt")
