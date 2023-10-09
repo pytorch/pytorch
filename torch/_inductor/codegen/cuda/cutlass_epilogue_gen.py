@@ -1,4 +1,4 @@
-from typing import cast, List
+from typing import List
 from unittest.mock import patch
 
 import sympy
@@ -82,7 +82,6 @@ class CutlassEVTEpilogueTypeFormatter:
                         "Epilogue nodes must be Pointwise nodes, wrapped in a named ComputedBuffer"
                     )
                 assert isinstance(pnode, Pointwise)
-                pnode = cast(Pointwise, pnode)  # make mypy happy
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
@@ -221,7 +220,6 @@ class CutlassEVTEpilogueArgumentFormatter:
                         "Epilogue nodes must be Pointwise nodes, wrapped in a named ComputedBuffer"
                     )
                 assert isinstance(pnode, Pointwise)
-                pnode = cast(Pointwise, pnode)  # make mypy happy
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
