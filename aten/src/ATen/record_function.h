@@ -462,7 +462,7 @@ struct TORCH_API RecordFunction {
   c10::ArrayRef<const IValue> inputs_;
   std::vector<c10::IValue> outputs_;
 
-  // For backward functions - thread id of the the forward function
+  // For backward functions - thread id of the forward function
   uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
