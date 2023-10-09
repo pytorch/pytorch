@@ -269,7 +269,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             return SparseSemiStructuredTensor(
                 args[0].original_tensor,
                 # transpose shape
-                original_shape=(args[0].shape[1], args[0].shape[0]),
+                original_shape=torch.Size([args[0].shape[1], args[0].shape[0]]),
                 compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
                 sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
                 meta_tensor_cutlass=args[0].meta_tensor_cutlass,
