@@ -47,7 +47,12 @@ class AutogradCompilerInstance:
 
     def wrap_fake(self, x, source, required_shape=None):
         assert isinstance(x, torch.Tensor)
-        if required_shape:
+        if required_shape and (
+            x.ndim != len(required_shape)
+            or any(
+                required > actual for required, actual in zip(required_shape, x.size())
+            )
+        ):
             """
             [Note: Required Shapes]
 
@@ -70,21 +75,13 @@ class AutogradCompilerInstance:
             is currently something smaller than that.  We just optimistically give it size `N`,
             and assume some hook will fix it at runtime.
             """
-            shape = [1] * (len(required_shape) - x.ndim) + [*x.size()]
-            if any(
-                required > actual for required, actual in zip(required_shape, shape)
-            ):
-                shape = [
-                    max(required, actual)
-                    for required, actual in zip(required_shape, shape)
-                ]
-                x = torch.zeros(
-                    shape,
-                    dtype=x.dtype,
-                    requires_grad=x.requires_grad,
-                    layout=x.layout,
-                    device=x.device,
-                )
+            x = torch.zeros(
+                required_shape,
+                dtype=x.dtype,
+                requires_grad=x.requires_grad,
+                layout=x.layout,
+                device=x.device,
+            )
         return self.fake_tensor_mode.from_tensor(x, source=source)
 
     @staticmethod

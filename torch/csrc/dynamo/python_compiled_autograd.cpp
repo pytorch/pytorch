@@ -258,10 +258,12 @@ static struct PyModuleDef _module = {
 static py::object wrap_required_shapes(AutogradCompilerCall& compiler_call) {
   // see [Note: Required Shapes]
   std::vector<std::vector<c10::SymInt>> shapes;
+  shapes.reserve(compiler_call.tensor_args.inputs.size());
   for (const at::Tensor& arg : compiler_call.tensor_args.inputs) {
+    const auto& required = compiler_call.tensor_args.lookup(arg).required_shape;
     std::vector<c10::SymInt> shape;
-    for (const c10::SymInt& s :
-         compiler_call.tensor_args.lookup(arg).required_shape) {
+    shape.reserve(required.size());
+    for (const c10::SymInt& s : required) {
       shape.emplace_back(s);
     }
     shapes.emplace_back(std::move(shape));
