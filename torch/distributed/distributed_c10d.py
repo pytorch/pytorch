@@ -3935,7 +3935,7 @@ def _new_group_with_tag(
         for rank in ranks:
             if rank < 0 or rank >= global_world_size:
                 raise ValueError(
-                    "The new group's rank should be within the "
+                    "The new group's rank should be within "
                     "the world_size set by init_process_group"
                 )
         if global_rank in ranks:
