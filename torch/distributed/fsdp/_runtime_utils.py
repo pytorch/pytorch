@@ -637,10 +637,7 @@ def _pre_backward_hook(
     *unused: Any,
 ) -> Any:
     # if gpu_id == 0:
-    log.warning("RUNNING PRE BWD HOOK. Handle? %s", handle is not None)
-    gpu_id = int(os.environ["LOCAL_RANK"])
     # print(id(state), "Running pre backward!")
-    log.warning("STATE? %s %s %s %s", state, module, handle, unused)
     #import traceback
     #traceback.print_stack()
     """
@@ -681,11 +678,7 @@ def _pre_backward_hook(
         if handle._needs_pre_backward_unshard:
             # If the handles have been prefetched, then there is no need to
             # call `_unshard()` again
-            if gpu_id == 0:
-                log.warning("%s %s %s", id(state), "HANDLE _needs_pre_backward_unshard", state.training_state)
             if not handle._prefetched:
-                if gpu_id == 0:
-                    log.warning("%s %s", id(state), "NOT PREFETCHED!")
                 _unshard(
                     state,
                     handle,
@@ -696,7 +689,6 @@ def _pre_backward_hook(
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
-        log.warning("%s %s", id(state), "SET _needs_pre_backward_unshard!")
         handle._needs_pre_backward_unshard = False
         with torch.profiler.record_function(
             "FullyShardedDataParallel._pre_backward_prefetch"
