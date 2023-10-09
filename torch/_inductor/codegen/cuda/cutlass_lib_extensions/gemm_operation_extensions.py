@@ -1,8 +1,6 @@
-# To be imported only after cutlass_utils.try_import_cutlass() has been called.
 from ..cutlass_utils import try_import_cutlass
 
 if try_import_cutlass():
-    # To be imported only after cutlass_utils.try_import_cutlass() has been called.
     import enum
 
     from cutlass_library.library import *  # type: ignore[import]  # noqa: F401, F403
@@ -168,7 +166,7 @@ if try_import_cutlass():
                     operation.tile_description.math_instruction.instruction_shape[2]
                 ),
                 "kernel_schedule": str(KernelScheduleTag[operation.kernel_schedule]),  # type: ignore[name-defined]
-                "epilogue_schedule": str(EpilogueScheduleTag[operation.epilogue_schedule]),  # type: ignore[name-defined] # noqa: B950
+                "epilogue_schedule": str(EpilogueScheduleTag[operation.epilogue_schedule]),  # type: ignore[name-defined]
                 "epilogue_functor": epilogue_functor,
                 "stages": stage_count_string,
                 "align_a": str(operation.A.alignment),
@@ -186,11 +184,3 @@ if try_import_cutlass():
             }
 
             return SubstituteTemplate(self.gemm_template, values)  # type: ignore[name-defined]
-
-else:  # Failure to import cutlass_libary via cutlass_utils.try_import_cutlass()
-
-    class EmitGemmUniversal3xInstanceWithEVT:  # type: ignore[no-redef]
-        def __init__(self, *args, **kwargs):
-            raise NotImplementedError(
-                "Could not define class EmitGemmUniversal3xInstanceWithEVT: cutlass_utils.try_import_cutlass() failed."
-            )
