@@ -31,7 +31,8 @@ AOTIModelRunner::AOTIModelRunner(
 
 AOTIModelRunner::~AOTIModelRunner() {
   AOTIRuntimeError result = delete_func_(container_handle_);
-  TORCH_CHECK(result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
+  TORCH_CHECK(
+      result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
 std::vector<at::Tensor> AOTIModelRunner::run(

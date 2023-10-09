@@ -13,6 +13,12 @@ namespace inductor {
 
 class TORCH_API AOTIModelRunner {
  public:
+  AOTIModelRunner() = delete;
+  AOTIModelRunner(const AOTIModelRunner& other) = delete;
+  AOTIModelRunner(AOTIModelRunner&& other) = delete;
+  AOTIModelRunner& operator=(const AOTIModelRunner& other) = delete;
+  AOTIModelRunner& operator=(AOTIModelRunner&& other) = delete;
+
   AOTIModelRunner(
       const char* model_path,
       size_t num_models = 1,
