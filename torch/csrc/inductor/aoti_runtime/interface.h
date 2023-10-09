@@ -112,7 +112,7 @@ AOTIRuntimeError AOTInductorModelRun(
 
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
 // so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
-AOTIRuntimeError AOTInductorModelUpdateConstants(
+AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
