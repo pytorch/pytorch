@@ -10,7 +10,6 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
@@ -1523,9 +1522,6 @@ def _register_post_backward_final_callback(
     # print(id(state), "NOT QUEUE")
     _assert_in_training_states(state, [TrainingState.IDLE])
     state._post_backward_callback_queued = True
-    Variable._execution_engine.queue_callback(
-        functools.partial(_post_backward_final_callback, state, module)
-    )
     # if gpu_id == 0:
     # print(id(state), "_post_backward_final_callback QUEUED")
 
