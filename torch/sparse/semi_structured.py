@@ -52,7 +52,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     _FUSE_TRANSPOSE = False
-    _FORCE_CUTLASS = False
+    _FORCE_CUTLASS = True
     _WARNING_SHOWN = False
 
     @staticmethod
@@ -268,7 +268,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
         if func is torch.ops.aten.t.default:
             return SparseSemiStructuredTensor(
                 args[0].original_tensor,
-                original_shape=args[0].shape,
+                # transpose shape
+                original_shape=torch.Size([args[0].shape[1], args[0].shape[0]]),
                 compressed_tensor=args[0].compressed_tensor,
                 transposed=not args[0].transposed,
             )
@@ -343,7 +344,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         if func is torch.ops.aten.values.default:
             m, k = args[0].shape
             num_kept_elements = m * k // 2
-            return args[0].compressed_tensor[:num_kept_elements].view(m, k // 2)
+            return args[0].compressed_tensor[:num_kept_elements].view(m, k // 2).detach()
 
         # handle indices
         if func is torch.ops.aten.indices.default:
@@ -431,4 +432,6 @@ def to_sparse_semi_structured(
                 [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
        dtype=torch.int16))
     """
-    return SparseSemiStructuredTensor(original_tensor, original_shape=original_tensor.shape, transposed=transposed)
+    return SparseSemiStructuredTensor(
+        original_tensor, original_shape=original_tensor.shape, transposed=transposed
+    )
