@@ -22,7 +22,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -315,7 +314,7 @@ static TensorOptions original_options(const OperandInfo& op) {
   }
 }
 
-// Implements the the behavior of the following flags:
+// Implements the behavior of the following flags:
 //   - check_all_same_dtype_
 //   - check_all_same_device_
 //   - enforce_safe_casting_to_output_
