@@ -890,7 +890,7 @@ class InvalidVecISA(VecISA):
     _bit_width = 0
     _macro = ""
     _arch_flags = ""
-    _dtype_nelements = {}
+    _dtype_nelements = {}  # type: ignore[var-annotated]
 
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
@@ -1961,9 +1961,10 @@ class CUDACodeCache:
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
-                    cmd = cuda_compile_command(
+                    cmdstr = cuda_compile_command(
                         [input_path], output_path, dst_file_ext
-                    ).split(" ")
+                    )
+                    cmd = cmdstr.split(" ")
                     try:
                         subprocess.check_output(
                             cmd, stderr=subprocess.STDOUT, env=os.environ
@@ -2095,7 +2096,7 @@ class AsyncCompile:
         # doesn't run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will
         # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)  # type: ignore[attr-defined]
         return pool
 
     @classmethod
@@ -2120,12 +2121,12 @@ class AsyncCompile:
 
         # We force them to start here with some YOLOing of the internal methods.
         if hasattr(pool, "_start_queue_management_thread"):
-            pool._start_queue_management_thread()
+            pool._start_queue_management_thread()  # type: ignore[attr-defined]
         else:
             for _ in range(config.compile_threads):
                 pool._adjust_process_count()
             if hasattr(pool, "_start_executor_manager_thread"):
-                pool._start_executor_manager_thread()
+                pool._start_executor_manager_thread()  # type: ignore[attr-defined]
         _compile_end()
 
     @classmethod

@@ -2882,11 +2882,14 @@ class TemplateBuffer(Buffer):
     that we can fuse an epilogue onto.
     """
 
-    def __init__(self, layout, inputs, make_kernel_render):
+    def __init__(self, layout, inputs, make_kernel_render, name=None):
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
-        self.name = V.graph.register_buffer(self)
+        if name is None:
+            self.name = V.graph.register_buffer(self)
+        else:
+            self.name = name
 
     def get_read_writes(self):
         return self.normalized_read_writes()
@@ -2929,22 +2932,6 @@ class TemplateBuffer(Buffer):
 
 class TritonTemplateBuffer(TemplateBuffer):
     pass
-
-
-class CUDATemplateBuffer(TemplateBuffer):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        make_kernel_render,
-        workspace_size: int = 0,
-    ):
-        super().__init__(layout, inputs, make_kernel_render)
-        # Global memory (in bytes) needed for this template.
-        self.workspace_size = workspace_size
-
-    def get_workspace_size(self):
-        return self.workspace_size if self.workspace_size is not None else 0
 
 
 @dataclasses.dataclass
