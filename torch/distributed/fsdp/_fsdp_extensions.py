@@ -50,6 +50,16 @@ class FSDPExtensions(ABC):
         ...
 
     @abstractmethod
+    def chunk_dtensor(
+        self,
+        tensor: torch.Tensor,
+        rank: int,
+        device_mesh: DeviceMesh,
+    ) -> torch.Tensor:
+        """Shards a tensor/DTensor to DTensor and returns the local DTensor."""
+        ...
+
+    @abstractmethod
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
@@ -114,11 +124,10 @@ def _ext_chunk_dtensor(
     rank: int,
     device_mesh: DeviceMesh,
 ) -> torch.Tensor:
-    # TODO: Address composability issue and remove the assertion.
-    assert (
-        _extensions is None
-    ), "Currently does not support composability when _use_dtensor = True"
-    return _create_chunk_dtensor(
+    chunk_dtensor_fn = (
+        _extensions.chunk_dtensor if _extensions is not None else _create_chunk_dtensor
+    )
+    return chunk_dtensor_fn(
         tensor,
         rank,
         device_mesh,

@@ -8,7 +8,7 @@ import torch.distributed as dist
 
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._tensor import DTensor as DT, init_device_mesh, Replicate
+from torch.distributed._tensor import DTensor as DT, init_device_mesh, Replicate, Shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -400,6 +400,57 @@ class TestNew2dParallelIntegration(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_e2e_training_not_use_orig_params(self):
         self._test_2d_e2e_training(recompute_activation=True)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_state_dict(self):
+        # Create a model without wrapper
+        torch.manual_seed(0)
+        simple_model = SimpleModel().cuda(self.rank)
+        no_wrap_state_dict = simple_model.state_dict()
+
+        # Create a model and sharded it with 2D FSDP + TP
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        model_2d = parallelize_module(SimpleModel().cuda(), tp_mesh, PairwiseParallel())
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=dp_mesh,
+            use_orig_params=True,
+        )
+
+        FSDP.set_state_dict_type(
+            model_2d,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+        state_dict_2d = model_2d.state_dict()
+
+        for no_wrap_items, two_d_items in zip(
+            no_wrap_state_dict.items(), state_dict_2d.items()
+        ):
+            no_wrap_k, no_wrap_v = no_wrap_items
+            two_d_k, two_d_v = two_d_items
+
+            self.assertEqual(no_wrap_k, two_d_k)
+
+            # check if all value in 2D state_dict are DTensor
+            self.assertTrue(isinstance(two_d_v, DT))
+            self.assertEqual(len(two_d_v.placements), 2)
+            # the outer dimension is the FSDP dimension and the placement is always Shard(0)
+            self.assertEqual(two_d_v.placements[0], Shard(0))
+            self.assertEqual(two_d_v.device_mesh, mesh_2d)
+
+            # check if the parameter value is the same between 2D model and the model without wrapper
+            all_gather_two_d_v = two_d_v.redistribute(
+                mesh_2d, (Replicate(), Replicate())
+            )
+            self.assertEqual(
+                torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True
+            )
 
 
 if __name__ == "__main__":
