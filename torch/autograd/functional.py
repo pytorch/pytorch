@@ -760,7 +760,9 @@ def jacobian(
             jacobian_input_output = []
             for jac_input_i, input_i in zip(jacobians_of_flat_output, inputs):
                 jacobian_input_i_output = []
-                for jac, output_j in zip(jac_input_i.split(output_numels, dim=0), outputs):
+                for jac, output_j in zip(
+                    jac_input_i.split(output_numels, dim=0), outputs
+                ):
                     jacobian_input_i_output_j = jac.view(output_j.shape + input_i.shape)
                     jacobian_input_i_output.append(jacobian_input_i_output_j)
                 jacobian_input_output.append(jacobian_input_i_output)
