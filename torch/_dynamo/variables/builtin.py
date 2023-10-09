@@ -825,6 +825,7 @@ class BuiltinVariable(VariableTracker):
         if obj is None:
             if cls is SetVariable:
                 return cls(
+                    tx,
                     [],
                     mutable_local=MutableLocal(),
                 )
@@ -1514,12 +1515,12 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(left, SetVariable):
             if isinstance(right, ConstantVariable) and right.value is None:
-                return ConstantVariable(op(left._underlying_items, right.value))
+                return ConstantVariable(op(left._underlying_items(tx), right.value))
 
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return ConstantVariable.create(
-                op(left._underlying_items, right._underlying_items)
+                op(left._underlying_items(tx), right._underlying_items(tx))
             )
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):

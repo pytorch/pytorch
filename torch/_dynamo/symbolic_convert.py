@@ -382,7 +382,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                 f"Dynamic control flow on {value} from {inst} is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow", case_name="cond_operands",
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
+                case_name="cond_operands",
             )
 
     return inner
@@ -1326,7 +1327,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        new_set = SetVariable(items, mutable_local=MutableLocal(), **options)
+        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):

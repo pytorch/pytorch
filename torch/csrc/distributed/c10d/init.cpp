@@ -2629,9 +2629,7 @@ Example::
 
   module.def(
       "_set_global_rank",
-      [](int64_t rank) {
-        c10::SetGlobalRank(rank);
-      },
+      [](int64_t rank) { c10::SetGlobalRank(rank); },
       py::arg("rank"),
       R"(
         Arguments:

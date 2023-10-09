@@ -415,7 +415,9 @@ static PyObject* THPVariable__mirror_autograd_meta_to(
           torch::autograd::deleteNode);
       torch::autograd::set_history(dst_, new_grad_fn);
     } else {
-      dst_.unsafeGetTensorImpl()->set_autograd_meta(std::make_unique<AutogradMeta>(dst_.unsafeGetTensorImpl(), src_autograd_meta->requires_grad_));
+      dst_.unsafeGetTensorImpl()->set_autograd_meta(
+          std::make_unique<AutogradMeta>(
+              dst_.unsafeGetTensorImpl(), src_autograd_meta->requires_grad_));
     }
   } else {
     dst_.unsafeGetTensorImpl()->set_autograd_meta(nullptr);

@@ -637,8 +637,8 @@ def _pre_backward_hook(
 ) -> Any:
     # if gpu_id == 0:
     # print(id(state), "Running pre backward!")
-    #import traceback
-    #traceback.print_stack()
+    # import traceback
+    # traceback.print_stack()
     """
     Prepares ``_handle`` 's ``FlatParameter`` s for gradient computation.
 
@@ -648,7 +648,11 @@ def _pre_backward_hook(
     """
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
-    if handle and hasattr(handle, "_ran_pre_backward_hook") and handle._ran_pre_backward_hook:
+    if (
+        handle
+        and hasattr(handle, "_ran_pre_backward_hook")
+        and handle._ran_pre_backward_hook
+    ):
         log.warning("%s %s", id(state), "Not Running pre backward! Already Ran!")
         return grad
 
@@ -714,7 +718,7 @@ def _post_backward_hook(
     # gpu_id = int(os.environ["LOCAL_RANK"])
     # if gpu_id == 0:
     log.warning("RUNNING POST BWD HOOK")
-        # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
+    # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
     # if state.training_state == TrainingState.IDLE:
     # return
     """

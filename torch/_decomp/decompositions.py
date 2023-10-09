@@ -4231,6 +4231,7 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
     else:
         return aten.squeeze.dims(self, [dim])
 
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
