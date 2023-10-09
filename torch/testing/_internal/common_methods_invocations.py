@@ -3140,11 +3140,7 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     for accumulate in [False, True]:
-        # Test with mask arg
-        mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
-        yield SampleInput(
-            make_arg((S, S)), (mask, ), make_arg((S,)), accumulate=accumulate)
-        # Test with indices arg
+       # Test with indices arg
         yield SampleInput(
             make_arg((S, S,)),
             (index_variable(2, S, device=device),),
@@ -3171,6 +3167,11 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
             (index_variable((2, S), S, device=device), torch.tensor(0, device=device), index_variable((1, S), S, device=device)),
             make_arg((2, S, S)),
             accumulate=accumulate)
+
+        # Test with mask arg
+        mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
+        yield SampleInput(
+            make_arg((S, S)), (mask, ), make_arg((S,)), accumulate=accumulate)
 
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
