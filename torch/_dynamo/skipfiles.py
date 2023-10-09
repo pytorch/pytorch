@@ -196,7 +196,7 @@ FILENAME_INLINELIST |= set(
     _module_dir(torch) + "_export/wrappers.py",
 }
 
-if torch.distributed.is_available():
+if torch.distributed.is_available() and config.trace_distributed:
     FILENAME_INLINELIST |= set(
         glob.glob(_module_dir(torch) + "distributed/**/*.py", recursive=True),
     )
