@@ -288,10 +288,12 @@ class NestedModel(torch.nn.Module):
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, no_grad: bool = False):
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
+        self.net1[0].weight.requires_grad = not no_grad
+        self.net1[0].bias.requires_grad = not no_grad
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
         self.net3 = nn.Linear(32, 64)
         self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
@@ -1921,6 +1923,38 @@ class TestFSDPOptimState(FSDPTest):
             self.assertEqual(original_osd, new_osd)
 
         self.run_subtests({"use_orig_params": [False, True]}, _run_test)
+
+    @skip_if_lt_x_gpu(2)
+    def test_no_grad(self):
+        model = TestDummyModel(no_grad=True).cuda()
+        fsdp_model = FSDP(deepcopy(model), use_orig_params=True)
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+
+        for i in range(5):
+            if i % 2 == 1:
+                fsdp_model.net1[0].weight.requires_grad = True
+                fsdp_model.net1[0].bias.requires_grad = True
+            else:
+                fsdp_model.net1[0].weight.requires_grad = False
+                fsdp_model.net1[0].bias.requires_grad = False
+            batch = fsdp_model.get_input()
+            loss = fsdp_model(batch).sum()
+            loss.backward()
+            fsdp_optim.step()
+            orig_state_dict = deepcopy(fsdp_optim.state_dict())
+            optim_state_dict = FSDP.optim_state_dict(fsdp_model, fsdp_optim)
+            FSDP.optim_state_dict_to_load(
+                fsdp_model,
+                fsdp_optim,
+                FSDP.optim_state_dict(fsdp_model, fsdp_optim),
+                load_directly=True,
+            )
+
+            self._check_same_state(
+                fsdp_optim.state_dict(),
+                orig_state_dict,
+                check_same_param_keys=True,
+            )
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
