@@ -1437,10 +1437,6 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if device.type != "cuda":
-            # TODO: CPU support
-            return None
-
         if torch.version.hip is not None:
             # TODO: ROCm support
             return None

@@ -1249,6 +1249,22 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
+    def declare_omp_reduction_scalar(self, reduction_type, acc_type, dtype):
+        if (reduction_type, dtype) not in self.reduction_omp_dec:
+            if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
+                # Scalar reduction for other reductions are declared by default
+                self.reduction_prefix.splice(
+                    f"""\
+#pragma omp declare reduction(\
+{RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
+omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
+            """
+                )
+            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                reduction_type
+            ]
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
 
@@ -1274,21 +1290,7 @@ class CppKernel(Kernel):
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
-
-            if (reduction_type, acc_type) not in self.reduction_omp_dec:
-                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                    # Scalar reduction for other reductions are declared by default
-                    self.reduction_prefix.splice(
-                        f"""\
-    #pragma omp declare reduction(\
-    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-                """
-                    )
-                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
-                    reduction_type
-                ]
+            self.declare_omp_reduction_scalar(reduction_type, acc_type, dtype)
 
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
@@ -1307,6 +1309,27 @@ class CppKernel(Kernel):
         self.reduction_suffix.writeline(
             DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
         )
+
+    def scan(self, dtype, scan_op, value):
+        assert scan_op in {"sum", "var"}
+
+        if self.parallel:
+            raise NotImplementedError("nyi parallel scan")
+
+        # Enable CSE with ops.reduction
+        reduction_key = dtype, scan_op, value
+        acc = self.reduction_cse.generate(
+            self.loads, f"reduction {reduction_key}", write=False
+        )
+        self.reduction_var_map[acc] = scan_op
+
+        acc_type = reduction_acc_type(scan_op, dtype)
+        self.declare_omp_reduction_scalar(scan_op, acc_type, dtype)
+        self.reduction_prefix.writeline(
+            f"{acc_type} {acc} = {reduction_init(scan_op, dtype)};"
+        )
+        self.stores.writeline(f"{acc} = {reduction_combine(scan_op, acc, value)};")
+        return acc
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -1581,6 +1604,20 @@ class CppVecKernel(CppKernel):
             )
         self.stores.writeline(DeferredLine(name, line))
 
+    def declare_omp_reduction_vec(self, reduction_type, acc_type_vec, dtype):
+        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
+            self.reduction_prefix.splice(
+                f"""\
+#pragma omp declare reduction(\
+{RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
+omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
+initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
+            """
+            )
+            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
+                reduction_type
+            ]
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
             "max",
@@ -1599,33 +1636,8 @@ class CppVecKernel(CppKernel):
         acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
-        if (reduction_type, acc_type) not in self.reduction_omp_dec:
-            if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                # Scalar reduction for other reductions are declared by default
-                self.reduction_prefix.splice(
-                    f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-            """
-                )
-            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
-                reduction_type
-            ]
-
-        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
-            self.reduction_prefix.splice(
-                f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
-omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
-            """
-            )
-            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
-                reduction_type
-            ]
+        self.declare_omp_reduction_scalar(reduction_type, acc_type, dtype)
+        self.declare_omp_reduction_vec(reduction_type, acc_type_vec, dtype)
 
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
@@ -1709,6 +1721,32 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
             self.reduction_suffix.writelines(store_lines)
+
+    def scan(self, dtype, scan_op, value):
+        assert reduction_type in {"sum", "prod"}
+        assert dtype == torch.float
+        assert src_dtype == torch.float
+
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+        acc_type = reduction_acc_type(reduction_type, dtype)
+        acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
+
+        self.declare_omp_reduction_scalar(scan_op, acc_type, dtype)
+        self.declare_omp_reduction_vec(scan_op, acc_type_vec, dtype)
+
+        if self.tiling_idx >= self.reduction_depth:
+            # Horizontal reduction
+            acc = self.cse.newvar()
+
+            self.reduction_prefix.writeline(f"auto {acc} = {acc_type_vec}(0.0f);")
+            self.store.writeline(
+                f"{acc} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
+            )
+            return acc
+
+        # Vertical reduction
+        raise NotImplementedError("Vertical scan NYI on CPU")
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -2075,6 +2113,14 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def store_reduction(self, name, index, value):
+        return self.simd_vec
+
+    def scan(self, dtype, scan_op, value):
+        if dtype == torch.float and scan_op in VECTORIZABLE_RTYPES:
+            pass
+        else:
+            self.disable_vec("scan: dtype {dtype}, scan_op {scan_op}")
+
         return self.simd_vec
 
     def is_supported_cmp(self, node: torch.fx.Node):
@@ -3023,6 +3069,9 @@ class LoopLevel:
 
     def is_reduction(self):
         return bool(self.reduction_var_map)
+
+    def is_scan(self):
+        return bool(self.scan_var_map)
 
     def split_with_tiling(self, depth, factor):
         def clone_inner():
