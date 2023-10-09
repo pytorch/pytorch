@@ -862,8 +862,9 @@ class FlatParamHandle:
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start_idx, end_idx)
-            if orig_storage._size() > 0:
-                orig_storage._resize_(0)
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                if orig_storage._size() > 0:
+                    orig_storage._resize_(0)
         if self._use_orig_params:
             self._use_sharded_views()
 

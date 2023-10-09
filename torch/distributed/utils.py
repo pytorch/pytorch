@@ -155,6 +155,11 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         bool: ``True`` if this method allocated storage and ``False`` if the
         storage was already allocated.
     """
+    # We have made a decision to bypass the free and alloc in FSDP during tracing
+    # partially because having this in the graph won't change anything from a compiling perspective,
+    # and partially because resizing storage in this way is not really a sound thing to do.
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
     with torch.no_grad():
         already_allocated = tensor._typed_storage()._size() == size.numel()
         if not already_allocated:
@@ -175,6 +180,11 @@ def _free_storage(tensor: torch.Tensor) -> None:
         bool: ``True`` if the method freed the storage and ``False`` if the
         storage was already freed.
     """
+    # We have made a decision to bypass the free and alloc in FSDP during tracing
+    # partially because having this in the graph won't change anything from a compiling perspective,
+    # and partially because resizing storage in this way is not really a sound thing to do.
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
     with torch.no_grad():
         already_freed = tensor._typed_storage()._size() == 0
         if not already_freed:
