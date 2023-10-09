@@ -22,6 +22,7 @@ from .profiler import (
     schedule,
     supported_activities,
     tensorboard_trace_handler,
+    correlate
 )
 
 __all__ = [

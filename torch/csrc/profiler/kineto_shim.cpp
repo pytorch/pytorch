@@ -9,6 +9,8 @@
 
 #include <c10/util/Exception.h>
 
+#include <atomic>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -36,6 +38,7 @@ const std::set<libkineto::ActivityType> kCudaTypes = {
     // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
+    libkineto::ActivityType::EXTERNAL_CORRELATION
 };
 const std::set<libkineto::ActivityType> kXpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
@@ -360,6 +363,37 @@ void addMetadataJson(const std::string& key, const std::string& value) {
   }
 #else
   LOG(WARNING) << "Adding profiling metadata requires using "
+               << "torch.profiler with Kineto support (USE_KINETO=1)";
+#endif // USE_KINETO
+}
+
+void pushSingleMetaActivity(const std::string& name) {
+#ifdef USE_KINETO
+  if (!libkineto::api().isProfilerInitialized()) {
+    return;
+  }
+  static std::atomic<size_t> correlation_id = 0;
+  auto act = std::make_unique<libkineto::GenericTraceActivity>();
+  act->activityName = name;
+  act->activityType = libkineto::ActivityType::GPU_USER_ANNOTATION;
+  act->id = correlation_id.fetch_add(1);
+  libkineto::api().activityProfiler().pushSingleMetaActivity(std::move(act));
+
+#else
+  LOG(WARNING) << "Adding profiling meta activity requires using "
+               << "torch.profiler with Kineto support (USE_KINETO=1)";
+#endif // USE_KINETO
+}
+
+void popSingleMetaActivity() {
+#ifdef USE_KINETO
+  if (!libkineto::api().isProfilerInitialized()) {
+    return;
+  }
+  libkineto::api().activityProfiler().popSingleMetaActivity();
+
+#else
+  LOG(WARNING) << "Adding profiling meta activity requires using "
                << "torch.profiler with Kineto support (USE_KINETO=1)";
 #endif // USE_KINETO
 }

@@ -379,6 +379,28 @@ def tensorboard_trace_handler(
     return handler_fn
 
 
+def correlate(meta_data: dict):
+  """
+    Correlates all gpu activities that being run under correlate
+    with given meta data.
+    Meta data will be passed to resulting trace to each correlating gpu op.
+    ```meta_data``` - dict with custom meta information.
+  """
+  class _MetaDataActivitiesTracker:
+    def __init__(self, meta_data: dict):
+      import json
+      self.meta_data = json.dumps(meta_data, indent=4)
+
+    def __enter__(self):
+      torch.autograd._push_single_meta_activity(self.meta_data)
+      return self
+
+    def __exit__(self, *_):
+      torch.autograd._pop_single_meta_activity()
+
+  return _MetaDataActivitiesTracker(meta_data)
+
+
 class profile(_KinetoProfile):
     """Profiler context manager.
 
