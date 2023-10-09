@@ -5167,7 +5167,7 @@ def fn():
 
             # Builtin functions are not guarded
             # Hence, this would not trigger recompile
-            # This behaviour may change if and when 
+            # This behaviour may change if and when
             # we start guarding builtins
             builtins.isinstance = patched_isinstance_2
             res2 = opt_fn(x, y)
