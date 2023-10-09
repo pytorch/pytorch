@@ -643,7 +643,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 1 /*TearDown*/));
+      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -666,7 +666,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
                 << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
                 << "must both be enabled. "
                 << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
-      asyncErrorHandling_ = TearDown;
+      asyncErrorHandling_ = SkipCleanUp;
     }
   }
 

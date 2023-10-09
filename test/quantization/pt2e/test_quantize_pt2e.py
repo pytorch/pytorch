@@ -1986,7 +1986,6 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             m = prepare_pt2e(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)
-            print("m:", m)
             self.assertEqual(
                 id(m.activation_post_process_3), id(m.activation_post_process_2)
             )
