@@ -341,9 +341,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
             "Chunk", "uint8, int8, int16, float16"
         ),
     ),
-    xfail(
-        "chunk", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason="https://github.com/pytorch/pytorch/issues/110131"
+    xfail_torchlib_forward_compatibility(
+        "chunk", reason="https://github.com/pytorch/pytorch/issues/110131"
     ),
     xfail(
         "clamp",
