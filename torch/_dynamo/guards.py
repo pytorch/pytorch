@@ -16,6 +16,7 @@ import re
 import sys
 import types
 import weakref
+import builtins
 from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
@@ -75,6 +76,7 @@ check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 dict_version = torch._C._dynamo.guards.dict_version
 
+BUILTIN_FUNC_NAMES = [b for b in builtins.__dir__() if b.lower() == b and '__' not in b]
 
 # For user stack printing
 @functools.lru_cache(None)
@@ -173,6 +175,32 @@ def strip_getattr_getitem(name):
     """
     return re.split(r"[.\[]", name)[0]
 
+# TODO(jon-chuang): isn't it easier to just merge the `__builtins__` into globals
+# since that's more or less how they behave anyway (+ dynamo actually attributes
+# their source to global) 
+def replace_patched_builtins(name, scope):
+    """
+    replaces global/local functions that are used to patch
+    builtins but are mistakenly scoped as builtins
+
+    this is due to cpython identifying these as builtins
+    while dynamo identifies these as globals/locals
+    """
+    pattern = re.compile(r'([LG])\[["\'](.*?)["\']\]')
+
+    def is_patched_builtin(var):
+        return var in BUILTIN_FUNC_NAMES and (
+            var not in scope["G"] if "G" in scope else var not in scope["L"]
+        )
+
+    def replace(match):
+        prefix = match.group(1)
+        var = match.group(2)
+        return f"__builtins__['{var}']" if is_patched_builtin(var) else match.group(0)
+
+    name = pattern.sub(replace, name)
+
+    return name
 
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
@@ -201,6 +229,13 @@ class GuardBuilder(GuardBuilderBase):
             scope = {"L" if local else "G": user_scope}
         else:
             scope = {"L" if local else "G": dict()}
+        # Builtins are globals from the perspective of CPython
+        # We do merge them into globals to make them visible to guards
+        # However, we currently offer no mechanism for guarding on builtins
+        if not local:
+            global_scope = builtins.__dict__.copy()
+            global_scope.update(scope['G'])  # Global defs take precedence over builtins'
+            scope['G'] = global_scope
         self.scope: Dict[str, Dict[str, object]] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
@@ -252,6 +287,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
+        # name = replace_patched_builtins(name, self.scope)
         return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the
@@ -272,6 +308,7 @@ class GuardBuilder(GuardBuilderBase):
                     log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
+        # name = replace_patched_builtins(name, self.scope)
         return name
 
     def TYPE_MATCH(self, guard: Guard):
@@ -498,7 +535,7 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def CODE_MATCH(self, guard: Guard):
-        """Checks that the `__code__` of two functions are equal"""
+        """Checks that the `__code__` of two functions are likely equal"""
         ref = self.arg_ref(guard)
         # Cannot guard with local var deps
         if re.match(r"^(.*)L\[.*\](.*)$", ref) or "L[" in ref:
@@ -507,6 +544,7 @@ class GuardBuilder(GuardBuilderBase):
 
         if hasattr(value, "__code__") and isinstance(value.__code__, types.CodeType):
             code = list()
+            code.append(f"hasattr({ref}, '__code__')")
             code.append(
                 f"hash({ref}.__code__.co_code) == {hash(value.__code__.co_code)}"
             )
@@ -534,8 +572,9 @@ class GuardBuilder(GuardBuilderBase):
             return self.CODE_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        if guard.is_local():
-            return self.ID_MATCH(guard)
+        # return self.FUNCTION_MATCH(guard)
+        # if guard.is_local():
+        return self.ID_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)

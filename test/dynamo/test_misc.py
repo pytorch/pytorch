@@ -5144,6 +5144,9 @@ def fn():
             else:
                 return builtin_isinstance(obj, classinfo)
 
+        def patched_isinstance_2(obj, classinfo) -> bool:
+            return builtin_isinstance(obj, classinfo)
+
         def fn(x, y):
             if isinstance(y, MyClass):
                 return x + 1
@@ -5161,6 +5164,14 @@ def fn():
             res = opt_fn(x, y)
             self.assertTrue(same(ref, x + 1))
             self.assertTrue(same(res, x - 1))
+
+            # Builtin functions are not guarded
+            # Hence, this would not trigger recompile
+            # This behaviour may change if and when 
+            # we start guarding builtins
+            builtins.isinstance = patched_isinstance_2
+            res2 = opt_fn(x, y)
+            self.assertTrue(same(res2, x - 1))
         finally:
             builtins.isinstance = builtin_isinstance
 
