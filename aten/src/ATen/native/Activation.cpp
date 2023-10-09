@@ -79,6 +79,7 @@
 #include <ATen/ops/zeros_like.h>
 
 #include <utility>
+#include <vector>
 #endif
 
 namespace at {

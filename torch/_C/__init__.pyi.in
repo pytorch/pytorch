@@ -1560,7 +1560,7 @@ class _ImperativeEngine:
 class _TensorMeta(type): ...
 
 # Defined in torch/csrc/autograd/python_variable.cpp
-class _TensorBase(metaclass=_TensorMeta):
+class TensorBase(metaclass=_TensorMeta):
     requires_grad: _bool
     retains_grad: _bool
     shape: Size
@@ -1588,6 +1588,8 @@ class _TensorBase(metaclass=_TensorMeta):
     nbytes: _int
     itemsize: _int
     ${tensor_method_hints}
+
+_TensorBase = TensorBase
 
 # Defined in torch/csrc/multiprocessing/init.cpp
 def _multiprocessing_init() -> None: ...

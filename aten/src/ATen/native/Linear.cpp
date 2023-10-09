@@ -4,6 +4,7 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
@@ -27,9 +28,11 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/tensordot_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <cctype>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>

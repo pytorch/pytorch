@@ -122,7 +122,7 @@ class TestForeach(TestCase):
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
         dtypes=(torch.float32,)
     )
-    def test_zero_size_tensor_inputs(self, device, dtype, op):
+    def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
@@ -631,11 +631,14 @@ class TestForeach(TestCase):
         fn, ref_fn, *_ = self._get_funcs(op)
         actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord, zero_size=False)
         expect = ref_fn(inputs, ord=ord)
+
         if dtype == torch.float16:
             # making sure the reference L2 norm values are in the range of FP16.
             self.assertFalse(any(torch.isinf(e) for e in expect))
         else:
-            self.assertTrue(all(torch.isinf(e) for e in expect))
+            self.assertTrue(all(
+                inputs[0][i].numel() == 0 or torch.isinf(e)
+                for i, e in enumerate(expect)))
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
