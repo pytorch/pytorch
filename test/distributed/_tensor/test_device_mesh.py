@@ -120,6 +120,15 @@ class DeviceMeshTest(DTensorTestBase):
             else:
                 mesh = DeviceMesh(self.device_type, mesh_subpg_2)
 
+        mesh_non_contiguous = (
+            torch.arange(0, self.world_size).view(2, 2).transpose(0, 1)
+        )
+        device_mesh = DeviceMesh(
+            self.device_type, mesh_non_contiguous, mesh_dim_names=("dp", "mp")
+        )
+        self.assertEqual(device_mesh.size(0), 2)
+        self.assertEqual(device_mesh.size(1), 2)
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
