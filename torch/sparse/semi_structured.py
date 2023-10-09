@@ -225,9 +225,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
         """
         return (
             f"SparseSemiStructuredTensor(shape={self.shape}, "
-            # f"transposed={self.transposed}"
-            #f"values={self.values()}"
-            #f"metadata={self.indices()})"
+            f"transposed={self.transposed}"
+            f"values={self.values()}"
+            f"metadata={self.indices()})"
         )
 
     __torch_function__ = torch._C._disabled_torch_function_impl
