@@ -72,6 +72,10 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
   if (args.cond(variable.defined() && variable.requires_grad())) {
     args.collect(variable);
     args.collect(variable.grad());
+    // see [Note: Required Shapes]
+    auto shape = input_metadata(0).shape_as_dim_vector();
+    args.set_required_shape(variable, shape);
+    args.set_required_shape(variable.grad(), shape);
   }
 }
 variable_list AccumulateGrad::apply_with_saved(

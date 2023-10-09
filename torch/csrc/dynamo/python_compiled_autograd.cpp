@@ -251,6 +251,20 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+static py::object wrap_required_shapes(AutogradCompilerCall& compiler_call) {
+  // see [Note: Required Shapes]
+  std::vector<std::vector<c10::SymInt>> shapes;
+  for (const at::Tensor& arg : compiler_call.tensor_args.inputs) {
+    std::vector<c10::SymInt> shape;
+    for (const c10::SymInt& s :
+         compiler_call.tensor_args.lookup(arg).required_shape) {
+      shape.emplace_back(s);
+    }
+    shapes.emplace_back(std::move(shape));
+  }
+  return py::cast(shapes);
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -259,8 +273,14 @@ static TraceState call_begin_capture(
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
+  py::object py_required_shapes = wrap_required_shapes(compiler_call);
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
-      self, method_name, pyinput.get(), pysizeinput.get(), nullptr)));
+      self,
+      method_name,
+      pyinput.get(),
+      pysizeinput.get(),
+      py_required_shapes.ptr(),
+      nullptr)));
 
   PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr};
   check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));

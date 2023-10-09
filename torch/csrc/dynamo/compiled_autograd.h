@@ -105,6 +105,8 @@ struct TensorArg {
   }
   uint32_t id;
   at::Tensor proxy_tensor;
+  // see [Note: Required Shapes]
+  torch::autograd::SymIntSmallVec required_shape;
 };
 
 struct TensorArgs {
@@ -431,6 +433,10 @@ class CompiledNodeArgs {
     std::free(_specialization_key);
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
+
+  void set_required_shape(const at::Tensor& tensor, c10::SymIntArrayRef shape) {
+    _compiler.tensor_args.lookup(tensor).required_shape = shape;
+  }
 
  private:
   template <typename T>
