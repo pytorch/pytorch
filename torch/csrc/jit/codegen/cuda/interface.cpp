@@ -63,17 +63,20 @@ bool setEnabled(bool is_enabled) {
 }
 
 bool canBeEnabled() {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::nvfuserCanBeEnabled() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::nvfuserCanBeEnabled() is deprecated");
   return false;
 }
 
 bool getSingletonFusion() {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::getSingletonFusion() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::getSingletonFusion() is deprecated");
   return false;
 }
 
 bool setSingletonFusion(bool value) {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::setSingletonFusion() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::setSingletonFusion() is deprecated");
   TORCH_INTERNAL_ASSERT(
       !value,
       "nvfuser support in torchscript is removed and singleton fusion cannot be enabled!");
@@ -81,12 +84,14 @@ bool setSingletonFusion(bool value) {
 }
 
 bool getHorizontalFusion() {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::getHorizontalFusion() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::getHorizontalFusion() is deprecated");
   return false;
 }
 
 bool setHorizontalFusion(bool value) {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::setHorizontalFusion() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::setHorizontalFusion() is deprecated");
   TORCH_INTERNAL_ASSERT(
       !value,
       "nvfuser support in torchscript is removed and horizontal fusion cannot be enabled!");
@@ -94,7 +99,8 @@ bool setHorizontalFusion(bool value) {
 }
 
 std::atomic<bool>& getCudaFusionGuardMode() {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::getCudaFusionGuardMode() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::getCudaFusionGuardMode() is deprecated");
   return cuda_fusion_guard_mode;
 }
 
@@ -104,7 +110,8 @@ CudaFuserInterface* getFuserInterface() {
 }
 
 void compileFusionGroup(Node* fusion_node) {
-  TORCH_WARN_ONCE("torch::jit::fuser::cuda::compileFusionGroup() is deprecated");
+  TORCH_WARN_ONCE(
+      "torch::jit::fuser::cuda::compileFusionGroup() is deprecated");
   TORCH_CHECK(
       getFuserInterface()->fn_compile_n != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
