@@ -1,7 +1,7 @@
 import abc
 import contextlib
 import weakref
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
@@ -15,6 +15,7 @@ __all__ = [
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
+    "GradientEdge",
     "increment_version",
 ]
 
@@ -131,6 +132,14 @@ class Node(abc.ABC):
             ) or issubclass(C, torch.autograd.function.BackwardCFunction):
                 return True
         return NotImplemented
+
+
+GradientEdge = namedtuple("GradientEdge", ("node output_nr"))
+GradientEdge.__doc__ = """\
+Object representing a given gradient edge within the autograd graph.
+To get the gradient edge where a given Tensor gradient will be computed,
+you can do ``edge = GradientEdge(t.grad_fn, t.output_nr)``.
+"""
 
 
 def increment_version(tensor):
