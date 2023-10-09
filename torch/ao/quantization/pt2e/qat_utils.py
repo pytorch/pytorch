@@ -574,6 +574,7 @@ def _fuse_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
 
     original_to_replacement_node = {}
     for r in replacements_with_conv_bias + replacements_no_conv_bias:
+        # TODO: rewrite this to return a map
         (
             replacement_conv_node,
             replacement_bn_node,
