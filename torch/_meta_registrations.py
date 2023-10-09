@@ -3647,12 +3647,14 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
     torch._check(bool(indices), lambda: "at least one index must be provided")
 
     # Most of the checks on the `indices` can be done by calling `meta_index_Tensor`.
-    # The result of that gives the expected shape for `values`
-    # which can be used to assert that `values` is of the correct shape
+    # The result of that gives the expected shape for `values` which can be used to
+    # assert that `values` is of the correct shape. If the indices contain byte/bool
+    # tensors it is not possible to verify the set of indices and values since this
+    # requires making a call to nonzero which has a dynamic output shape.
+
     # It is possible for index_put to contain scalars in the set of indices so these
     # are handled here since aten::index is the handler for advanced tensor indexing.
     # Basic indexing is handled elsewhere.
-
     indices_without_scalars: List[Optional[Tensor]] = []
     expected_values_shape = self
     for i, index in enumerate(indices):
@@ -3661,6 +3663,9 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
                 index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
                 lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
+            # bool/byte tensor index, return early
+            if index.dtype in [torch.int8, torch.bool]:
+                return
             if index.ndim != 0:
                 indices_without_scalars.append(index)
             else:
@@ -3672,13 +3677,12 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
 
     import torch._refs as refs  # avoid import cycle in mypy
 
-    if len(indices_without_scalars) == 0:
-        list(refs._maybe_broadcast(expected_values_shape, values))
-    else:
+    if len(indices_without_scalars) != 0:
         expected_values_shape = meta_index_Tensor(
             expected_values_shape, indices_without_scalars
         )
-        list(refs._maybe_broadcast(expected_values_shape, values))
+
+    list(refs._maybe_broadcast(expected_values_shape, values))
 
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
