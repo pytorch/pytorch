@@ -48,6 +48,8 @@ def is_int(s: str):
         int(s)
     except ValueError:
         return False
+    except TypeError:
+        return False
     return True
 
 
@@ -1472,10 +1474,25 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
 
+    def can_prove_buffer_has_static_shape(self, buffer):
+        # TODO: this is overly restrictive -- `3 + 4` is fine, for example. Reviewers
+        # please advise on how to write this check properly!
+        return all(is_int(x) for x in buffer.get_size())
+
+    def can_cache_buffer_in_thread_local(self, buffer):
+        # We are gated off on CUDA because this is intended to reduce overhead in
+        # overhead-bound CPU use case.
+        return (not self.cuda and config.allow_buffer_reuse and
+                # We currently require this config option because we cannot guarantee
+                # that the buffers we're caching aren't aliased by outputs in the
+                # absence of proper memory planning.
+                config.cpp.allow_unsafe_output_reuse and
+                self.can_prove_buffer_has_static_shape(buffer))
+
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout) or self.can_prove_buffer_has_static_shape(buffer)
             else f"{buffer.get_name()}.reset();"
         )
 
@@ -1551,11 +1568,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 "this->device_idx_" if V.graph.aot_mode else device_id,
                 f"&{name}_handle",
             ]
-            self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
-            self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
-            )
-            return f"RAIIAtenTensorHandle {name}({name}_handle);"
+            def gen_alloc(wrapper_call, name, args):
+                wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+                wrapper_call.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+                )
+            if self.can_cache_buffer_in_thread_local(buffer):
+                self.wrapper_call.writeline(f"thread_local AtenTensorHandle {name} = ([&] {{")
+                with self.wrapper_call.indent():
+                    gen_alloc(self.wrapper_call, name, args)
+                    self.wrapper_call.writeline(f"return {name}_handle;")
+                return "})();"
+            else:
+                gen_alloc(self.wrapper_call, name, args)
+                return f"RAIIAtenTensorHandle {name}({name}_handle);"
         else:
             if V.graph.aot_mode and device.startswith("c10::Device("):
                 tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
