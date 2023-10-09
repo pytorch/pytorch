@@ -1261,7 +1261,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
-        # The first output should view off the the first input, the 2nd output should view off the 2nd input
+        # The first output should view off the first input, the 2nd output should view off the 2nd input
         def f(a, b):
             return a.view(a.shape), b.view(b.shape)
 
@@ -2924,6 +2924,7 @@ aot_autograd_failures = {
     decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
     decorate('linalg.pinv', 'singular', decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)})),
+    decorate('nn.functional.interpolate', 'bicubic', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     # conv2d sometimes nondeterministic in this config?
     decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }

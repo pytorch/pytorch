@@ -548,7 +548,7 @@ class TorchVariable(VariableTracker):
             invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
             # the space of invoking functions in the middle of the guard chain is very iffy. As such,
-            # guard propagaiton via options is the best we can do.
+            # guard propagation via options is the best we can do.
             from .builder import SourcelessBuilder
 
             return SourcelessBuilder()(tx, invocation_result).add_options(options)

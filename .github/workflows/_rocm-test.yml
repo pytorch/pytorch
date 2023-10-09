@@ -199,7 +199,7 @@ jobs:
         shell: bash
         if: always() && steps.test.conclusion
         run: |
-          cat test/**/*.log || true
+          cat test/**/*_toprint.log || true
 
       - name: Get workflow job id
         id: get-job-id
