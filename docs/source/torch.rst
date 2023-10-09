@@ -133,6 +133,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    unsafe_chunk
     vsplit
     vstack
     where
