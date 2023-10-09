@@ -386,6 +386,9 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -433,6 +436,8 @@ def mps_ops_modifier(ops):
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_13_3_XFAILLIST = {
@@ -10988,6 +10993,12 @@ class TestConsistency(TestCaseMPS):
             elif op.name in ["pow", "__rpow__"]:
                 atol = 1e-6
                 rtol = 4e-6
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
+            elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
+                atol = 1.0
+                rtol = 0.0
             else:
                 atol = None
                 rtol = None
@@ -11047,6 +11058,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
             else:
                 atol = None
                 rtol = None

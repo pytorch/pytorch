@@ -4293,22 +4293,78 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
 
-    make_arg = partial(make_tensor, device=device, dtype=dtype,
-                       requires_grad=requires_grad, low=-1, high=1)
+    if mode in ('bilinear', 'bicubic') and dtype == torch.uint8:
+        make_arg = partial(
+            make_tensor,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
+            high=256 if dtype == torch.uint8 else None,
+        )
+        # provide few samples for a more close to typical image processing usage
+        rank = 2
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            yield SampleInput(
+                make_arg(shape(270, rank), memory_format=memory_format),
+                shape(130, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=False,
+            )
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for align_corners in align_corners_options:
         for rank in ranks_for_mode[mode]:
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(S, rank, False), None, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(L, rank, False), None, mode, align_corners)
+            yield SampleInput(
+                make_arg(shape(D, rank)),
+                shape(S, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=align_corners,
+            )
+            yield SampleInput(
+                make_arg(shape(D, rank)),
+                shape(L, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=align_corners,
+            )
             for recompute_scale_factor in [False, True]:
-                yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 1.7, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
-                yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 0.6, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
+                for scale_factor in [1.7, 0.6]:
+                    yield SampleInput(
+                        make_arg(shape(D, rank)),
+                        size=None,
+                        scale_factor=scale_factor,
+                        mode=mode,
+                        align_corners=align_corners,
+                        recompute_scale_factor=recompute_scale_factor,
+                    )
+
+def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs)
+
+    if mode in ('bilinear', 'bicubic'):
+        make_arg = partial(
+            make_tensor,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
+            high=256 if dtype == torch.uint8 else None,
+        )
+        # provide few samples for more typical image processing usage
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            for aa in [True, False]:
+                yield SampleInput(
+                    make_arg((2, 3, 345, 456), memory_format=memory_format),
+                    (270, 270),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=False,
+                    antialias=aa,
+                )
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
@@ -4326,8 +4382,7 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
             return torch.Size([N, C] + ([size] * rank))
         return torch.Size([size] * rank)
 
-    make_arg = partial(make_tensor, device=device, dtype=dtype,
-                       requires_grad=requires_grad, low=-1, high=1)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for rank in ranks_for_mode[mode]:
         yield SampleInput(make_arg(shape(D, rank)), size=shape(S, rank, False))
@@ -4335,8 +4390,26 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=1.7)
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=0.6)
 
+def reference_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs)
 
-def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwargs):
+    if mode in ('bilinear', ):
+        make_arg = partial(
+            make_tensor,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
+            high=256 if dtype == torch.uint8 else None,
+        )
+        # provide a single sample for more typical image processing usage
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            yield SampleInput(
+                make_arg((2, 3, 345, 456), memory_format=memory_format),
+                (270, 270),
+            )
+
+def sample_inputs_upsample_aa(mode, self, device, dtype, requires_grad, **kwargs):
     N = 6
     C = 3
     H = 10
@@ -4344,8 +4417,7 @@ def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwar
     S = 3
     L = 5
 
-    input_tensor = make_tensor(torch.Size([N, C, H, W]), device=device, dtype=dtype,
-                               requires_grad=requires_grad, low=-1, high=1)
+    input_tensor = make_tensor(torch.Size([N, C, H, W]), device=device, dtype=dtype, requires_grad=requires_grad)
 
     yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scale_factors=None)
     yield SampleInput(input_tensor, output_size=torch.Size([L, L]), align_corners=False, scale_factors=None)
@@ -4355,7 +4427,6 @@ def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwar
     yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scales_h=None, scales_w=None)
     yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scales_h=1.7, scales_w=0.9)
     yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=True, scales_h=1.7, scales_w=0.9)
-
 
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
@@ -12895,6 +12966,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
+           reference_inputs_func=partial(reference_inputs_interpolate, 'bilinear'),
            skips=(
                # RuntimeError: false
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
@@ -12911,6 +12983,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
+           reference_inputs_func=partial(reference_inputs_interpolate, 'bicubic'),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
                # RuntimeError: false
@@ -12961,6 +13034,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
+           reference_inputs_func=partial(reference_inputs_upsample, 'bilinear'),
            skips=(
                # RuntimeError: false
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
@@ -12977,7 +13051,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.uint8),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=partial(sample_inputs_upsample_aten, 'bilinear'),
+           sample_inputs_func=partial(sample_inputs_upsample_aa, 'bilinear'),
            supports_out=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
