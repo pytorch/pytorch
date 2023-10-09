@@ -1474,7 +1474,7 @@ class ReductionOpInfo(OpInfo):
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
             yield tuple(),
-            {},
+            {"dim": dim, "keepdim": keepdim},
         ),
         # Options from the OpInfo base class
         **kwargs,
