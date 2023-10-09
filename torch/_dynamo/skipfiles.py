@@ -230,7 +230,10 @@ if torch.distributed.is_available():
 def get_func_inlinelist():
     inlinelist = set()
     for f in FUNC_INLINELIST:
-        inlinelist.add(eval(f).__code__)
+        module_name, fn_name = f.rsplit(".", 1)
+        m = importlib.import_module(module_name)
+        fn = getattr(m, fn_name)
+        inlinelist.add(fn.__code__)
     return inlinelist
 
 
@@ -254,7 +257,9 @@ if TYPE_CHECKING:
     for m in FILE_INLINELIST.union(SUBMODULE_INLINELIST):
         importlib.import_module(m)
     for f in FUNC_INLINELIST:
-        inspect.isfunction(eval(f))
+        module_name, fn_name = f.rsplit(".", 1)
+        m = importlib.import_module(module_name)
+        inspect.isfunction(getattr(m, fn_name))
 
 
 # skip some standard python builtin libs
