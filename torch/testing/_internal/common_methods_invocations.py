@@ -6459,6 +6459,7 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
         cases = (  # type: ignore[assignment]
             ((S, S, S), (2,)),
             ((S, S, S), (S, 1)),
+            ((S, S, S), (int(S / 2), 0, True)),
         )
 
     for shape, args in cases:
@@ -6472,6 +6473,7 @@ def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwar
              ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3), 0]),)),
              ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), 2)),
              ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), -2)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), 2, True)),
              )
 
     for shape, args in cases:
@@ -7341,7 +7343,10 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     cases = (((S, S, S), (2,)),
              ((S, S, S), (S, 1)),
-             ((S, S, S), (S, -1)))
+             ((S, S, S), (S, -1)),
+             ((S, S, S), (2, 0, True, False)),
+             ((S, S, S), (2, 0, False, True)),
+             ((S, S, S), (2, 0, True, True)))
 
     for case in cases:
         shape, args = case
