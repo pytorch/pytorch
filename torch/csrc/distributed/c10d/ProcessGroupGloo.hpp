@@ -228,11 +228,11 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   struct TORCH_API Options : public Backend::Options {
     explicit Options(
-        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kBackendDefaultTimeout) {
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
       return c10::make_intrusive<Options>(timeout);
     }
 

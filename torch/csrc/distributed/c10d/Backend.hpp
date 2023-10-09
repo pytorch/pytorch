@@ -15,9 +15,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
-
-constexpr auto kBackendDefaultTimeout =
-    std::chrono::milliseconds(10 * 60 * 1000);
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 namespace c10d {
 
@@ -30,7 +28,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   struct TORCH_API Options : torch::CustomClassHolder {
     explicit Options(
         std::string backend,
-        std::chrono::milliseconds timeout = kBackendDefaultTimeout)
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
         : timeout(timeout), backend(std::move(backend)) {}
     ~Options() override = default;
 

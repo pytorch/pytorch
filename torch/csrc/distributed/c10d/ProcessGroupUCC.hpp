@@ -153,7 +153,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
       const c10::intrusive_ptr<Store>& store,
       int rank = -1,
       int size = -1,
-      std::chrono::duration<float> timeout = kBackendDefaultTimeout);
+      std::chrono::duration<float> timeout = kProcessGroupDefaultTimeout);
 
   void initComm(c10::Device dev);
 
