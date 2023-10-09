@@ -275,8 +275,10 @@ class TritonTemplateKernel(TritonKernel):
         return "<STORE_OUTPUT>"
 
     def render(self, template, kwargs):
+        env = dict(**self.template_env(), **kwargs)
+        print("in render: ", env)
         return PartialRender(
-            template.render(**self.template_env(), **kwargs),
+            template.render(**env),
             self.render_hooks,
         )
 
@@ -416,6 +418,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        template_env=dict(),
         **kwargs,
     ):
         assert self.template, "requires jinja2"
@@ -427,8 +430,18 @@ class TritonTemplate(KernelTemplate):
         fake_out = ir.Buffer("buf_out", layout)
         kernel_name = f"triton_{self.name}"
 
+        from torch._inductor.lowering import clone
+
+        input_buffer_names = {
+            read_dep.name
+            for node in input_nodes
+            for read_dep in clone(node).get_reads()
+        }
+        print(input_buffer_names)
+        buffers = [*(V.graph.get_buffer(name) for name in input_buffer_names), fake_out]
+        print(dict(zip(input_buffer_names, buffers)))
+
         numel = sympy_product(layout.size)
-        buffers = itertools.chain(input_nodes, (fake_out,))
         if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
             raise NotImplementedError(
                 "64-bit indexing is not yet implemented for triton templates"
