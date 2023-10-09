@@ -4,6 +4,7 @@
 
 #include <c10/util/CallOnce.h>
 
+#include <cstdlib>
 #include <thread>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -121,11 +122,10 @@ struct Workspace {
     constexpr size_t nnpack_memory_alignment_boundary = 64;
 
     // Won't work on Windows, but NNPACK doesn't support Windows either
-    auto res = posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
-    if (res != 0) {
-      TORCH_CHECK(false, "posix_memalign failed:", strerror(errno), " (", errno, ")");
+    buffer = std::aligned_alloc(nnpack_memory_alignment_boundary, size);
+    if (!buffer) {
+      throw std::bad_alloc();
     }
-    return;
   }
 
   ~Workspace() {

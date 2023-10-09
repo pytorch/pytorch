@@ -1,10 +1,11 @@
-#include <c10/core/impl/alloc_cpu.h>
-
 #include <c10/core/alignment.h>
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
+
+#include <cstdlib>
 
 #ifdef USE_MIMALLOC
 #include <mimalloc.h>
@@ -58,38 +59,21 @@ void* alloc_cpu(size_t nbytes) {
       "alloc_cpu() seems to have been called with negative number: ",
       nbytes);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  void* data;
-#ifdef __ANDROID__
-  data = memalign(gAlignment, nbytes);
-  CAFFE_ENFORCE(
-      data,
-      "DefaultCPUAllocator: not enough memory: you tried to allocate ",
-      nbytes,
-      " bytes.");
-#elif defined(_MSC_VER)
+  void* data = nullptr;
+#if defined(_MSC_VER)
 #ifdef USE_MIMALLOC
   data = mi_malloc_aligned(nbytes, gAlignment);
 #else
   data = _aligned_malloc(nbytes, gAlignment);
 #endif
+#else
+  data = std::aligned_alloc(gAlignment, nbytes);
+#endif
   CAFFE_ENFORCE(
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
       " bytes.");
-#else
-  int err = posix_memalign(&data, gAlignment, nbytes);
-  CAFFE_ENFORCE(
-      err == 0,
-      "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
-      nbytes,
-      " bytes. Error code ",
-      err,
-      " (",
-      strerror(err),
-      ")");
-#endif
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());

@@ -9,9 +9,10 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
-
-#include <stdlib.h>
+#include <memory>
+#include <type_traits>
 
 template <typename T, size_t Alignment>
 class AlignedAllocator;
@@ -72,21 +73,10 @@ class AlignedAllocator {
   inline pointer allocate(
       size_type n,
       typename AlignedAllocator<void, Alignment>::const_pointer hint = 0) {
-#if defined(__ANDROID__)
-    void* memory = memalign(Alignment, n * sizeof(T));
-    if (memory == 0) {
-#if !defined(__GNUC__) || defined(__EXCEPTIONS)
+    void* memory = std::aligned_alloc(Alignment, n * sizeof(T));
+    if (!memory) {
       throw std::bad_alloc();
-#endif
     }
-#else
-    void* memory = nullptr;
-    if (posix_memalign(&memory, Alignment, n * sizeof(T)) != 0) {
-#if !defined(__GNUC__) || defined(__EXCEPTIONS)
-      throw std::bad_alloc();
-#endif
-    }
-#endif
     return static_cast<pointer>(memory);
   }
 

@@ -66,6 +66,7 @@
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -718,14 +719,10 @@ static std::shared_ptr<char> copyStr(const std::string& bytes) {
   std::shared_ptr<char> bytes_copy(
       static_cast<char*>(_aligned_malloc(size, kFlatbufferDataAlignmentBytes)),
       _aligned_free);
-#elif defined(__APPLE__)
-  void* p;
-  ::posix_memalign(&p, kFlatbufferDataAlignmentBytes, size);
-  TORCH_INTERNAL_ASSERT(p, "Could not allocate memory for flatbuffer");
-  std::shared_ptr<char> bytes_copy(static_cast<char*>(p), free);
 #else
   std::shared_ptr<char> bytes_copy(
-      static_cast<char*>(aligned_alloc(kFlatbufferDataAlignmentBytes, size)),
+      static_cast<char*>(
+          std::aligned_alloc(kFlatbufferDataAlignmentBytes, size)),
       free);
 #endif
   memcpy(bytes_copy.get(), bytes.data(), bytes.size());
