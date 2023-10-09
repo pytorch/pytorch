@@ -17,7 +17,7 @@
 #include <torch/csrc/distributed/c10d/debug.h>
 
 constexpr auto kBackendDefaultTimeout =
-    std::chrono::milliseconds(30 * 60 * 1000);
+    std::chrono::milliseconds(10 * 60 * 1000);
 
 namespace c10d {
 
