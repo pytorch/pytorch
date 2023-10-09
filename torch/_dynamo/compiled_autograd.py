@@ -45,15 +45,58 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy = None
 
-    def wrap_fake(self, x, source):
+    def wrap_fake(self, x, source, required_shape=None):
         assert isinstance(x, torch.Tensor)
+        if required_shape:
+            """
+            [Note: Required Shapes]
+
+            FSDP hooks have side effects where the sizes of parameters are be mutated in-place.
+            At the start of backwards, a parameter might have a sharded size of `N/world_size`.
+            It will then get dynamically resized to `N` in the hook.  Then resized back to
+            `N/world_size` at the end of backwards in another hook.
+
+            The autograd engine uniformly requires the parameters to be size `N`, and will throw
+            an error if it ever observes the size `N/world_size` sharded value.  The size
+            requirements are enforced via `input_metadata_` on each autograd node, which will store
+            the unsharded `N` size.
+
+            Rather than trying to model the metadata mutation side effects of hooks, we observe that
+            the `N/world_size` size is actually never required to capture the graph.  Instead we
+            take the size requirements encoded in `input_metadata_` on `AccumulateGrad` nodes and
+            lift them to the `required_shape` metadata passed to this function.
+
+            If a graph input is required to be size `N` (or the autograd engine will error), but it
+            is currently something smaller than that.  We just optimistically give it size `N`,
+            and assume some hook will fix it at runtime.
+            """
+            shape = [1] * (len(required_shape) - x.ndim) + [*x.size()]
+            if any(
+                required > actual for required, actual in zip(required_shape, shape)
+            ):
+                shape = [
+                    max(required, actual)
+                    for required, actual in zip(required_shape, shape)
+                ]
+                x = torch.zeros(
+                    shape,
+                    dtype=x.dtype,
+                    requires_grad=x.requires_grad,
+                    layout=x.layout,
+                    device=x.device,
+                )
         return self.fake_tensor_mode.from_tensor(x, source=source)
 
     @staticmethod
     def source(name, idx):
         return GetItemSource(LocalSource(name), idx)
 
-    def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
+    def begin_capture(
+        self,
+        inputs: List[torch.Tensor],
+        sizes: List[int],
+        required_shapes: List[List[int]],
+    ):
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
@@ -61,10 +104,10 @@ class AutogradCompilerInstance:
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
-
+        assert len(required_shapes) == len(inputs)
         # tensor inputs to fake tensors
         inputs = [
-            self.wrap_fake(x, self.source("inputs", idx))
+            self.wrap_fake(x, self.source("inputs", idx), required_shapes[idx])
             for idx, x in enumerate(inputs)
         ]
         proxies = [args_proxy[i] for i in range(len(inputs))]
