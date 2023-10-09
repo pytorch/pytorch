@@ -533,7 +533,7 @@ def _register_quantization_maxpool2d():
         )
         _register_quantized_maxpool2d_lowering(
             generate_pattern_with_output_quant(dequantize_maxpool2d_get_item_pattern),
-            quantized.max_pool2d,
+            quantized.max_pool2d.default,
         )
 
 

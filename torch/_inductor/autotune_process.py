@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
 
 import torch
 from torch import multiprocessing
@@ -337,9 +337,9 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
-        if isinstance(irnodes, (tuple, list)):
+        if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result

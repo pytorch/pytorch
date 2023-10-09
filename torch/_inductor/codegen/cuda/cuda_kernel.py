@@ -408,7 +408,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         # We can fuse a Pointwise op that depends on the last fused epilogue node
         # if any. If there is no epilogue node yet, it needs to depend on the template
         # node
-        node_name = node.name if node.name is not None else node.data.name
+        node_name = node.name if node.name is not None else node.data.name  # type: ignore[attr-defined]
         if node_name is None:
             return False
 
@@ -416,11 +416,11 @@ class CUDATemplateBuffer(TemplateBuffer):
             if self.name not in node.get_read_names():
                 return False
         else:
-            last_epilogue_node = self._epilogue_nodes[-1]
+            last_epilogue_node = cast(ComputedBuffer, self._epilogue_nodes[-1])
             last_epilogue_name = (
                 last_epilogue_node.name
                 if last_epilogue_node.name is not None
-                else last_epilogue_node.data.name
+                else last_epilogue_node.data.name  # type: ignore[attr-defined]
             )
             if last_epilogue_name not in node.get_read_names():
                 return False
@@ -433,10 +433,10 @@ class CUDATemplateBuffer(TemplateBuffer):
             )
 
             CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-                self.name, "anything", [node]
+                cast(str, self.name), "anything", [node]
             )
             CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                self.name, [node]
+                cast(str, self.name), [node]
             )
         except NotImplementedError as e:
             not_implemented_op = str(e)
