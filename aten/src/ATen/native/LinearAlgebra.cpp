@@ -2172,6 +2172,7 @@ using array2d = std::array<std::array<scalar_t, COL>, ROW>;
 // we consider 6 Taylor expansions of degree
 // 1, 2, 4, 8, 12, 18
 constexpr int total_n_degs = 6;
+constexpr int large_batch_threshold = 100;
 
 Tensor operator_1_norm(const Tensor& tensor) {
   return std::get<0>(tensor.abs().sum(-2).max(-1));
@@ -2573,14 +2574,17 @@ Tensor mexp_impl(
     res.fill_(std::numeric_limits<double>::quiet_NaN());
     return res;
   }
-  
-  // `norm_cpu` is used to decide which Tensors require which approximation
-  // based on their norm. This decision takes place on CPU.
-  // It requires moving data back and forth between devices when `a` is on CUDA,
-  // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+
+  // `norm_small_to_cpu` is used to decide which Tensors require which
+  // approximation based on their norm. This decision may take place on CPU.
+  // It could require moving data back and forth between devices when `a` is on CUDA,
+  // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
   // and better performance overall (benchmarked).
-  const auto norm_cpu = (a.device().type() == at::kCUDA)
-    ? norm.to(at::kCPU) : norm;
+  // For large batch size, the cost of the above decision on CPU will be quite 
+  // expensive (compared to the synchronization overhead from GPU to CPU), so
+  // here we have a threshold to determine whether or not to move norm to CPU.
+  const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA) 
+    && a.size(0) >= large_batch_threshold) ? norm.to(at::kCPU) : norm;
 
   if (!compute_highest_degree_approx) {
     constexpr std::array<
@@ -2596,7 +2600,7 @@ Tensor mexp_impl(
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
       auto idx_curr_norm_interval = (
-        (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
+        (norm_lower_bound < norm_small_to_cpu) * (norm_small_to_cpu <= norm_upper_bound)
       ).nonzero().squeeze(-1);
 
       if (idx_curr_norm_interval.numel()) {
@@ -2609,7 +2613,7 @@ Tensor mexp_impl(
     }
 
     // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
-    auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
+    auto idx_large_norm = (norm_small_to_cpu >= thetas[total_n_degs - 2])
       .nonzero().squeeze(-1);
 
     if (idx_large_norm.numel()) {
