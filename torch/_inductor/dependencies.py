@@ -125,7 +125,7 @@ class WeakDep(typing.NamedTuple):
         return 1  # Purely inserted for ordering, not an actual dep
 
     def has_unbacked_symbols(self):
-        return len(free_unbacked_symbols(V.graph.get_numel(self.name))) > 0
+        return False
 
     def is_contiguous(self) -> bool:
         return False

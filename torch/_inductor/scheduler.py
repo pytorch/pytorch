@@ -574,10 +574,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # don't allow reuse of an 'input' buffer, we don't own it
             # (would this have been fixed if I tracked mutations properly above?)
             return False
-        if read_dep.has_unbacked_symbols():
-            # can't inplace, as can't guarantee the exact size match
-            return False
-
         if not isinstance(
             self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
         ):
@@ -586,6 +582,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
         if len(self.read_writes.writes) == 1:
             write_dep = next(iter(self.read_writes.writes))
+            if read_dep.has_unbacked_symbols():
+                # can't inplace, as can't guarantee the exact size match
+                return False
             if write_dep.has_unbacked_symbols():
                 # can't inplace, as can't guarantee the exact size match
                 return False
