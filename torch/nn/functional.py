@@ -3781,7 +3781,7 @@ if upsample.__doc__:
 
 def _is_integer(x) -> bool:
     r"""Type check the input number is an integer.
-    Will return True for int, SymInt and Tensors / Numpy arrays with integer elements.
+    Will return True for int, SymInt, Numpy integers and Tensors with integer elements.
     """
     if isinstance(x, (int, torch.SymInt)):
         return True
