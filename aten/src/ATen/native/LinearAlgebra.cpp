@@ -39,18 +39,23 @@
 #include <ATen/ops/addr.h>
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/arange.h>
+#include <ATen/ops/argsort.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/ceil.h>
 #include <ATen/ops/chain_matmul_native.h>
+#include <ATen/ops/cumsum.h>
 #include <ATen/ops/det_native.h>
 #include <ATen/ops/diag_embed.h>
+#include <ATen/ops/diff.h>
 #include <ATen/ops/dot.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/eye.h>
+#include <ATen/ops/floor.h>
 #include <ATen/ops/frobenius_norm_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/full.h>
@@ -119,9 +124,11 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/slogdet_native.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/sqrt.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/tensordot.h>
+#include <ATen/ops/unique_consecutive.h>
 #include <ATen/ops/vdot_native.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
@@ -2517,25 +2524,40 @@ void compute_T18_scale_square(
   scalar_t theta
 ) {
   // Scale
-  const auto s = at::max(
-    at::zeros_like(norm),
-    at::ceil(at::log2(norm / theta))
-  ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
-  const auto pow2s = at::pow(2, s);
-  const auto a_scaled = a / pow2s;
+  const auto s = (at::floor(at::log2(norm / theta)) + 1).clamp(/*min=*/0);
+  const auto pow2s = at::pow(2, -s);
+  const auto a_scaled = a * pow2s.view({-1, 1, 1});
+  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+
+  // Sort
+  Tensor sorted_s, sorted_s_inds;
+  std::tie(sorted_s, sorted_s_inds) = at::sort(s, /*dim=*/0);
+  auto split_counts = std::get<2>(at::unique_consecutive(sorted_s, true, /*return_counts=*/true));
+  auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
+  auto split_adv = at::diff(split_edges, 1, -1, /*prepend=*/split_edges.new_zeros({1})).to(at::kCPU);
+  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong);
+  auto diffs = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1})).to(at::kCPU);
 
   // Square
-  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
-  auto s_cpu = (s.device().type() == at::kCPU)
-    ? s : s.to(at::kCPU);
-  for (const auto i : c10::irange(mexp_scaled.size(0))) {
-    auto s_val = s_cpu.select(0, i).template item<int64_t>();
-    auto mexp = mexp_scaled.select(0, i);
-    for (const auto p C10_UNUSED : c10::irange(s_val)) {
-      mexp = at::matmul(mexp, mexp);
+  TORCH_INTERNAL_ASSERT(split_adv.is_contiguous());
+  TORCH_INTERNAL_ASSERT(diffs.is_contiguous());
+  auto idxs = split_adv.data_ptr<int64_t>();
+  auto ps = diffs.data_ptr<int64_t>();
+
+  std::vector<Tensor> output_pieces;
+  auto acc = mexp_scaled.index_select(0, sorted_s_inds);
+  for (int64_t i = 0; i < split_adv.numel(); ++i) {
+    for (int64_t j = 0; j < ps[i]; j++) {
+        acc = at::matmul(acc, acc);
     }
-    mexp_out.select(0, i).copy_(mexp);
+    output_pieces.push_back(acc.slice(0, 0, idxs[i] + 1));
+    acc = acc.slice(0, idxs[i] + 1);
   }
+
+  // Compose the result back
+  auto output = at::cat(output_pieces, 0);
+  output = output.index_select(0, at::argsort(sorted_s_inds));
+  mexp_out.copy_(output);
 }
 
 template <typename scalar_t>
@@ -2546,6 +2568,12 @@ Tensor mexp_impl(
 ) {
   auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
+  const auto norm_max = norm.max().to(at::kCPU).item().toFloat();
+  if (std::isnan(norm_max)) {
+    res.fill_(std::numeric_limits<double>::quiet_NaN());
+    return res;
+  }
+  
   // `norm_cpu` is used to decide which Tensors require which approximation
   // based on their norm. This decision takes place on CPU.
   // It requires moving data back and forth between devices when `a` is on CUDA,
@@ -2679,7 +2707,7 @@ Tensor backward_analytic_function_of_a_matrix(
 //
 Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg.matrix_exp");
-  checkFloatingOrComplex(a, "matrix_exp");
+  checkFloatingOrComplex(a, "linalg.matrix_exp");
 
   NoTF32Guard disable_tf32;
 
