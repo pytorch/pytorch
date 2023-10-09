@@ -1016,6 +1016,7 @@ run_cudnn_LLM_fprop2(int64_t b,
                     Tensor& o,
                     Tensor& dropoutseed,
                     Tensor& dropoutoffset) {
+    cudnnHandle_t handle = getCudnnHandle();
     namespace fe = cudnn_frontend;
     auto dtype = fe::DataType_t::HALF;
     if (q.scalar_type() == kBFloat16) {
@@ -1076,7 +1077,7 @@ run_cudnn_LLM_fprop2(int64_t b,
                                        .set_data_type(fe::DataType_t::INT32));
     auto scaled_dot_product_flash_attention_options = fe::graph::Scaled_dot_product_flash_attention_attributes()
                                                           .set_name("flash_attention")
-                                                          .set_is_inference(return_softmaxstats)
+                                                          .set_is_inference(return_softmaxstats == false)
                                                           .set_causal_mask(true)
                                                           .set_attn_scale(attn_scale)
                                                           .set_dropout(dropout_probability, seed, offset);
@@ -1115,15 +1116,54 @@ run_cudnn_LLM_fprop2(int64_t b,
         Stats->set_output(true).set_data_type(fe::DataType_t::FLOAT);
     }
 
-   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
-        {Q, q.data_ptr()},
-        {K, k.data_ptr()},
-        {V, v.data_ptr()},
-        {attn_scale, &scaling_factor},
-        //{bias, bias.data_ptr()},
-        {seed, dropoutseed.data_ptr()},
-        {offset, dropoutoffset.data_ptr()},
-        {O, o.data_ptr()}};
+    TORCH_INTERNAL_ASSERT(mha_graph.validate().is_good());
+
+    TORCH_INTERNAL_ASSERT(mha_graph.build_operation_graph(handle).is_good());
+
+    auto plans = mha_graph.get_execution_plan_list(fe::HeurMode_t::HEUR_MODE_A);
+
+
+    TORCH_INTERNAL_ASSERT(plans.check_support(handle).is_good());
+
+    TORCH_INTERNAL_ASSERT(mha_graph.set_execution_plans(plans).is_good());
+
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = { {Q, q.data_ptr()},
+         {K, k.data_ptr()},
+         {V, v.data_ptr()},
+         {attn_scale, &scaling_factor},
+         //{bias, bias.data_ptr()},
+         {seed, dropoutseed.data_ptr()},
+         {offset, dropoutoffset.data_ptr()},
+         {O, o.data_ptr()}};
+
+
+    //#if (CUDNN_VERSION >= 8903)
+    //Surface<int32_t> devActualSeqlenQ(b, false);
+    //Surface<int32_t> devActualSeqlenKV(b, false);
+    //std::vector<int32_t> hostActualSeqlenQ(b, 20);
+    //std::vector<int32_t> hostActualSeqlenKV(b, 20);
+
+    //checkCudaErr(cudaMemcpy(
+    //    devActualSeqlenQ.devPtr, hostActualSeqlenQ.data(), sizeof(hostActualSeqlenQ[0]) * b, cudaMemcpyHostToDevice));
+    //checkCudaErr(cudaMemcpy(devActualSeqlenKV.devPtr,
+    //                        hostActualSeqlenKV.data(),
+    //                        sizeof(hostActualSeqlenKV[0]) * b,
+    //                        cudaMemcpyHostToDevice));
+    //checkCudaErr(cudaDeviceSynchronize());
+
+    //variant_pack[seq_q]  = devActualSeqlenQ.devPtr;
+    //variant_pack[seq_kv] = devActualSeqlenKV.devPtr;
+    //#endif
+
+    if (return_softmaxstats) {
+        variant_pack[Stats] = softmaxstats.data_ptr();
+    }
+
+    auto workspace_size = mha_graph.get_workspace_size();
+    auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+    TORCH_INTERNAL_ASSERT(mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+
+    //checkCudaErr(cudaDeviceSynchronize());
 }
 
 
