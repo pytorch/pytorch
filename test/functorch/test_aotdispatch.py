@@ -1261,7 +1261,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
-        # The first output should view off the the first input, the 2nd output should view off the 2nd input
+        # The first output should view off the first input, the 2nd output should view off the 2nd input
         def f(a, b):
             return a.view(a.shape), b.view(b.shape)
 
