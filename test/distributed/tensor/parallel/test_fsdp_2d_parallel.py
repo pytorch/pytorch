@@ -429,21 +429,29 @@ class TestNew2dParallelIntegration(DTensorTestBase):
         )
         state_dict_2d = model_2d.state_dict()
 
-        for k, v in state_dict_2d.items():
-            # check if all value in 2D state_dict are DTensor
-            self.assertTrue(isinstance(v, DT))
-            self.assertEqual(len(v.placements), 2)
-            # the outer dimension is the FSDP dimension and the placement is always Shard(0)
-            self.assertEqual(v.placements[0], Shard(0))
-            self.assertEqual(v.device_mesh, mesh_2d)
-
-        for no_wrap_items, two_d_items in zip(no_wrap_state_dict.items(), state_dict_2d.items()):
+        for no_wrap_items, two_d_items in zip(
+            no_wrap_state_dict.items(), state_dict_2d.items()
+        ):
             no_wrap_k, no_wrap_v = no_wrap_items
             two_d_k, two_d_v = two_d_items
 
             self.assertEqual(no_wrap_k, two_d_k)
-            all_gather_two_d_v = two_d_v.redistribute(mesh_2d, (Replicate(), Replicate()))
-            self.assertEqual(torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True)
+
+            # check if all value in 2D state_dict are DTensor
+            self.assertTrue(isinstance(two_d_v, DT))
+            self.assertEqual(len(two_d_v.placements), 2)
+            # the outer dimension is the FSDP dimension and the placement is always Shard(0)
+            self.assertEqual(two_d_v.placements[0], Shard(0))
+            self.assertEqual(two_d_v.device_mesh, mesh_2d)
+
+            # check if the parameter value is the same between 2D model and the model without wrapper
+            all_gather_two_d_v = two_d_v.redistribute(
+                mesh_2d, (Replicate(), Replicate())
+            )
+            self.assertEqual(
+                torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True
+            )
+
 
 if __name__ == "__main__":
     run_tests()

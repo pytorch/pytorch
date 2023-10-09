@@ -270,7 +270,7 @@ def _chunk_dtensor(
         # Therefore, shard placements for tensor is (Shard(0), tp_placement).
         replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
         replicate_placements[-1] = tp_placement  # type: ignore[call-overload]
-        shard_placements = [DShard(0) for _ in range(parent_mesh.ndim)]
+        shard_placements = [DShard(0) for _ in range(parent_mesh.ndim)]  # type: ignore[misc]
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 
         return DTensor.from_local(
