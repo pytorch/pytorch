@@ -19,6 +19,7 @@ namespace c10 {
 // we associate each raggedness pattern with an integer "id" that can be used as
 // a proxy to evaluate equality. We also constrain the range of values for this
 // as to enable inequality checks.
+//
 class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
@@ -69,55 +70,38 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     return "j" + std::to_string(val_);
   }
 
-  c10::SymNode eq(const c10::SymNode& other) override {
-    c10::optional<int64_t> c = other->singleton_int();
-    bool ret = c.has_value() && val_ == *c;
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
-  }
-
-  c10::SymNode ne(const c10::SymNode& other) override {
-    c10::optional<int64_t> c = other->singleton_int();
-    bool ret = !c.has_value() || val_ != *c;
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
-  }
-
-  // It would be cool to have the ability to arbitrarily constrain the range of
-  // values as we do for unbacked symints. For now a useful default
-  // range seems to be [2, int64_t::max()] (1) since sizes are non-negative, and
-  // (2) we need to get past 0/1 specialization checks.
-  c10::SymNode ge(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
-      return SymNode(
-          c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *mb_si));
-    }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c <= 2));
-  }
-
-  c10::SymNode gt(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
-    }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c < 2));
-  }
-
-  c10::SymNode lt(const c10::SymNode& other) override {
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
-  }
-
-  c10::SymNode le(const c10::SymNode& other) override {
-    if (auto mb_si = other->singleton_int()) {
-      return SymNode(
-          c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *mb_si));
-    }
-    c10::optional<int64_t> c = other->constant_int();
-    TORCH_CHECK(c.has_value());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
-        *c >= std::numeric_limits<int64_t>::max()));
-  }
+  // NOTE [ Inequalities with SingletonInt ]
+  //
+  // The semantics of SingletonInt when it comes to relations is that it is
+  // treated as integer known to be within a certain range,
+  //
+  //     j0 \in [2, int64_t::max]
+  //
+  // allowing us to answer queries like j0 >= 1 (True), and j0 == 0 (False).
+  // This is a useful default range for the raggedness pattern of a jagged
+  // tensor (1) since sizes are non-negative, and (2) we need to get past 0/1
+  // specialization checks.
+  //
+  // [ Indeterminate inequalities error out ]
+  //
+  // Given the semantic defined above, certain relations like j0 < 3 are thus
+  // indeterminable. In our impl today, evaluating such relations error
+  //
+  // It may seem convenient to just define indeterminate relations to return
+  // False, but the implementation we maintain in parallel using sympy does not
+  // allow this.
+  //
+  // Sympy only allows overriding of Ge. The other relations (Lt, Gt, Le) are,
+  // by consequence, all derived from Ge e.g., Lt(a, b) := !Ge(a, b). This
+  // would mean that means that if we define the indeterminate j0 >= 3 to be
+  // False, the also indeterminate j0 < 3 will be evaluated to be True!
+  //
+  c10::SymNode eq(const c10::SymNode& other) override;
+  c10::SymNode ne(const c10::SymNode& other) override;
+  c10::SymNode ge(const c10::SymNode& other) override;
+  c10::SymNode gt(const c10::SymNode& other) override;
+  c10::SymNode lt(const c10::SymNode& other) override;
+  c10::SymNode le(const c10::SymNode& other) override;
 
   c10::optional<int64_t> singleton_int() override {
     return val_;

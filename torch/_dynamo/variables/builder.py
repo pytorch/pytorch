@@ -778,6 +778,7 @@ class VariableBuilder:
         elif isinstance(value, JITFunction):
             return TritonKernelVariable(
                 value,
+                None,  # No kernel idx provided
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
@@ -1184,7 +1185,7 @@ class VariableBuilder:
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
-                    # Note - this esentially means that if this name gets reused as a tensor,
+                    # Note - this essentially means that if this name gets reused as a tensor,
                     # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
                     # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
                     # sure that is necessary for now.
@@ -1498,7 +1499,7 @@ def wrap_fx_proxy_cls(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         elif istype(example_value, set):
-            return SetVariable(tx, unpacked, mutable_local=MutableLocal(), **options)
+            return SetVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
