@@ -6020,11 +6020,9 @@ def linalg_vector_norm(
             ),
         )
 
-        out_dtype = self.type().dtype()
-        if out_dtype == torch.float16:
-            result = g.op("Cast", result, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
-        elif out_dtype == torch.bfloat16:
-            result = g.op("Cast", result, to_i=_C_onnx.TensorProtoDataType.BFLOAT16)
+        out_dtype = _type_utils.JitScalarType.from_value(self)
+        if out_dtype != _type_utils.JitScalarType.FLOAT:
+            result = g.op("Cast", result, to_i=out_dtype.onnx_type())
 
     return result
 
