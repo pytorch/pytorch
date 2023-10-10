@@ -1373,7 +1373,7 @@ def _convert_all_state_info(
                 ]
             local_state = input_states[fqn].get(state_name, None)
             # N.B. We need to move the state to compute_device. The reason is
-            # not yet clear and we need to figure why the state may be on a
+            # not yet clear and we need to figure out why the state may be on a
             # different device.
             if local_state is not None:
                 local_state = local_state.to(fsdp_param_info.state.compute_device)
