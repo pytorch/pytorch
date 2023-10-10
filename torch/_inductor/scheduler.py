@@ -500,6 +500,8 @@ class BaseSchedulerNode:
         dtype = None
         if not self.node:
             assert self.snodes
+            if not self.snodes[0].node:
+                return 0
             layout = self.snodes[0].node.get_layout()
             dtype = self.snodes[0].node.get_dtype()
         else:
@@ -530,19 +532,23 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(input) for input in self.node.inputs
+                        ir_node_to_tensor(input, guard_shape=False)
+                        for input in self.node.inputs
                     ]
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
 
                     # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
-                    factor = 0.5
+                    factor = 1.0
                     counted_flops = flop_counter_mode.get_total_flops()
-                    return factor * counted_flops / gpu_flops
+
+                    # Return estimated runtime in nanoseconds
+                    return (factor * counted_flops / gpu_flops) * 1e9
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
         ):
+            # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
         # TODO(xmfan): add support for CollectiveKernel
@@ -681,28 +687,6 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
-    @cache_on_self
-    def _get_atomic_add_buffers(self) -> Set[str]:
-        buffers_store_as_atomic_add = set()
-        for node in self._body.get_nodes():
-            if (
-                node.op == "call_method"
-                and node.target == "store"
-                and (
-                    ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
-                    or (len(node.args) == 5 and node.args[4] == "atomic_add")
-                )
-            ):
-                buffers_store_as_atomic_add.add(
-                    node.kwargs["name"]
-                    if "name" in node.kwargs
-                    else (node.args[1] if len(node.args) >= 2 else "")
-                )
-        return buffers_store_as_atomic_add
-
-    def has_atomic_add(self, check_buf):
-        return check_buf in self._get_atomic_add_buffers()
-
 
 class FusedSchedulerNode(BaseSchedulerNode):
     """
@@ -804,15 +788,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
-
-    def has_atomic_add(self, check_buf):
-        return any(
-            (
-                isinstance(sub_schedule_node1, SchedulerNode)
-                and sub_schedule_node1.has_atomic_add(check_buf)
-            )
-            for sub_schedule_node1 in self.get_nodes()
-        )
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -944,6 +919,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
+            self.node = None
+
+            self.node = None
+            self.users = None
 
             self.set_read_writes(
                 dependencies.ReadWrites.merge_list(
@@ -1229,8 +1208,11 @@ class Scheduler:
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
-                assert s not in unbacked_symbol_to_origin_node
-                unbacked_symbol_to_origin_node[s] = node
+                # Pick the first definer as canonical.  There may be multiple
+                # because if a MultiOutputLayout buffer propagates an unbacked
+                # symint to multiple outputs, they will all claim to def it.
+                if s not in unbacked_symbol_to_origin_node:
+                    unbacked_symbol_to_origin_node[s] = node
 
             # if a kernel takes unbacked symints, register dependencies
             for s in node.node.get_unbacked_symbol_uses():
@@ -1499,7 +1481,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heursitic would be to use live
+        A better but difficult to implement heurisitic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of
@@ -1536,25 +1518,6 @@ class Scheduler:
 
         if node2.get_names() & node1.ancestors:
             return False  # node1 must go before node2
-
-        if (
-            isinstance(node1, (FusedSchedulerNode, SchedulerNode))
-            and isinstance(node2, SchedulerNode)
-            and isinstance(node2._body, ir.LoopBody)
-        ):
-            # Fix issue: https://github.com/pytorch/pytorch/issues/108963
-            # Check:
-            #   If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
-            #   we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
-            # If True, we will disable the fusion of node1 and node2.
-            if any(
-                (
-                    node2_used_buf in self.mutation_renames
-                    and node1.has_atomic_add(self.mutation_renames[node2_used_buf])
-                )
-                for node2_used_buf in node2._body.reads_name2expr.keys()
-            ):
-                return False
 
         if node2.is_template():
             return False  # only epilogues
@@ -1819,6 +1782,18 @@ class Scheduler:
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            try:
+                log.debug(
+                    "Generating code for node %s with estimated runtime %f",
+                    node.get_name(),
+                    node.get_estimated_runtime(),
+                )
+            except Exception:
+                log.error(
+                    "Generating code for node %s with estimated runtime 0.0",
+                    node.get_name(),
+                )
+
             self.enter_context(node)
 
             if not isinstance(node, NopKernelSchedulerNode):
@@ -1858,6 +1833,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.debug_check_inf_and_nan:
+                V.graph.wrapper_code.generate_inf_and_nan_checker(node)
 
             if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()

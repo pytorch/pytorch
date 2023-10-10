@@ -371,7 +371,8 @@ class ShardedTensor(ShardedTensorBase):
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
-        enforce_dtype: Optional[bool] = False,
+        enforce_dtype: bool = False,
+        dtype: Optional[torch.dtype] = None,
     ) -> None:
         """
         Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
@@ -387,10 +388,16 @@ class ShardedTensor(ShardedTensorBase):
             out (:class `torch.Tensor`, optional): The output full tensor.
                 Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
-            enforce_dtype: force the imterediate tensor with the same type as input and output
+            enforce_dtype (bool): Deprecated, please use dtype instead.  Force the
+                gathered tensors to be the same type as input and output.
+            dtype (torch.dtype): Force the gathered tensors to be this dtype.
+                Default: ``None``
         """
         def shard_size(shard_md):
             return reduce((lambda x, y: x * y), shard_md.shard_sizes)  # type: ignore[attr-defined]
+
+        if enforce_dtype:
+            warnings.warn("enforce_dtype is deprecated.  Please use dtype instead.")
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
@@ -413,17 +420,18 @@ class ShardedTensor(ShardedTensorBase):
         gather_list: Optional[List[torch.Tensor]]
         if rank == dst:
             assert out is not None
+            if enforce_dtype:
+                # enforce_dtype is deprecated.  Do it for backward compatibility.
+                dtype = out.dtype
             # TODO make it as a view of out tensor
-            gather_list = [torch.empty((max_rank_size,), device=out.device, dtype=out.dtype
-                           if enforce_dtype else torch.float32) for _ in range(world_size)]
+            gather_list = [torch.empty((max_rank_size,), device=out.device, dtype=dtype) for _ in range(world_size)]
         else:
             gather_list = None
 
         with torch.no_grad():
             if enforce_dtype and len(local_shards) > 0:
+                # enforce_dtype is deprecated.  Do it for backward compatibility.
                 dtype = local_shards[0].tensor.dtype
-            else:
-                dtype = torch.float32
             data = torch.empty(max_rank_size, device=self._get_preferred_device(), dtype=dtype)
 
             for shard in local_shards:
@@ -616,7 +624,6 @@ class ShardedTensor(ShardedTensorBase):
             # if user specify the device index.
             current_idx = torch.cuda.current_device()
             if device_to.index != current_idx:
-                import warnings
                 warnings.warn("ShardedTensor.to only move tensor to its current device"
                               "If you want to put to different device, use `reshard` instead.")
             device_to = torch.device(current_idx)

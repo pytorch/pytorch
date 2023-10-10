@@ -108,6 +108,20 @@ __global__ void multi_tensor_apply_kernel(
 
 } // namespace
 
+// multi_tensor_apply enables horizontal fusion across lists of tensors.
+// For example, whereas you once had a for-loop of a + b = c, where a, b,
+// and c are individual tensors in lists as, bs, and cs, you can now with
+// fewer kernel launches compute as + bs = cs.
+//
+// You can also imagine bs to be a scalar list vs a tensor list.
+//
+// The function below takes in tensor lists, scalars, and a callable and
+// chunks up the computation to launch as few kernels as possible by iterating
+// through every "chunk" in every tensor (thus the nested for loops). In the
+// simplest case, everything gets bundled into just one kernel launch, but
+// due to blocksize constraints, we may need to launch multiple kernels.
+// Each kernel launch is defined by one tensorListMeta construct, which we
+// use to track and reset the necessary metadata for each launch.
 template <int depth, typename scalar_T, typename T, typename... ArgTypes>
 void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -143,8 +157,8 @@ void multi_tensor_apply(
     // per tensor since the zero-sized ones will not enter the loop, so
     // the nested forloop within represents iterating through the chunks
     // of a single tensor.
-    const auto chunks =
-        (tensor_lists[0][t].numel() + kChunkSize - 1) / kChunkSize;
+    const auto numel = tensor_lists[0][t].numel();
+    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
@@ -169,8 +183,8 @@ void multi_tensor_apply(
 
         // Reset.
         loc_block_info = 0;
-        if (chunk ==
-            chunks - 1) { // all chunks have already been handled in the kernel
+        // all chunks have already been handled in the kernel
+        if (chunk == chunks - 1) {
           loc_tensor_info = 0;
         } else { // blocks were full and tensor chunks remain
           tensorListMeta.numel_for_tensor[0] =
@@ -228,8 +242,8 @@ void multi_tensor_apply(
     loc_tensor_info++;
 
     // see note: [chunking territory].
-    const auto chunks =
-        (tensor_lists[0][t].numel() + kChunkSize - 1) / kChunkSize;
+    const auto numel = tensor_lists[0][t].numel();
+    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
@@ -310,8 +324,8 @@ void multi_tensor_apply_for_fused_optimizer(
     loc_tensor_info++;
 
     // see above note: [chunking territory]
-    const int64_t chunks =
-        (tensor_lists[0][tensor_index].numel() + kChunkSize - 1) / kChunkSize;
+    const auto numel = tensor_lists[0][tensor_index].numel();
+    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
     TORCH_CHECK(chunks > -1);
     for (const auto& chunk : c10::irange(chunks)) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;

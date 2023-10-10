@@ -36,7 +36,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 
-from . import comptime, external_utils
+from . import comptime, external_utils, polyfill
 
 """
 A note on skipfiles:
@@ -145,6 +145,7 @@ def _module_dir(m: types.ModuleType):
     return _strip_init_py(m.__file__)
 
 
+# TODO(ybliang): Change to user *.__file__ rather than hard code string for this list.
 # Force inline functions in these files, even the files is in *_SKIPLIST.
 FILENAME_INLINELIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
@@ -153,6 +154,7 @@ FILENAME_INLINELIST = {
     torch.utils._content_store.__file__,
     external_utils.__file__,
     comptime.__file__,
+    polyfill.__file__,
     torch.optim._functional.__file__,
     torch.utils._foreach_utils.__file__,
     _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
@@ -170,14 +172,6 @@ FILENAME_INLINELIST = {
     _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
     _module_dir(torch) + "distributed/_tensor/api.py",
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
-    _module_dir(torch) + "distributed/_tensor/placement_types.py",
-    _module_dir(torch) + "distributed/c10d_logger.py",
-    _module_dir(torch) + "distributed/_functional_collectives.py",
-    torch.distributions.normal.__file__,
-    torch.distributions.independent.__file__,
-    torch.distributions.utils.__file__,
-    torch.utils._contextlib.__file__,
-    torch.fx._pytree.__file__,
 }
 
 if torch.distributed.is_available():
@@ -217,6 +211,7 @@ SUBMODULE_INLINELIST = {
     torch.fx._pytree,
     torch.sparse,
 }
+
 
 if torch.distributed.is_available():
     from torch.distributed import _functional_collectives
@@ -269,7 +264,8 @@ class SkipResult:
     reason: Optional[str]
 
 
-def check_verbose(filename, allow_torch=False):
+# TODO(ybliang): This is a temp function, we should consolidate this with check_verbose.
+def _check_verbose_inner(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -278,10 +274,11 @@ def check_verbose(filename, allow_torch=False):
             False,
             "inlined according skipfiles.FILENAME_INLINELIST",
         )
-    if allow_torch and is_torch_inline_allowed(filename):
+    # TODO(ybliang): the is_torch check should be consolidate with is_torch_inline_allowed
+    if allow_torch and is_torch(filename):
         return SkipResult(
             False,
-            "inlined according skipfiles.SUBMODULE_INLINELIST",
+            "inlined according skipfiles.is_torch",
         )
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
         return SkipResult(
@@ -294,8 +291,19 @@ def check_verbose(filename, allow_torch=False):
         return SkipResult(False, "inlined by default")
 
 
-def check(filename, allow_torch=False):
-    return check_verbose(filename, allow_torch).skipped
+def check_verbose(filename, allow_torch=False, extra_check=False):
+    result = _check_verbose_inner(filename, allow_torch)
+    if extra_check and result.skipped and is_torch_inline_allowed(filename):
+        return SkipResult(
+            False,
+            "inlined according skipfiles.is_torch_inline_allowed returning True",
+        )
+    else:
+        return result
+
+
+def check(filename, allow_torch=False, extra_check=False):
+    return check_verbose(filename, allow_torch, extra_check).skipped
 
 
 # skip common third party libs
