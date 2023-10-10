@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     skipMeta,
+    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
@@ -2857,7 +2858,7 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, coeff=1)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -2947,6 +2948,20 @@ class TestNestedTensorSubclass(TestCase):
             # should be conceptually equal but not necessarily metadata equivalent
             self.assertEqual(b, nt_contiguous)
             self.assertEqual(b, nt_noncontiguous)
+
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @onlyCUDA
+    def test_pin_memory(self, device):
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
+        for nt in [nt_contiguous, nt_noncontiguous]:
+            self.assertFalse(nt.is_pinned())
+            pinned = nt.pin_memory(device)
+            self.assertTrue(pinned.is_pinned())
+            self.assertEqual(nt, pinned)
+            self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
+            # test that pin_memory on already pinned tensor has no effect
+            self.assertIs(pinned, pinned.pin_memory())
+            self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
 
 instantiate_parametrized_tests(TestNestedTensor)
