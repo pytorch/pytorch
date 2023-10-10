@@ -16,24 +16,23 @@ target_compile_definitions(test_aot_inductor PRIVATE USE_GTEST)
 
 # Define a custom command to generate the library
 add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libmodel.so
         COMMAND python ${AOT_INDUCTOR_TEST_ROOT}/test.py
         DEPENDS ${AOT_INDUCTOR_TEST_ROOT}/test.py
 )
-add_custom_target(aot_inductor_output_target ALL
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so)
-add_dependencies(test_aot_inductor aot_inductor_output_target)
+add_custom_target(model_so ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libmodel.so)
+add_dependencies(test_aot_inductor model_so)
 
 target_link_libraries(test_aot_inductor PRIVATE
   torch
   gtest
-  ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so
+  ${CMAKE_CURRENT_BINARY_DIR}/libmodel.so
 )
 
 if(USE_CUDA)
   target_include_directories(test_aot_inductor PRIVATE ${ATen_CUDA_INCLUDE})
 
-  target_compile_definitions(test_aot_inductor PRIVATE USE_CUDA)
+  target_compile_definitions(test_aot_inductor PRIVATE USE_CUDA CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 if(INSTALL_TEST)
