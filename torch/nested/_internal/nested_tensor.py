@@ -93,8 +93,10 @@ class NestedTensor(torch.Tensor):
         self._ragged_idx = 1
 
         if values.requires_grad:
-            raise ValueError("NestedTensor values cannot require grad, please "
-                             "detach before passing to NestedTensor constructor")
+            raise ValueError(
+                "NestedTensor values cannot require grad, please "
+                "detach before passing to NestedTensor constructor"
+            )
         self._values = values
         self._offsets = offsets
         return
