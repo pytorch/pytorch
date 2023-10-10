@@ -242,6 +242,7 @@ endif()
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
+  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/cuda)
   list(APPEND ATen_CUDA_CU_SRCS
     ${cuda_cu}
     ${native_cuda_cu}
