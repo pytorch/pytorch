@@ -4822,10 +4822,16 @@ def arange(
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    torch._check(
-        (step > 0 and end >= start) or (step < 0 and end <= start),
-        lambda: "upper bound and lower bound inconsistent with step sign",
-    )
+    if step > 0:
+        torch._check(
+            end >= start,
+            lambda: "upper bound and lower bound inconsistent with step sign",
+        )
+    elif step < 0:
+        torch._check(
+            end <= start,
+            lambda: "upper bound and lower bound inconsistent with step sign",
+        )
 
     def is_finite(x):
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
