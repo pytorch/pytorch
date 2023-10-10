@@ -1791,14 +1791,6 @@ class MiniOpTestOther(CustomOpTestCaseBase):
         self.assertEqual(y, torch.tensor([[1], [2]]))
 
 
-mini_op_test_checks = [
-    "test_schema",
-    "test_autograd_registration",
-    "test_faketensor",
-    "test_aot_dispatch_static",
-    "test_aot_dispatch_dynamic",
-]
-
 optests.generate_opcheck_tests(
     MiniOpTest,
     ["aten", "mini_op_test"],
@@ -1806,8 +1798,6 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
-    [],
-    mini_op_test_checks,
 )
 
 optests.generate_opcheck_tests(
@@ -1817,15 +1807,15 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
-    [],
-    mini_op_test_checks,
 )
 
 
 class TestGenerateOpcheckTests(CustomOpTestCaseBase):
     def test_MiniOpTest(self):
         for orig_test in ["test_mm", "test_nonzero"]:
-            for test in mini_op_test_checks:
+            for (
+                test
+            ) in torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS:
                 expected_test = f"{test}__{orig_test}"
                 self.assertTrue(hasattr(MiniOpTest, expected_test), msg=expected_test)
 
@@ -1917,7 +1907,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         }
         with self.assertRaisesRegex(RuntimeError, "got status=success"):
             validate_failures_dict_structure(
-                FailuresDict("", failures), mini_op_test_checks, MiniOpTest
+                FailuresDict("", failures),
+                torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS,
+                MiniOpTest,
             )
 
         failures = {
@@ -1930,7 +1922,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         }
         with self.assertRaisesRegex(RuntimeError, "should begin with one of"):
             validate_failures_dict_structure(
-                FailuresDict("", failures), mini_op_test_checks, MiniOpTest
+                FailuresDict("", failures),
+                torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS,
+                MiniOpTest,
             )
 
         failures = {
@@ -1943,7 +1937,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         }
         with self.assertRaisesRegex(RuntimeError, "does not exist on the TestCase"):
             validate_failures_dict_structure(
-                FailuresDict("", failures), mini_op_test_checks, MiniOpTest
+                FailuresDict("", failures),
+                torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS,
+                MiniOpTest,
             )
 
     def test_dont_generate_decorator(self):
