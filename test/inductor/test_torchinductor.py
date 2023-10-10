@@ -1464,6 +1464,12 @@ class CommonTemplate:
 
         self.common(fn, (1024, 100))
 
+    def test_div9(self):
+        def fn(x):
+            return (torch.div(42, x), aten.true_divide(42, x), aten.div.Tensor(42, x))
+
+        self.common(fn, (torch.randn(8),))
+
     def test_div_zero_dim(self):
         def fn(a, b):
             return (
