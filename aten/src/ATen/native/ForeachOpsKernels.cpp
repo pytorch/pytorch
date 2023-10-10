@@ -100,29 +100,41 @@ namespace at::native {
     return result;                                              \
   }
 
-#define FOREACH_BINARY_OP_SCALAR(OP)                            \
-  void foreach_tensor_##OP##_scalar_kernel_slow_(               \
-      TensorList tensors, const Scalar& scalar) {               \
-    check_foreach_api_restrictions(tensors);                    \
-                                                                \
+#define FOREACH_BINARY_OP_SCALAR(OP)                               \
+  void foreach_tensor_##OP##_scalar_kernel_slow_(                  \
+      TensorList tensors, const Scalar& scalar) {                  \
+    check_foreach_api_restrictions(tensors);                       \
+                                                                   \
     Tensor scalar_tensor = tensors[0].new_empty({}).fill_(scalar); \
-    for (auto& t : tensors) {                                   \
-      t.OP##_(scalar_tensor);                                   \
-    }                                                           \
-  }                                                             \
-                                                                \
-  std::vector<Tensor> foreach_tensor_##OP##_scalar_kernel_slow( \
-      TensorList tensors, const Scalar& scalar) {               \
-    check_foreach_api_restrictions(tensors);                    \
-                                                                \
-    std::vector<Tensor> result;                                 \
-    result.reserve(tensors.size());                             \
+    for (auto& t : tensors) {                                      \
+      if (t.is_floating_point() &&                                 \
+          t.dtype() == scalar_tensor.dtype() &&                    \
+          t.device() == scalar_tensor.device()) {                  \
+        t.OP##_(scalar_tensor);                                    \
+      } else {                                                     \
+        t.OP##_(scalar);                                           \
+      }                                                            \
+    }                                                              \
+  }                                                                \
+                                                                   \
+  std::vector<Tensor> foreach_tensor_##OP##_scalar_kernel_slow(    \
+      TensorList tensors, const Scalar& scalar) {                  \
+    check_foreach_api_restrictions(tensors);                       \
+                                                                   \
+    std::vector<Tensor> result;                                    \
+    result.reserve(tensors.size());                                \
     Tensor scalar_tensor = tensors[0].new_empty({}).fill_(scalar); \
-    for (const auto& t : tensors) {                             \
-      result.emplace_back(t.OP(scalar_tensor));                        \
-    }                                                           \
-                                                                \
-    return result;                                              \
+    for (const auto& t : tensors) {                                \
+      if (t.is_floating_point() &&                                 \
+          t.dtype() == scalar_tensor.dtype() &&                    \
+          t.device() == scalar_tensor.device()) {                  \
+        result.emplace_back(t.OP(scalar_tensor));                  \
+      } else {                                                     \
+        result.emplace_back(t.OP(scalar));                         \
+      }                                                            \
+    }                                                              \
+                                                                   \
+    return result;                                                 \
   }
 
 #define FOREACH_BINARY_OP_SCALARLIST(OP)                            \
