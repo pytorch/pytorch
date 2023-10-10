@@ -74,7 +74,7 @@ class FSDPExtensions(ABC):
     @abstractmethod
     def all_gather_dtensor(
         self,
-        tensor: torch.Tensor,
+        tensor: DTensor,
         parent_mesh: DeviceMesh,
     ) -> torch.Tensor:
         """

@@ -360,7 +360,7 @@ class DTensorExtensions(FSDPExtensions):
 
     def all_gather_dtensor(
         self,
-        tensor: torch.Tensor,
+        tensor: DTensor,
         parent_mesh: DeviceMesh,
     ) -> torch.Tensor:
         return _all_gather_dtensor(tensor, parent_mesh)
