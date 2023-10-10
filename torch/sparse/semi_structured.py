@@ -329,7 +329,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     res = torch._cslt_sparse_mm(
                         input_B.compressed_tensor_cusparselt, input_A_padded.t(), bias  # type: ignore[arg-type]
                     ).t()
-                return res[:row]
+                return res[:row, :]
 
         # handle mm
         if func is torch.ops.aten.mm.default:
@@ -348,7 +348,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     res = torch._cslt_sparse_mm(
                         input_A.compressed_tensor_cusparselt, input_B_padded, None  # type: ignore[arg-type]
                     )
-                return res[:row, :col]
+                return res[:, :col]
 
             # second element sparse
             elif isinstance(input_B, cls) and input_B.transposed:
@@ -363,7 +363,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 else:
                     res = torch._cslt_sparse_mm(input_B.compressed_tensor_cusparselt, input_A_padded.t(), None).t()  # type: ignore[arg-type]
 
-                return res[:row, :col]
+                return res[:row, :]
 
         # When torch is run with inference mode, pytorch does not decompose torch.ops.aten.linear into a .t() and addmm(),
         # so we must match the aten.linear op. In this case, we need to explicitly handle collapsing to 2d matmul
@@ -386,14 +386,14 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         weight.meta_tensor_cutlass,
                         bias=bias
                     )
-                    return res[:row]
+                    return res[:row, :]
                 else:
                     res = torch._cslt_sparse_mm(
                         weight.compressed_tensor_cusparselt,  # type: ignore[arg-type]
                         input_tensor_2d_padded.t(),
                         bias
                     ).t()
-                    return res[:row].view(*shape[:-1], -1)
+                    return res[:row, :].view(*shape[:-1], -1)
 
 
         # handle values
