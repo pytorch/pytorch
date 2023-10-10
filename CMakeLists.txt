@@ -1051,7 +1051,7 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
-include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+include_directories(BEFORE ${CMAKE_BINARY_DIR}/aten/src/)
 
 if(USE_MIMALLOC)
   set(MI_OVERRIDE OFF)
