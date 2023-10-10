@@ -856,7 +856,6 @@ def _post_load_state_dict_hook(
             "be returned."
         )
     else:
-        _set_use_dtensor(module, fsdp_state)
         context = contextlib.nullcontext()
 
     with context:

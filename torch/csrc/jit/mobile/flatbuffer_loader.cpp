@@ -291,9 +291,11 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
-  TORCH_CHECK(ivalues != nullptr, "Corrupted ivalues field")
   TORCH_CHECK(
-      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field")
+      ivalues && module->object_types(),
+      "Parsing flatbuffer module: Corrupted ivalues/object_types field");
+  TORCH_CHECK(
+      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field");
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
@@ -753,8 +755,6 @@ mobile::Module parse_and_initialize_mobile_module(
     c10::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
-  TORCH_CHECK(
-      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): If not copying, enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
 
