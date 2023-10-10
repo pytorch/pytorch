@@ -28,7 +28,7 @@ import types
 import typing
 import unittest
 import weakref
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 import torch
 import torch._inductor.test_operators
@@ -165,6 +165,7 @@ FUNC_INLINELIST = set()
 # Force inline functions in these files or directories, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
+# TODO: Merge FILE_INLINELIST into SUBMODULE_INLINELIST.
 FILE_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
@@ -226,6 +227,7 @@ if torch.distributed.is_available():
     SUBMODULE_INLINELIST.add("torch.distributed._functional_collectives")
 
 
+# TODO: support adding bound method into this list
 @functools.lru_cache(None)
 def get_func_inlinelist():
     inlinelist = set()
@@ -251,15 +253,6 @@ def get_submodule_inlinelist():
     for m in SUBMODULE_INLINELIST:
         inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
     return inlinelist
-
-
-if TYPE_CHECKING:
-    for m in FILE_INLINELIST.union(SUBMODULE_INLINELIST):
-        importlib.import_module(m)
-    for f in FUNC_INLINELIST:
-        module_name, fn_name = f.rsplit(".", 1)
-        m = importlib.import_module(module_name)
-        inspect.isfunction(getattr(m, fn_name))
 
 
 # skip some standard python builtin libs
