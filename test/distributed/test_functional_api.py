@@ -458,6 +458,92 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
+    @with_comms()
+    def test_all_to_all_single(self):
+        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
+        rank = dist.get_rank()
+
+        row = self.world_size * (rank + 1) * (self.world_size + 1) / 2
+        x = torch.ones(int(row), 5, device=device) * (rank + 1)
+        split_sizes = [(i + 1) * (rank + 1) for i in range(self.world_size)]
+        y = ft_c.all_to_all_single(
+            x, output_split_sizes=split_sizes, input_split_sizes=split_sizes, group=mesh
+        )
+        expected = []
+        for idx, tensor in enumerate(torch.split(x, split_sizes)):
+            expected.append(torch.full_like(tensor, (idx + 1)))
+        expected = torch.cat(expected)
+        self.assertEqual(y, expected)
+
+    @with_comms()
+    def test_all_to_all_single_1d_input(self):
+        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
+        rank = dist.get_rank()
+
+        row = self.world_size * (rank + 1) * (self.world_size + 1) / 2
+        x = torch.ones(int(row), device=device) * (rank + 1)
+        split_sizes = [(i + 1) * (rank + 1) for i in range(self.world_size)]
+        y = ft_c.all_to_all_single(
+            x, output_split_sizes=split_sizes, input_split_sizes=split_sizes, group=mesh
+        )
+        expected = []
+        for idx, tensor in enumerate(torch.split(x, split_sizes)):
+            expected.append(torch.full_like(tensor, (idx + 1)))
+        expected = torch.cat(expected)
+        self.assertEqual(y, expected)
+
+    @with_comms()
+    def test_all_to_all_single_output_split_sizes_none(self):
+        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
+        rank = dist.get_rank()
+
+        input_split_sizes = [1] * self.world_size
+        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
+        y = ft_c.all_to_all_single(
+            x, output_split_sizes=None, input_split_sizes=input_split_sizes, group=mesh
+        )
+        expected = []
+        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
+            expected.append(torch.full_like(tensor, (idx + 1)))
+        expected = torch.cat(expected)
+        self.assertEqual(y, expected)
+
+    @with_comms()
+    def test_all_to_all_single_input_split_sizes_none(self):
+        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
+        rank = dist.get_rank()
+
+        output_split_sizes = [1] * self.world_size
+        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
+        y = ft_c.all_to_all_single(
+            x, output_split_sizes=output_split_sizes, input_split_sizes=None, group=mesh
+        )
+        expected = []
+        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
+            expected.append(torch.full_like(tensor, (idx + 1)))
+        expected = torch.cat(expected)
+        self.assertEqual(y, expected)
+
+    @with_comms()
+    def test_all_to_all_single_split_sizes_none(self):
+        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
+        rank = dist.get_rank()
+
+        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
+        y = ft_c.all_to_all_single(
+            x, output_split_sizes=None, input_split_sizes=None, group=mesh
+        )
+        expected = []
+        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
+            expected.append(torch.full_like(tensor, (idx + 1)))
+        expected = torch.cat(expected)
+        self.assertEqual(y, expected)
+
 
 class TestOpWaitiness(MultiThreadedTestCase):
     @property
