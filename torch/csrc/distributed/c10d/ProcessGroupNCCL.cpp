@@ -322,7 +322,8 @@ struct NCCLTraceBuffer {
     return instance;
   }
   NCCLTraceBuffer() {
-    enabled_ = c10::utils::check_env("TORCH_NCCL_TRACE_BUFFER") == true;
+    max_entries_ = parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0);
+    enabled_ = max_entries_ > 0;
   }
   using EventList = std::vector<at::cuda::CUDAEvent>;
   struct Entry {
@@ -856,7 +857,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_);
+  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ || parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
