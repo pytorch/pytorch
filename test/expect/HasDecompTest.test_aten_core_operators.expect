@@ -458,13 +458,10 @@ aten::special_zeta.other_scalar_out
 aten::special_zeta.out
 aten::special_zeta.self_scalar
 aten::special_zeta.self_scalar_out
-aten::split.Tensor
 aten::split_with_sizes
 aten::sqrt
 aten::sqrt.out
 aten::sqrt_
-aten::squeeze
-aten::squeeze.dim
 aten::squeeze.dims
 aten::sub.Scalar
 aten::sub.Scalar_out
@@ -472,10 +469,8 @@ aten::sub.Tensor
 aten::sub.out
 aten::sub_.Scalar
 aten::sub_.Tensor
-aten::sum
 aten::sum.IntList_out
 aten::sum.dim_IntList
-aten::sum.out
 aten::tan
 aten::tan.out
 aten::tan_
@@ -489,7 +484,6 @@ aten::triu_indices.out
 aten::trunc
 aten::trunc.out
 aten::trunc_
-aten::unbind.int
 aten::unfold
 aten::uniform
 aten::uniform.out

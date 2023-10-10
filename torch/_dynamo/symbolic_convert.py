@@ -51,6 +51,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
+from .funcname_cache import get_funcname
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -381,7 +382,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                 "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                case_name="cond_operands",
             )
 
     return inner
@@ -626,7 +628,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        return f"{self.f_code.co_filename}:{lineno} in {self.f_code.co_name}{inline_depth_str}"
+        funcname = get_funcname(self.f_code.co_filename, lineno)
+        funcname_str = "" if funcname is None else f" ({funcname})"
+        return f"{self.f_code.co_filename}:{lineno} in {self.f_code.co_name}{funcname_str}{inline_depth_str}"
 
     def get_log_starts_line_log_str(self):
         log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
@@ -1305,7 +1309,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
+        new_set = SetVariable(items, mutable_local=MutableLocal(), **options)
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
@@ -2243,7 +2247,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        result = skipfiles.check_verbose(func.get_filename(), allow_torch=True)
+        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
@@ -2261,7 +2265,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}, skip reason: {result.reason}'"  # noqa: B950
+                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
@@ -2323,9 +2327,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 return f"TRACE inlined call {code.co_name} from {header}\n{line}"
 
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
-        log.debug("INLINING %s%s, inline reason: %s", code, suffix, result.reason)
+        log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
-        # Detect inline GraphModule calls in order to propgate node metadata,
+        # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
