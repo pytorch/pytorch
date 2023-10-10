@@ -418,9 +418,11 @@ class TritonTemplate(KernelTemplate):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
-        template_env=dict(),
+        template_env=None,
         **kwargs,
     ):
+        if template_env is None:
+            template_env = dict()
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():

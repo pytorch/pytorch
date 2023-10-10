@@ -1,9 +1,14 @@
 import torch
-from torch._inductor.select_algorithm import TritonTemplate, ExternKernelChoice, autotune_select_algorithm
 import torch._prims_common as utils
 from torch._inductor import ir
+from torch._inductor.select_algorithm import (
+    autotune_select_algorithm,
+    ChoiceCaller,
+    ExternKernelChoice,
+    TritonTemplate,
+)
+from torch._inductor.utils import ceildiv, get_dtype_size, sympy_product
 from torch.utils._sympy.functions import CeilDiv
-from torch._inductor.utils import ceildiv, sympy_product, get_dtype_size
 
 # This implements multi-block scans in the same manner as CUB, according to the paper
 #
@@ -33,14 +38,16 @@ from torch._inductor.utils import ceildiv, sympy_product, get_dtype_size
 # scratch buffer. This is required to use relaxed atomics for which there is
 # far less cache invalidation and thus much better performance.
 
+
 def cumsum_grid(batch_size, dim_size, meta):
     """
     The CUDA grid size for cumsum template kernel.
     """
     return (ceildiv(dim_size, meta["XBLOCK"]), batch_size, 1)
 
+
 cumsum_template = TritonTemplate(
-    name=f"cumsum",
+    name="cumsum",
     grid=cumsum_grid,
     debug=True,
     source="""
@@ -110,8 +117,9 @@ def unpack_flag(pack):
 
     # Inductor generates a suffix
     {{store_output(("yindex", "xindex"), "result", "xmask")}}
-"""
+""",
 )
+
 
 def view_as_batch_and_dim(x, dim):
     orig_sizes = x.get_size()
@@ -119,23 +127,27 @@ def view_as_batch_and_dim(x, dim):
     x = ir.PermuteView.create(x, perm)
     return ir.TensorBox(ir.View.create(x, (-1, orig_sizes[dim])))
 
+
 def view_as_original_shape(x, orig_sizes, dim):
     pre_dim_size = sympy_product(orig_sizes[:dim])
     dim_size = orig_sizes[dim]
-    post_dim_size = sympy_product(orig_sizes[dim + 1:])
+    post_dim_size = sympy_product(orig_sizes[dim + 1 :])
 
     tmp = ir.View.create(x, (pre_dim_size, post_dim_size, dim_size))
     tmp = ir.PermuteView.create(tmp, [0, 2, 1])
     return ir.TensorBox(ir.View.create(tmp, orig_sizes))
 
+
 def aten_cumsum(x, scratch, flags):
     return x.cumsum(-1)
 
+
 fallback_aten_cumsum = ExternKernelChoice(aten_cumsum, None)
 
+
 def split_cumsum(x, dim):
-    from torch._inductor.lowering import empty, _full, clone
     from torch._inductor.codegen.triton import triton_compute_type
+    from torch._inductor.lowering import _full, clone
 
     assert x.get_device().type == "cuda"
 
@@ -179,15 +191,15 @@ def split_cumsum(x, dim):
     x.realize()
     scratch.realize()
 
-    choices = []
+    choices: ChoiceCaller = []
 
     for XBLOCK, num_warps in [
-            (512, 4),
-            (512, 8),
-            (256, 4),
-            (128, 4),
-            (1024, 4),
-            (1024, 8),
+        (512, 4),
+        (512, 8),
+        (256, 4),
+        (128, 4),
+        (1024, 4),
+        (1024, 8),
     ]:
         cumsum_template.maybe_append_choice(
             choices,
