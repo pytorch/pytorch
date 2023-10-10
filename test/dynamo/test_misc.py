@@ -7309,6 +7309,81 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_infinite_repeat(self):
+        counters.clear()
+
+        def fn(x):
+            r = itertools.repeat(100.0)
+            idx = 0
+            for i in r:
+                x += i
+                idx += 1
+                if idx > 10:
+                    break
+            return x
+
+        x = torch.randn([2, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_infinite_count(self):
+        for args in ([], [10], [5, -1]):
+            counters.clear()
+
+            def fn(x):
+                r = itertools.count(*args)
+                idx = 0
+                for i in r:
+                    x += i
+                    idx += 1
+                    if idx > 10:
+                        break
+                return x
+
+            x = torch.randn([2, 5])
+            eager = fn(x)
+
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+            compiled = compiled_fn(x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_infinite_cycle(self):
+        print("TRYING")
+        counters.clear()
+
+        def fn(x):
+            for iterator in (
+                iter([]),
+                iter([10, 11.0]),
+                itertools.repeat(-1),
+                itertools.count(10, 15),
+            ):
+                r = itertools.cycle(iterator)
+                idx = 0
+                for i in r:
+                    x += i
+                    idx += 1
+                    if idx > 10:
+                        break
+                return x
+
+        x = torch.randn([2, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+        print("SUCCESS")
+
     def test_itertools_accumulate_symint_default_sum(self):
         # https://github.com/pytorch/pytorch/issues/110287
         counters.clear()
