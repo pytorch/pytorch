@@ -681,7 +681,7 @@ class ExecutionTraceObserver:
 
     def register_callback(self, output_file_path: str):
         """
-        Adds ET observer to record function callbacks. The the data will be
+        Adds ET observer to record function callbacks. The data will be
         written to output_file_path.
         """
         if not self._registered:

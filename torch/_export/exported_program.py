@@ -336,7 +336,7 @@ def _process_constraints(
     for symbol, value_range in inline_constraints.items():
         range_constraints[symbol] = RangeConstraint(value_range.lower, value_range.upper)
 
-    # Add input range constraints to range_constraintss
+    # Add input range constraints to range_constraints
     for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
         # Simplify the range constraints into a single range constraint
         # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
