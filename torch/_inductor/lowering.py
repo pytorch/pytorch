@@ -4167,17 +4167,21 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             kept_sizes.append(size[i])
 
     def loader(index, reduction_index):
+        print(f"lowering: loader: {index=}, {reduction_index=}, {reduced_idx=}, {size=}", flush=True)
+        # breakpoint()
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
             assert len(index) == len(size)
             assert all(index[i] == 0 for i in reduced_idx)
             index = [index[i] for i in kept_idx]
+        print(f"lowering: loader: {index=}, {kept_idx=}", flush=True)
         assert len(index) == len(kept_idx)
         new_index = [None] * (len(index) + len(reduction_index))
         for idx, var in itertools.chain(
             zip(kept_idx, index), zip(reduced_idx, reduction_index)
         ):
             new_index[idx] = var
+        print(f"lowering: loader: new_index: {new_index=}", flush=True)
         return inner_loader(new_index)
 
     if keepdims:
@@ -4207,7 +4211,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
             dtype=dtype,
             override_return_dtype=override_return_dtype,
         )
-        result = Reduction.create(reduction_type=reduction_type, **kwargs)
+        result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
             result.data.data, Reduction
         ):  # Only realize if reduction isn't unrolled

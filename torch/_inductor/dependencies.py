@@ -338,7 +338,9 @@ def extract_read_writes(
     normalize: bool = False,
     prefix: str = "d",
 ):
+    print(f"dependencies: extract_read_writes: {argsizes=}, {normalize=}, {fn=}", flush=True)
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
+    print(f"dependencies: {args=}, {var_ranges=}", flush=True)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):  # type: ignore[call-arg]
         fn(*args)
@@ -349,7 +351,7 @@ def extract_read_writes(
         range_vars = [*itertools.chain(*args)]
 
     inner = rw.parent_handler.parent_handler
-    return ReadWrites(
+    res = ReadWrites(
         set(inner._reads),
         set(inner._writes),
         inner._index_exprs,
@@ -357,6 +359,29 @@ def extract_read_writes(
         var_ranges,
         rw.parent_handler._op_counts,
     )
+    print(f"dependencies: extract_read_writes results: {res=}", flush=True)
+    return res
+
+
+def extract_input_node_reduction_ranges(input_node: 'ir.TensorBox') -> List[sympy.Expr]:
+    from .ir import ComputedBuffer
+    reads = input_node.get_reads()
+    reduction_size = None
+    size = None
+    for read in reads:
+        if not isinstance(read, MemoryDep):
+            continue
+        buffer = V.graph.get_buffer(read.name)
+        if buffer is None:
+            continue
+        if isinstance(buffer, ComputedBuffer) and len(buffer.get_reduction_size()) > 0:
+            if reduction_size is None:
+                reduction_size = buffer.get_reduction_size()
+                size = buffer.get_size()
+            elif reduction_size != buffer.get_reduction_size() or size != buffer.get_size():
+                return None
+    print(f"dependencies: extract_input_ranges: {size=}, {reduction_size=}", flush=True)
+    return (size, reduction_size)
 
 
 def canonicalization_prefix():

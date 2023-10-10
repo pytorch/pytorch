@@ -50,7 +50,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .dependencies import extract_read_writes, var_builder
+from .dependencies import extract_read_writes, var_builder, extract_input_node_reduction_ranges
 from .utils import (
     argsort,
     cache_on_self,
@@ -373,6 +373,7 @@ class Loops(IRNode):
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
 
     def get_reads(self):
+        print(f"ir: Loops: get_reads()", flush=True)
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
@@ -587,7 +588,13 @@ class Reduction(Loops):
         reduction_ranges,
         reduction_type,
         reduction_numel,
+        input_node: IRNode = None,
     ):
+        print(
+            f"ir: reduction num_splits: {ranges=}, {reduction_ranges=}, {reduction_numel=}, {inner_fn=}, {reduction_type=}",
+            flush=True,
+        )
+
         def _is_static(x):
             return isinstance(x, (int, sympy.Integer))
 
@@ -692,9 +699,15 @@ class Reduction(Loops):
 
         # easy cases
         if numel_hint == 1:
-            return ReductionHint.INNER, inner_reduction_splits(
-                reduction_numel_hint, numel_hint
-            )
+            split = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            if split == 1:
+                return ReductionHint.INNER, split
+            if input_node is not None and isinstance(input_node, TensorBox):
+                _, reduction_size = extract_input_node_reduction_ranges(input_node)
+                if reduction_size is not None:
+                    return ReductionHint.INNER, -1
+            return ReductionHint.INNER, split
+
         if (
             reduction_numel_hint <= min_elements_per_thread
             or numel_hint >= num_sm * 2 * 32
@@ -723,6 +736,7 @@ class Reduction(Loops):
                 data=r,
             )
             read_writes = cb.get_read_writes()
+            print(f"ir: reduction: get_read_indices: {read_writes=}", flush=True)
             # try finding the full size producer
             # TODO this will fail for something like ((1, N) * (N, 1)).sum()
             # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
@@ -825,6 +839,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: IRNode = None,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -903,13 +918,28 @@ class Reduction(Loops):
             reduction_ranges,
             reduction_type,
             reduction_numel,
+            input_node=input_node,
         )
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
-        if split > 1:
+        if split == -1:
+            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(input_node)
+            return cls.create_multilayer_existing_ranges(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                new_ranges,
+                new_reduction_ranges,
+                reduction_type,
+                reduction_hint,
+            )
+        elif split > 1:
             # triton doesn't support reduce to single element well, so break it up
             return cls.create_multilayer(
                 device,
@@ -972,6 +1002,9 @@ class Reduction(Loops):
     def _multilayer_second_step_hint(
         split: int, numel_hint: int, reduction_hint: ReductionHint
     ) -> ReductionHint:
+        if split == -1:
+            return reduction_hint
+
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
             return ReductionHint.OUTER_TINY
         if (
@@ -993,7 +1026,12 @@ class Reduction(Loops):
         block_size,
         default,
     ):
+        # breakpoint()
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+        print(
+            f"ir: reduction: multilayer_wrap_loader: {reduction_ranges=}, {reduction_numel=}, {reindex=}",
+            flush=True,
+        )
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
             sympy.Eq(reduction_numel % split, 0)
         )
@@ -1002,6 +1040,10 @@ class Reduction(Loops):
             (reduction_index,) = reduction_index
             *new_index, reduction_block = index
             indices = block_size * reduction_block + reduction_index
+            print(
+                f"ir: reduction: wrapper_fn: {index=}, {reduction_index=}, {new_index=}, {indices=}, {reindex([indices])=}",
+                flush=True,
+            )
 
             def body():
                 return loader(new_index, reindex([indices]))
@@ -1016,6 +1058,97 @@ class Reduction(Loops):
                 return body()
 
         return wrapper_fn
+
+    @classmethod
+    def _multilayer_wrap_loader_existing_ranges(
+        cls,
+        loader,
+        original_ranges,
+        original_reduction_ranges,
+        new_ranges,
+        new_reduction_ranges,
+        default,
+    ):
+        # breakpoint()
+        assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
+        reindex = View.dynamic_reshape_indexer(
+            original_reduction_ranges,
+            tuple(new_ranges) + tuple(new_reduction_ranges)
+        )
+        print(
+            f"ir: reduction: multilayer_wrap_loader_existing_ranges: {new_ranges=}, {new_reduction_ranges=}, {original_reduction_ranges=}",
+            flush=True,
+        )
+
+        def wrapper_fn(index, reduction_index):
+            print(
+                f"ir: reduction: wrapper_fn: body: {index=}, {reduction_index=}",
+                flush=True,
+            )
+            return loader([], reindex(tuple(index) + tuple(reduction_index)))
+
+        return wrapper_fn
+
+    @classmethod
+    def create_multilayer_helper(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        wrapper_fn: Callable[..., Any],
+        original_ranges: List[Expr],
+        original_reduction_ranges: List[Expr],
+        new_ranges: List[Expr],
+        new_reduction_ranges: List[Expr],
+        reduction_type: str,
+        split: int,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
+        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
+        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
+        intermediate_dtype = (
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
+        )
+        intermediate = Reduction.create(
+            device,
+            intermediate_dtype,
+            src_dtype,
+            wrapper_fn,
+            new_ranges,
+            new_reduction_ranges,
+            reduction_type,
+            reduction_hint,
+        )
+        intermediate.realize()
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(index, reduction_index):
+            return intermediate_loader([*index, *reduction_index])
+
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(new_ranges))
+        reduction_hint = cls._multilayer_second_step_hint(
+            split, numel_hint, reduction_hint
+        )
+
+        return TensorBox.create(
+            Reduction(
+                device,
+                dst_dtype,
+                intermediate_fn,
+                original_ranges,
+                new_ranges,
+                reduction_type,
+                src_dtype,
+                reduction_hint,
+            )
+        )
 
     @classmethod
     def create_multilayer(
@@ -1042,45 +1175,59 @@ class Reduction(Loops):
             inner_fn, reduction_ranges, reduction_numel, split, block_size, default
         )
 
-        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
-        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
-        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
-        intermediate_dtype = (
-            dst_dtype
-            if dst_dtype not in (torch.float16, torch.bfloat16)
-            else torch.float
-        )
-        intermediate = Reduction.create(
+        return cls.create_multilayer_helper(
             device,
-            intermediate_dtype,
+            dst_dtype,
             src_dtype,
             wrapper_fn,
+            ranges,
+            reduction_ranges,
             [*ranges, split],
             [block_size],
             reduction_type,
+            split,
             reduction_hint,
         )
-        intermediate.realize()
-        intermediate_loader = intermediate.make_loader()
 
-        def intermediate_fn(index, reduction_index):
-            return intermediate_loader([*index, *reduction_index])
-
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-        reduction_hint = cls._multilayer_second_step_hint(
-            split, numel_hint, reduction_hint
+    @classmethod
+    def create_multilayer_existing_ranges(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        original_ranges: List[Expr],
+        original_reduction_ranges: List[Expr],
+        new_ranges: List[Expr],
+        new_reduction_ranges: List[Expr],
+        reduction_type: str,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        default = cls.default_value(reduction_type, dst_dtype)
+        wrapper_fn = cls._multilayer_wrap_loader_existing_ranges(
+            inner_fn,
+            original_ranges,
+            original_reduction_ranges,
+            new_ranges,
+            new_reduction_ranges,
+            default,
         )
-        return TensorBox.create(
-            Reduction(
-                device,
-                dst_dtype,
-                intermediate_fn,
-                ranges,
-                [split],
-                reduction_type,
-                src_dtype,
-                reduction_hint,
-            )
+        return cls.create_multilayer_helper(
+            device,
+            dst_dtype,
+            src_dtype,
+            wrapper_fn,
+            original_ranges,
+            original_reduction_ranges,
+            new_ranges,
+            new_reduction_ranges,
+            reduction_type,
+            -1,
+            reduction_hint,
         )
 
 
@@ -1144,6 +1291,7 @@ class WelfordReduction(Reduction):
     ):
         assert reduction_type in {"welford_reduce", "welford_combine"}
 
+        print(f"ir: reduction create: {ranges=}, {reduction_ranges=}")
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         def const(idx, val):
@@ -1458,6 +1606,7 @@ class BaseView(IRNode):
         return self.data.is_extern()
 
     def get_reads(self):
+        print(f"ir: BaseView: get_reads()", flush=True)
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
@@ -1789,9 +1938,12 @@ class View(GenericView):
         assert len(view_expr) == len(old_size)
 
         def reindex(index):
+            print(f"ir: View: reindex: {index=}, {vars=}, {view_expr=}", flush=True)
             assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
-            return tuple(sympy_subs(x, replacements) for x in view_expr)
+            res = tuple(sympy_subs(x, replacements) for x in view_expr)
+            print(f"ir: View: reindex: {res=}", flush=True)
+            return res
 
         return reindex
 
@@ -2428,6 +2580,7 @@ class Buffer(IRNode):
         return ()
 
     def get_read_writes(self):
+        print(f"ir: Buffer: get_read_writes()", flush=True)
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
@@ -2581,8 +2734,14 @@ class ComputedBuffer(Buffer):
         return len(self.get_read_writes().reads)
 
     def get_read_writes(self):
+        print(f"ir: ComputedBuffer: get_read_writes()", flush=True)
+        # breakpoint()
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
+                print(
+                    f"ir: ComputedBuffer: {self.data.get_size()=}, {self.data.get_reduction_size()=}",
+                    flush=True,
+                )
                 return extract_read_writes(
                     self.get_store_function(),
                     self.data.get_size(),

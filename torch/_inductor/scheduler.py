@@ -1044,6 +1044,7 @@ class NodeUser:
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
+        print(f"{len(nodes)=}, {nodes=}", flush=True)
         super().__init__()
         self.backends = {}
         self.fuse_cache = {}

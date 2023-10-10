@@ -243,14 +243,10 @@ class TestFP8Types(TestCase):
     #@parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("float8_dtype", (torch.float8_e4m3fn, ))
     @parametrize("shape", ((4, 2048, 4096),))
-    # @parametrize("enable_split_reductions", (True, False))
-    # @parametrize("enable_split_reductions", (False, ))
-    @parametrize("enable_split_reductions", (True, ))
     def test_layernorm_fp8_quant_benchmark(
         self,
         float8_dtype: torch.dtype,
         shape: Tuple[int],
-        enable_split_reductions: bool,
     ):
         batch_size, sequence_length, hidden_size = shape
 
@@ -267,25 +263,24 @@ class TestFP8Types(TestCase):
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
 
-        with config.patch({"split_reductions": enable_split_reductions}):
-            compiled_ln_fp8_quant = torch.compile(ln_fp8, backend="inductor")
+        compiled_ln_fp8_quant = torch.compile(ln_fp8, backend="inductor")
 
-            x_shape = (batch_size, sequence_length, hidden_size)
-            x = torch.rand(*x_shape, device="cuda", dtype=torch.half)
-            scale = torch.tensor(0.2, device="cuda", dtype=torch.float)
+        x_shape = (batch_size, sequence_length, hidden_size)
+        x = torch.rand(*x_shape, device="cuda", dtype=torch.half)
+        scale = torch.tensor(0.2, device="cuda", dtype=torch.float)
 
-            amax_buffer_compiled = torch.zeros((1), device="cuda", dtype=torch.half)
-            y_compiled = compiled_ln_fp8_quant(x, scale, amax_buffer_compiled)
-            compiled_latency = utils.do_bench_using_profiling(
-                functools.partial(compiled_ln_fp8_quant, x, scale, amax_buffer_compiled)
-            )
-            amax_buffer = torch.zeros((1), device="cuda", dtype=torch.half)
-            eager_latency = utils.do_bench_using_profiling(
-                functools.partial(ln_fp8, x, scale, amax_buffer)
-            )
-            print(
-                f"Config: {float8_dtype=}, {shape=}, {enable_split_reductions=}. Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms."
-            )
+        amax_buffer_compiled = torch.zeros((1), device="cuda", dtype=torch.half)
+        amax_buffer = torch.zeros((1), device="cuda", dtype=torch.half)
+        y_compiled = compiled_ln_fp8_quant(x, scale, amax_buffer_compiled)
+        compiled_latency = utils.do_bench_using_profiling(
+            functools.partial(compiled_ln_fp8_quant, x, scale, amax_buffer_compiled)
+        )
+        eager_latency = utils.do_bench_using_profiling(
+            functools.partial(ln_fp8, x, scale, amax_buffer)
+        )
+        print(
+            f"Config: {float8_dtype=}, {shape=}. Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms."
+        )
 
 
 if __name__ == "__main__":
