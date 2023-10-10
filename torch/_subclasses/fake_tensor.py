@@ -582,7 +582,7 @@ def nonzero(fake_mode, func, arg):
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
-            if arg.numel() >= 2:
+            if arg.numel() > 2:
                 maxval = int(arg.numel())
 
         _constrain_range_for_size(nnz, max=maxval)

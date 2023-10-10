@@ -4,13 +4,18 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, Optional, cast, TYPE_CHECKING
-from torch.utils._pytree import tree_map_only
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import _register_tensor_wrapper
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
 from torch._custom_ops import impl_abstract
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only
+except ImportError:
+    from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
+
 
 if torch._running_with_deploy():
     def is_torchdynamo_compiling():
