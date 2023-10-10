@@ -182,7 +182,7 @@ class ExprPrinterTests(TorchTestCase):
         ]
 
         gpu_cases = common_cases + [
-            (sympy.Pow(s1 + s2, 2), lambda c, L: "(bar + foo)*(bar + foo)")
+            (sympy.Pow(s1 + s2, 2), lambda c, L: "(bar + foo)*(bar + foo)"),
         ]
         cpu_cases = common_cases + [
             (
@@ -190,11 +190,23 @@ class ExprPrinterTests(TorchTestCase):
                 lambda c, L: "static_cast<long>((bar + foo)*(bar + foo))",
             )
         ]
+        sqrt_cases = [
+            (
+                sympy.Pow(s1 + s2, -0.5),
+                lambda c, _: f"{c}/math.sqrt(bar + foo)",
+            ),
+            (
+                sympy.Pow(s1 + s2, -0.25),
+                lambda c, _: f"{c}/math.sqrt(math.sqrt(bar + foo))",
+            ),
+        ]
         for expr, result in gpu_cases:
             self.assertEqual(texpr(expr), result(1, ""))
             self.assertEqual(pexpr(expr), result(1, ""))
         for expr, result in cpu_cases:
             self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
+        for expr, result in sqrt_cases:
+            self.assertEqual(pexpr(expr), result(1, ""))
 
     def test_print_floor(self):
         for integer in [True, False]:

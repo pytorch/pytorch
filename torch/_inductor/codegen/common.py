@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import operator
 import re
 from collections import namedtuple
@@ -285,10 +286,18 @@ class ExprPrinter(Printer):
         # in sizevar compute.  Instead of adding support for floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
-        if exp == 0.5:
-            return self._helper_sqrt(base)  # type: ignore[attr-defined]
-        elif exp == -0.5:
-            return "1/" + self._helper_sqrt(base)  # type: ignore[attr-defined]
+
+        if abs(exp) < 1.0 and exp != 0:
+            pow2 = math.log(1 / abs(exp), 2)
+            # call nested sqrt
+            if pow2.is_integer():
+                for _ in range(int(pow2)):
+                    base = self._helper_sqrt(base)   # type: ignore[attr-defined]
+                if exp > 0:
+                    return base
+                if exp < 0:
+                    return "1/" + base
+
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
