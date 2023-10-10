@@ -841,6 +841,9 @@ class OpInfo:
     # whether the op supports sparse bsc inputs, defaults to False
     supports_sparse_bsc: bool = None
 
+    # whether the op promotes integer inputs to float
+    promotes_int_to_float: bool = False
+
     # the following metadata relates to complex support and is checked in test_ops.py
 
     test_conjugated_samples: bool = True
@@ -2061,7 +2064,6 @@ class BinaryUfuncInfo(OpInfo):
         error_inputs_func=None,
         lhs_make_tensor_kwargs=None,
         rhs_make_tensor_kwargs=None,
-        promotes_int_to_float=False,  # Set to true if the op promotes integer inputs to float
         always_returns_bool=False,  # Set to true if the op always returns bool tensors
         supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
         supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
@@ -2098,7 +2100,6 @@ class BinaryUfuncInfo(OpInfo):
             rhs_make_tensor_kwargs = {}
         self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
 
-        self.promotes_int_to_float = promotes_int_to_float
         self.always_returns_bool = always_returns_bool
         self.supports_rhs_python_scalar = supports_rhs_python_scalar
         self.supports_one_python_scalar = supports_one_python_scalar
