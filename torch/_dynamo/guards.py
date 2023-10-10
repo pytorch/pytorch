@@ -1409,7 +1409,7 @@ def make_dupe_guard(obj_source, dupe_source):
     # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
     # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
     # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-    # In the the fn(x, x) example call above look like a graph with a single input.
+    # In the fn(x, x) example call above look like a graph with a single input.
     # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
 
     # Note - we may not have a source, that is fine, it just means we had an object that is safe to have

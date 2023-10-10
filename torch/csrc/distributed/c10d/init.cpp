@@ -2622,6 +2622,19 @@ Example::
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   module.def(
+      "_set_global_rank",
+      [](int64_t rank) { c10::SetGlobalRank(rank); },
+      py::arg("rank"),
+      R"(
+        Arguments:
+          rank(int): The rank of the default process group
+        Informs the C++ runtime what the default process group (a strictly Python
+        notion) is.  This mostly ensures that C++ log messages are prefixed with
+        rank information.  This is not meant to be called manually; it is
+        called by _update_default_pg.
+      )");
+
+  module.def(
       "_create_work_from_future",
       [](std::shared_ptr<jit::PythonFutureWrapper> future) {
         return ::c10d::Work::create_from_future(future->fut);

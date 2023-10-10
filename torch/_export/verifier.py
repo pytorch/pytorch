@@ -232,7 +232,7 @@ def verify_exported_program_signature(exported_program) -> None:
     total_gs_placeholders = len(gs.inputs_to_parameters) + len(gs.inputs_to_buffers) + len(gs.user_inputs)
     if len(placeholder_nodes) != total_gs_placeholders:
         raise SpecViolationError(
-            f"Number of placholders nodes {len(placeholder_nodes)} is different "
+            f"Number of placeholders nodes {len(placeholder_nodes)} is different "
             "Than the number of inputs specified by the graph signature: \n"
             f"Number of parameters: {len(gs.inputs_to_parameters)}. \n"
             f"Number of buffers: {len(gs.inputs_to_buffers)}. \n"
@@ -303,7 +303,7 @@ def verify_exported_program_signature(exported_program) -> None:
             gs.buffers_to_mutate[buffer_node] not in gs.buffers
         ):
             raise SpecViolationError(
-                f"Buffer output {buffer_node} is not in buffer mutation dictinoary "
+                f"Buffer output {buffer_node} is not in buffer mutation dictionary "
                 "or, it does not point to a buffer that exists. \n"
                 f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
                 f"Buffer nodes available: {gs.buffers} \n"
