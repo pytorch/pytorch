@@ -428,8 +428,6 @@ def mps_ops_modifier(ops):
         'kthvalue': None,
         'lcm': None,
         'lgamma': None,
-        'linalg.cholesky': None,
-        'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.detsingular': None,
         'linalg.det': None,
