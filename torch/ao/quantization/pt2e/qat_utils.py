@@ -21,7 +21,7 @@ from .utils import (
 )
 
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
 
 
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`

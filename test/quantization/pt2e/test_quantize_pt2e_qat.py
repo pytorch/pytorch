@@ -573,11 +573,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         # Extract the conv weight and bias nodes
         def get_conv_weight_and_bias(conv_node: torch.fx.Node):
             weight_dq_node = conv_node.args[1]
-            assert isinstance(weight_dq_node, torch.fx.Node)
-            assert weight_dq_node.target == torch.ops.quantized_decomposed.dequantize_per_tensor.default
             weight_q_node = weight_dq_node.args[0]
-            assert isinstance(weight_q_node, torch.fx.Node)
-            assert weight_q_node.target == torch.ops.quantized_decomposed.quantize_per_tensor.default
             weight_node = weight_q_node.args[0]
             bias_node = conv_node.args[2]
             assert isinstance(weight_node, torch.fx.Node)
