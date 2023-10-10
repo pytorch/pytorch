@@ -477,6 +477,55 @@ Lazy Modules Initialization
     nn.modules.lazy.LazyModuleMixin
 
 
-.. This module is kept only for backward compatibility
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
+.. py:module:: torch.nn.backends.thnn
+.. py:module:: torch.nn.common_types
+.. py:module:: torch.nn.cpp
+.. py:module:: torch.nn.functional
+.. py:module:: torch.nn.grad
+.. py:module:: torch.nn.init
+.. py:module:: torch.nn.modules.activation
+.. py:module:: torch.nn.modules.adaptive
+.. py:module:: torch.nn.modules.batchnorm
+.. py:module:: torch.nn.modules.channelshuffle
+.. py:module:: torch.nn.modules.container
+.. py:module:: torch.nn.modules.conv
+.. py:module:: torch.nn.modules.distance
+.. py:module:: torch.nn.modules.dropout
+.. py:module:: torch.nn.modules.flatten
+.. py:module:: torch.nn.modules.fold
+.. py:module:: torch.nn.modules.instancenorm
+.. py:module:: torch.nn.modules.lazy
+.. py:module:: torch.nn.modules.linear
+.. py:module:: torch.nn.modules.loss
+.. py:module:: torch.nn.modules.module
+.. py:module:: torch.nn.modules.normalization
+.. py:module:: torch.nn.modules.padding
+.. py:module:: torch.nn.modules.pixelshuffle
+.. py:module:: torch.nn.modules.pooling
+.. py:module:: torch.nn.modules.rnn
+.. py:module:: torch.nn.modules.sparse
+.. py:module:: torch.nn.modules.transformer
+.. py:module:: torch.nn.modules.upsampling
+.. py:module:: torch.nn.modules.utils
+.. py:module:: torch.nn.parallel.comm
+.. py:module:: torch.nn.parallel.data_parallel
+.. py:module:: torch.nn.parallel.distributed
+.. py:module:: torch.nn.parallel.parallel_apply
+.. py:module:: torch.nn.parallel.replicate
+.. py:module:: torch.nn.parallel.scatter_gather
+.. py:module:: torch.nn.parameter
+.. py:module:: torch.nn.utils.clip_grad
+.. py:module:: torch.nn.utils.convert_parameters
+.. py:module:: torch.nn.utils.fusion
+.. py:module:: torch.nn.utils.init
+.. py:module:: torch.nn.utils.memory_format
+.. py:module:: torch.nn.utils.parametrizations
+.. py:module:: torch.nn.utils.parametrize
+.. py:module:: torch.nn.utils.prune
+.. py:module:: torch.nn.utils.rnn
+.. py:module:: torch.nn.utils.spectral_norm
+.. py:module:: torch.nn.utils.weight_norm
