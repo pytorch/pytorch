@@ -5,7 +5,7 @@ Getting Started
 
 Before you read this section, make sure to read the :ref:`torch.compiler_overview`.
 
-Let’s start by looking at a simple ``torch.compile`` example that demonstrates
+Let's start by looking at a simple ``torch.compile`` example that demonstrates
 how to use ``torch.compile`` for inference. This example demonstrates the
 ``torch.cos()`` and ``torch.sin()`` features which are examples of pointwise
 operators as they operate element by element on a vector. This example might
@@ -14,15 +14,15 @@ understanding of how you can use ``torch.compile`` in your own programs.
 
 .. note::
    To run this script, you need to have at least one GPU on your machine.
-   If you do not have a GPU, you can remove the ``cuda()`` code in the
-   snippet below and it will run on CPU.
+   If you do not have a GPU, you can remove the ``.to(device="cuda:0")`` code
+   in the snippet below and it will run on CPU.
 
 .. code:: python
 
    import torch
    def fn(x, y):
-       a = torch.cos(x).cuda()
-       b = torch.sin(y).cuda()
+       a = torch.cos(x)
+       b = torch.sin(y)
        return a + b
    new_fn = torch.compile(fn, backend="inductor")
    input_tensor = torch.randn(10000).to(device="cuda:0")
@@ -76,12 +76,12 @@ And you can verify that fusing the ``cos`` and ``sin`` did actually occur
 because the ``cos`` and ``sin`` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
-Read more on Triton’s performance
+Read more on Triton's performance
 `here <https://openai.com/blog/triton/>`__. Because the code is written
 in Python, it's fairly easy to understand even if you have not written all that
 many CUDA kernels.
 
-Next, let’s try a real model like resnet50 from the PyTorch
+Next, let's try a real model like resnet50 from the PyTorch
 hub.
 
 .. code-block:: python
@@ -126,7 +126,7 @@ kernels for BERT. They are more complex than the trigonometry
 example we tried above but you can similarly skim through it and see if you
 understand how PyTorch works.
 
-Similarly, let’s try out a TIMM example:
+Similarly, let's try out a TIMM example:
 
 .. code-block:: python
 
