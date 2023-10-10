@@ -115,7 +115,7 @@ log = logging.getLogger(__name__)
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}".replace("\\", "")
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
