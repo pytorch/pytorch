@@ -333,8 +333,6 @@ inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 # lists, and incorrectly issue guards.
 inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
-add_runtime_assertions_for_inline_constraints = True
-
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
     "requires_grad",

@@ -25,11 +25,11 @@ TEST(SymIntTest, CheckRange) {
 
 TEST(SymIntTest, SingletonSymNode) {
   auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
+      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1)));
   auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
+      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1)));
   auto c = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2, 1)));
+      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2)));
   auto d = c10::SymInt(3);
 
   ASSERT_TRUE(a == a);
@@ -99,24 +99,5 @@ TEST(SymIntTest, SingletonSymNode) {
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW((void)(a > 2), c10::Error);
   ASSERT_TRUE(a > 1);
-}
-
-TEST(SymIntTest, SingletonSymNodeWithFactor) {
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10)));
-  // eq
-  ASSERT_FALSE(a == b);
-  ASSERT_FALSE(a >= b);
-  ASSERT_TRUE(b >= a);
-  ASSERT_TRUE(a <= b);
-  ASSERT_FALSE(b <= a);
-  // ne
-  ASSERT_TRUE(a != b);
-  // mul
-  ASSERT_TRUE(a * 2 == b);
-  ASSERT_TRUE(a * 3 >= b);
-  ASSERT_TRUE(a * 2 == 2 * a);
 }
 #endif
