@@ -188,7 +188,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         ddp_model = torch.nn.parallel.DistributedDataParallel(
             model1,
         )
-        x = torch.randn(8, 1, 28, 28, device='cuda').requires_grad_()
+        x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
         y = torch.randint(low=0, high=9, size=(8,), device="cuda")
         x1 = x.clone().detach().requires_grad_()
         y1 = y.clone().detach()
