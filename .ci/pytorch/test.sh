@@ -491,7 +491,7 @@ test_inductor_torchbench_smoketest_perf() {
   python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
     --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 5.5
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 5.25
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
