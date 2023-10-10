@@ -1,6 +1,4 @@
-#include <dlfcn.h>
-#include <iostream>
-
+#include <ATen/DynamicLibrary.h>
 #include <torch/csrc/inductor/aoti_model_runner.h>
 
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
@@ -9,34 +7,29 @@ namespace torch {
 namespace inductor {
 
 AOTIModelRunner::AOTIModelRunner(
-    const char* model_so_path,
+    const char* model_path,
     size_t num_models,
     bool is_cpu,
-    const char* cubin_dir)
-    : model_so_{dlopen(model_so_path, RTLD_NOW | RTLD_LOCAL)} {
-  TORCH_CHECK(model_so_, "Failure loading .so: ", dlerror());
-
-#define LOAD_SYMBOL(var, name_str)                                   \
-  var = reinterpret_cast<decltype(var)>(dlsym(model_so_, name_str)); \
-  TORCH_CHECK(var, "could not dlsym " name_str);
-
-  LOAD_SYMBOL(create_func_, "AOTInductorModelContainerCreate");
-  LOAD_SYMBOL(delete_func_, "AOTInductorModelContainerDelete");
-  LOAD_SYMBOL(get_num_outputs_func_, "AOTInductorModelContainerGetNumOutputs");
-  LOAD_SYMBOL(run_func_, "AOTInductorModelContainerRun");
-#undef LOAD_SYMBOL
+    const char* cubin_dir) {
+  model_so_ = std::make_unique<at::DynamicLibrary>(model_path);
+  TORCH_CHECK(model_so_, "Failed to load model: ", model_path);
+  create_func_ = reinterpret_cast<decltype(create_func_)>(
+      model_so_->sym("AOTInductorModelContainerCreate"));
+  delete_func_ = reinterpret_cast<decltype(delete_func_)>(
+      model_so_->sym("AOTInductorModelContainerDelete"));
+  get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
+      model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
+  run_func_ = reinterpret_cast<decltype(run_func_)>(
+      model_so_->sym("AOTInductorModelContainerRun"));
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       create_func_(&container_handle_, num_models, is_cpu, cubin_dir));
 }
 
 AOTIModelRunner::~AOTIModelRunner() {
-  if (delete_func_(container_handle_) != AOTI_RUNTIME_SUCCESS) {
-    std::cerr << "Failed to delete model container" << std::endl;
-  }
-  if (dlclose(model_so_) != 0) {
-    std::cerr << "Failed to close shared lib: " << dlerror() << std::endl;
-  }
+  AOTIRuntimeError result = delete_func_(container_handle_);
+  TORCH_CHECK(
+      result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
 std::vector<at::Tensor> AOTIModelRunner::run(
