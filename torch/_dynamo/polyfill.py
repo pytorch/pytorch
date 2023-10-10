@@ -8,3 +8,11 @@ def all(iterator):
         if not elem:
             return False
     return True
+
+
+def index(iterator, item, start=0, end=-1):
+    for i, elem in enumerate(list(iterator))[start:end]:
+        if item == elem:
+            return i
+    # This will not run in dynamo
+    raise ValueError(f"{item} is not in {type(iterator)}")
