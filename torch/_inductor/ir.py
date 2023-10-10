@@ -1409,7 +1409,7 @@ class Scan(Loops):
         return self.ranges
 
     def index_length(self):
-        return len(self.ranges) + len(self.reduction_ranges)
+        return len(self.ranges) + len(self.scan_ranges)
 
     def inner_fn_str(self):
         index = self._index(self.ranges)

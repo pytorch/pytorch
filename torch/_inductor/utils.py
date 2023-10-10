@@ -1136,7 +1136,7 @@ def try_find_schema(schemas, args, kwargs):
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops, nvsmi
 
-    cur_sm_clock = nvsmi(['clocks.current.sm'])[0]
+    cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
     if dtype in (torch.float16, torch.bfloat16):
         return get_max_tensorcore_tflops(dtype, cur_sm_clock)
