@@ -735,6 +735,22 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["FLAKY"]) == 2)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 4)
 
+    def test_get_classifications_flaky_fullname(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 110362)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            pr.last_commit()["oid"],
+            pr.get_merge_base(),
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+
     def test_get_classifications_similar_failures(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 109750)
         checks = pr.get_checkrun_conclusions()
