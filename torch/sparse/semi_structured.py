@@ -278,7 +278,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         Raises:
             NotImplementedError: If the dispatched operation is not implemented.
         """
-        #print(func)
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
