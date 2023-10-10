@@ -147,7 +147,7 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
             raise AssertionError(s)
 
 
-def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
+def _alloc_storage(tensor: torch.Tensor, size: torch.Size, *, compiling=False) -> None:
     """
     Allocate storage for ``tensor`` with the given size.
 
@@ -158,7 +158,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
     # We have made a decision to bypass the free and alloc in FSDP during tracing
     # partially because having this in the graph won't change anything from a compiling perspective,
     # and partially because resizing storage in this way is not really a sound thing to do.
-    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+    if compiling:
         return
     with torch.no_grad():
         already_allocated = tensor._typed_storage()._size() == size.numel()
@@ -172,7 +172,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
 
 
 
-def _free_storage(tensor: torch.Tensor) -> None:
+def _free_storage(tensor: torch.Tensor, *, compiling=False) -> None:
     """
     Frees the underlying storage of ``tensor``.
 
@@ -183,7 +183,7 @@ def _free_storage(tensor: torch.Tensor) -> None:
     # We have made a decision to bypass the free and alloc in FSDP during tracing
     # partially because having this in the graph won't change anything from a compiling perspective,
     # and partially because resizing storage in this way is not really a sound thing to do.
-    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+    if compiling:
         return
     with torch.no_grad():
         already_freed = tensor._typed_storage()._size() == 0
