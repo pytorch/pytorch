@@ -582,7 +582,7 @@ def nonzero(fake_mode, func, arg):
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
-            if arg.numel() >= 2:
+            if arg.numel() > 2:
                 maxval = int(arg.numel())
 
         _constrain_range_for_size(nnz, max=maxval)
@@ -591,6 +591,28 @@ def nonzero(fake_mode, func, arg):
         arg._nonzero_memo_vc = arg._version
 
     return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+
+
+@register_op_impl(lambda func: func is torch.ops.aten.masked_select.default)
+def masked_select(fake_mode, func, self, mask):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    # see nonzero for commentary
+    maxval = sys.maxsize - 1
+    if not free_symbols(arg.numel()):
+        if arg.numel() >= 2:
+            maxval = int(arg.numel())
+
+    _constrain_range_for_size(nnz, max=maxval)
+
+    return self.new_empty((nnz,))
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -1528,10 +1550,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_abstract_impl = torch._custom_op.impl.get_abstract_impl(func.name())
+        maybe_abstract_impl = torch._library.simple_registry.singleton.find(
+            func.name()
+        ).abstract_impl.kernel
         if maybe_abstract_impl:
-            ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
-            with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
                 result = maybe_abstract_impl(*args, **kwargs)
                 return result
 

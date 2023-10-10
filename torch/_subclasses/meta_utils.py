@@ -409,9 +409,11 @@ class MetaConverter:
                     if not t.is_nested:
                         # Nested tensor subclasses have special logic for
                         # creating symbolic size/strides/storage_offset
-                        sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
-                            t, source
-                        )
+                        (
+                            sizes,
+                            strides,
+                            storage_offset,
+                        ) = sym_sizes_strides_storage_offset(t, source)
 
                     def empty_create(inner_t, inner_src):
                         (
@@ -457,6 +459,10 @@ class MetaConverter:
                             # We expect JaggedTensor to have a 'ragged_size' in
                             # its context
                             assert isinstance(ctx, dict) and "ragged_size" in ctx
+                            assert (
+                                isinstance(t._size[1], torch.SymInt)
+                                and t._size[1].node.singleton_int() is not None
+                            )
                             # Replace the eager ragged size with our freshly
                             # allocated jagged size that has a source
                             ctx["ragged_size"] = shape_env.create_symintnode(
@@ -468,7 +474,9 @@ class MetaConverter:
                                 ),
                                 hint=t._size[1],
                             )
-                            r = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
+                            r = type(t).__tensor_unflatten__(
+                                transformed_tensors_dict, ctx
+                            )
                         else:
                             r = transform_subclass(
                                 t,

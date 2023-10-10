@@ -4,7 +4,7 @@ import unittest
 from typing import Any, Dict
 from unittest import mock
 
-from tools.stats.upload_metrics import emit_metric
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 
 from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
 
@@ -83,6 +83,76 @@ class TestUploadStats(unittest.TestCase):
         self.assertEqual(
             emitted_metric,
             {**emit_should_include, **emitted_metric},
+        )
+
+    @mock.patch("boto3.Session.resource")
+    def test_when_global_metric_specified_then_it_emits_it(
+        self, mock_resource: Any
+    ) -> None:
+        metric = {
+            "some_number": 123,
+        }
+
+        global_metric_name = "global_metric"
+        global_metric_value = "global_value"
+
+        add_global_metric(global_metric_name, global_metric_value)
+
+        emit_should_include = {
+            **metric,
+            global_metric_name: global_metric_value,
+        }
+
+        # Preserve the metric emitted
+        emitted_metric: Dict[str, Any] = {}
+
+        def mock_put_item(Item: Dict[str, Any]) -> None:
+            nonlocal emitted_metric
+            emitted_metric = Item
+
+        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+
+        emit_metric("metric_name", metric)
+
+        self.assertEqual(
+            emitted_metric,
+            {**emitted_metric, **emit_should_include},
+        )
+
+    @mock.patch("boto3.Session.resource")
+    def test_when_local_and_global_metric_specified_then_global_is_overridden(
+        self, mock_resource: Any
+    ) -> None:
+        global_metric_name = "global_metric"
+        global_metric_value = "global_value"
+        local_override = "local_override"
+
+        add_global_metric(global_metric_name, global_metric_value)
+
+        metric = {
+            "some_number": 123,
+            global_metric_name: local_override,
+        }
+
+        emit_should_include = {
+            **metric,
+            global_metric_name: local_override,
+        }
+
+        # Preserve the metric emitted
+        emitted_metric: Dict[str, Any] = {}
+
+        def mock_put_item(Item: Dict[str, Any]) -> None:
+            nonlocal emitted_metric
+            emitted_metric = Item
+
+        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+
+        emit_metric("metric_name", metric)
+
+        self.assertEqual(
+            emitted_metric,
+            {**emitted_metric, **emit_should_include},
         )
 
     @mock.patch("boto3.Session.resource")
