@@ -4,6 +4,8 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/core/thread_pool.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 
 #include <cuda_runtime_api.h>
 #include <stdint.h>
@@ -174,11 +176,18 @@ class CUDAHostAllocator {
     }
 
     // Round up the allocation to the nearest power of two to improve reuse.
+    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
     void* ptr = nullptr;
-    C10_CUDA_CHECK(cudaHostAlloc(
-        &ptr, c10::llvm::PowerOf2Ceil(size), cudaHostAllocDefault));
+    if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_use_cuda_host_register()) {
+      allocWithCudaHostRegister(&ptr, roundSize);
+    } else {
+      // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
+      C10_CUDA_CHECK(cudaHostAlloc(&ptr, roundSize, cudaHostAllocDefault));
+    }
+
     auto block = new Block();
-    block->size_ = c10::llvm::PowerOf2Ceil(size);
+    block->size_ = roundSize;
     block->ptr_ = ptr;
     block->allocated_ = true;
 
@@ -279,7 +288,14 @@ class CUDAHostAllocator {
     for (auto* block : blocks_to_remove) {
       blocks_.erase(block);
       ptr_to_block_.erase(block->ptr_);
-      AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+      if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+              pinned_use_cuda_host_register()) {
+        void* ptr = block->ptr_;
+        AT_CUDA_CHECK(cudaHostUnregister(ptr));
+        free(ptr);
+      } else {
+        AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+      }
       delete block;
     }
   }
@@ -341,6 +357,80 @@ class CUDAHostAllocator {
         free_list_.insert(block);
       }
     }
+  }
+
+  TaskThreadPool* getThreadPool() {
+    static TaskThreadPool* pool = new TaskThreadPool(
+        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_max_register_threads());
+    return pool;
+  }
+
+  void mapPagesForRegister(
+      const void* ptr,
+      size_t size,
+      size_t i,
+      size_t numThreads,
+      size_t pageSize) {
+    uintptr_t start = (uintptr_t)ptr + (size * i / numThreads);
+    uintptr_t end = (uintptr_t)start + (size / numThreads);
+    if (i == (numThreads - 1)) {
+      end = (uintptr_t)ptr + size;
+    }
+
+    // pre-fault/map the pages by setting the first byte of the page
+    uintptr_t alignedStart =
+        (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
+    for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+      memset((void*)p, 0, 1);
+    }
+  }
+
+  void registerPages(const void* ptr, size_t size) {
+    AT_CUDA_CHECK(
+        cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
+
+    // If host and device pointer don't match, give a warning and exit
+    void* devptr;
+    AT_CUDA_CHECK(cudaHostGetDevicePointer(&devptr, (void*)ptr, 0));
+    TORCH_CHECK(
+        (void*)devptr == (void*)ptr,
+        "Host and device pointer dont match with cudaHostRegister. "
+        "Please dont use this feature by setting "
+        "PYTORCH_PINNED_ALLOC_CONF=use_cuda_host_register:False (default)",
+        "");
+  }
+
+  inline void allocWithCudaHostRegister(void** ptr, size_t roundSize) {
+    // Here we do regular allocation, pre-fault/map the pages, and then do
+    // cudaHostRegister with GPU mapping flags to lock the pages, so we
+    // can minimize the cost for the cuda global lock.
+    *ptr = malloc(roundSize);
+
+    // Parallelize the mapping/registering of pages to reduce wall time
+    size_t pageSize = (1 << 12); // 4kB pages
+    size_t numMapThreads = c10::cuda::CUDACachingAllocator::
+        CUDAAllocatorConfig::pinned_num_register_threads();
+    if ((numMapThreads > 1) && (roundSize >= (pageSize * numMapThreads))) {
+      auto* pool = getThreadPool();
+      for (size_t i = 0; i < numMapThreads; i++) {
+        pool->run(std::bind(
+            &CUDAHostAllocator::mapPagesForRegister,
+            this,
+            *ptr,
+            roundSize,
+            i, // thread task-id
+            numMapThreads,
+            pageSize));
+      }
+      pool->waitWorkComplete();
+    } else {
+      // Map pages in the same thread
+      mapPagesForRegister(*ptr, roundSize, 0, 1, pageSize);
+    }
+
+    // Register the mapped pages using cudaHostRegister
+    registerPages(*ptr, roundSize);
   }
 
   EventPool event_pool_;

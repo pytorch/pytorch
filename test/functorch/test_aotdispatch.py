@@ -18,13 +18,14 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     skipIfRocm,
 )
-from torch.testing._internal.two_tensor import TwoTensor
+from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
 import warnings
 import itertools
+from contextlib import nullcontext
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
@@ -41,7 +42,7 @@ from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
     nop, default_partition, default_decompositions,
-    memory_efficient_fusion, get_aot_compilation_context
+    memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
 from torch._decomp import decomposition_table
 
@@ -263,6 +264,9 @@ class TestAOTAutograd(AOTTestCase):
         test_mutation: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
+        # Only active when inp_ is Callable.
+        # TODO: probably consolidate all tests to make inp a Callable.
+        make_inputs_subclasses: bool = False,
     ):
         for keep_input_mutations in [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
@@ -272,8 +276,9 @@ class TestAOTAutograd(AOTTestCase):
                 # The callable should return a tuple of f_inputs, f_graph_inputs
                 # (The idea is that we might want to compile a function with the graph inputs,
                 # but test autograd backprop all the way through the actual inputs)
-                inp_copy, graph_inps_copy = inp_callable()
-                inp, graph_inps = inp_callable()
+                with TwoTensorMode() if make_inputs_subclasses else nullcontext():
+                    inp_copy, graph_inps_copy = inp_callable()
+                    inp, graph_inps = inp_callable()
             else:
                 inp_copy = []
                 inp = []
@@ -309,7 +314,7 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(f, nn.Module):
                 compiled_f = aot_module(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -318,7 +323,7 @@ class TestAOTAutograd(AOTTestCase):
             else:
                 compiled_f = aot_function(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -1011,6 +1016,9 @@ def forward(self, primals_1):
             return [(x,), (x,)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(AssertionError, "which is currently unsupported in the subclass use case"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
@@ -1117,6 +1125,10 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        with self.assertRaisesRegex(RuntimeError, "Encountered aliased inputs that are mutated in the graph, but"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(RuntimeError, "Encountered aliased inputs that are mutated in the graph, but"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # https://github.com/pytorch/pytorch/issues/106456
     def test_input_mutation_noncontiguous(self):
@@ -1133,6 +1145,9 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
@@ -1152,6 +1167,10 @@ def forward(self, primals_1, primals_2):
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        # Input mutations on subclasses with training graphs fail backward guards today.
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+            self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
         # Important characteristic: the graph takes in 2 inputs!
         # That shows that we didn't try to run our complicated synthetic base logic,
@@ -1262,7 +1281,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
-        # The first output should view off the the first input, the 2nd output should view off the 2nd input
+        # The first output should view off the first input, the 2nd output should view off the 2nd input
         def f(a, b):
             return a.view(a.shape), b.view(b.shape)
 
@@ -1276,6 +1295,8 @@ def forward(self, arg0_1, arg1_1):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
@@ -1424,6 +1445,10 @@ def forward(self, primals_1, primals_2):
             return [base, c_arg], [x.view(-1), x.view(-1), c_arg]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
@@ -1455,6 +1480,10 @@ def forward(self, primals_1, primals_2):
             return [base1, base2], [x1.view(-1), x2.view(-1), x1.view(-1), x2.view(-1)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # 3 graph inputs: (b_d_base, a, c)
         # 2 returns: (b_updated, a+c+d)
@@ -3297,6 +3326,7 @@ aot_autograd_failures = {
     decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
     decorate('linalg.pinv', 'singular', decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)})),
+    decorate('nn.functional.interpolate', 'bicubic', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     # conv2d sometimes nondeterministic in this config?
     decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
@@ -3318,7 +3348,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..

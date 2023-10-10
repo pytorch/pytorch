@@ -19,10 +19,84 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
+// TODO(NS): Investigate why FP8 conversion intrisncs end up being slower
+#ifdef AT_USE_NV_CVT_INTRINSICS
+#include <cuda_fp8.h>
+#endif
+
 namespace at::native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
+
+void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
+  ScalarType dtype = iter.dtype(0);
+  ScalarType other_dtype = iter.dtype(1);
+  if (dtype == kFloat8_e4m3fn) {
+    switch (other_dtype) {
+#if !defined(USE_ROCM)
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+#endif /* !defined(USE_ROCM) */
+      default:
+        gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
+        break;
+    }
+  } else if (dtype == kFloat8_e5m2) {
+    switch (other_dtype) {
+#if !defined(USE_ROCM)
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+             return Float8_e5m2(value);
+#endif
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+             return Float8_e5m2(value);
+#endif
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+             return Float8_e5m2(value);
+#endif
+         });
+         break;
+#endif /* !defined(USE_ROCM) */
+      default:
+         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2 x) { return x; });
+         break;
+    }
+  } else {
+    TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
+  }
+}
 
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
@@ -30,9 +104,11 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+  } else if (dtype == kFloat8_e5m2 || dtype == kFloat8_e4m3fn) {
+     float8_copy_kernel_cuda(iter);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(
-        kHalf, kBool, kBFloat16, kComplexHalf, kFloat8_e4m3fn, kFloat8_e5m2, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        kHalf, kBool, kBFloat16, kComplexHalf,dtype, "copy_", [&] {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   }
