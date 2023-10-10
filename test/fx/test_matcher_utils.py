@@ -148,7 +148,9 @@ class TestMatcher(JitTestCase):
         self.assertEqual(before_split_res[0], after_split_res[0])
         self.assertEqual(before_split_res[1], after_split_res[1])
 
-    def test_matcher_with_name_node_map(self):
+    def test_matcher_with_name_node_map_function(self):
+        """Testing SubgraphMatcherWithNameNodeMap with function pattern
+        """
 
         def target_graph(x, weight):
             x = x * 2
@@ -183,7 +185,9 @@ class TestMatcher(JitTestCase):
                 if n == name_node_map["conv"]:
                     assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
 
-    def test_matcher_with_name_node_map(self):
+    def test_matcher_with_name_node_map_module(self):
+        """Testing SubgraphMatcherWithNameNodeMap with module pattern
+        """
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -201,7 +205,7 @@ class TestMatcher(JitTestCase):
 
             def forward(self, x):
                 linear = self.linear(x)
-                # Note: we can put "weight": self.linear.weight in dictionary since
+                # Note: we can't put "weight": self.linear.weight in dictionary since
                 # nn.Parameter is not an allowed output type in dynamo
                 return linear, {"linear": linear, "x": x}
 
