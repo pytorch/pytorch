@@ -6,8 +6,8 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/MPSFunctions.h>
+#include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
 #include <ATen/ops/abs_native.h>
@@ -42,8 +42,8 @@
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
-#include <ATen/ops/sign_native.h>
 #include <ATen/ops/sign_mps_dispatch.h>
+#include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh_native.h>
