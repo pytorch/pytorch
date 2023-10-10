@@ -19,20 +19,20 @@ class TORCH_API AOTIModelRunner {
   AOTIModelRunner& operator=(const AOTIModelRunner& other) = delete;
   AOTIModelRunner& operator=(AOTIModelRunner&& other) = delete;
 
+ protected:
+  std::vector<at::Tensor> run(
+      std::vector<at::Tensor> inputs,
+      AOTInductorStreamHandle cuda_stream_handle,
+      AOTIProxyExecutorHandle proxy_executor_handle);
+
   AOTIModelRunner(
       const char* model_path,
-      size_t num_models = 1,
-      bool is_cpu = false,
-      const char* cubin_dir = nullptr);
+      size_t num_models,
+      bool is_cpu,
+      const char* cubin_dir);
 
   ~AOTIModelRunner();
 
-  std::vector<at::Tensor> run(
-      std::vector<at::Tensor> inputs,
-      AOTInductorStreamHandle cuda_stream_handle = nullptr,
-      AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
-
- private:
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
@@ -40,6 +40,18 @@ class TORCH_API AOTIModelRunner {
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
   AOTInductorModelContainerHandle container_handle_ = nullptr;
+};
+
+class TORCH_API AOTIModelRunnerCpu : public AOTIModelRunner {
+ public:
+  AOTIModelRunnerCpu(const char* model_path, size_t num_models = 1)
+      : AOTIModelRunner(model_path, num_models, true, nullptr) {}
+
+  std::vector<at::Tensor> run(
+      std::vector<at::Tensor> inputs,
+      AOTIProxyExecutorHandle proxy_executor_handle = nullptr) {
+    return AOTIModelRunner::run(inputs, nullptr, proxy_executor_handle);
+  }
 };
 
 } // namespace inductor

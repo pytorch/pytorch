@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_model_runner.h>
+#include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
@@ -27,7 +28,7 @@ TEST(AotInductorTest, BasicTest) {
   const auto& ref_output_tensors =
       data_loader.attr("outputs").toTensorList().vec();
 
-  AOTIModelRunner runner(model_so_path.c_str());
+  AOTIModelRunnerCuda runner(model_so_path.c_str());
   auto actual_output_tensors = runner.run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
