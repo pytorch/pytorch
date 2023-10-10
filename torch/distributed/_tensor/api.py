@@ -313,10 +313,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
         device_mesh = device_mesh or mesh_resources.get_current_mesh()
+        device_type = device_mesh.device_type
 
         # convert the local tensor to desired device base on device mesh's device_type
-        if not local_tensor.is_meta:
-            local_tensor = local_tensor.to(device_mesh.device_type)
+        if device_type != local_tensor.device.type and not local_tensor.is_meta:
+            local_tensor = local_tensor.to(device_type)
 
         # set default placements to replicated if not specified
         if placements is None:
@@ -452,13 +453,14 @@ def distribute_tensor(
 
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_type = device_mesh.device_type
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-        random._rng_tracker = OffsetBasedRNGTracker(device_mesh.device_type)
+        random._rng_tracker = OffsetBasedRNGTracker(device_type)
 
     if not tensor.is_leaf:
         raise RuntimeError(
@@ -466,8 +468,9 @@ def distribute_tensor(
         )
 
     # convert tensor to the corresponding device type if it's not in that device type
-    if not tensor.is_meta:
-        tensor = tensor.to(device_mesh.device_type)
+    if device_type != tensor.device.type and not tensor.is_meta:
+        tensor = tensor.to(device_type)
+
     # set default placements to replicated if not specified
     if placements is None:
         placements = [Replicate() for _ in range(device_mesh.ndim)]
