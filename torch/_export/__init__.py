@@ -35,6 +35,11 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
+from torch.export.exported_program import (
+    ExportBackwardSignature,
+    ExportedProgram,
+    ExportGraphSignature,
+)
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -51,9 +56,6 @@ from .exported_program import (
     _process_constraints,
     CallSpec,
     combine_args_kwargs,
-    ExportBackwardSignature,
-    ExportedProgram,
-    ExportGraphSignature,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -646,7 +648,6 @@ def _export(
     gm, graph_signature = aot_export_module(
         gm_torch_level,
         (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
-        decompositions=DECOMP_TABLE,
         trace_joint=False
     )
 
@@ -879,20 +880,16 @@ def aot_compile(
             "Please use dynamic_shapes instead."
         )
 
-    from torch._inductor.decomposition import select_decomp_table
-
-    global DECOMP_TABLE
-    DECOMP_TABLE = select_decomp_table()
     if constraints is not None:
         ep = export(f, args, kwargs, constraints)
     else:
         ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
 
+    from torch._inductor.decomposition import select_decomp_table
+    ep = ep.run_decompositions(select_decomp_table())
+
     if remove_runtime_assertions:
         ep = ep._transform(_RemoveRuntimeAssertionsPass())
-
-    # Reset the global value
-    DECOMP_TABLE = core_aten_decompositions()
 
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]
