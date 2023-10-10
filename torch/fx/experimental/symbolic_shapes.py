@@ -3968,7 +3968,8 @@ class ShapeEnv:
                     ''.join(traceback.format_list(user_tb))
                 )
             self.log.info(
-                "eval %s [guard added]%s (%s)%s",
+                "%s %s [guard added]%s (%s)%s",
+                prefix,
                 g,
                 maybe_user_loc,
                 format_frame(fsummary),

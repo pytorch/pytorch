@@ -631,6 +631,38 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             expected_ops_dynamic=ifdynstaticdefault(1, 17),
         )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(y >= 0)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_is_size(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            # unsound 0/1 specialization!
+            if y == 0:
+                assert False
+            else:
+                return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_config_obj(self):
         class Cfg:
             def __init__(self):
