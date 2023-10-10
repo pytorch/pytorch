@@ -97,7 +97,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not dist.is_available(), "requires distributed")
     def test_fsdp_flat_param(self):
-        from torch.distributed.fsdp.flat_param import FlatParameter
+        from torch.distributed.fsdp._flat_param import FlatParameter
         with FakeTensorMode() as m:
             data = torch.randn(2, 2)
             param = FlatParameter(data, requires_grad=True)

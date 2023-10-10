@@ -185,7 +185,7 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
-- func: sym_constrain_range_for_size(Scalar size, *, int? min, int? max) -> ()
+- func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range_for_size
 
@@ -431,6 +431,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sgn_out
+    MPS: sgn_out_mps
     SparseCPU, SparseCUDA: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA: sgn_sparse_csr_out
   tags: pointwise
@@ -1692,6 +1693,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: copy
+  tags: core
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
@@ -1970,6 +1972,7 @@
   dispatch:
     CPU: ctc_loss_cpu
     CUDA: ctc_loss_gpu
+    Meta: ctc_loss_meta
   autogen: _ctc_loss.out
   tags: dynamic_output_shape  # the shape of second output is data dependent
 
@@ -2002,6 +2005,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: diagonal
+  tags: core
 
 - func: linalg_diagonal(Tensor(a) A, *, int offset=0, int dim1=-2, int dim2=-1) -> Tensor(a)
   python_module: linalg
@@ -2082,7 +2086,7 @@
   structured_delegate: div.out_mode
   dispatch:
     SparseCPU, SparseCUDA: div_sparse
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2123,7 +2127,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
@@ -2373,7 +2377,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags: [core, inplace_view]
   dispatch:
     Meta: resize__symint
     CPU: resize_
@@ -2520,7 +2524,7 @@
   dispatch:
     SparseCPU, SparseCUDA: expm1_sparse
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3355,7 +3359,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log10.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3379,7 +3383,7 @@
   dispatch:
     SparseCPU, SparseCUDA: log1p_sparse
     SparseCsrCPU, SparseCsrCUDA: log1p_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3405,7 +3409,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log2.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6042,7 +6046,7 @@
   dispatch:
     SparseCPU, SparseCUDA: trunc_sparse
     SparseCsrCPU, SparseCsrCUDA: trunc_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: trunc.out
@@ -6292,6 +6296,7 @@
   dispatch:
     CPU: _efficientzerotensor
     CUDA: _efficientzerotensor_cuda
+    MPS: _efficientzerotensor_mps
     Meta: _efficientzerotensor_meta
   autogen: _efficientzerotensor.out
 
@@ -7128,7 +7133,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    CompositeImplicitAutogradNestedTensor: NestedTensor_unbind
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
@@ -9342,7 +9347,7 @@
   dispatch:
     CPU, CUDA: atan2_out
     MPS: atan2_out_mps
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9354,7 +9359,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: atan2.out
   variants: method, function
-  tags: pointwise
+  tags: [core, pointwise]
 # arctan2, alias of atan2
 
 - func: arctan2(Tensor self, Tensor other) -> Tensor
@@ -9543,7 +9548,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: nextafter_out
+    CPU, CUDA, MPS: nextafter_out
   tags: pointwise
 
 - func: nextafter(Tensor self, Tensor other) -> Tensor
@@ -9890,7 +9895,7 @@
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: pow.Scalar_out
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -14348,14 +14353,14 @@
   variants: function
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CPU: _scaled_dot_product_flash_attention_cpu
     CUDA: _scaled_dot_product_flash_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
+- func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
   device_check: NoCheck
   variants: function
   dispatch:
@@ -14374,13 +14379,13 @@
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
 
-- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, int? max_q, int? max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt? max_q, SymInt? max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
   tags: nondeterministic_seeded
 
-- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor, Tensor, Tensor)
+- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
   dispatch:
