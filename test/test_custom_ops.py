@@ -1813,7 +1813,9 @@ optests.generate_opcheck_tests(
 class TestGenerateOpcheckTests(CustomOpTestCaseBase):
     def test_MiniOpTest(self):
         for orig_test in ["test_mm", "test_nonzero"]:
-            for test in torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS:
+            for (
+                test
+            ) in torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS:
                 expected_test = f"{test}__{orig_test}"
                 self.assertTrue(hasattr(MiniOpTest, expected_test), msg=expected_test)
 
@@ -1905,7 +1907,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         }
         with self.assertRaisesRegex(RuntimeError, "got status=success"):
             validate_failures_dict_structure(
-                FailuresDict("", failures), torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS, MiniOpTest
+                FailuresDict("", failures),
+                torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS,
+                MiniOpTest,
             )
 
         failures = {
@@ -1918,7 +1922,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         }
         with self.assertRaisesRegex(RuntimeError, "should begin with one of"):
             validate_failures_dict_structure(
-                FailuresDict("", failures), torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS, MiniOpTest
+                FailuresDict("", failures),
+                torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS,
+                MiniOpTest,
             )
 
         failures = {
@@ -1931,7 +1937,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         }
         with self.assertRaisesRegex(RuntimeError, "does not exist on the TestCase"):
             validate_failures_dict_structure(
-                FailuresDict("", failures), torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS, MiniOpTest
+                FailuresDict("", failures),
+                torch.testing._internal.optests.generate_tests.DEFAULT_TEST_UTILS,
+                MiniOpTest,
             )
 
     def test_dont_generate_decorator(self):

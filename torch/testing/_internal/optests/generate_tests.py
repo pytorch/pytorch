@@ -1,6 +1,7 @@
 import datetime
 import difflib
 import functools
+import inspect
 import json
 import os
 import tempfile
@@ -10,13 +11,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 
 import torch._dynamo
-import inspect
-import os
 
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
-from torch._utils_internal import get_file_path_2
 from torch._subclasses.schema_check_mode import SchemaCheckMode
+from torch._utils_internal import get_file_path_2
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.optests import (
     aot_autograd_check,
@@ -128,6 +127,7 @@ DEFAULT_TEST_UTILS = [
     "test_aot_dispatch_dynamic",
 ]
 
+
 def generate_opcheck_tests(
     testcase: Any,
     namespaces: List[str],
@@ -179,7 +179,9 @@ def generate_opcheck_tests(
         # the same directory as the test file.
         prev_frame = inspect.currentframe().f_back
         filename = inspect.getframeinfo(prev_frame)[0]
-        failures_dict_path = get_file_path_2(os.path.dirname(filename), "failures_dict.json")
+        failures_dict_path = get_file_path_2(
+            os.path.dirname(filename), "failures_dict.json"
+        )
     failures_dict = FailuresDict.load(
         failures_dict_path, create_file=should_update_failures_dict()
     )
