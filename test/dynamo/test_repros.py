@@ -3470,7 +3470,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             from .utils import some_global_fn as some_global_fn_other
         except ImportError:
-            from .utils import some_global_fn as some_global_fn_other
+            from utils import some_global_fn as some_global_fn_other
 
         global some_global_fn
         org_func = some_global_fn
