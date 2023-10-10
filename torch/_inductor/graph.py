@@ -531,6 +531,14 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
                 name = f"constant_{name}"
+            # We may generate a var name for each constant in the codegen.
+            # Let's only keep sane characters.
+            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            name = prefix
+            cnt = 0
+            while name in self.constants:
+                name = f"{prefix}_{cnt}"
+                cnt += 1
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
@@ -631,17 +639,24 @@ class GraphLowering(torch.fx.Interpreter):
                 e.__traceback__
             ) from None
 
+    @staticmethod
+    def can_inline_constant(t: torch.Tensor) -> bool:
+        """
+        True if this is a small constant attr that will be inlined.
+        """
+        return len(t.shape) == 1 and t.shape[0] <= 8
+
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
 
-        if unsupported_output_tensor(value):
+        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
-            if len(value.shape) == 1 and value.shape[0] <= 8:
+            if self.can_inline_constant(value):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
@@ -959,13 +974,12 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = self.codegen()
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
-        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        mod = PyCodeCache.load_by_key_path(
+            key, path, linemap=linemap, attrs=self.constants
+        )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap
-
-        for name, value in self.constants.items():
-            setattr(mod, name, value)
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature

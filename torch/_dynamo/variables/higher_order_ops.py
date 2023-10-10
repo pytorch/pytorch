@@ -802,7 +802,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
                     f"argnums is expected to be int or tuple of ints. Got {argnums}.",
-                    case_names=[],
                 )
 
             if isinstance(argnums, ConstantVariable):
@@ -810,7 +809,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"argnums is expected to be int or tuple of ints. Got {argnums}.",
-                        case_names=[],
                     )
                 return argnums.value
             else:
@@ -822,7 +820,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"argnums is expected to contain int only. Got {const_vars}.",
-                        case_names=[],
                     )
                 return tuple(var.value for var in const_vars)
 
