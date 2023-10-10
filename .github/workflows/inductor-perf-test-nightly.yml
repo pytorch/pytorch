@@ -2,7 +2,8 @@ name: inductor-A100-perf-nightly
 
 on:
   schedule:
-    - cron: 0 7 * * *
+    - cron: 0 7 * * 1-6
+    - cron: 0 7 * * 0
   workflow_dispatch:
     inputs:
       training:
@@ -85,7 +86,7 @@ jobs:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
-    if: github.event.schedule == '0 7 * * *'
+    if: github.event.schedule == '0 7 * * 1-6'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true
@@ -93,6 +94,21 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
+    name: cuda12.1-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    if: github.event.schedule == '0 7 * * 0'
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 1440
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 

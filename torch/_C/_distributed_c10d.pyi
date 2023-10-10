@@ -185,6 +185,7 @@ class TCPStore(Store):
         wait_for_workers: bool = ...,
         multi_tenant: bool = ...,
         master_listen_fd: Optional[int] = ...,
+        use_libuv: Optional[bool] = ...,
     ): ...
     @property
     def host(self) -> str: ...

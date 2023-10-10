@@ -1,8 +1,5 @@
 # Owner(s): ["module: cpp"]
 
-import torch
-# NN tests use double as the default dtype
-torch.set_default_dtype(torch.double)
 
 import os
 
@@ -59,4 +56,5 @@ if not common.IS_ARM64:
     functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 
 if __name__ == "__main__":
+    common.TestCase._default_dtype_check_enabled = True
     common.run_tests()

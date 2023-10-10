@@ -14,7 +14,6 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/pybind.h>
 

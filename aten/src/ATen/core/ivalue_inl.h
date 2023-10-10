@@ -846,6 +846,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   friend c10::intrusive_ptr<Future>;
 
+  struct FutureCallback {
+    std::function<void(Future&)> callback;
+    bool uses_future; // whether the Future& passed in is actually used
+
+    template <typename T>
+    FutureCallback(T callback, bool uses_future)
+        : callback(std::move(callback)), uses_future(uses_future) {}
+  };
+
  public:
   Future(const Future&) = delete;
   Future(Future&&) = delete;
@@ -942,13 +951,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       events_.push_back(std::move(event));
     }
 
-    std::vector<std::function<void(Future&)>> cbs;
+    std::vector<FutureCallback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      invokeCallback(std::move(callback));
+      invokeCallback(std::move(callback.callback), callback.uses_future);
     }
   }
 
@@ -1023,19 +1032,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * this function will execute the callback immediately.
    */
   template <typename T>
-  void addCallback(T callback) {
+  void addCallback(T callback, bool uses_future = true) {
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
 #endif
+
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-      invokeCallback(std::move(callback));
+      invokeCallback(std::move(callback), uses_future);
       return;
     }
-    callbacks_.emplace_back(std::move(callback));
+    callbacks_.emplace_back(std::move(callback), uses_future);
   }
 
   /**
@@ -1048,7 +1058,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
-        guts::disjunction<
+        std::disjunction<
             std::is_invocable_r<IValue, T, Future&>,
             std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
         "The callback must have signature IValue(Future&) or "
@@ -1153,24 +1163,29 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
   template<typename T>
-  void invokeCallback(T callback) {
+  void invokeCallback(T callback, bool uses_future) {
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
 #endif
 
-    c10::OptionalDeviceGuard deviceGuard(currentDevice_);
+    // The synchronization performed below shouldn't be needed when the future
+    // is not used by the callback.
+    if (uses_future) {
+      c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
-    std::vector<c10::Stream> streams;
-    streams.reserve(devices_.size());
-    for (const c10::Device& device : devices_) {
-      streams.push_back(impl_.getStreamFromGlobalPool(device));
+      std::vector<c10::Stream> streams;
+      streams.reserve(devices_.size());
+      for (const c10::Device& device : devices_) {
+        streams.push_back(impl_.getStreamFromGlobalPool(device));
+      }
+      c10::MultiStreamGuard streamGuard(streams);
+      synchronizeWithCurrentStreams();
+      callback(*this);
+    } else {
+      callback(*this);
     }
-    c10::MultiStreamGuard streamGuard(streams);
-    synchronizeWithCurrentStreams();
-
-    callback(*this);
   }
 
   // This method should be called before this future's value is used, as it
@@ -1206,13 +1221,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    std::vector<std::function<void(Future&)>> cbs;
+    std::vector<FutureCallback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      invokeCallback(std::move(callback));
+      invokeCallback(std::move(callback.callback), callback.uses_future);
     }
   }
 
@@ -1353,7 +1368,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(Future&)>> callbacks_;
+  std::vector<FutureCallback> callbacks_;
   std::exception_ptr eptr_;
 
   // An upcast pointer to a virtual class which allows us to manipulate events,
@@ -1918,9 +1933,9 @@ template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
     std::enable_if_t<
-        !guts::disjunction<
+        !std::disjunction<
             std::is_lvalue_reference<Args>...,
-            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
   const auto& vals = ivalue.toTupleRef().elements();
@@ -2098,9 +2113,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 template <
     typename... Args,
     std::enable_if_t<
-        !guts::disjunction<
+        !std::disjunction<
             std::is_lvalue_reference<Args>...,
-            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
@@ -2109,9 +2124,9 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 template <
     typename... Args,
     std::enable_if_t<
-        !guts::disjunction<
+        !std::disjunction<
             std::is_lvalue_reference<Args>...,
-            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {

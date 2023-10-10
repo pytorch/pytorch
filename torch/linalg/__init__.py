@@ -1137,7 +1137,7 @@ as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
     Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
     a negative power as, if :attr:`n`\ `> 0`::
 
-        matrix_power(torch.linalg.solve(A, B), n) == matrix_power(A, -n)  @ B
+        torch.linalg.solve(matrix_power(A, n), B) == matrix_power(A, -n)  @ B
 
     It is always preferred to use :func:`~solve` when possible, as it is faster and more
     numerically stable than computing :math:`A^{-n}` explicitly.

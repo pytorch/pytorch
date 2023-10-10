@@ -229,7 +229,11 @@ class Redistribute(torch.autograd.Function):
                 target_placements.append(Replicate())
             else:
                 target_placements.append(target)
-        target_spec = DTensorSpec(previous_spec.mesh, tuple(target_placements))
+        target_spec = DTensorSpec(
+            previous_spec.mesh,
+            tuple(target_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         local_tensor = grad_output._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)

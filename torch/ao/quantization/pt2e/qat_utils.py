@@ -15,6 +15,7 @@ from torch.ao.quantization.quantizer import (
     QuantizationSpecBase,
 )
 from .utils import (
+    _is_supported_batch_norm_for_training,
     fold_bn_weights_into_conv_node,
     get_aten_graph_module,
 )
@@ -43,6 +44,7 @@ _quantized_conv2d_bn_pattern_example_inputs = (
 def _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(
     is_per_channel: bool,
     has_bias: bool,
+    is_cuda: bool,
 ) -> Dict[str, Any]:
     """
     Optional example inputs for both `_quantized_qat_conv2d_bn_pattern`
@@ -59,6 +61,10 @@ def _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(
         kwargs["weight_zero_point"] = torch.tensor([0], dtype=torch.int)
     if has_bias:
         kwargs["conv_bias"] = torch.randn(1)
+    if is_cuda:
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor):
+                kwargs[k] = v.cuda()
     return kwargs
 
 def _conv2d_bn_pattern(
@@ -367,7 +373,7 @@ def _get_conv_bn_getitem_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node]:
         if n.target == torch.ops.aten.conv2d.default:
             assert conv_node is None
             conv_node = n
-        elif n.target == torch.ops.aten._native_batch_norm_legit.default:
+        elif _is_supported_batch_norm_for_training(n):
             assert bn_node is None
             bn_node = n
         elif n.target == operator.getitem:
@@ -490,6 +496,12 @@ def _update_special_qspecs_after_replacement(
     annotation.output_qspec = _get_new_qspec(annotation.output_qspec)
 
 def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
+    m = _fuse_conv_bn_qat_helper(m, is_cuda=False)
+    if torch.cuda.is_available():
+        m = _fuse_conv_bn_qat_helper(m, is_cuda=True)
+    return m
+
+def _fuse_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
     """
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
     the fused QAT subgraph equivalent. The input graph should already be annotated.
@@ -501,7 +513,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     m.graph.eliminate_dead_code()
     m.recompile()
     example_inputs = _conv2d_bn_pattern_example_inputs
-    match_pattern = get_aten_graph_module(_conv2d_bn_pattern, example_inputs)
+    match_pattern = get_aten_graph_module(_conv2d_bn_pattern, example_inputs, is_cuda)
 
     # Step (1): Replace patterns with conv bias
     #
@@ -512,6 +524,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     replacement_pattern_with_conv_bias = get_aten_graph_module(
         _qat_conv2d_bn_pattern,
         example_inputs,
+        is_cuda,
     )
     replacements_with_conv_bias = replace_pattern_with_filters(
         m,
@@ -527,6 +540,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     replacement_pattern_no_conv_bias = get_aten_graph_module(
         _qat_conv2d_bn_pattern_no_conv_bias,
         example_inputs,
+        is_cuda,
     )
     replacements_no_conv_bias = replace_pattern_with_filters(
         m,
@@ -569,7 +583,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
                 _copy_over_literal_conv_args(original_node, replacement_conv_node)
                 # Step (3c): Update old references in the conv node's input_qspec_map
                 _update_conv_input_qspec_map_after_replacement(original_node, replacement_conv_node)
-            if original_node.target == torch.ops.aten._native_batch_norm_legit.default:
+            if _is_supported_batch_norm_for_training(original_node):
                 replacement_bn_node.meta = original_node.meta
                 original_to_replacement_node[original_node] = replacement_bn_node
             if original_node.target == operator.getitem:
@@ -632,6 +646,12 @@ def _remove_extra_dequantize(m: GraphModule):
     m.recompile()
 
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
+    m = _fold_conv_bn_qat_helper(m, is_cuda=False)
+    if torch.cuda.is_available():
+        m = _fold_conv_bn_qat_helper(m, is_cuda=True)
+    return m
+
+def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
     """
     Replace the quantized (conv + bn) pattern with conv with bn weights folded into the weights of conv.
     """
@@ -653,15 +673,15 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
         if not has_relu and relu_is_inplace:
             continue
         example_inputs = _quantized_conv2d_bn_pattern_example_inputs
-        kwargs = _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(is_per_channel, has_bias)
+        kwargs = _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(is_per_channel, has_bias, is_cuda)
         match_pattern = _get_quantized_qat_conv2d_bn_pattern(
             is_per_channel, has_relu, has_bias, relu_is_inplace,
         )
-        match_pattern = get_aten_graph_module(match_pattern, example_inputs, **kwargs)
+        match_pattern = get_aten_graph_module(match_pattern, example_inputs, is_cuda, **kwargs)
         replacement_pattern = _get_folded_quantized_qat_conv2d_bn_pattern(
             is_per_channel, has_relu, has_bias, relu_is_inplace,
         )
-        replacement_pattern = get_aten_graph_module(replacement_pattern, example_inputs, **kwargs)
+        replacement_pattern = get_aten_graph_module(replacement_pattern, example_inputs, is_cuda, **kwargs)
         replacements.extend(
             replace_pattern_with_filters(
                 m,

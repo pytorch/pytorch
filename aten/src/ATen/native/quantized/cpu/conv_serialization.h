@@ -6,7 +6,9 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
+#if !defined(__s390x__)
 #include <cpuinfo.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -170,6 +172,10 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
       for (const auto& elem : elements[2].toList()) {
         optional.emplace_back(static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
       }
+    }
+    // create default optional value for bias
+    if (optional.empty()) {
+      optional.emplace_back();
     }
 
     auto config_a = non_optional[0].accessor<int16_t, 1>();

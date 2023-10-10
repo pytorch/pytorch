@@ -10,7 +10,7 @@ from weakref import WeakSet
 
 log = logging.getLogger(__name__)
 
-DEFAULT_LOG_LEVEL = logging.WARN
+DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 
 
@@ -643,13 +643,11 @@ class TorchLogsFormatter(logging.Formatter):
         if dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
-        record.compileid = ""
-        if (
-            compile_id := torch._guards.CompileContext.current_compile_id()
-        ) is not None:
-            record.compileid = f" [{compile_id}]"
+        record.traceid = ""
+        if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+            record.traceid = f" [{trace_id}]"
 
-        prefix = f"{record.rankprefix}[{record.asctime}]{record.compileid} {record.name}: [{record.levelname}]"
+        prefix = f"{record.rankprefix}[{record.asctime}]{record.traceid} {record.name}: [{record.levelname}]"
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 

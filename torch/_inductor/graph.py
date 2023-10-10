@@ -5,9 +5,9 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
+from torch._logging import LazyString
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     magic_methods,
@@ -165,6 +166,7 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode=False,
         user_visible_outputs=frozenset(),
         layout_opt=None,
+        extern_node_serializer=None,
     ):
         super().__init__(gm)
 
@@ -189,13 +191,19 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = set()
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: Dict[str, torch.Tensor] = {}
+        self.constants: OrderedDict[str, torch.Tensor] = OrderedDict()
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
+        self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        # See `ProxyExecutor Design Note` in ir.py for more details
+        self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
+        self.extern_node_serializer: Optional[
+            Callable[[List[ir.ExternKernelNode]], Any]
+        ] = extern_node_serializer
         self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
@@ -223,6 +231,7 @@ class GraphLowering(torch.fx.Interpreter):
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs = False
+        self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.init_backend_registration()
 
     @staticmethod
@@ -337,7 +346,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
         #
-        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
+        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
         # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
         # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
         # bringing perf gains.
@@ -479,7 +488,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if (
                     not hasattr(value, "data")
                     or not isinstance(value.data, ir.IRNode)
-                    or not isinstance(value.data.data, ir.IRNode)
+                    or not (
+                        hasattr(value.data, "data")
+                        and isinstance(value.data.data, ir.IRNode)
+                    )
                 ):
                     return
 
@@ -502,9 +514,9 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
-    def add_tensor_constant(self, data):
-        def allocate():
-            for name, value in self.constants.items():
+    def add_tensor_constant(self, data, name=None):
+        def allocate(name):
+            for constant_name, value in self.constants.items():
                 if (
                     not data.is_mkldnn
                     and data.size() == value.size()
@@ -513,17 +525,31 @@ class GraphLowering(torch.fx.Interpreter):
                     and data.device == value.device
                     and torch.eq(data, value).all()
                 ):
-                    return name
-            name = f"constant{len(self.constants)}"
+                    return constant_name
+
+            if name is None:
+                name = f"constant{len(self.constants)}"
+            if name[0].isdigit():
+                name = f"constant_{name}"
+            # We may generate a var name for each constant in the codegen.
+            # Let's only keep sane characters.
+            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            name = prefix
+            cnt = 0
+            while name in self.constants:
+                name = f"{prefix}_{cnt}"
+                cnt += 1
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
             ).hexdigest()
             return name
 
+        name = allocate(name)
+
         return TensorBox.create(
             ir.ConstantBuffer(
-                allocate(),
+                name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -613,23 +639,30 @@ class GraphLowering(torch.fx.Interpreter):
                 e.__traceback__
             ) from None
 
+    @staticmethod
+    def can_inline_constant(t: torch.Tensor) -> bool:
+        """
+        True if this is a small constant attr that will be inlined.
+        """
+        return len(t.shape) == 1 and t.shape[0] <= 8
+
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
 
-        if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value)
+        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
+            return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
-            if len(value.shape) == 1 and value.shape[0] <= 8:
+            if self.can_inline_constant(value):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
                 return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        return self.add_tensor_constant(value)
+        return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
         raise AssertionError()
@@ -658,7 +691,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
-            assert isinstance(value, (TensorBox, sympy.Expr))
+            assert isinstance(
+                value, (TensorBox, sympy.Expr)
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -681,7 +716,7 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
-            self.graph_id,
+            self.graph_id if self.graph_id is not None else -1,
         )
 
     def finalize(self):
@@ -689,6 +724,7 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
+        log.debug("lowering %s", LazyString(lambda: n.format_node()))
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -891,7 +927,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
+        # check the device of the buffers.
         for buffer in self.buffers:
             device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
@@ -911,6 +947,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
+        V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
@@ -937,16 +974,16 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = self.codegen()
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
-        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        mod = PyCodeCache.load_by_key_path(
+            key, path, linemap=linemap, attrs=self.constants
+        )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap
 
-        for name, value in self.constants.items():
-            setattr(mod, name, value)
-
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
+        assert mod.__file__ is not None
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.info("Output code written to: %s", mod.__file__)
@@ -963,8 +1000,24 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
+            serialized_extern_kernel_nodes = None
+            if (
+                config.is_fbcode()
+                and self.extern_kernel_nodes
+                and self.extern_node_serializer
+            ):
+                serialized_extern_kernel_nodes = self.extern_node_serializer(
+                    self.extern_kernel_nodes
+                )
+                output_code_log.debug(
+                    "Serialized Extern Kernel Nodes: \n%s",
+                    serialized_extern_kernel_nodes,
+                )
+
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(self, code, cuda=self.cuda)
+            return AotCodeCache.compile(
+                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
+            )
         else:
             return self.compile_to_module().call
 

@@ -723,6 +723,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& scale_result,
           Tensor& out, Tensor& amax) {
   // Check sizes
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  TORCH_CHECK(dprops->major >= 9, "torch._scaled_mm is only supported on devices with compute capability >= 9.0)");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(

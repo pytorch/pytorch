@@ -23,6 +23,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -41,6 +42,7 @@ from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
     _init_device_handle,
+    _init_extension,
     _init_ignored_module_states,
     _init_param_handle_from_module,
     _init_prefetching_state,
@@ -78,6 +80,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
+from ._flat_param import FlatParameter
 
 from ._optim_utils import (
     _flatten_optim_state_dict,
@@ -96,8 +99,7 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from .flat_param import FlatParameter
-from .wrap import ModuleWrapPolicy
+from .wrap import CustomPolicy, ModuleWrapPolicy
 
 
 __all__ = [
@@ -259,7 +261,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
             (Default: ``None``)
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy]]):
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy, CustomPolicy]]):
             This specifies a policy to apply FSDP to submodules of ``module``,
             which is needed for communication and computation overlap and thus
             affects performance. If ``None``, then FSDP only applies to
@@ -409,7 +411,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,
+        auto_wrap_policy: Optional[
+            Union[Callable, ModuleWrapPolicy, CustomPolicy]
+        ] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -422,6 +426,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
+        device_mesh: Optional[DeviceMesh] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -436,8 +441,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
+        self.device_mesh = device_mesh
         _init_process_group_state(
-            self, process_group, sharding_strategy, auto_wrap_policy
+            self,
+            process_group,
+            sharding_strategy,
+            auto_wrap_policy,
+            device_mesh,
         )
         if auto_wrap_policy is not None:
             root_kwargs = {
@@ -484,6 +494,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         _init_runtime_state(self)
         _init_prefetching_state(self, backward_prefetch, forward_prefetch)
         _init_buffer_state(self, module)
+        # extension needs to be set before `_init_param_handle_from_module()`
+        _init_extension(self, device_mesh)
         _init_param_handle_from_module(
             self,
             module,
@@ -664,6 +676,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
             state_dict_config (Optional[StateDictConfig]): the configuration for the
                 target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the configuration
+                for the optimizer state dict.
+
         Returns:
             A StateDictSettings that include the previous state_dict type and
             configuration for the module.
@@ -763,6 +778,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     "All FSDP modules must have the same state dict settings."
                     f"Got {submodule_settings} and {state_dict_settings}."
                 )
+
+            # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+            # _use_dtensor flag to be true for ShardedOptimStateDictConfig().
+            if (
+                getattr(module, "device_mesh", None)
+                and state_dict_settings.state_dict_type
+                == StateDictType.SHARDED_STATE_DICT
+            ):
+                state_dict_settings.optim_state_dict_config._use_dtensor = True
         return state_dict_settings
 
     @staticmethod
@@ -1219,6 +1243,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         rank0_only: bool = True,
         full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
+        cpu_offload: bool = True,
     ) -> Dict[str, Any]:
         """
         The internal API that is used by all the optim_state_dict implementations.
@@ -1253,6 +1278,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             group=group,
             using_optim_input=using_optim_input,
             use_orig_params=use_orig_params,
+            cpu_offload=cpu_offload,
         )
 
     @staticmethod
@@ -1826,6 +1852,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             full_state_dict=state_dict_settings.state_dict_type
             == StateDictType.FULL_STATE_DICT,
             group=group,
+            cpu_offload=getattr(
+                state_dict_settings.optim_state_dict_config, "offload_to_cpu", True
+            ),
         )
 
     @staticmethod
@@ -1875,7 +1904,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 
