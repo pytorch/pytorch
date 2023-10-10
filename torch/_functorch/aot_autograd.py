@@ -3480,7 +3480,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     if aot_config.enable_log:
         aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
-        aot_joint_log.info("%s", LazyString(lambda m: f'meta: {str(m)}', fw_metadata))
 
     with torch.no_grad():
         inner_meta = fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
