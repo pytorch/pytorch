@@ -128,6 +128,7 @@ class TestMatcher(JitTestCase):
         match_sp_result = maxpool_matcher.match(maxpool_sp_graph)
         self.assertEqual(len(match_sp_result), 1)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_split_to_graph_and_name_node_map(self):
         """Testing the internal helper function for splitting the pattern graph"""
         from torch.fx.passes.utils.matcher_with_name_node_map_utils import _split_to_graph_and_name_node_map
