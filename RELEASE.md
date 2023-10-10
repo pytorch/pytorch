@@ -257,7 +257,7 @@ This is normally done right after the release is completed. We would need to cre
 
 A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`).
 
-Please note: As of release 2.1 we plan on executing 2 patch releases following each minor release.
+Please note: Starting from 2.1 one can expect up to 2 patch releases after every minor ones. Patch releases would only be published for latest minor release.
 
 ## Patch Release Criteria
 
