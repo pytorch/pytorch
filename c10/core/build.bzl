@@ -34,8 +34,8 @@ def define_targets(rules):
             ":CPUAllocator",
             ":base",
             "//c10/util:base",
+            "//third_party:rt",
         ],
-        linkopts = ["-lrt"],
         alwayslink = True,
     )
 
