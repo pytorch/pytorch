@@ -751,9 +751,9 @@ class TestSymNumberMagicMethods(TestCase):
                 hash(x)
 
         # Singleton SymInt, constant SymBool, SymNode are hashable
-        j1 = torch._C._get_singleton_int(1, 1)
-        j1_copy = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(2, 1)
+        j1 = torch._C._get_singleton_int(1)
+        j1_copy = torch._C._get_singleton_int(1)
+        j2 = torch._C._get_singleton_int(2)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
@@ -773,9 +773,9 @@ class TestSymNumberMagicMethods(TestCase):
         hash(m)
 
     def test_non_symbolic_symnode(self):
-        j1 = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(1, 1)
-        j3 = torch._C._get_singleton_int(3, 1)
+        j1 = torch._C._get_singleton_int(1)
+        j2 = torch._C._get_singleton_int(1)
+        j3 = torch._C._get_singleton_int(3)
 
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)
