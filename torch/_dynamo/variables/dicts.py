@@ -105,7 +105,6 @@ class ConstDictVariable(VariableTracker):
         elif name == "keys":
             assert not (args or kwargs)
             return SetVariable(
-                tx=tx,
                 items=[
                     ConstDictVariable._key_to_var(
                         tx,
@@ -123,7 +122,7 @@ class ConstDictVariable(VariableTracker):
             return TupleVariable(list(val.values()), **options)
         elif name == "__len__":
             assert not (args or kwargs)
-            return ConstantVariable(len(self.items), **options)
+            return ConstantVariable.create(len(self.items), **options)
         elif (
             name == "__setitem__"
             and args
@@ -193,7 +192,7 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
-            return ConstantVariable(
+            return ConstantVariable.create(
                 ConstDictVariable.get_key(args[0]) in self.items, **options
             )
         else:
@@ -236,7 +235,7 @@ class ConstDictVariable(VariableTracker):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
-            return ConstantVariable(key, **options)
+            return ConstantVariable.create(key, **options)
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -346,7 +345,7 @@ class DataClassVariable(ConstDictVariable):
             else:
                 if cls.include_none:
                     assert variables.ConstantVariable.is_literal(val)
-                    items[key] = variables.ConstantVariable(val)
+                    items[key] = variables.ConstantVariable.create(val)
                 else:
                     assert val is None, f"unexpected {val}"
 
@@ -421,13 +420,15 @@ class DataClassVariable(ConstDictVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
             return self.call_method(
-                tx, "__getitem__", [variables.ConstantVariable(name)], {}
+                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         elif not self.include_none:
             defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
-                return variables.ConstantVariable(defaults[name]).add_options(self)
+                return variables.ConstantVariable.create(defaults[name]).add_options(
+                    self
+                )
         super().var_getattr(tx, name)
 
 
@@ -463,7 +464,7 @@ class CustomizedDictVariable(ConstDictVariable):
     # when is_matching_cls(cls) is true
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
-        # avoid tracing when returnning ModelOutput from forward func
+        # avoid tracing when returning ModelOutput from forward func
         for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)
@@ -491,7 +492,7 @@ class CustomizedDictVariable(ConstDictVariable):
             if isinstance(val, VariableTracker):
                 items[key] = val
             elif variables.ConstantVariable.is_literal(val):
-                items[key] = variables.ConstantVariable(val)
+                items[key] = variables.ConstantVariable.create(val)
             else:
                 unimplemented("expect VariableTracker or ConstantVariable.is_literal")
 
@@ -548,7 +549,7 @@ class CustomizedDictVariable(ConstDictVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
             return self.call_method(
-                tx, "__getitem__", [variables.ConstantVariable(name)], {}
+                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         super().var_getattr(tx, name)
 
@@ -579,7 +580,9 @@ class HFPretrainedConfigVariable(VariableTracker):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
 
-        return ConstantVariable(getattr(self.obj, name))
+        return ConstantVariable.create(getattr(self.obj, name))
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
+        return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
+            self
+        )

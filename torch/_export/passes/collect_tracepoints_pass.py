@@ -2,9 +2,7 @@ import operator
 
 import torch
 
-from torch._export.exported_program import ArgumentKind, ArgumentSpec
-
-from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+from torch.export.exported_program import ConstantArgument, TensorArgument
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 __all__ = ["CollectTracepointsPass"]
@@ -23,13 +21,13 @@ class CollectTracepointsPass(PassBase):
         def get_arg_spec(arg):
             if isinstance(arg, torch.fx.Node):
                 if isinstance(arg.meta.get("val"), torch.Tensor):
-                    return ArgumentSpec(kind=ArgumentKind.Tensor, value=arg.name)
+                    return TensorArgument(name=arg.name)
                 else:
                     raise AssertionError(
                         "Symint input is not implemented yet for submodule call signature."
                     )
             else:
-                return ArgumentSpec(kind=ArgumentKind.Constant, value=arg)
+                return ConstantArgument(value=arg)
 
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
