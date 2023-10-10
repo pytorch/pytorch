@@ -1184,6 +1184,22 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
             y = x.stft(10, pad_mode='constant')
 
+    # stft and istft are currently warning if a window is not provided
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_stft_requires_window(self, device):
+        x = torch.rand(100)
+        with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
+            y = x.stft(10, pad_mode='constant', return_complex=True)
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_istft_requires_window(self, device):
+        stft = torch.rand((51, 5), dtype=torch.cdouble)
+        # 51 = 2 * n_fft + 1, 5 = number of frames
+        with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
+            x = torch.istft(stft, n_fft=100, length=100)
+
     @skipCPUIfNoFFT
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
