@@ -208,7 +208,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 compressed_tensor_cusparselt = torch._cslt_compress(original_tensor)
 
         # set values
-        self._PADDING_WARNING_SHOWN =
         self.original_tensor = None
         self.compressed_tensor_cusparselt = compressed_tensor_cusparselt
         self.sparse_tensor_cutlass = sparse_tensor_cutlass
@@ -330,7 +329,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     res = torch._cslt_sparse_mm(
                         input_B.compressed_tensor_cusparselt, input_A_padded.t(), bias  # type: ignore[arg-type]
                     ).t()
-                return res[:row, :col]
+                return res[:row]
 
         # handle mm
         if func is torch.ops.aten.mm.default:
@@ -387,14 +386,14 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         weight.meta_tensor_cutlass,
                         bias=bias
                     )
-                    return res[:row, :col]
+                    return res[:row]
                 else:
                     res = torch._cslt_sparse_mm(
                         weight.compressed_tensor_cusparselt,  # type: ignore[arg-type]
                         input_tensor_2d_padded.t(),
                         bias
                     ).t()
-                    return res[:row, :col].view(*shape[:-1], -1)
+                    return res[:row].view(*shape[:-1], -1)
 
 
         # handle values
