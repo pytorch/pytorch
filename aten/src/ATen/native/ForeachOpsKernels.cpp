@@ -105,8 +105,9 @@ namespace at::native {
       TensorList tensors, const Scalar& scalar) {               \
     check_foreach_api_restrictions(tensors);                    \
                                                                 \
+    Tensor scalar_tensor = tensors[0].new_empty({}).fill_(scalar); \
     for (auto& t : tensors) {                                   \
-      t.OP##_(scalar);                                          \
+      t.OP##_(scalar_tensor);                                   \
     }                                                           \
   }                                                             \
                                                                 \
@@ -116,8 +117,9 @@ namespace at::native {
                                                                 \
     std::vector<Tensor> result;                                 \
     result.reserve(tensors.size());                             \
+    Tensor scalar_tensor = tensors[0].new_empty({}).fill_(scalar); \
     for (const auto& t : tensors) {                             \
-      result.emplace_back(t.OP(scalar));                        \
+      result.emplace_back(t.OP(scalar_tensor));                        \
     }                                                           \
                                                                 \
     return result;                                              \
