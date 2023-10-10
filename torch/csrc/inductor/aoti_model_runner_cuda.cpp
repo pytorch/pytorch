@@ -1,8 +1,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 
 std::vector<at::Tensor> AOTIModelRunnerCuda::run(
     std::vector<at::Tensor> inputs,
@@ -16,5 +15,4 @@ std::vector<at::Tensor> AOTIModelRunnerCuda::run(
       inputs, cuda_stream_handle, proxy_executor_handle);
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor
