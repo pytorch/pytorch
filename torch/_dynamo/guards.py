@@ -1318,6 +1318,8 @@ def get_lhs_val(part):
     for splitter in [" == ", " is "]:
         if splitter in part:
             lhs = part.split(splitter)[0]
+            if splitter == " is ":
+                lhs = f"type({lhs})"
             break
     if not lhs:
         for check, fn in [
