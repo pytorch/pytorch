@@ -3222,19 +3222,18 @@ def meta__int_mm(a, b):
 
 
 @register_meta([aten._convert_weight_to_int4pack])
-def meta__convert_weight_to_int4pack(a, inner_k_tiles):
-    torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
-    torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
+def meta__convert_weight_to_int4pack(w, inner_k_tiles):
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
-        a.dtype is torch.int32,
-        lambda: f"expected self to be int32, got {a.dtype}",
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
     )
-    out_features = a.size(0)
-    in_features = a.size(1)
+    n = w.size(0)
+    k = w.size(1)
     torch.empty(
         (
-            out_features // 8,
-            in_features // (inner_k_tiles * 16),
+            n // 8,
+            k // (inner_k_tiles * 16),
             32,
             inner_k_tiles // 2,
         ),
@@ -3243,14 +3242,18 @@ def meta__convert_weight_to_int4pack(a, inner_k_tiles):
 
 
 @register_meta([aten._weight_int4pack_mm])
-def meta__weight_int4pack_mm(a, b, q_group_size, q_scale_and_zeros):
-    torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
-    torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
+def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
-        b.dtype is torch.int32,
-        lambda: f"expected mat2 to be int32, got {a.dtype}",
+        x.dtype is torch.bfloat16,
+        lambda: f"expected x to be bf16, got {x.dtype}",
     )
-    torch.empty(a.size(0), b.size(0) * 8, dtype=a.dtype)
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    torch.empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
 
 
 @register_meta(aten._cdist_forward.default)
