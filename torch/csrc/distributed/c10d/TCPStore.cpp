@@ -6,6 +6,10 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <fstream>
+#include <random>
+#include <streambuf>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -299,9 +303,37 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     // server successfully started
     C10D_DEBUG("The server has started on port = {}.", server_->port());
 
+    std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
+    if (maxconnFile.good() && numWorkers_.has_value()) {
+      try {
+        std::string str(
+            (std::istreambuf_iterator<char>(maxconnFile)),
+            std::istreambuf_iterator<char>());
+        std::size_t somaxconn = std::stoll(str);
+        if (somaxconn < *numWorkers_) {
+          C10D_WARNING(
+              "Starting store with {} workers but somaxconn is {}."
+              "This might cause instability during bootstrap, consider increasing it.",
+              *numWorkers_,
+              somaxconn);
+        }
+      } catch (std::logic_error& e) {
+        C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
+      }
+    }
+
     addr_.port = server_->port();
   } else {
     addr_.port = opts.port;
+  }
+
+  if (numWorkers_.has_value()) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(1, *numWorkers_);
+    // stagger connecting to the store when there are too many ranks to
+    // avoid causing a DDoS
+    std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
   }
 
   client_ = detail::TCPClient::connect(addr_, opts);

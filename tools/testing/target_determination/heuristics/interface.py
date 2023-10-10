@@ -240,8 +240,6 @@ class AggregatedHeuristics:
         for heuristic_results in self._heuristic_results.values():
             aggregated_priorities.integrate_priorities(heuristic_results)
 
-        aggregated_priorities.print_info()
-
         return aggregated_priorities
 
     def get_test_stats(self, test: str) -> Dict[str, Any]:
@@ -251,6 +249,16 @@ class AggregatedHeuristics:
         stats: Dict[str, Any] = {
             "test_name": test,
         }
+
+        # Get baseline metrics assuming we didn't have any TD heuristics
+        baseline_priorities = TestPrioritizations(
+            tests_being_ranked=self.unranked_tests
+        )
+        baseline_stats = baseline_priorities.get_priority_info_for_test(test)
+        baseline_stats["heuristic_name"] = "baseline"
+        stats["without_heuristics"] = baseline_stats
+
+        # Get metrics about the heuristics used
         heuristics = []
 
         # Figure out which heuristic gave this test the highest priority (if any)

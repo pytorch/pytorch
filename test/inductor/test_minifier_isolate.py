@@ -2,10 +2,7 @@
 import functools
 import unittest
 
-import torch
-import torch._dynamo
 import torch._inductor.config as inductor_config
-import torch._inductor.utils
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import (
     IS_JETSON,
@@ -13,8 +10,9 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
+from torch.utils._triton import has_triton
 
-_HAS_TRITON = torch._inductor.utils.has_triton()
+_HAS_TRITON = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
 
 
