@@ -668,6 +668,16 @@ class TensorVariable(VariableTracker):
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
+            if not isinstance(
+                fn_var,
+                (
+                    variables.functions.FunctoolsPartialVariable,
+                    variables.UserFunctionVariable,
+                    variables.TorchVariable,
+                    variables.NNModuleVariable,
+                ),
+            ):
+                unimplemented("Unexpected callable type passed to register_hook")
 
             # Guards from the fn_var
             options.update(VariableTracker.propagate(fn_var))

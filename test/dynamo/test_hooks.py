@@ -532,3 +532,31 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             comp_out[0].backward(torch.ones(4))
             self.assertEqual(x0.grad, x1.grad)
+
+    def test_functools_arg_vary(self):
+        def pre_hook(grad, *, k):
+            return grad * k
+
+        hook = functools.partial(pre_hook, k=1)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def h(x):
+            y = x.mul(2)
+            y.register_hook(hook)
+            return y.mul(3)
+
+        with compiled_autograd.enable(torch.compile(backend="eager", fullgraph=True)):
+            x = torch.randn(2, requires_grad=True)
+            h(x).sum().backward()
+            orig_grad = x.grad
+            x.grad = None
+
+            hook = functools.partial(pre_hook, k=2)
+            h(x).sum().backward()
+            self.assertEqual(orig_grad * 2, x.grad)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

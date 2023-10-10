@@ -501,7 +501,7 @@ Graph breaks can also be encountered on data-dependent control flow (``if
 x.shape[0] > 2``) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators. Currently, we support :ref:`torch.cond <control_flow_cond>`
+special control flow operators. Currently, we support :ref:`torch.cond <cond>`
 to express if-else like control flow (more coming soon!).
 
 Data-Dependent Accesses
@@ -521,9 +521,13 @@ When tracing, a META implementation (or "meta kernel") is required for all
 operators. This is used to reason about the input/output shapes for this
 operator.
 
-Note that the official API for registering custom meta kernels for custom ops is
-currently undergoing development. While the final API is being refined, you can
-refer to the documentation `here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
+To register a meta kernel for a C++ Custom Operator, please refer to
+`this documentation <https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz>`__.
+
+The official API for registering custom meta kernels for custom ops implemented
+in python is currently undergoing development. While the final API is being
+refined, you can refer to the documentation
+`here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
 
 In the unfortunate case where your model uses an ATen operator that is does not
 have a meta kernel implementation yet, please file an issue.
@@ -540,7 +544,7 @@ Read More
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
-   control_flow_cond
+   cond
 
 .. toctree::
    :caption: Deep Dive for PyTorch Developers
