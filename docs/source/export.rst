@@ -504,16 +504,6 @@ number of paths. In such cases, users will need to rewrite their code using
 special control flow operators. Currently, we support :ref:`torch.cond <cond>`
 to express if-else like control flow (more coming soon!).
 
-Data-Dependent Accesses
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Data dependent behavior such as using the value inside of a tensor to construct
-another tensor, or using the value of a tensor to slice into another tensor, is
-also something the tracer cannot fully determine. Users will need to rewrite
-their code using the inline constraint APIs
-:func:`torch.export.constrain_as_size` and
-:func:`torch.export.constrain_as_value`.
-
 Missing Meta Kernels for Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -561,8 +551,6 @@ API Reference
 .. automodule:: torch.export
 .. autofunction:: export
 .. autofunction:: dynamic_dim
-.. autofunction:: constrain_as_size
-.. autofunction:: constrain_as_value
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
