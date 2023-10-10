@@ -1313,6 +1313,28 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
 stashed_first_fail_reason = None
 
 
+def get_lhs_val(part):
+    lhs = None
+    for splitter in [" == ", " is "]:
+        if splitter in part:
+            lhs = part.split(splitter)[0]
+            break
+    if not lhs:
+        for check, fn in [
+            ("___check_type_id", "type"),
+            ("___check_obj_id", "id"),
+            ("hasattr", None),
+            ("not hasattr", None),
+        ]:
+            if matched := re.match(rf"{check}\(([^,]+),\s*[^)]+\)", part):
+                if fn:
+                    lhs = f"{{'{fn}': {fn}({matched.group(1)}) }}"
+                else:
+                    lhs = matched.group(1)
+                break
+    return lhs
+
+
 def guard_fail_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
@@ -1344,10 +1366,10 @@ def guard_fail_hook(
             fail_reason = part
         if isinstance(fail_reason, str):
             if config.report_guard_failure_values:
-                if "==" in part:
-                    lhs = part.split("==")[0]
+                if lhs := get_lhs_val(part):
                     lhs_value = eval(lhs, global_scope, scope)
                     fail_reason += f", with LHS value: {lhs_value}"
+
             reason += fail_reason
             if config.report_all_guard_failures:
                 reason += "\n"

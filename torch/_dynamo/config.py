@@ -259,7 +259,7 @@ error_on_recompile = False
 report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
 
 # Whether to report all guard failures or just the first one that fails
-report_all_guard_failures = True
+report_all_guard_failures = False
 
 # Whether to report all guard failures or just the first one that fails
 report_guard_failure_values = True
