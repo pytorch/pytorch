@@ -53,7 +53,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ## Release Cadence
 
-Following is the release cadence for year 2023/2024. Please note: these dates are subject to change, the exact dates should be announced on the [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27) before each release.
+Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27).
 
 | Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
 | --- | --- | --- | --- | --- |
