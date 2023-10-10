@@ -1,10 +1,10 @@
+#ifndef C10_MOBILE
 #include <ATen/DynamicLibrary.h>
-#include <torch/csrc/inductor/aoti_model_runner.h>
 
+#include <torch/csrc/inductor/aoti_model_runner.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 
 AOTIModelRunner::AOTIModelRunner(
     const char* model_path,
@@ -59,5 +59,5 @@ std::vector<at::Tensor> AOTIModelRunner::run(
       output_handles.data(), output_handles.size());
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor
+#endif
