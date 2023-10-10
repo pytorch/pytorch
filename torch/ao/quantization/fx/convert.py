@@ -62,9 +62,6 @@ from torch.ao.quantization.utils import (
     is_per_channel,
     to_underlying_dtype,
 )
-from torch.ao.quantization.quantize import (
-    _remove_qconfig,
-)
 from torch.ao.quantization.stubs import DeQuantStub
 from .custom_config import (
     ConvertCustomConfig,
@@ -1098,11 +1095,6 @@ def convert(
     if not is_reference:
         model = lower_to_fbgemm(model, node_name_to_qconfig, node_name_to_scope)
 
-    # TODO: this looks hacky, we want to check why we need this and see if we can
-    # remove this
-    # removes qconfig and activation_post_process modules
-    if _remove_qconfig_flag:
-        _remove_qconfig(model)
     model.delete_all_unused_submodules()
     model.meta.pop("_observed_graph_module_attrs", None)
     return model
