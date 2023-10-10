@@ -68,7 +68,7 @@ namespace {
 void throw_python_error() {
   python_error err;
   err.persist();
-  throw err;
+  throw std::move(err);
 }
 
 } // namespace
@@ -1557,6 +1557,7 @@ PyTypeObject THPFunctionType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
