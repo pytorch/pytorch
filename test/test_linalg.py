@@ -5848,7 +5848,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         c2 = torch.mm(a, b.t())
 
         mean_err = ((c - c2).abs() / c2).mean()
-        assert mean_err < 0.05
+        self.assertTrue(mean_err < 0.05)
 
     @slowTest
     @onlyNativeDeviceTypes

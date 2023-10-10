@@ -121,7 +121,7 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
-// f16 vector ypes
+// f16 vector types
 struct __align__(2) f16x1 {
   __half vals[1];
 };
