@@ -12,7 +12,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv, SymTypes
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
 
 from .. import codecache, config, ir
@@ -981,7 +981,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.shape_env = ShapeEnv()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1491,7 +1490,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def is_statically_known_int(self, x):
         try:
-            val = self.shape_env._maybe_evaluate_static(x)
+            val = V.graph._shape_env._maybe_evaluate_static(x)
             int(x)
             return True
         except Exception:

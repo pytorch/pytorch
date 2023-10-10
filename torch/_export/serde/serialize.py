@@ -16,10 +16,10 @@ from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, U
 import sympy
 
 import torch
-import torch._export.exported_program as ep
+import torch.export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils._pytree import treespec_dumps, treespec_loads, tree_map_only
+from torch.utils._pytree import tree_map_only, treespec_dumps, treespec_loads
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,
@@ -62,6 +62,12 @@ __all__ = [
     "GraphModuleDeserializer",
     "ExportedProgramDeserializer",
 ]
+
+from torch.export.exported_program import (
+    ConstantArgument as PyConstantArgument,
+    TensorArgument as PyTensorArgument,
+    SymIntArgument as PySymIntArgument,
+)
 
 from .upgrade import GraphModuleOpUpgrader
 
@@ -190,15 +196,16 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
         layout=_TORCH_TO_SERIALIZE_LAYOUT[t.layout],
     )
 
-def serialize_call_spec(call_spec: ep.CallSpec) -> CallSpec:
+# TODO(zhxchen17) Remove call spec.
+def serialize_call_spec(call_spec: torch._export.exported_program.CallSpec) -> CallSpec:
     return CallSpec(
         in_spec=treespec_dumps(call_spec.in_spec, TREESPEC_VERSION) if call_spec.in_spec else "",
         out_spec=treespec_dumps(call_spec.out_spec, TREESPEC_VERSION) if call_spec.out_spec else "",
     )
 
 
-def deserialize_call_spec(call_spec: CallSpec) -> ep.CallSpec:
-    return ep.CallSpec(
+def deserialize_call_spec(call_spec: CallSpec) -> torch._export.exported_program.CallSpec:
+    return torch._export.exported_program.CallSpec(
         in_spec=treespec_loads(call_spec.in_spec) if call_spec.in_spec else None,
         out_spec=treespec_loads(call_spec.out_spec) if call_spec.out_spec else None,
     )
@@ -289,7 +296,7 @@ def _int_to_sympy_int(val) -> sympy.Expr:
 
 
 def serialize_range_constraints(
-    range_constraints: Dict[sympy.Symbol, ep.RangeConstraint]
+    range_constraints: Dict[sympy.Symbol, torch._export.exported_program.RangeConstraint]
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
@@ -301,7 +308,7 @@ def serialize_range_constraints(
 
 
 def serialize_equality_constraints(
-    equality_constraints: List[Tuple[ep.InputDim, ep.InputDim]]
+    equality_constraints: List[Tuple[torch._export.exported_program.InputDim, torch._export.exported_program.InputDim]]
 ) -> List[Tuple[Tuple[str, int], Tuple[str, int]]]:
     return [
         ((v1.input_name, v1.dim), (v2.input_name, v2.dim))
@@ -311,9 +318,9 @@ def serialize_equality_constraints(
 
 def deserialize_equality_constraints(
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
-) -> List[Tuple[ep.InputDim, ep.InputDim]]:
+) -> List[Tuple[torch._export.exported_program.InputDim, torch._export.exported_program.InputDim]]:
     return [
-        (ep.InputDim(v1[0], v1[1]), ep.InputDim(v2[0], v2[1]))
+        (torch._export.exported_program.InputDim(v1[0], v1[1]), torch._export.exported_program.InputDim(v2[0], v2[1]))
         for (v1, v2) in equality_constraints
     ]
 
@@ -339,7 +346,7 @@ class GraphModuleSerializer:
     def __init__(
         self,
         graph_signature: ep.ExportGraphSignature,
-        call_spec: ep.CallSpec,
+        call_spec: torch._export.exported_program.CallSpec,
         module_call_graph: List[ep.ModuleCallEntry]
     ):
         self.graph_state = GraphState()
@@ -697,12 +704,12 @@ class GraphModuleSerializer:
 
     def serialize_module_call_signature(self, module_call_signature: ep.ModuleCallSignature) -> ModuleCallSignature:
         def serialize_argument(x: ep.ArgumentSpec) -> Argument:
-            if x.kind == ep.ArgumentKind.Tensor:
-                return Argument.create(as_tensor=TensorArgument(name=x.value))
-            elif x.kind == ep.ArgumentKind.SymInt:
-                return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.value))
+            if isinstance(x, PyTensorArgument):
+                return Argument.create(as_tensor=TensorArgument(name=x.name))
+            elif isinstance(x, PySymIntArgument):
+                return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.name))
             else:
-                assert x.kind == ep.ArgumentKind.Constant
+                assert isinstance(x, PyConstantArgument)
                 return self.serialize_input(x.value)
         return ModuleCallSignature(
             inputs=[serialize_argument(x) for x in module_call_signature.inputs],
@@ -1085,7 +1092,13 @@ class GraphModuleDeserializer:
         self,
         serialized_graph_module: GraphModule,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
-    ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec, List[ep.ModuleCallEntry], Dict[str, sympy.Symbol]]:
+    ) -> Tuple[
+        torch.fx.GraphModule,
+        ep.ExportGraphSignature,
+        torch._export.exported_program.CallSpec,
+        List[ep.ModuleCallEntry],
+        Dict[str, sympy.Symbol]
+    ]:
         self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
         self.fake_tensor_mode = FakeTensorMode(
             allow_fallback_kernels=False,
@@ -1101,7 +1114,7 @@ class GraphModuleDeserializer:
         call_spec = deserialize_call_spec(serialized_graph_module.call_spec)
         module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
         return (
-            ep._create_graph_module_for_export(self.module, self.graph),
+            torch._export.exported_program._create_graph_module_for_export(self.module, self.graph),
             sig,
             call_spec,
             module_call_graph,
@@ -1151,7 +1164,7 @@ class GraphModuleDeserializer:
             assert isinstance(value, GraphArgument)
             with self.save_graph_module():
                 self.deserialize_graph(value.graph)
-                submodule = ep._create_graph_module_for_export(self.module, self.graph)
+                submodule = torch._export.exported_program._create_graph_module_for_export(self.module, self.graph)
             self.module.register_module(value.name, submodule)
             return self.graph.create_node(
                 "get_attr",
@@ -1341,13 +1354,11 @@ class GraphModuleDeserializer:
     def deserialize_module_call_signature(self, module_call_signature: ModuleCallSignature) -> ep.ModuleCallSignature:
         def deserialize_argument(x: Argument) -> ep.ArgumentSpec:
             if x.as_tensor is not None:
-                return ep.ArgumentSpec(kind=ep.ArgumentKind.Tensor, value=x.as_tensor.name)
+                return PyTensorArgument(name=x.as_tensor.name)
             elif x.as_symint is not None:
-                return ep.ArgumentSpec(kind=ep.ArgumentKind.SymInt, value=x.as_symint.as_name)
+                return PySymIntArgument(name=x.as_symint.as_name)
             else:
-                return ep.ArgumentSpec(
-                    kind=ep.ArgumentKind.Constant, value=self.deserialize_input(x)
-                )
+                return PyConstantArgument(value=self.deserialize_input(x))
 
         return ep.ModuleCallSignature(
             inputs=[deserialize_argument(x) for x in module_call_signature.inputs],
@@ -1377,11 +1388,11 @@ class ExportedProgramDeserializer:
         self,
         symbol_name_to_range: Dict[str, symbolic_shapes.ValueRanges],
         symbol_name_to_symbol: Dict[str, sympy.Symbol],
-    ) -> Dict[sympy.Symbol, ep.RangeConstraint]:
+    ) -> Dict[sympy.Symbol, torch._export.exported_program.RangeConstraint]:
         range_constraints = {}
         for k, v in symbol_name_to_range.items():
             if symbol := symbol_name_to_symbol.get(k):
-                range_constraints[symbol] = ep.RangeConstraint(v.lower, v.upper)  # type: ignore[arg-type]
+                range_constraints[symbol] = torch._export.exported_program.RangeConstraint(v.lower, v.upper)  # type: ignore[arg-type]
             else:
                 log.warning(f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
         return range_constraints

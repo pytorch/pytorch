@@ -4405,7 +4405,7 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    NestedTensorCUDA, CUDA: is_pinned_cuda
+    CUDA: is_pinned_cuda
     MPS: is_pinned_mps
     CompositeExplicitAutograd: is_pinned_default
 
@@ -4419,7 +4419,6 @@
   dispatch:
     CUDA: _pin_memory_cuda
     MPS: _pin_memory_mps
-    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor

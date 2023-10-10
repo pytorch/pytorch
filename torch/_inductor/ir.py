@@ -2337,6 +2337,9 @@ class Buffer(IRNode):
     name: Optional[str]
     layout: Layout
 
+    # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
+    # MultiOutput does NOT define this!
+
     def __post_init__(self):
         super().__post_init__()
         self.origin_node = None
@@ -2439,7 +2442,42 @@ class Buffer(IRNode):
         Returns the unbacked symbols which are defined by this IR node,
         because this is a data-dependent IR node, or item()
         """
-        return set()
+        # So this is a little unusual.  In principle, you could imagine
+        # defining a MultiOutputLayout buffer so that it DOES define
+        # unbacked symints.  However, we can't easily tell what symints
+        # such a buffer defines, because MultiOutputLayout doesn't actually
+        # define any useful information about what it returns.
+        #
+        # An easier and better approach is to delay the symint allocation
+        # to the MultiOutput IR nodes, which are when we actually extract
+        # out the buffers and know what their sizes are.
+        #
+        # There are two subleties here:
+        #
+        # 1. Suppose you have a kernel that produces out1: (i0,), out2: (i0,)
+        #    Both of these actually count as defs!  The scheduler will just
+        #    arbitrarily pick one of these as the canonical definer and
+        #    ensure it stays live.  It's not a big deal if we pick the
+        #    wrong one because tuple accesses are cheap, and all this means
+        #    is we accidentally keep a MultiOutput node live when it wasn't
+        #    strictly necessary.
+        #
+        # 2. Suppose you have a MultiOutput buffer whose size is (i0,), but
+        #    the MultiOutputLayout buffer it is projecting from isn't actually
+        #    dynamic; it has i0 as one of the arguments.  We cannot tell this
+        #    directly from MultiOutput, we have to look at the input buffer's
+        #    uses to work this out.  No big deal.
+        if isinstance(self.layout, MultiOutputLayout):
+            return set()
+
+        # This kernel defines all unbacked symbols... that it didn't get in as
+        # arguments!
+        defs = (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
+        return defs - self.get_unbacked_symbol_uses()
 
     def get_unbacked_symbol_uses(self):
         """
@@ -2457,6 +2495,32 @@ class Buffer(IRNode):
         necessary.
         """
         return set()
+
+    def codegen_unbacked_symbol_defs(self, wrapper):
+        # NB: If it is possible for other ir node types to return unbacked
+        # symints, you need to make sure their codegen calls this method.
+        # Don't forget to update get_unbacked_symbol_defs too.
+        symbols_to_define = self.get_unbacked_symbol_defs()
+        for i, s in enumerate(self.get_size()):
+            if s in symbols_to_define:
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                )
+                symbols_to_define.remove(s)
+        for i, s in enumerate(self.get_stride()):
+            if s in symbols_to_define:
+                wrapper.writeline(
+                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                )
+                symbols_to_define.remove(s)
+        if (s := self.get_offset()) in symbols_to_define:
+            wrapper.writeline(
+                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+            )
+            symbols_to_define.remove(s)
+        assert (
+            not symbols_to_define
+        ), f"unbacked symint {s} not written out, check comment above"
 
     def realize(self):
         pass
@@ -4009,6 +4073,9 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
+    # Given an input MultiOutputLayout buffer, indexes out an actual buffer
+    # from that result.  This doesn't actually produce multiple outputs,
+    # that's MultiOutputLayout!
     def codegen_list_tuple_access(self, basename, indices):
         if len(indices) > 0:
             itype, i = indices[0]
@@ -4025,50 +4092,20 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
-    def get_unbacked_symbol_defs(self):
-        # This kernel defines all unbacked symbols... that it didn't get in as
-        # arguments!
-        defs = (
-            free_unbacked_symbols(self.get_size())
-            | free_unbacked_symbols(self.get_stride())
-            | free_unbacked_symbols(self.get_offset())
-        )
-        return defs - self.get_unbacked_symbol_uses()
-
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
-        # NB: If it is possible for other ir node types to return unbacked
-        # symints, we also have to add this logic there too.  Don't forget to
-        # update get_unbacked_symbol_defs too.
-        symbols_to_define = self.get_unbacked_symbol_defs()
-        for i, s in enumerate(self.get_size()):
-            if s in symbols_to_define:
-                wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
-                )
-                symbols_to_define.remove(s)
-        for i, s in enumerate(self.get_stride()):
-            if s in symbols_to_define:
-                wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
-                )
-                symbols_to_define.remove(s)
-        if (s := self.get_offset()) in symbols_to_define:
-            wrapper.writeline(
-                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
-            )
-            symbols_to_define.remove(s)
-        assert (
-            not symbols_to_define
-        ), f"unbacked symint {s} not written out, check comment above"
+        self.codegen_unbacked_symbol_defs(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         self.indices = indices
+
+    def get_unbacked_symbol_uses(self):
+        return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self):
         return False
@@ -5790,6 +5827,12 @@ class CollectiveKernel(ExternKernel):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
 
+    def should_emit_register_tensor_work(self):
+        return True
+
+    def should_emit_find_or_create_pg(self):
+        return True
+
     def codegen_collective(self, wrapper, output_name, input_names):
         # factor so the boilerplate can be handled in CollectiveKernel.codegen
         raise NotImplementedError("Must implement")
@@ -5819,16 +5862,18 @@ class CollectiveKernel(ExternKernel):
         output_name = self.get_name()
         tag, ranks, group_size = self.constant_args
 
-        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
-        wrapper.writeline(
-            f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
-        )
+        if self.should_emit_find_or_create_pg():
+            # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+            wrapper.writeline(
+                f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+            )
 
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
-        wrapper.writeline(
-            f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
-        )
+        if self.should_emit_register_tensor_work():
+            wrapper.writeline(
+                f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
+            )
 
 
 class InPlaceCollectiveKernel(CollectiveKernel):
@@ -6214,3 +6259,69 @@ def maybe_free_unbacked_symbols(s):
         return free_unbacked_symbols(s)
     else:
         return set()
+
+
+class AllToAllSingle(OutOfPlaceCollectiveKernel):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        outputs,
+        constant_args,
+        output_split_sizes,
+        input_split_sizes,
+    ):
+        super().__init__(layout, inputs, outputs, constant_args)
+        self.output_split_sizes = output_split_sizes
+        self.input_split_sizes = input_split_sizes
+
+    def get_unbacked_symbol_uses(self):
+        r = set()
+        if self.output_split_sizes is not None:
+            r |= free_unbacked_symbols(self.output_split_sizes)
+        if self.input_split_sizes is not None:
+            r |= free_unbacked_symbols(self.input_split_sizes)
+        return r
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        output_split_sizes: Optional[List[Expr]],
+        input_split_sizes: Optional[List[Expr]],
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        inputs = [cls.realize_input(x)]
+
+        def compute_size(new_size):
+            if output_split_sizes is not None:
+                new_size[0] = sum(output_split_sizes)
+
+        outputs = cls.create_output_buffers(inputs, compute_size)
+
+        layout = MultiOutputLayout(inputs[0].get_device())
+
+        packed = AllToAllSingle(
+            layout=layout,
+            inputs=inputs,
+            outputs=outputs,
+            constant_args=[tag, ranks, group_size],
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
+        )
+        return cls.create_output_nodes(packed, outputs)[0]
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        tag, ranks, group_size = self.constant_args
+
+        # TODO: might be necessary to do some pretty printing on
+        # split sizes
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_to_all_single("
+            f"{output_name}[0], {output_name}_inputs[0], "
+            f"output_split_sizes={self.output_split_sizes}, "
+            f"input_split_sizes={self.input_split_sizes}, "
+            f"group={output_name}_pg, async_op=True)"
+        )
