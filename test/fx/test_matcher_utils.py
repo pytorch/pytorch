@@ -13,7 +13,9 @@ sys.path.append(pytorch_test_dir)
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.fx.passes.utils.matcher_with_name_node_map_utils import SubgraphMatcherWithNameNodeMap
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests
+import unittest
 
 class TestMatcher(JitTestCase):
     def test_subgraph_matcher_with_attributes(self):
@@ -148,6 +150,7 @@ class TestMatcher(JitTestCase):
         self.assertEqual(before_split_res[0], after_split_res[0])
         self.assertEqual(before_split_res[1], after_split_res[1])
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_matcher_with_name_node_map_function(self):
         """Testing SubgraphMatcherWithNameNodeMap with function pattern
         """
@@ -185,6 +188,7 @@ class TestMatcher(JitTestCase):
                 if n == name_node_map["conv"]:
                     assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_matcher_with_name_node_map_module(self):
         """Testing SubgraphMatcherWithNameNodeMap with module pattern
         """
