@@ -32,6 +32,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
+from .fx_utils import FakeTensorUpdater
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -262,17 +263,12 @@ def fake_tensor_prop(
     fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
     else:
         ctx = (
             contextlib.nullcontext()
             if not force_allow_non_fake_inputs
             else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
         )
-        with ctx:  # type: ignore[attr-defined]
-            FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                *example_inputs
-            )
 
     return fake_mode
 
@@ -519,7 +515,9 @@ def fx_codegen_and_compile(
     #
     # Also this has to be done before FakeTensorProp below to avoid the failed
     # .view() call.
+    fake_tensor_updater = FakeTensorUpdater(gm.graph)
     view_to_reshape(gm)
+    fake_tensor_updater.incremental_update()
 
     fake_mode = fake_tensor_prop(gm, example_inputs)
 
