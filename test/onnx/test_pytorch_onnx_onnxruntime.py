@@ -13584,6 +13584,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_rnn(self, *args, **kwargs):
         self._dispatch_rnn_test(*args, **kwargs)
 
+    def test_aten_diag_embed(self):
+        class MyDiagEmbedModel(torch.nn.Module):
+            def forward(self, input, offset=0, dim1=-2, dim2=-1):
+                return torch.diag_embed(input, offset=offset, dim1=dim1, dim2=dim2)
+
+
+        model = MyDiagEmbedModel()
+        input = torch.randn(2, 3)
+        self.run_test(model, input)
 
 if __name__ == "__main__":
     common_utils.TestCase._default_dtype_check_enabled = True

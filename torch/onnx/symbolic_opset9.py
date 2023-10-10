@@ -7195,3 +7195,8 @@ def logit(g: jit_utils.GraphContext, self: torch._C.Value, eps: torch._C.Value):
     sub = g.op("Sub", one, z)
     div = g.op("Div", z, sub)
     return g.op("Log", div)
+
+@_onnx_symbolic("aten::diag_embed")
+@_beartype.beartype
+def diag_embed(g: jit_utils.GraphContext, self: torch._C.Value, offset, dim1, dim2):
+    return None
