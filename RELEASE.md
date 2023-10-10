@@ -55,23 +55,13 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 Following is the release cadence for year 2023/2024. Please note: these dates are subject to change, the exact dates should be announced on the [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27) before each release.
 
-| Release | Start Date | Release Date |
-| --- | --- | --- |
-| 2.1.0 | May 2023 |  October 4, 2023 |
-| 2.1.1 | October 2023 | November 2023 |
-| 2.1.2 | November 2023 | December 2023  |
-| 2.2.0 | October 2023 | January 2024 |
-| 2.2.1 | January 2024 | February 2024 |
-| 2.2.2 | February 2024 | March 2024 |
-| 2.3.0 | January 2024 | April 2024 |
-| 2.3.1 | April 2024 | May 2024 |
-| 2.3.2 | May 2024 | June 2024 |
-| 2.4.0 | April 2024 | July 2024 |
-| 2.4.1 | July 2024 | August 2024 |
-| 2.4.2 | August 2024 | September 2024 |
-| 2.5.0 | July 2024 | October 2024 |
-| 2.5.1 | October 2024 | November 2024 |
-| 2.5.2 | November 2024 | December 2024 |
+| Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
+| --- | --- | --- | --- | --- |
+| 2.1.0 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
+| 2.2.0 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
+| 2.3.0 | Mar 2024 | Apr 2024 | May 2024 | Jun 2024 |
+| 2.4.0 | May 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
+| 2.5.0 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
 
 ## General Overview
 
