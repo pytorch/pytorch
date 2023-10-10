@@ -2418,7 +2418,6 @@
     SparseCsrCPU, SparseCsrCUDA: empty_like_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: empty_like_nested
   autogen: empty_like.out
-  tags: core
 
 - func: empty_strided(SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -2748,7 +2747,6 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: full_like
   autogen: full_like.out
-  tags: core
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
