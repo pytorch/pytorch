@@ -3,6 +3,8 @@
 
 # This file exports ONNX ops for opset 13
 import functools
+import math
+from typing import Optional, Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1150,3 +1152,49 @@ def quantized_conv_transpose3d(
     )
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("aten::linalg_vector_norm")
+@symbolic_helper.parse_args("v", "f", "is", "b", "v")
+@_beartype.beartype
+def linalg_vector_norm(
+    g: jit_utils.GraphContext,
+    self: torch._C.Value,
+    ord: float,
+    dim: Optional[Sequence[int]],
+    keepdim: bool,
+    dtype: torch._C.Value,
+):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
+    if dim is None:
+        self = symbolic_helper._reshape_helper(g, self, [-1])
+        keepdim = False
+
+    if ord == math.inf:
+        result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == -math.inf:
+        result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == 0:
+        return symbolic_helper._onnx_opset_unsupported_detailed(
+            "linalg_vector_norm", 9, 11, "ord=0 not supported", self
+        )
+    else:
+        ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
+        result = symbolic_helper._reducesum_helper(
+            g, g.op("Pow", g.op("Abs", self), ord_op), axes_i=dim, keepdims_i=keepdim
+        )
+        result = g.op(
+            "Pow",
+            result,
+            g.op(
+                "Div",
+                g.op("Constant", value_t=torch.tensor(1, dtype=torch.float32)),
+                ord_op,
+            ),
+        )
+
+        out_dtype = _type_utils.JitScalarType.from_value(self)
+        if out_dtype != _type_utils.JitScalarType.FLOAT:
+            result = g.op("Cast", result, to_i=out_dtype.onnx_type())
+
+    return result
