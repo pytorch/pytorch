@@ -12,7 +12,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv, SymTypes
 from torch.fx.node import _get_qualified_name
 
 from .. import codecache, config, ir
@@ -981,6 +981,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.shape_env = ShapeEnv()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1488,10 +1489,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
 
+    def is_statically_known_int(self, x):
+        try:
+            val = self.shape_env._maybe_evaluate_static(x)
+            int(x)
+            return True
+        except Exception:
+            return False
+
+    def is_statically_known_list_of_ints(self, lst):
+        return all(isinstance(self.is_statically_known_int(x), int) for x in lst)
+
     def can_prove_buffer_has_static_shape(self, buffer):
-        # TODO: this is overly restrictive -- `3 + 4` is fine, for example. Reviewers
-        # please advise on how to write this check properly!
-        return all(is_int(x) for x in buffer.get_size())
+        return self.is_statically_known_list_of_ints(buffer.get_size())
 
     def can_cache_buffer_in_thread_local(self, buffer):
         # We are gated off on CUDA because this is intended to reduce overhead in
@@ -1632,8 +1642,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             if (self.can_cache_buffer_in_thread_local(data) and
-                all(is_int(x) for x in size_list) and
-                all(is_int(x) for x in stride_list)):
+                self.is_statically_known_list_of_ints(size_list) and
+                self.is_statically_known_list_of_ints(stride_list)):
                 self.cached_thread_locals.add(tmp_name)
                 writer.writeline(f"thread_local AtenTensorHandle {tmp_name} = ([&] {{")
                 if hasattr(writer, "indent"):
