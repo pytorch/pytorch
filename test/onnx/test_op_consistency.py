@@ -66,6 +66,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "hstack",
         "logical_not",
         # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        "new_zeros",
         "nn.functional.scaled_dot_product_attention",
         "repeat",
         "round",

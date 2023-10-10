@@ -3886,7 +3886,7 @@ def new_zeros(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype.node.mustBeNone() and self_dtype is not None:
+    if dtype.node().mustBeNone() and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
