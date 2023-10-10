@@ -1372,6 +1372,7 @@ def _convert_all_state_info(
                     None for _ in fsdp_param_info.param_indices
                 ]
             local_state = input_states[fqn].get(state_name, None)
+            local_state = local_state.to(fsdp_param_info.state.compute_device)
             state_buffers[state_name][fsdp_param_info.param_indices[fqn]] = local_state
 
         # Restoring the scalar and non-tensor states. If the corresponding
