@@ -40,7 +40,7 @@ from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
     nop, default_partition, default_decompositions,
-    memory_efficient_fusion, get_aot_compilation_context
+    memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
 from torch._decomp import decomposition_table
 
@@ -308,7 +308,7 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(f, nn.Module):
                 compiled_f = aot_module(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -317,7 +317,7 @@ class TestAOTAutograd(AOTTestCase):
             else:
                 compiled_f = aot_function(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
