@@ -3,10 +3,8 @@
 #include <ATen/core/function.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API GraphFunction : public Function {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -77,7 +75,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   Function& setSchema(FunctionSchema schema) override {
-    schema_ = make_unique<FunctionSchema>(std::move(schema));
+    schema_ = std::make_unique<FunctionSchema>(std::move(schema));
     return *this;
   }
 
@@ -193,5 +191,4 @@ TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
 TORCH_API GraphFunction& toGraphFunction(Function&);
 TORCH_API const GraphFunction& toGraphFunction(const Function&);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
