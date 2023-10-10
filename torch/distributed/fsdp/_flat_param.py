@@ -862,6 +862,15 @@ class FlatParamHandle:
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start_idx, end_idx)
+            # Note [Skip storage resize when Dynamo tracing in FSDP]
+            #
+            # Resizing storage is used as a mechanism in FSDP to avoid churning tensor identity
+            # it allows FSDP to keep it's flat param while manipulating the underlying tensor's storage
+            # object. This can create discrepancies between the tensor meta (like size) and the actual
+            # underlying memory. Despite the fact that FSDP's size is canceled out across all the
+            # operations within FSDP, it is still a useful mechanism for freeing unused memory.
+            # For compilation, we do not need these ops. This, combined with the complexity of tracing
+            # and soundly capturing them, we chose to omit these ops for now.
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 if orig_storage._size() > 0:
                     orig_storage._resize_(0)
