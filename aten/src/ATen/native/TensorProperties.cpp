@@ -41,6 +41,18 @@ bool nested_is_same_size(const Tensor& self, const Tensor& other) {
       "nested. While Other ",
       other.is_nested()? "is " : "is not ",
       "nested.")
+  const auto self_is_python_dispatch =
+      self.unsafeGetTensorImpl()->is_python_dispatch();
+  const auto other_is_python_dispatch =
+      other.unsafeGetTensorImpl()->is_python_dispatch();
+
+  TORCH_CHECK(
+      self_is_python_dispatch == other_is_python_dispatch,
+      "Expected both self and other to be both python dispatch ",
+      "or both not python dispatch.")
+  if (self_is_python_dispatch && other_is_python_dispatch) {
+    return self.sym_sizes() == other.sym_sizes();
+  }
   const auto self_nt_size = _nested_tensor_size(self);
   const auto other_nt_size = _nested_tensor_size(other);
   return at::equal(self_nt_size, other_nt_size);

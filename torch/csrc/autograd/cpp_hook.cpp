@@ -8,8 +8,8 @@
 namespace {
 using torch::autograd::Variable;
 void check_single_result(
-    const at::TensorBase& value,
-    const at::TensorBase& result,
+    const at::Tensor& value,
+    const at::Tensor& result,
     const std::string& hook_name) {
   if (!value.defined()) {
     throw std::runtime_error(
@@ -50,7 +50,7 @@ variable_list CppFunctionTensorPreHook::operator()(
 }
 
 CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
-    std::function<at::TensorBase(const at::TensorBase&)> hook,
+    std::function<at::Tensor(const at::Tensor&)> hook,
     size_t value_idx)
     : hook_(std::move(hook)), value_idx_(value_idx) {}
 

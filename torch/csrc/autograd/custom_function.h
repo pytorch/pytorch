@@ -24,8 +24,8 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context);
 
 TORCH_API void check_variable_result(
-    const at::TensorBase& original,
-    const at::TensorBase& result,
+    const at::Tensor& original,
+    const at::Tensor& result,
     const std::string& hook_name);
 
 // Get the return type of the forward function of the custom Function class X

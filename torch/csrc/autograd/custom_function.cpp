@@ -483,8 +483,8 @@ optional_variable_list _wrap_outputs(
 }
 
 void check_variable_result(
-    const at::TensorBase& original,
-    const at::TensorBase& result,
+    const at::Tensor& original,
+    const at::Tensor& result,
     const std::string& hook_name) {
   if (!original.options().type_equal(result.options())) {
     std::stringstream ss;
@@ -504,8 +504,7 @@ void check_variable_result(
     }
     throw std::runtime_error(ss.str());
   }
-
-  if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
+  if (!original.is_same_size(result)) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
     throw std::runtime_error(ss.str());

@@ -1014,6 +1014,14 @@ TEST(CustomAutogradTest, Hooks) {
   ASSERT_VARIABLE_EQ(y.grad(), (x + 1) * 4);
 
   ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
+
+  std::function<Variable(Variable)> bw_hook_change_size([](Variable grad) {
+    return torch::ones({4, 4});
+  });
+  z.register_hook(bw_hook_change_size);
+  ASSERT_THROWS_WITH(
+      z.backward(torch::ones({5, 5}), true, true),
+      "hook '3' has changed the size of value");
 }
 
 TEST(CustomAutogradTest, HooksInplace) {

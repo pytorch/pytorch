@@ -6,8 +6,7 @@
 namespace torch {
 namespace autograd {
 
-using hooks_list =
-    std::vector<std::function<at::TensorBase(const at::TensorBase&)>>;
+using hooks_list = std::vector<std::function<at::Tensor(const at::Tensor&)>>;
 
 struct CppFunctionTensorPreHook : public FunctionPreHook {
   CppFunctionTensorPreHook(std::shared_ptr<hooks_list> hooks, size_t value_idx);
@@ -19,11 +18,11 @@ struct CppFunctionTensorPreHook : public FunctionPreHook {
 
 struct CppFunctionSingleTensorPreHook : public FunctionPreHook {
   CppFunctionSingleTensorPreHook(
-      std::function<at::TensorBase(const at::TensorBase&)> hook,
+      std::function<at::Tensor(const at::Tensor&)> hook,
       size_t value_idx);
   variable_list operator()(const variable_list& values) override;
 
-  std::function<at::TensorBase(const at::TensorBase&)> hook_;
+  std::function<at::Tensor(const at::Tensor&)> hook_;
   size_t value_idx_;
 };
 
