@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from ..exc import unimplemented
 
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 
 
@@ -39,13 +39,8 @@ class CountIteratorVariable(IteratorVariable):
 
     def next_variables(self, tx):
         assert self.mutable_local
-        next_iter = type(self)(
-            item=self.item.call_method(tx, "__add__", [self.step], {}),
-            step=self.step.clone(),
-            mutable_local=MutableLocal(),
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
+        next_item = self.item.call_method(tx, "__add__", [self.step], {})
+        next_iter = self.clone(item=next_item)
         tx.replace_all(self, next_iter)
         return self.item.add_options(self), next_iter
 
