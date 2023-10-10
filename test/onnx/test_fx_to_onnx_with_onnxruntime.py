@@ -18,7 +18,7 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, exporter
 from torch.onnx._internal.fx import (
     fx_symbolic_graph_extractor,
     patcher,
@@ -684,9 +684,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
-                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
-                    options
-                )
+                export_options = exporter.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )

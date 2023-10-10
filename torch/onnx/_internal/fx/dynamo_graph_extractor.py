@@ -210,4 +210,19 @@ class DynamoExport(exporter.FXGraphExtractor):
         self.input_adapter.append_step(
             io_adapter.FlattenInputWithTreeSpecValidationStep()
         )
-        return graph_module  # type: ignore[return-value]
+
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+
+    @_beartype.beartype
+    def pre_export_passes(
+        self,
+        options: exporter.ResolvedExportOptions,
+        original_model: Union[torch.nn.Module, Callable],
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ):
+        return exporter.common_pre_export_passes(
+            options, original_model, fx_module, fx_module_args
+        )
