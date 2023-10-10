@@ -26,6 +26,11 @@ __all__ = [
 
 @dataclass
 class CollectiveStatus:
+    r"""Status of a collective operation.
+
+    Drop count indicates events have been dropped at the producer side, which means they
+    were not consumed fast enough by hooks.
+    """
     pg_name: str = "unknown"  # This name matches the one informed in the pgreg cb
     backend: str = "unknown"  # Name of the backend used
     sequence_number: int = -1  # This name matches the one informed in the pgreg cb
@@ -135,8 +140,7 @@ def _lazy_init():
 
 
 def register_collective_start_hook(hook: COLLECTIVE_HOOK_TYPE) -> None:
-    """
-    Register a hook that is called every time a collective starts.
+    r"""Register a hook that is called every time a collective starts.
 
     The hook is invoked on a background thread.
     Exceptions raised by the callback are ignored and non-fatal.
@@ -146,8 +150,7 @@ def register_collective_start_hook(hook: COLLECTIVE_HOOK_TYPE) -> None:
 
 
 def register_collective_end_hook(hook: COLLECTIVE_HOOK_TYPE) -> None:
-    """
-    Register a hook that is called every time a collective finishes.
+    r"""Register a hook that is called every time a collective finishes.
 
 
     The hook is invoked on a background thread.
@@ -158,8 +161,7 @@ def register_collective_end_hook(hook: COLLECTIVE_HOOK_TYPE) -> None:
 
 
 def register_process_group_hook(hook: PG_HOOK_TYPE) -> None:
-    """
-    Register a hook that is called every time a process group is created on this rank.
+    r"""Register a hook that is called every time a process group is created on this rank.
 
     This hook is only invoked if the current rank is part of the PG being created.
     The pg_name is unique to the whole cluster and should be treated as an opaque identified subject to change.

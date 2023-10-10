@@ -10,8 +10,8 @@ from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
+import torch.distributed._hooks as dhooks
 import torch.distributed.distributed_c10d as c10d
-import torch.distributed.hooks as dhooks
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
