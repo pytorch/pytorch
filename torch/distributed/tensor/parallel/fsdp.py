@@ -296,7 +296,7 @@ def _pre_load_state_dict(
 def _all_gather_dtensor(
     tensor: DTensor,
     parent_mesh: DeviceMesh,
-) -> DTensor:
+) -> torch.Tensor:
     """
     All gather a DTensor in its FSDP dimension and return the local tensor.
     """

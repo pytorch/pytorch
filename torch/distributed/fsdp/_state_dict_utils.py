@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import logging
 import math
 import warnings
@@ -17,7 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.device_mesh import mesh_resources
 
 from torch.distributed.distributed_c10d import _get_pg_default_device
@@ -608,12 +607,9 @@ def _sharded_pre_load_state_dict_hook(
             "load_sharded_state_dict can only be called when parameters "
             "are flattened and sharded."
         )
-    fqn_to_param_ext = {
-        fqn: param_extensions
-        for fqn, param_extensions in zip(
-            handle.flat_param._fqns, handle.flat_param._param_extensions
-        )
-    }
+    fqn_to_param_ext = dict(
+        zip(handle.flat_param._fqns, handle.flat_param._param_extensions)
+    )
 
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
@@ -755,7 +751,6 @@ def _post_state_dict_hook(
                     if shards:
                         local_shape = shards[0].tensor.shape
                 elif isinstance(tensor, DTensor):
-                    # print(f"key:{key}, tensor:{tensor}")
                     local_shape = tensor.to_local().shape
                 logger.info(
                     "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
