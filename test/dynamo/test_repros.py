@@ -3068,18 +3068,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_list_index(self):
-        for i, list_type in enumerate((
-            list,
-            tuple,
-            torch.Size,
-            collections.deque,
-            namedtuple("FourElems", "one two three four", defaults=[0, 0, 0, 0]),
-        )):
+        for i, list_type in enumerate(
+            (
+                list,
+                tuple,
+                torch.Size,
+                collections.deque,
+                namedtuple("FourElems", "one two three four", defaults=[0, 0, 0, 0]),
+            )
+        ):
             torch._dynamo.reset()
             for index in ([], [2], [0, 3]):
 
                 def f(t):
-                    if i == 4: # namedtuple
+                    if i == 4:  # namedtuple
                         xs = list_type(1, 2, 3, 4)
                     else:
                         xs = list_type([1, 2, 3, 4])
