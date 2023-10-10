@@ -21,7 +21,8 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(devices, rank, opType, seq), simulate_error_(simulate_error) {}
+      : WorkNCCL(0, devices, rank, opType, seq),
+        simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
@@ -93,7 +94,7 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(devices, rank, opType, seq),
+      : WorkNCCL(0, devices, rank, opType, seq),
         set_timedout_error_(set_timedout_error) {}
 
  private:

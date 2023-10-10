@@ -2651,6 +2651,9 @@ Example::
             The provided Future object result must be a Tensor or a list of Tensors.
            )");
 
+  module.def("_dump_nccl_trace", []() {
+    return py::bytes(::c10d::dump_nccl_trace());
+  });
   Py_RETURN_TRUE;
 }
 
