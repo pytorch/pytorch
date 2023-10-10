@@ -57,11 +57,11 @@ Following is the release cadence for year 2023/2024. Please note: these dates ar
 
 | Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
 | --- | --- | --- | --- | --- |
-| 2.1.0 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
-| 2.2.0 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
-| 2.3.0 | Mar 2024 | Apr 2024 | May 2024 | Jun 2024 |
-| 2.4.0 | May 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
-| 2.5.0 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
+| 2.1 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
+| 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
+| 2.3 | Mar 2024 | Apr 2024 | May 2024 | Jun 2024 |
+| 2.4 | May 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
+| 2.5 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
 
 ## General Overview
 
