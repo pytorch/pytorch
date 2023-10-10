@@ -179,6 +179,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // In case of timeout, set exception on the WorkNCCL object.
     bool checkTimeout(
         c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
+
     std::vector<at::Tensor> result() override;
 
    protected:
