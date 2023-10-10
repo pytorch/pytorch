@@ -488,8 +488,8 @@ test_inductor_torchbench_smoketest_perf() {
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.15
 
-  python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference --only nanogpt \
-    --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
+  python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
+    --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 5.5
 
