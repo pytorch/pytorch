@@ -178,8 +178,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export.constrain_as_size,
-        torch.export.constrain_as_value,
         torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
