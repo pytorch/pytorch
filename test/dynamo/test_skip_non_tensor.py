@@ -36,10 +36,7 @@ class MyModule(torch.nn.Module):
 
     def forward(self, x):
         global _variable, _variable_2
-        # By invoking torch._utils.is_compiling(),
-        # there may be side-effects inconsistent with eager when
-        # compiling. Thus we force dynamo to commit the graph,
-        # even if it does not perform any tensor operation
+
         if self.mode == 1:
             if torch._utils.is_compiling():
                 _variable += 1
@@ -165,6 +162,11 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
     def test_do_not_skip_side_effects(self):
         # https://github.com/pytorch/pytorch/issues/110765
+
+        # By invoking torch._utils.is_compiling(),
+        # there may be side-effects inconsistent with eager when
+        # compiling. Thus we force dynamo to commit the graph,
+        # even if it does not perform any tensor operation
         global _variable, _variable_2
 
         for mode in range(1, 7):
