@@ -304,14 +304,16 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   CUFFT_CHECK(cufftSetWorkArea(plan, workspace.mutable_data_ptr()));
 
   // execute transform plan
+#if !defined(USE_ROCM)
   CUcontext pctx = nullptr;
   at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
-  if (!pctx) {
+  if (C10_UNLIKELY(!pctx)) {
     // workaround for corner case where a primary context exists but is not
     // the current context
     at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, 0);
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
   }
+#endif /* !defined(USE_ROCM) */
   exec_cufft_plan(*config, input.data_ptr(), out.data_ptr(), forward);
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
