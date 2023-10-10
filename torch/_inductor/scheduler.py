@@ -516,6 +516,7 @@ class BaseSchedulerNode:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
         except Exception:
+            log.exception("Could not get gpu speeds to estimate runtime")
             return 0
 
         if isinstance(self, ExternKernelSchedulerNode):
