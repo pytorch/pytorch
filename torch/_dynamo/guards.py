@@ -1343,6 +1343,11 @@ def guard_fail_hook(
         if isinstance(fail_reason, bool) and not fail_reason:
             fail_reason = part
         if isinstance(fail_reason, str):
+            if config.report_guard_failure_values:
+                if "==" in part:
+                    lhs = part.split("==")[0]
+                    lhs_value = eval(lhs, global_scope, scope)
+                    fail_reason += f", with LHS value: {lhs_value}"
             reason += fail_reason
             if config.report_all_guard_failures:
                 reason += "\n"
