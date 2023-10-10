@@ -2005,6 +2005,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: diagonal
+  tags: core
 
 - func: linalg_diagonal(Tensor(a) A, *, int offset=0, int dim1=-2, int dim2=-1) -> Tensor(a)
   python_module: linalg
@@ -2376,7 +2377,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags: [core, inplace_view]
   dispatch:
     Meta: resize__symint
     CPU: resize_
@@ -2417,6 +2418,7 @@
     SparseCsrCPU, SparseCsrCUDA: empty_like_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: empty_like_nested
   autogen: empty_like.out
+  tags: core
 
 - func: empty_strided(SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -2523,7 +2525,7 @@
   dispatch:
     SparseCPU, SparseCUDA: expm1_sparse
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2746,6 +2748,7 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: full_like
   autogen: full_like.out
+  tags: core
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -3358,7 +3361,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log10.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3382,7 +3385,7 @@
   dispatch:
     SparseCPU, SparseCUDA: log1p_sparse
     SparseCsrCPU, SparseCsrCUDA: log1p_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3408,7 +3411,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log2.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9346,7 +9349,7 @@
   dispatch:
     CPU, CUDA: atan2_out
     MPS: atan2_out_mps
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9358,7 +9361,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: atan2.out
   variants: method, function
-  tags: pointwise
+  tags: [core, pointwise]
 # arctan2, alias of atan2
 
 - func: arctan2(Tensor self, Tensor other) -> Tensor
@@ -9894,7 +9897,7 @@
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: pow.Scalar_out
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
