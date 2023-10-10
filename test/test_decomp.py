@@ -480,6 +480,7 @@ class TestDecomp(TestCase):
     # runs on things that are definitely decomposed so it's a lot faster
     # to run
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipOps('TestDecomp', 'test_quick', core_not_decomposed)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
