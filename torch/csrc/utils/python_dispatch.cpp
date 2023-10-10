@@ -789,21 +789,6 @@ void initDispatchBindings(PyObject* module) {
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
   });
 
-  m.def("_compute_hash", [](const at::Tensor& tensor) -> int64_t {
-    TORCH_CHECK(tensor.dim() == 1, "_compute_hash expects a 1-D tensor.");
-
-    int64_t R = 31;  // A prime number as base multiplier, similar to Java's String hashcode method.
-    const int64_t M = 1e9 + 7;  // Large prime number for modulo operation to prevent overflow.
-
-    int64_t hash = 0;
-    auto *data_ptr = tensor.data_ptr<int64_t>();
-
-    for (int64_t i = 0; i < tensor.size(0); ++i) {
-      hash = (R * hash + data_ptr[i]) % M;
-    }
-    return hash;
-  });
-
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)

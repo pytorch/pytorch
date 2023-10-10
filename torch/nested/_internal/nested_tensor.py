@@ -2,12 +2,13 @@ from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
-from torch.utils.weak import WeakTensorKeyDictionary
 from torch.fx.experimental.symbolic_shapes import is_symbolic
+from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
 _tensor_id_counter = 0
 _tensor_id_registry = WeakTensorKeyDictionary()
+
 
 def get_tensor_id(tensor, *, coeff=1):
     global _tensor_id_counter
@@ -15,6 +16,7 @@ def get_tensor_id(tensor, *, coeff=1):
         _tensor_id_registry[tensor] = _tensor_id_counter
         _tensor_id_counter += 1
     return torch._C._get_singleton_int(_tensor_id_registry[tensor], coeff)
+
 
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
@@ -92,8 +94,10 @@ class NestedTensor(torch.Tensor):
         self._ragged_idx = 1
 
         if values.requires_grad:
-            raise ValueError("NestedTensor values cannot require grad, please "
-                             "detach before passing to NestedTensor constructor")
+            raise ValueError(
+                "NestedTensor values cannot require grad, please "
+                "detach before passing to NestedTensor constructor"
+            )
         self._values = values
         self._offsets = offsets
         return
@@ -130,11 +134,10 @@ class NestedTensor(torch.Tensor):
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
 
-        if not any([is_symbolic(x.shape[0]) for x in (values, offsets)]):
+        if not any(is_symbolic(x.shape[0]) for x in (values, offsets)):
             # If no inner tensors are symbolic we are going from fake to
             # non-fake. Make sure we don't leak any SymInts.
             meta["ragged_size"] = None
-
 
         return NestedTensor(
             values,

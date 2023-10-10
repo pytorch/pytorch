@@ -946,6 +946,7 @@ static variable_list call_function(
   } else {
     outputs = fn(std::move(inputs));
   }
+
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
     ss << "Function " << fn.name() << " returned an " << msg;
