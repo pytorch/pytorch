@@ -53,7 +53,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     _FUSE_TRANSPOSE = False
     _FORCE_CUTLASS = True
-    _WARNING_SHOWN = False
+    _PROTOTYPE_WARNING_SHOWN = False
 
     @staticmethod
     def __new__(
@@ -88,7 +88,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         """
         assert compressed_tensor_cusparselt is None or (sparse_tensor_cutlass is None and meta_tensor_cutlass is None)
 
-        if not cls._WARNING_SHOWN:
+        if not cls._PROTOTYPE_WARNING_SHOWN:
             warnings.warn(
                 (
                     "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
@@ -98,7 +98,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 ),
                 UserWarning,
             )
-            cls._WARNING_SHOWN = True
+            cls._PROTOTYPE_WARNING_SHOWN = True
 
         if original_tensor is not None:
             previous_tensor = original_tensor
@@ -208,6 +208,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 compressed_tensor_cusparselt = torch._cslt_compress(original_tensor)
 
         # set values
+        self._PADDING_WARNING_SHOWN =
         self.original_tensor = None
         self.compressed_tensor_cusparselt = compressed_tensor_cusparselt
         self.sparse_tensor_cutlass = sparse_tensor_cutlass
@@ -250,7 +251,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             warnings.warn(
                 (
                     "Attempting to do matmul with a dense tensor that does not meet shape requirements."
-                    "Padding dense input tensor of shape ({m}, {n}) to ({m+to_pad_m}, {n+to_pad_n}."
+                    f"Padding dense input tensor of shape ({m}, {n}) to ({m+to_pad_m}, {n+to_pad_n})."
                 ),
                 UserWarning,
             )
@@ -278,6 +279,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         Raises:
             NotImplementedError: If the dispatched operation is not implemented.
         """
+        #print(func)
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(

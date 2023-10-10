@@ -47,9 +47,9 @@ def rand_sparse_semi_structured_mask(
         .contiguous()
     )
 
-
+#@torch.inference_mode()
 def test_linear(m, k, n, dtype, contiguous, backend):
-    SparseSemiStructuredTensor.fuse_transpose = contiguous
+    SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
     mask = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
     sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
