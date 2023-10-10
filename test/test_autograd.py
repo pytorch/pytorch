@@ -804,9 +804,7 @@ class TestAutograd(TestCase):
         def check_matches(out, inp):
             ref = torch.autograd.grad(out.sum(), inp)
 
-            grad_fn = inp.grad_fn if inp.grad_fn else inp.clone().grad_fn.next_functions[0][0]
-            edge = torch.autograd.graph.GradientEdge(grad_fn, inp.output_nr)
-
+            edge = torch.autograd.graph.get_gradient_edge(inp)
             new = torch.autograd.grad(out.sum(), edge)
             self.assertEqual(ref, new)
 
@@ -823,6 +821,33 @@ class TestAutograd(TestCase):
         x = torch.autograd._functions.Resize.apply(x, (2,))
         out = x.clone()
         check_matches(out, x)
+
+        x = torch.var_mean(x)[1]
+        out = x.clone()
+        check_matches(out, x)
+
+    def test_grad_to_node_set(self):
+        x = torch.rand(2, requires_grad=True)
+        x_edge = torch.autograd.graph.get_gradient_edge(x)
+        out = x.clone()
+
+        with torch.no_grad():
+            x.set_(torch.rand_like(x))
+
+        with self.assertRaisesRegex(RuntimeError, "to not have been used in the graph"):
+            torch.autograd.grad(out.sum(), x)
+
+        # Works
+        torch.autograd.grad(out.sum(), x_edge)
+
+    def test_grad_to_node_inplace(self):
+        x = torch.rand(2, requires_grad=True).clone()
+        x_edge = torch.autograd.graph.get_gradient_edge(x)
+        x *= 2
+
+        g_old, g_new = torch.autograd.grad(x.sum(), (x_edge, x))
+        self.assertEqual(g_old, 2 * torch.ones_like(x))
+        self.assertEqual(g_new, torch.ones_like(x))
 
     def test_grad_to_node_multi(self):
         x = torch.rand(2, requires_grad=True).clone()

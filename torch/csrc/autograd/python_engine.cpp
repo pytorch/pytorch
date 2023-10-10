@@ -345,7 +345,7 @@ PyObject* THPEngine_run_backward(
       } else {
         THPUtils_assert(
             false,
-            "all inputs have to be Tensors or GradiendEdges, but got %s",
+            "all inputs have to be Tensors or GradientEdges, but got %s",
             THPUtils_typename(input));
       }
     }
