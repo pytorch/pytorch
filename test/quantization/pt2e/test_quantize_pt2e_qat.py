@@ -535,14 +535,21 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.conv = torch.nn.Conv2d(5, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
                 self.backbone = TestHelperModules.ConvWithBNRelu(relu=True)
 
             def forward(self, x):
-                return self.backbone(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                x = self.backbone(x)
+                return x
 
         # QAT prepare + convert
         m = M()
-        example_inputs = (torch.randn(1, 3, 5, 5),)
+        example_inputs = (torch.randn(1, 5, 10, 10),)
         quantizer = XNNPACKQuantizer()
         quantizer.set_global(get_symmetric_quantization_config(is_qat=True))
         m = capture_pre_autograd_graph(m, example_inputs)
@@ -550,36 +557,56 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m(*example_inputs)
         m = convert_pt2e(m)
 
-        # Assert these nodes have the right source partitions
-        node_name_to_source_partition = {
-            "_param_constant0": "l__self___backbone_conv",
-            "_param_constant1": "l__self___backbone_conv",
-            "conv2d_default_2": "l__self___backbone_conv",
-            "relu_default_1": "l__self___backbone_relu",
-        }
+        # Extract the conv and relu nodes (bn was folded into conv)
+        first_conv, first_relu, second_conv, second_relu = None, None, None, None
         for n in m.graph.nodes:
-            if n.name in node_name_to_source_partition:
-                self.assertTrue(
-                    "source_fn_stack" in n.meta,
-                    "did not find 'source_fn_stack' in node '%s' meta" % n.name,
-                )
-                # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
-                actual = n.meta["source_fn_stack"][0][0]
-                expected = node_name_to_source_partition[n.name]
-                self.assertEqual(
-                    actual,
-                    expected,
-                    "expected node '%s' to have source partition '%s', but found '%s'" % (
-                        n.name, expected, actual
-                    ),
-                )
-                del node_name_to_source_partition[n.name]
+            if n.target == torch.ops.aten.relu.default:
+                if first_relu is None:
+                    assert first_conv is None, "bad test setup"
+                    first_relu = n
+                    first_conv = n.args[0]
+                else:
+                    assert second_conv is None, "bad test setup"
+                    second_relu = n
+                    second_conv = n.args[0]
 
-        # Assert all nodes of interest were found
-        self.assertTrue(
-            len(node_name_to_source_partition) == 0,
-            "did not find the following nodes in the graph: %s" % list(node_name_to_source_partition.keys())
-        )
+        # Extract the conv weight and bias nodes
+        def get_conv_weight_and_bias(conv_node: torch.fx.Node):
+            weight_dq_node = conv_node.args[1]
+            assert isinstance(weight_dq_node, torch.fx.Node)
+            assert weight_dq_node.target == torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            weight_q_node = weight_dq_node.args[0]
+            assert isinstance(weight_q_node, torch.fx.Node)
+            assert weight_q_node.target == torch.ops.quantized_decomposed.quantize_per_tensor.default
+            weight_node = weight_q_node.args[0]
+            bias_node = conv_node.args[2]
+            assert isinstance(weight_node, torch.fx.Node)
+            assert isinstance(bias_node, torch.fx.Node)
+            return (weight_node, bias_node)
+        first_conv_weight, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        second_conv_weight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+
+        # Assert that each set of conv, conv weight, and conv bias are in the same partition
+        def get_source_fn(node: torch.fx.Node):
+            # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
+            return node.meta["source_fn_stack"][0][0]
+        self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_weight))
+        self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_bias))
+        self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_weight))
+        self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_bias))
+
+        # Assert that different sets of convs and relus have different partitions
+        self.assertNotEqual(get_source_fn(first_conv), get_source_fn(first_relu))
+        self.assertNotEqual(get_source_fn(first_conv), get_source_fn(second_conv))
+        self.assertNotEqual(get_source_fn(second_conv), get_source_fn(second_relu))
+        self.assertNotEqual(get_source_fn(first_relu), get_source_fn(second_relu))
+
+        # Assert that "backbone" exists only in the second set of conv and relu's partition
+        self.assertTrue("backbone" not in get_source_fn(first_conv))
+        self.assertTrue("backbone" not in get_source_fn(first_relu))
+        self.assertTrue("backbone" in get_source_fn(second_conv))
+        self.assertTrue("backbone" in get_source_fn(second_relu))
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQATModels(PT2EQATTestCase):
