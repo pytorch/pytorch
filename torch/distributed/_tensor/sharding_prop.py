@@ -4,6 +4,7 @@ from typing import Callable, cast, Dict, Optional
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
@@ -30,12 +31,7 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
-        # because SymInts are not hashable.
-        # This is generally ok because this only happens during tracing in torch.compile,
-        # and tracing does not need to be as fast as eagermode DTensor usages.
-        # TODO only remove the cache under compile, keep it under eager
-        # self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self,
@@ -129,10 +125,17 @@ class ShardingPropagator:
                         spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
-        output_sharding = self.propagate_op_sharding(op_info.schema)
+        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
+        # because SymInts are not hashable.
+        # This is generally ok because this only happens during tracing in torch.compile,
+        # and tracing does not need to be as fast as eagermode DTensor usages.
+        if _are_we_tracing():
+            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+        else:
+            output_sharding = self.propagate_op_sharding(op_info.schema)
         op_info.output_sharding = output_sharding
 
-    def propagate_op_sharding(self, op_schema: OpSchema) -> OutputSharding:
+    def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
