@@ -46,8 +46,10 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
+    _ext_all_gather_dtensor,
     _ext_chunk_dtensor,
     _ext_chunk_tensor,
+    _ext_post_unflatten_transform,
     _ext_pre_load_state_dict_transform,
 )
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
@@ -606,6 +608,12 @@ def _sharded_pre_load_state_dict_hook(
             "load_sharded_state_dict can only be called when parameters "
             "are flattened and sharded."
         )
+    fqn_to_param_ext = {
+        fqn: param_extensions
+        for fqn, param_extensions in zip(
+            handle.flat_param._fqns, handle.flat_param._param_extensions
+        )
+    }
 
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
@@ -679,13 +687,14 @@ def _sharded_pre_load_state_dict_hook(
         else:
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
-            placements = list(copy.deepcopy(param.placements))
-            placements[-1] = Replicate()
-            param = param.redistribute(
-                device_mesh=param.device_mesh,
-                placements=placements,
-            )
-            state_dict[fqn_from_global_root] = param.to_local()
+
+            parent_mesh = mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            local_tensor = _ext_all_gather_dtensor(param, parent_mesh)
+
+            if fqn_to_param_ext.get(fqn) is not None:
+                ext = fqn_to_param_ext[fqn]
+                local_tensor = _ext_post_unflatten_transform(local_tensor, ext)
+            state_dict[fqn_from_global_root] = local_tensor
 
     with SimpleProfiler.profile("_enter_unshard_params_ctx"):
         _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
@@ -746,6 +755,7 @@ def _post_state_dict_hook(
                     if shards:
                         local_shape = shards[0].tensor.shape
                 elif isinstance(tensor, DTensor):
+                    # print(f"key:{key}, tensor:{tensor}")
                     local_shape = tensor.to_local().shape
                 logger.info(
                     "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
