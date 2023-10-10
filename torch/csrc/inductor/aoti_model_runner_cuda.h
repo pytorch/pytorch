@@ -2,8 +2,7 @@
 
 #include <torch/csrc/inductor/aoti_model_runner.h>
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 
 class TORCH_API AOTIModelRunnerCuda : public AOTIModelRunner {
  public:
@@ -19,5 +18,4 @@ class TORCH_API AOTIModelRunnerCuda : public AOTIModelRunner {
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
 };
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

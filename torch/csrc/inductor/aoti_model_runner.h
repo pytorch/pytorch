@@ -1,3 +1,4 @@
+#ifndef C10_MOBILE
 #pragma once
 
 #include <ATen/Tensor.h>
@@ -8,8 +9,7 @@ namespace at {
 struct DynamicLibrary;
 }
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 
 class TORCH_API AOTIModelRunner {
  public:
@@ -54,5 +54,5 @@ class TORCH_API AOTIModelRunnerCpu : public AOTIModelRunner {
   }
 };
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor
+#endif
