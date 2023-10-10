@@ -33,7 +33,8 @@ be something like ``torch.relu()``. Pointwise ops in eager mode are
 suboptimal because each one would need to read a tensor from the
 memory, make some changes, and then write back those changes. The single
 most important optimization that inductor performs is fusion. In the
-example above we can turn 2 reads and 2 writes into 1 read and 1 write which
+example above we can turn 4 reads (``x``, ``y``, ``a``, ``b``) and
+3 writes (``a``, ``b``, ``a+b``) into 1 read and 1 write which
 is crucial especially for newer GPUs where the bottleneck is memory
 bandwidth (how quickly you can send data to a GPU) rather than compute
 (how quickly your GPU can crunch floating point operations).
