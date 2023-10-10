@@ -46,6 +46,9 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+constexpr auto kProcessGroupNCCLDefaultTimeout =
+    std::chrono::milliseconds(10 * 60 * 1000);
+
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
 // CleanUpOnly: just clean up collectives and abort communicators without
@@ -176,7 +179,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // In case of timeout, set exception on the WorkNCCL object.
     bool checkTimeout(
         c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
-
+    bool checkDesyncTimeout(
+        c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
     std::vector<at::Tensor> result() override;
 
    protected:
