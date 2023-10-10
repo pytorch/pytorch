@@ -261,8 +261,8 @@ report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "
 # Whether to report all guard failures or just the first one that fails
 report_all_guard_failures = False
 
-# Whether to report all guard failures or just the first one that fails
-report_guard_failure_values = True
+# Whether to report the values that cause the guards to fail
+report_guard_failure_values = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
