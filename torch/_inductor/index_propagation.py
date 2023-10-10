@@ -54,7 +54,9 @@ class SymPyOps:
 
     @staticmethod
     def constant(value: Union[int, float, bool], dtype: torch.dtype) -> TypedExpr:
-        if is_boolean_dtype(dtype):
+        if isinstance(value, sympy.Expr):
+            expr = value
+        elif is_boolean_dtype(dtype):
             expr = sympy.Integer(bool(value))
         elif is_integer_dtype(dtype):
             expr = sympy.Integer(int(value))

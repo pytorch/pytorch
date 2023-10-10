@@ -3180,7 +3180,7 @@ def reflection_pad2d(x, padding):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+        ranges=[*batch, sympy.sympify(h + top + bot), sympy.sympify(w + left + right)],
     )
 
 
