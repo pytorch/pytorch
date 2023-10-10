@@ -7291,6 +7291,24 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    def test_itertools_repeat(self):
+        counters.clear()
+
+        def fn(x):
+            r = itertools.repeat(100.0, 5)
+            for i in r:
+                x += i
+            return x
+
+        x = torch.randn([2, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_accumulate_symint_default_sum(self):
         # https://github.com/pytorch/pytorch/issues/110287
         counters.clear()
