@@ -16,7 +16,7 @@ class IteratorVariable(VariableTracker):
         ret_val = self.item.add_options(self)
         self.next_item(tx)
         next_iter = type(self)(
-            *self.items(),
+            *self.values(),
             mutable_local=MutableLocal(),
             recursively_contains=self.recursively_contains,
             **VariableTracker.propagate([self]),
@@ -30,7 +30,7 @@ class IteratorVariable(VariableTracker):
     def init_item(self, tx):
         pass
 
-    def items(self):
+    def values(self):
         return []
 
 
@@ -39,7 +39,7 @@ class RepeatIteratorVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.item = item
 
-    def items(self):
+    def values(self):
         return [self.item]
 
 
@@ -53,7 +53,7 @@ class CountIteratorVariable(IteratorVariable):
         self.item = item
         self.step = step
 
-    def items(self):
+    def values(self):
         return [self.item, self.step]
 
     def next_item(self, tx):
@@ -79,14 +79,7 @@ class CycleIteratorVariable(IteratorVariable):
         self.saved_len = len(saved)
         self.item = item
 
-    def items(self):
-        return [self.iterator, self.saved, self.saved_len, self.saved_index, self.item]
-
-    def init_item(self, tx):
-        if self.item is None:
-            self.next_item(tx)
-
-    def next_item(self, tx):
+    def next_values(self, tx):
         if self.iterator is not None:
             try:
                 val, next_iter = self.iterator.next_variables(tx)
@@ -96,7 +89,18 @@ class CycleIteratorVariable(IteratorVariable):
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
-                self.item = val
+                new_item = val
+            
+        return old_item, [self.iterator, self.saved, self.saved_len, self.saved_index, new_item]
+
+    def init_item(self, tx):
+        if self.item is None:
+            self.next_item(tx)
+
+    def next_item(self, tx):
+            try:
+                val, next_iter = self.iterator.next_variables(tx)
+
             except StopIteration:
                 self.iterator = None
                 self.saved_len = len(self.saved)
