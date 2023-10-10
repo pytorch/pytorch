@@ -3,6 +3,7 @@
 <!-- toc -->
 
   - [Release Compatibility Matrix](#release-compatibility-matrix)
+  - [Release Cadence](#release-cadence)
   - [General Overview](#general-overview)
     - [Frequently Asked Questions](#frequently-asked-questions)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
@@ -49,6 +50,28 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
 | 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
+
+## Release Cadence
+
+Following is the release cadence for year 2023/2024. Please note: these dates are subject to change, the exact dates should be announced on the [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27) before each release.
+
+| Release | Start Date | Release Date |
+| --- | --- | --- |
+| 2.1.0 | May 2023 |  October 4, 2023 |
+| 2.1.1 | October 2023 | November 2023 |
+| 2.1.2 | November 2023 | December 2023  |
+| 2.2.0 | October 2023 | January 2024 |
+| 2.2.1 | January 2024 | February 2024 |
+| 2.2.2 | February 2024 | March 2024 |
+| 2.3.0 | January 2024 | April 2024 |
+| 2.3.1 | April 2024 | May 2024 |
+| 2.3.2 | May 2024 | June 2024 |
+| 2.4.0 | April 2024 | July 2024 |
+| 2.4.1 | July 2024 | Aug 2024 |
+| 2.4.2 | Aug 2024 | Sept 2024 |
+| 2.5.0 | July 2024 | October 2024 |
+| 2.5.1 | October 2024 | November 2024 |
+| 2.5.2 | November 2024 | December 2024 |
 
 ## General Overview
 
@@ -220,12 +243,10 @@ The following should be prepared for the release day
 
 ### Modify release matrix
 
-Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
+Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/test-infra/pull/4611) as reference.
 
-After modifying published_versions.json you will need to regenerate the quick-start-module.js file run following command
-```
-python3 scripts/gen_quick_start_module.py >assets/quick-start-module.js
-```
+The PR to update published_versions.json and quick-start-module.js is auto generated. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/1467) as reference.
+
 Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
 
 ### Open Google Colab issue
@@ -234,7 +255,9 @@ This is normally done right after the release is completed. We would need to cre
 
 # Patch Releases
 
-A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`)
+A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`).
+
+Please note: As of release 2.1 we plan on executing 2 patch releases following each minor release.
 
 ## Patch Release Criteria
 
@@ -257,10 +280,10 @@ Patch releases should be considered if a regression meets the following criteria
 > Main POC: Patch Release Managers, Triage Reviewers
 
 Patch releases should follow these high-level phases. This process starts immediately after the previous release has completed.
-Minor release process takes around 6-7 weeks to complete.
+Patch release process takes around 4-5 weeks to complete.
 
-1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
-2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
+1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2 weeks after the release completion.
+2. Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
   * Should the new patch Release be created ?
   * Timeline execution for the patch release
 3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
