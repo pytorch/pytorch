@@ -427,7 +427,6 @@ def mps_ops_modifier(ops):
         'isposinf': None,
         'kthvalue': None,
         'lcm': None,
-        'lgamma': None,
         'linalg.cond': None,
         'linalg.detsingular': None,
         'linalg.det': None,
