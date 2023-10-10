@@ -20,6 +20,10 @@ from .utils import (
     get_aten_graph_module,
 )
 
+
+__all__ = []
+
+
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
 _conv2d_bn_pattern_example_inputs = (
     torch.randn(1, 1, 3, 3),  # x
