@@ -271,7 +271,8 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
+        f"    with torch.no_grad():"
+        f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
         ")\n"
     )

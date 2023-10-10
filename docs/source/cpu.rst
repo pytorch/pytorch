@@ -11,6 +11,7 @@ torch.cpu
     is_available
     synchronize
     stream
+    set_device
     device_count
     StreamContext
 
