@@ -126,6 +126,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(fix);
   OP_DECOMPOSE(fliplr);
   OP_DECOMPOSE(flipud);
+  OP_DECOMPOSE2(flatten, using_ints);
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
   OP_DECOMPOSE2(float_power, Scalar);
@@ -159,12 +160,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
+  OP_DECOMPOSE(linear);
   OP_DECOMPOSE(linalg_cond);
   OP_DECOMPOSE(linalg_cholesky);
   OP_DECOMPOSE(linalg_det);
   OP_DECOMPOSE(linalg_eigvalsh);
   OP_DECOMPOSE(linalg_eigvals);
   OP_DECOMPOSE(linalg_inv);
+  OP_DECOMPOSE(linalg_lu_factor);
   OP_DECOMPOSE(linalg_matmul);
   OP_DECOMPOSE(linalg_matrix_norm);
   OP_DECOMPOSE2(linalg_matrix_norm, str_ord);
@@ -172,15 +175,20 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_norm);
   OP_DECOMPOSE2(linalg_norm, ord_str);
   OP_DECOMPOSE(linalg_eigh);
+  OP_DECOMPOSE(linalg_slogdet);
   OP_DECOMPOSE(linalg_solve);
   OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
+  OP_DECOMPOSE(linalg_pinv);
   OP_DECOMPOSE(linalg_tensorinv);
+  OP_DECOMPOSE2(linalg_pinv, atol_rtol_float);
   m.impl("linalg_vander", native::linalg_vander_symint);
   OP_DECOMPOSE(cumprod_backward);
   OP_DECOMPOSE(linalg_matrix_power);
   OP_DECOMPOSE(linalg_vecdot);
+  OP_DECOMPOSE(logdet);
+  OP_DECOMPOSE2(log_softmax, int);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
@@ -250,6 +258,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_psi);
   OP_DECOMPOSE(special_round);
   OP_DECOMPOSE(special_sinc);
+  OP_DECOMPOSE(special_xlogy);
+  OP_DECOMPOSE2(special_xlogy, other_scalar);
+  OP_DECOMPOSE2(special_xlogy, self_scalar);
 
 
   m.impl("split.sizes", native::split_symint);
