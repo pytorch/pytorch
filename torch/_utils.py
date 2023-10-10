@@ -873,12 +873,12 @@ def _functionalize_sync(t):
             torch._C._TorchDispatchModeKey.FUNCTIONAL
         )
         try:
-            torch._functionalize_sync(t.elem)
+            torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
         finally:
             if maybe_functional_mode is not None:
                 torch._C._set_dispatch_mode(maybe_functional_mode)
     else:
-        torch._functionalize_sync(t)
+        torch._functionalize_sync(t)  # type: ignore[attr-defined]
 
 
 @functools.lru_cache(2)

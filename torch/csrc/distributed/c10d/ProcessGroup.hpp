@@ -692,8 +692,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   const int size_;
   const c10::intrusive_ptr<Options> options_;
   const BackendType backendType_;
-  // Optional sequence number structure for matching collectives.
-  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.

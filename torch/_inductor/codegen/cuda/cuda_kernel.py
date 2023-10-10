@@ -160,7 +160,7 @@ class CUDATemplateKernel(CUDAKernel):
             triton=False,
         )
 
-    def dtype(self, node: IRNode) -> str:
+    def dtype(self, node: IRNode) -> Optional[str]:
         """
         Generates code which represents dtype of a given node.
         """

@@ -243,8 +243,9 @@ class TestFP8Types(TestCase):
     #@parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("float8_dtype", (torch.float8_e4m3fn, ))
     @parametrize("shape", ((4, 2048, 4096),))
-    #@parametrize("enable_split_reductions", (True, False))
-    @parametrize("enable_split_reductions", (False, ))
+    # @parametrize("enable_split_reductions", (True, False))
+    # @parametrize("enable_split_reductions", (False, ))
+    @parametrize("enable_split_reductions", (True, ))
     def test_layernorm_fp8_quant_benchmark(
         self,
         float8_dtype: torch.dtype,
