@@ -563,12 +563,8 @@ class WrapperCodeGen(CodeGen):
         return result.getvaluewithlinemap()
 
     def memory_plan(self):
-        if config.memory_planning and not V.graph.cpp_wrapper:
-            from .memory_planning import MemoryPlanner
-
-            self.lines = MemoryPlanner(self).plan(self.lines)
-        else:
-            self.memory_plan_reuse()
+        from .memory_planning import MemoryPlanner
+        self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
         out_names = V.graph.get_output_names()

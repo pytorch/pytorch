@@ -569,10 +569,14 @@ class BufferGroup:
         assert not self.allocation, "multiple allocations"
         assert isinstance(self.live_range.begin, int), "live ranges not computed"
         nbytes = self.sym_nbytes()
+        try: # FIXME
+            size_hint=V.graph.sizevars.size_hint(nbytes)
+        except TypeError:
+            size_hint = 1
         self.allocation = Allocation(
             self.node,
             self.live_range,
-            size_hint=V.graph.sizevars.size_hint(nbytes),
+            size_hint=size_hint,
             symbolic_size=nbytes,
         )
 
