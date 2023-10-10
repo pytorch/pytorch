@@ -67,8 +67,8 @@ Following is the release cadence for year 2023/2024. Please note: these dates ar
 | 2.3.1 | April 2024 | May 2024 |
 | 2.3.2 | May 2024 | June 2024 |
 | 2.4.0 | April 2024 | July 2024 |
-| 2.4.1 | July 2024 | Aug 2024 |
-| 2.4.2 | Aug 2024 | Sept 2024 |
+| 2.4.1 | July 2024 | August 2024 |
+| 2.4.2 | August 2024 | September 2024 |
 | 2.5.0 | July 2024 | October 2024 |
 | 2.5.1 | October 2024 | November 2024 |
 | 2.5.2 | November 2024 | December 2024 |
