@@ -10,9 +10,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 
 import torch._dynamo
+import inspect
+import os
 
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
+from torch._utils_internal import get_file_path_2
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.optests import (
@@ -117,13 +120,20 @@ ALL_TEST_UTILS = {
 
 GDOC = "https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
 
+DEFAULT_TEST_UTILS = [
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_static",
+    "test_aot_dispatch_dynamic",
+]
 
 def generate_opcheck_tests(
     testcase: Any,
     namespaces: List[str],
-    failures_dict_path: str,
-    additional_decorators: List[Callable],
-    test_utils: List[str],
+    failures_dict_path: Optional[str] = None,
+    additional_decorators: Dict[str, Callable] = None,
+    test_utils: List[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -157,11 +167,19 @@ def generate_opcheck_tests(
         failures_dict_path: See ``validate_failures_dict_structure`` for more details
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
+    if additional_decorators is None:
+        additional_decorators = {}
     test_methods = [
         m
         for m in dir(testcase)
         if m.startswith("test_") and callable(getattr(testcase, m))
     ]
+    if failures_dict_path is None:
+        # The default failures_dict_path is failures_dict.json in
+        # the same directory as the test file.
+        prev_frame = inspect.currentframe().f_back
+        filename = inspect.getframeinfo(prev_frame)[0]
+        failures_dict_path = get_file_path_2(os.path.dirname(filename), "failures_dict.json")
     failures_dict = FailuresDict.load(
         failures_dict_path, create_file=should_update_failures_dict()
     )
