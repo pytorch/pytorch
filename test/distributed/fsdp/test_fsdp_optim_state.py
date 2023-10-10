@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 import torch
 import torch.nn as nn
 from torch import distributed as dist
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     apply_activation_checkpointing,
@@ -1866,8 +1867,49 @@ class TestFSDPOptimState(FSDPTest):
             optim.state_dict(), original_osd, check_same_param_keys=True
         )
 
-        # TODO: add local/sharded/full state_dict and CPU offloading and rank0
-        # interface test here, https://github.com/pytorch/pytorch/issues/97163
+        # Test the default setting.
+        osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+        for state in osd["state"].values():
+            for s in state.values():
+                self.assertFalse(isinstance(s, ShardedTensor))
+                self.assertFalse(s.is_cuda)
+
+        # Test sharded state_dict without offload_to_cpu
+        with FSDP.state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            ShardedStateDictConfig(),
+            ShardedOptimStateDictConfig(offload_to_cpu=False),
+        ):
+            osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+            for state in osd["state"].values():
+                for s in state.values():
+                    if s.dim() == 0:
+                        continue
+                    self.assertTrue(isinstance(s, ShardedTensor))
+                    if s._local_shards[0]:
+                        self.assertTrue(s._local_shards[0].tensor.is_cuda)
+
+        # Test full state_dict with rank0_only
+        with FSDP.state_dict_type(
+            model,
+            StateDictType.FULL_STATE_DICT,
+            FullStateDictConfig(),
+            FullOptimStateDictConfig(
+                offload_to_cpu=True,
+                rank0_only=True,
+            ),
+        ):
+            osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+            if dist.get_rank() > 0:
+                self.assertEqual(osd, {})
+            else:
+                for state in osd["state"].values():
+                    for s in state.values():
+                        if s.dim() == 0:
+                            continue
+                        self.assertFalse(s.is_cuda)
+                        self.assertFalse(isinstance(s, ShardedTensor))
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_with_none_tensor_state(self):

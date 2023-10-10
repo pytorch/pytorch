@@ -134,6 +134,7 @@ def _is_supported_batch_norm_for_training(node: Node):
         # For now, we need to continue to support it because it gives better
         # training numerics than `_native_batch_norm_legit`
         torch.ops.aten.cudnn_batch_norm.default,
+        torch.ops.aten.miopen_batch_norm.default,
     ]
     return node.target in supported_ops
 

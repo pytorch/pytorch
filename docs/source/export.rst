@@ -501,7 +501,7 @@ Graph breaks can also be encountered on data-dependent control flow (``if
 x.shape[0] > 2``) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators. Currently, we support :ref:`torch.cond <control_flow_cond>`
+special control flow operators. Currently, we support :ref:`torch.cond <cond>`
 to express if-else like control flow (more coming soon!).
 
 Missing Meta Kernels for Operators
@@ -530,7 +530,7 @@ Read More
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
-   control_flow_cond
+   cond
 
 .. toctree::
    :caption: Deep Dive for PyTorch Developers
@@ -563,7 +563,10 @@ API Reference
 
 .. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
-.. autoclass:: ArgumentKind
-.. autoclass:: ArgumentSpec
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.export.exported_program
