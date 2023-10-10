@@ -292,7 +292,7 @@ class ExprPrinter(Printer):
             # call nested sqrt
             if pow2.is_integer():
                 for _ in range(int(pow2)):
-                    base = self._helper_sqrt(base)   # type: ignore[attr-defined]
+                    base = self._helper_sqrt(base)  # type: ignore[attr-defined]
                 if exp > 0:
                     return base
                 if exp < 0:
