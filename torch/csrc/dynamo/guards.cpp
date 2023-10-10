@@ -183,9 +183,10 @@ static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
     const c10::SymIntArrayRef& intArray) {
   std::vector<std::optional<c10::SymInt>> optVec(intArray.size());
   std::transform(
-      intArray.begin(), intArray.end(), optVec.begin(), [](c10::SymInt value) {
-        return std::make_optional(value);
-      });
+      intArray.begin(),
+      intArray.end(),
+      optVec.begin(),
+      [](const c10::SymInt& value) { return std::make_optional(value); });
   return optVec;
 }
 

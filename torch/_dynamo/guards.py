@@ -1335,7 +1335,7 @@ def guard_fail_hook(
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reason = None
+    reason = ""
     for part in guard_fn.code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
@@ -1343,12 +1343,15 @@ def guard_fail_hook(
             fail_reason = eval(part, global_scope, scope)
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
+
+        if isinstance(fail_reason, bool) and not fail_reason:
+            fail_reason = part
         if isinstance(fail_reason, str):
-            reason = fail_reason
-            break
-        elif isinstance(fail_reason, bool) and not fail_reason:
-            reason = part
-            break
+            reason += fail_reason
+            if config.report_all_guard_failures:
+                reason += "\n"
+            else:
+                break
 
     if first:
         stashed_first_fail_reason = reason
@@ -1413,7 +1416,7 @@ def make_dupe_guard(obj_source, dupe_source):
     # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
     # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
     # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-    # In the the fn(x, x) example call above look like a graph with a single input.
+    # In the fn(x, x) example call above look like a graph with a single input.
     # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
 
     # Note - we may not have a source, that is fine, it just means we had an object that is safe to have

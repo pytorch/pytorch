@@ -60,19 +60,19 @@ def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_f
                     ret.append(node.meta.get(field_name))
     return ret
 
-def _reduce_func(*operands):
+def reduce_func(*operands):
     acc = 0
     for operand in operands:
         acc += operand
     return acc
 
-class _ReduceObj:
+class ReduceObj:
     def __call__(self, *operands):
-        return _reduce_func(*operands)
+        return reduce_func(*operands)
 
-class _ReduceMod(torch.nn.Module):
+class ReduceMod(torch.nn.Module):
     def _reduce(self, *operands):
-        return _reduce_func(*operands)
+        return reduce_func(*operands)
 
     def forward(self, *operands):
         return self._reduce(*operands)
@@ -1629,18 +1629,45 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
                 return cond(pred, true_fn, false_fn, operands)
             return (pred, operands), fn
 
-    @parametrize("pred", [True, torch.tensor(0), torch.randn(1), torch.tensor(False)])
-    @parametrize("inner_most_fn", [_reduce_func, _ReduceMod(), _ReduceObj()])
-    @parametrize("operands", [(), (torch.randn(2, 3), torch.randn(2, 3))])
-    @parametrize("closure_list", [[], [torch.randn(2, 3), torch.randn(2, 3)]])
-    @parametrize("nested_level", [0, 2])
-    def test_cond_tracing_with_valid_inputs(self, pred, inner_most_fn, operands, closure_list, nested_level):
-        args, fn = self._create_test_fns_for_cond(pred, inner_most_fn, operands, closure_list, nested_level)
+    def _init_predicate(self, pred_type):
+        if pred_type == "bool":
+            return True
+        elif pred_type == "intTensor":
+            return torch.tensor(1)
+        elif pred_type == "floatTensor":
+            return torch.tensor(1.)
+        elif pred_type == "boolTensor":
+            return torch.tensor(False)
+        else:
+            raise NotImplementedError
+
+    def _init_fn(self, inner_fn_type):
+        if inner_fn_type == "function":
+            return reduce_func
+        elif inner_fn_type == "module":
+            return ReduceMod()
+        elif inner_fn_type == "object":
+            return ReduceObj()
+        else:
+            raise NotImplementedError
+
+    @parametrize("predType", ["bool", "intTensor", "floatTensor", "boolTensor"])
+    @parametrize("innerFnType", ["function", "module", "object"])
+    @parametrize("nOperands", [0, 1])
+    @parametrize("nClosure", [0, 1])
+    @parametrize("nesting", [0, 2])
+    def test_cond_tracing_with_valid_inputs(self, predType, innerFnType, nOperands, nClosure, nesting):
+        pred = self._init_predicate(predType)
+        inner_fn = self._init_fn(innerFnType)
+        operands = [torch.ones(2, 3) + i for i in range(nOperands)]
+        closure = [torch.ones(2, 3) - i for i in range(nClosure)]
+        args, fn = self._create_test_fns_for_cond(pred, inner_fn, operands, closure, nesting)
         eager_res = fn(*args)
         for tracing_mode in ["symbolic", "fake", "real"]:
             # set _allow_non_fake_inputs = True to allow fake prop through closures
-            gm = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=True)(*args)
-            self.assertEqual(gm(*args), eager_res)
+            with self.subTest(tracing_mode=tracing_mode):
+                gm = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=True)(*args)
+                self.assertEqual(gm(*args), eager_res)
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 
