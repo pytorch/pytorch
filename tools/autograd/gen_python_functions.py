@@ -599,7 +599,7 @@ def load_deprecated_signatures(
         if is_out:
             aten_name = aten_name.replace("_out", "")
 
-        # HACK: these are fixed constants used to pass the the aten function.
+        # HACK: these are fixed constants used to pass the aten function.
         # The type must be known ahead of time
         known_constants = {
             "1": Type.parse("Scalar"),

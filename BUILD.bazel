@@ -1643,7 +1643,8 @@ cc_library(
     name = "shm",
     srcs = glob(["torch/lib/libshm/*.cpp"]),
     deps = [
-        ":torch",
+        ":torch_headers",
+        "//c10",
     ],
 )
 
