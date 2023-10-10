@@ -869,7 +869,6 @@ def check_signature_rewritable(graph):
             "like its value to be embedded as an exported constant, wrap its access "
             "in a function marked with @assume_constant_result.\n\n"
             + "\n\n".join(input_errors),
-            case_names=[],
         )
 
 
@@ -1290,7 +1289,7 @@ def export(
                     raise UserError(
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
                         str(e),
-                        case_names=["cond_predicate", "cond_operands"],
+                        case_name="cond_operands",
                     )
 
         if same_signature:
