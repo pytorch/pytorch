@@ -244,8 +244,9 @@ at::Tensor logcumsumexp_jvp(
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unbind_backward_nested(
     const variable_list& grads,
-    const variable_list& result,
-    int64_t dim);
+    const Tensor& nt_sizes,
+    int64_t dim,
+    const at::TensorOptions& options);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
@@ -440,7 +441,8 @@ at::Tensor _nested_split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    const Tensor& self);
+    const Tensor& nt_sizes,
+    const at::TensorOptions& options);
 at::Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     const c10::SymInt& split_size,

@@ -9,7 +9,7 @@ namespace internal {
 TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
   return OptionalTensorRef(self)->expand(size);
 }
-}
+} // namespace internal
 
 namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed

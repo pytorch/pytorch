@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <memory>
 
+// NOLINTBEGIN(clang-analyzer-cplusplus*)
 namespace c10::impl {
 namespace {
 
@@ -79,3 +80,4 @@ TEST_F(ContextTest, cow_deleter) {
 
 } // namespace
 } // namespace c10::impl
+// NOLINTEND(clang-analyzer-cplusplus*)
