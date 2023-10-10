@@ -210,6 +210,11 @@ class C10_API SymInt {
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
 
+  // If both are symbolic, this checks if
+  // they share the same node.
+  // If both are not symbolic this just checks normal equality.
+  bool is_same(const SymInt& other) const;
+
   operator SymFloat() const;
 
   // Don't use this.  Prefer maybe_as_int instead

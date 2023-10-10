@@ -75,9 +75,7 @@ def get_py_torch_functions(
 # the stubs to read on the human eye.
 
 DEVICE_PARAM = "device: Device = None"
-FACTORY_PARAMS = (
-    f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
-)
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
 # NOTE: specifying indices for Tensor.__getitem__
 # We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
@@ -738,6 +736,13 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_replace": [
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_commit_update": [
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
