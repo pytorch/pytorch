@@ -437,7 +437,7 @@ struct NCCLTraceBuffer {
     c10::IValue seq_id_s = "seq_id";
     c10::IValue profiling_name_s = "profiling_name";
     c10::IValue sizes_s = "sizes";
-    c10::IValue traceback_s = "traceback";
+    c10::IValue frames_s = "frames";
     c10::IValue state_s = "state";
     c10::IValue line_s = "line";
     c10::IValue name_s = "name";
@@ -470,7 +470,7 @@ struct NCCLTraceBuffer {
       for (int64_t frame : tb) {
         frames.push_back(all_frames.at(frame));
       }
-      dict.insert(traceback_s, frames);
+      dict.insert(frames_s, frames);
       entries.push_back(dict);
     }
     return write_pickle(entries);
