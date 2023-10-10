@@ -1380,7 +1380,7 @@ class WelfordReduction(Reduction):
 class Scan(Loops):
     scan_ranges: List[Expr]
     size: List[Expr]
-    combine_fn: Callable  # TODO make this a callable
+    combine_fn: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
     init: Any
@@ -1411,7 +1411,7 @@ class Scan(Loops):
         return self.ranges
 
     def index_length(self):
-        return len(self.ranges) + len(self.reduction_ranges)
+        return len(self.ranges) + len(self.scan_ranges)
 
     def inner_fn_str(self):
         index = self._index(self.ranges)
@@ -1430,7 +1430,7 @@ class Scan(Loops):
         inner_fn: Callable[[List[Expr]], Any],
         size: List[Expr],
         axis: int,
-        combine_fn: Callable,
+        combine_fn: Callable[..., Any],
         init: Any,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Optional["TensorBox"]:
@@ -1502,7 +1502,7 @@ class Scan(Loops):
         axis: int,
         pointwise_ranges: List[Expr],
         scan_ranges: List[Expr],
-        combine_fn: Callable,
+        combine_fn: Callable[..., Any],
         scan_numel: Expr,
     ):
         # TODO: custom splitting heuristic for scan
@@ -5907,7 +5907,9 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def scan(dtype_proxy, combine_fn: Callable, value_proxy, init_proxy):
+            def scan(
+                dtype_proxy, combine_fn: Callable[..., Any], value_proxy, init_proxy
+            ):
                 def shim(dtype, value, init):
                     return V.ops.scan(dtype, combine_fn, value, init)
 
