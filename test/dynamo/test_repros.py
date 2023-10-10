@@ -3467,7 +3467,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
 
     def test_global_fn_guards(self):
-        from .utils import some_global_fn as some_global_fn_other
+        try:
+            from .utils import some_global_fn as some_global_fn_other
+        except ImportError:
+            from .utils import some_global_fn as some_global_fn_other
 
         global some_global_fn
         org_func = some_global_fn
@@ -3477,7 +3480,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         for updated in [renamed_global_fn, some_global_fn_other, None]:
             try:
-                torch._dynamo.reset() # clear the cache
+                torch._dynamo.reset()  # clear the cache
+
                 def foo(x, y):
                     return some_global_fn(x) + y
 
@@ -3493,8 +3497,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(actual, expected)
 
                 if updated is None:
+
                     def some_global_fn(x):
                         return torch.exp(x)
+
                 else:
                     some_global_fn = updated
 

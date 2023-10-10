@@ -5167,8 +5167,8 @@ def fn():
 
             # we guard on builtins being modified
             builtins.isinstance = patched_isinstance_2
-            assert(id(builtins.isinstance) == id(patched_isinstance_2))
-            assert(builtins.isinstance.__code__.co_name == "patched_isinstance_2")
+            assert id(builtins.isinstance) == id(patched_isinstance_2)
+            assert builtins.isinstance.__code__.co_name == "patched_isinstance_2"
             res2 = opt_fn(x, y)
             self.assertTrue(same(res2, x + 1))
         finally:

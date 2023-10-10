@@ -1293,9 +1293,10 @@ class CheckFunctionManager:
 
         out: Dict[str, Any] = dict()
         # Remove the cached copy of `__builtins__` from the guard fn
-        # We need to do this because unlike globals, the builtins dict
-        # is copied when constructing the guarded code.
-        global_builder.scope.pop("__builtins__") 
+        # We need to do this to allow guarding on builtins because unlike
+        # globals, the builtins dict is copied when constructing the guarded
+        # code, hence will not be updated when any of the builtins are modified.
+        global_builder.scope.pop("__builtins__")
         exec(pycode, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
