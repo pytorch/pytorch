@@ -7331,6 +7331,29 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_infinite_repeat_mutation(self):
+        counters.clear()
+
+        def fn(x):
+            r = itertools.repeat(x)
+            idx = 0
+            for i in r:
+                x += i
+                i += 1
+                idx += 1
+                if idx > 10:
+                    break
+            return x
+
+        x = torch.randn([2, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_infinite_count(self):
         for args in ([], [10], [5, -1]):
             counters.clear()
@@ -7361,8 +7384,8 @@ def ___make_guard_fn():
             for iterator in (
                 iter([]),
                 iter([10, 11.0]),
-                itertools.repeat(-1),
-                itertools.count(10, 15),
+                itertools.repeat(-1, 3),
+                itertools.count(10),
             ):
                 r = itertools.cycle(iterator)
                 idx = 0
@@ -7371,10 +7394,12 @@ def ___make_guard_fn():
                     idx += 1
                     if idx > 10:
                         break
-                return x
+            return x
 
         x = torch.randn([2, 5])
         eager = fn(x)
+
+        print("EAGER", eager)
 
         compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(x)

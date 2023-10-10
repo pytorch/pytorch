@@ -2,6 +2,8 @@ MAX_CYCLE = 3000
 
 from typing import List, Optional
 
+from ..exc import unimplemented
+
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
@@ -11,27 +13,7 @@ class IteratorVariable(VariableTracker):
         super().__init__(**kwargs)
 
     def next_variables(self, tx):
-        assert self.mutable_local
-        self.init_item(tx)
-        ret_val = self.item.add_options(self)
-        self.next_item(tx)
-        next_iter = type(self)(
-            *self.values(),
-            mutable_local=MutableLocal(),
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
-        tx.replace_all(self, next_iter)
-        return ret_val, next_iter
-
-    def next_item(self, tx):
-        pass
-
-    def init_item(self, tx):
-        pass
-
-    def values(self):
-        return []
+        unimplemented("abstract method, must implement")
 
 
 class RepeatIteratorVariable(IteratorVariable):
@@ -39,8 +21,10 @@ class RepeatIteratorVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.item = item
 
-    def values(self):
-        return [self.item]
+    # Repeat needs no mutation, clone self
+    def next_variables(self, tx):
+        # add_options will clone self.item
+        return self.item.add_options(self), self
 
 
 class CountIteratorVariable(IteratorVariable):
@@ -53,11 +37,17 @@ class CountIteratorVariable(IteratorVariable):
         self.item = item
         self.step = step
 
-    def values(self):
-        return [self.item, self.step]
-
-    def next_item(self, tx):
-        self.item.call_method(tx, "__add__", [self.step], {})
+    def next_variables(self, tx):
+        assert self.mutable_local
+        next_iter = type(self)(
+            item=self.item.call_method(tx, "__add__", [self.step], {}),
+            step=self.step.clone(),
+            mutable_local=MutableLocal(),
+            recursively_contains=self.recursively_contains,
+            **VariableTracker.propagate([self]),
+        )
+        tx.replace_all(self, next_iter)
+        return self.item.add_options(self), next_iter
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -66,7 +56,6 @@ class CycleIteratorVariable(IteratorVariable):
         iterator: IteratorVariable,
         saved: List[VariableTracker] = None,
         saved_index: int = 0,
-        saved_len: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
     ):
@@ -76,40 +65,42 @@ class CycleIteratorVariable(IteratorVariable):
         self.iterator = iterator
         self.saved = saved
         self.saved_index = saved_index
-        self.saved_len = len(saved)
         self.item = item
 
-    def next_values(self, tx):
+    def next_variables(self, tx):
+        assert self.mutable_local
+
         if self.iterator is not None:
             try:
-                val, next_iter = self.iterator.next_variables(tx)
-                tx.replace_all(self.iterator, next_iter)
-                self.saved.append(val)
+                new_item, next_inner_iter = self.iterator.next_variables(tx)
+                tx.replace_all(self.iterator, next_inner_iter)
                 if len(self.saved) > MAX_CYCLE:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
-                new_item = val
-            
-        return old_item, [self.iterator, self.saved, self.saved_len, self.saved_index, new_item]
+                next_iter = self.clone(
+                    iterator=next_inner_iter,
+                    saved=self.saved + [new_item],
+                    item=new_item,
+                )
 
-    def init_item(self, tx):
-        if self.item is None:
-            self.next_item(tx)
-
-    def next_item(self, tx):
-            try:
-                val, next_iter = self.iterator.next_variables(tx)
-
+                tx.replace_all(self, next_iter)
+                if self.item is None:
+                    return next_iter.next_variables(tx)
+                return self.item.add_options(self), next_iter
             except StopIteration:
-                self.iterator = None
-                self.saved_len = len(self.saved)
-                self.saved_index = 0
-                self.next_item(tx)
-        elif self.saved_len > 0:
-            ret = self.saved[self.saved_index]
-            self.saved_index += 1
-            self.saved_index %= self.saved_len
-            self.item = ret
+                next_iter = self.clone(iterator=None)
+                # this is redundant as next_iter will do the same
+                # but we do it anyway for safety
+                tx.replace_all(self, next_iter)
+                return next_iter.next_variables(tx)
+        elif len(self.saved) > 0:
+            next_iter = self.clone(
+                saved_index=(self.saved_index + 1) % len(self.saved),
+                item=self.saved[self.saved_index],
+            )
+            tx.replace_all(self, next_iter)
+            return self.item.add_options(self), next_iter
         else:
             raise StopIteration
+        return self.item.add_options(self), next_iter
