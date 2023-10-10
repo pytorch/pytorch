@@ -194,7 +194,7 @@ def _create_chunk_dtensor(
 
 def _all_gather_dtensor(
     tensor: DTensor,
-    parent_mesh: DeviceMesh,
+    parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
     """
     All gather a DTensor in its sharded dimension and return the local tensor.
