@@ -7355,7 +7355,6 @@ def ___make_guard_fn():
             self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_infinite_cycle(self):
-        print("TRYING")
         counters.clear()
 
         def fn(x):
@@ -7382,7 +7381,6 @@ def ___make_guard_fn():
 
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
-        print("SUCCESS")
 
     def test_itertools_accumulate_symint_default_sum(self):
         # https://github.com/pytorch/pytorch/issues/110287
