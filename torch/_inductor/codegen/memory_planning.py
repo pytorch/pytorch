@@ -746,7 +746,7 @@ class MemoryPlanner:
                 worklist.popleft()
 
         timestep += 1
-        assert self.buffer_groups
+        assert self.buffer_groups is not None
         for group in self.buffer_groups:
             if group.is_output:
                 group.update_usage(timestep)
@@ -756,7 +756,7 @@ class MemoryPlanner:
         Assign every allocation to a specific location in a specific AllocationPool.
         """
         assert config.memory_pool in ("none", "intermediates", "outputs", "combined")
-        assert self.buffer_groups
+        assert self.buffer_groups is not None
 
         for group in self.buffer_groups:
             group.make_allocation()

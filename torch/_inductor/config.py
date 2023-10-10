@@ -15,6 +15,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# use fx aot graph codegen cache
+fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -198,6 +201,10 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
+
+# we always add constants into graph.constants without
+# performing any constant-inlining optimization
+always_keep_tensor_constants = False
 
 
 def is_fbcode():
