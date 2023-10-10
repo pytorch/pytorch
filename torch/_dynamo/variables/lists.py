@@ -155,8 +155,6 @@ class BaseListVariable(VariableTracker):
         elif name == "index":
             from .builder import SourcelessBuilder
 
-            assert len(kwargs) == 0
-            assert len(args) > 0 and len(args) <= 3
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
             )
