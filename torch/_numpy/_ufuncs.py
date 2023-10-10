@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 
 from . import _binary_ufuncs_impl, _dtypes_impl, _unary_ufuncs_impl, _util
 from ._normalizations import (
     ArrayLike,
+    ArrayLikeOrScalar,
     CastingModes,
     DTypeLike,
     normalizer,
     NotImplementedType,
     OutArray,
-    Scalar,
 )
 
 
@@ -71,8 +71,8 @@ def deco_binary_ufunc(torch_func):
 
     @normalizer
     def wrapped(
-        x1: Union[ArrayLike, Scalar],
-        x2: Union[ArrayLike, Scalar],
+        x1: ArrayLikeOrScalar,
+        x2: ArrayLikeOrScalar,
         /,
         out: Optional[OutArray] = None,
         *,
@@ -99,7 +99,7 @@ def deco_binary_ufunc(torch_func):
             x1, x2 = _util.typecast_tensors((x1, x2), dtype, casting)
         else:
             x1, x2 = _dtypes_impl.nep50_to_tensors(
-                x1, x2, torch_func.__name__ in NEP50_FUNCS
+                x1, x2, torch_func.__name__ in NEP50_FUNCS, torch_func.__name__
             )
 
         result = torch_func(x1, x2)
@@ -145,8 +145,8 @@ def matmul(
 # ldexp casting is special : the dtype of the result == dtype of the 1st arg
 @normalizer
 def ldexp(
-    x1: Union[ArrayLike, Scalar],
-    x2: Union[ArrayLike, Scalar],
+    x1: ArrayLikeOrScalar,
+    x2: ArrayLikeOrScalar,
     /,
     out: Optional[OutArray] = None,
     *,

@@ -147,6 +147,10 @@ def to_underlying_dtype(qdtype):
         torch.qint32: torch.int32,
         torch.quint4x2: torch.uint8,
         torch.quint2x4: torch.uint8,
+        torch.uint8: torch.uint8,
+        torch.int8: torch.int8,
+        torch.int16: torch.int16,
+        torch.int32: torch.int32,
     }
     assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
     return DTYPE_MAPPING[qdtype]
@@ -219,7 +223,16 @@ def activation_is_statically_quantized(qconfig):
     quantized or not, this includes quantizing to quint8, qint8 and qint32 and float16
     """
     return (
-        activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
+        activation_dtype(qconfig) in [
+            torch.quint8,
+            torch.qint8,
+            torch.qint32,
+            torch.float16,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32
+        ]
         and (not activation_is_dynamically_quantized(qconfig))
     )
 
@@ -236,25 +249,34 @@ def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int8 or not, this includes quantizing to quint8, qint8
     """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
+    return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.uint8, torch.int8]
 
 def activation_is_int32_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int32 or not
     """
-    return activation_dtype(qconfig) == torch.qint32
+    return activation_dtype(qconfig) in [torch.qint32, torch.int32]
 
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16, torch.quint4x2]
+    return weight_dtype(qconfig) in [
+        torch.quint8,
+        torch.qint8,
+        torch.float16,
+        torch.quint4x2,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32
+    ]
 
 def weight_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be statically
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
+    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.uint8, torch.int8]
 
 def op_is_int8_dynamically_quantized(qconfig) -> bool:
     """ Given a qconfig, returns True if this op is using int8 dynamic
@@ -263,9 +285,9 @@ def op_is_int8_dynamically_quantized(qconfig) -> bool:
     activation_dtype, weight_dtype, activation_is_dynamic = \
         get_qconfig_dtypes(qconfig)
     return (
-        activation_dtype is torch.quint8 and
+        activation_dtype in [torch.quint8, torch.uint8] and
         # for now, the lines below assume fbgemm or qnnpack
-        weight_dtype is torch.qint8 and
+        weight_dtype in [torch.qint8, torch.int8] and
         activation_is_dynamic
     )
 
@@ -283,7 +305,7 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32]
     if weight.dtype in static_dtypes:
         if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
@@ -340,7 +362,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
         # The actual values of initial_qmin and initial_qmax will be reset below.
-        if dtype == torch.qint32:
+        if dtype in [torch.qint32, torch.int32]:
             initial_quant_min, initial_quant_max = 0, 2**32 - 1
         else:
             initial_quant_min, initial_quant_max = 0, 255
@@ -354,11 +376,11 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             )
 
         qrange_len = initial_quant_max - initial_quant_min + 1
-        if dtype == torch.qint8:
+        if dtype in [torch.qint8, torch.int8]:
             assert (
                 0 < qrange_len <= 256
             ), "quantization range should be positive and not exceed the maximum bit range (=256)."
-        elif dtype == torch.qint32:
+        elif dtype in [torch.qint32, torch.int32]:
             assert (
                 0 < qrange_len <= 2**32
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
@@ -366,17 +388,17 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
         # Fallback onto default 8-bit qmin and qmax calculation if dynamic range is not used.
-        if dtype == torch.qint8:
+        if dtype in [torch.qint8, torch.int8]:
             if reduce_range:
                 quant_min, quant_max = -64, 63
             else:
                 quant_min, quant_max = -128, 127
-        elif dtype == torch.quint8:
+        elif dtype in [torch.quint8, torch.uint8]:
             if reduce_range:
                 quant_min, quant_max = 0, 127
             else:
                 quant_min, quant_max = 0, 255
-        elif dtype == torch.qint32:
+        elif dtype in [torch.qint32, torch.int32]:
             quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
         else:
             quant_min, quant_max = 0, 15
@@ -541,7 +563,7 @@ def determine_qparams(
         max_val_pos = torch.max(-min_val_neg, max_val_pos)
         scale = max_val_pos / (float(quant_max - quant_min) / 2)
         scale = torch.max(scale, eps)
-        if dtype == torch.uint8 or dtype == torch.quint8:
+        if dtype in [torch.uint8, torch.quint8]:
             if has_customized_qrange:
                 # When customized quantization range is used, down-rounded midpoint of the range is chosen.
                 zero_point = zero_point.new_full(

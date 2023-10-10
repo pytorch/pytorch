@@ -904,6 +904,7 @@ struct TORCH_API ListType
   static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
+  static ListTypePtr ofNumbers();
 
  private:
   ListType(TypePtr elem) : SingleElementType(std::move(elem)) {}

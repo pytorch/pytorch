@@ -19,7 +19,7 @@ class HalfCauchy(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = HalfCauchy(torch.tensor([1.0]))
         >>> m.sample()  # half-cauchy distributed with scale=1
         tensor([ 2.3214])

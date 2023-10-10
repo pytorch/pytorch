@@ -47,8 +47,10 @@ class NAdam(Optimizer):
                 s['mu_product'] = torch.tensor(s['mu_product'])
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
+        has_complex = False
         for p in group['params']:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError('NAdam does not support sparse gradients')
@@ -77,6 +79,7 @@ class NAdam(Optimizer):
                 exp_avg_sqs.append(state['exp_avg_sq'])
                 mu_products.append(state['mu_product'])
                 state_steps.append(state['step'])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -102,7 +105,7 @@ class NAdam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps)
 
             nadam(params_with_grad,
                   grads,
@@ -119,7 +122,8 @@ class NAdam(Optimizer):
                   decoupled_weight_decay=group['decoupled_weight_decay'],
                   foreach=group['foreach'],
                   capturable=group['capturable'],
-                  differentiable=group['differentiable'])
+                  differentiable=group['differentiable'],
+                  has_complex=has_complex)
 
         return loss
 
@@ -195,6 +199,7 @@ def nadam(params: List[Tensor],
           foreach: Optional[bool] = None,
           capturable: bool = False,
           differentiable: bool = False,
+          has_complex: bool = False,
           *,
           beta1: float,
           beta2: float,
@@ -239,7 +244,8 @@ def nadam(params: List[Tensor],
          decoupled_weight_decay=decoupled_weight_decay,
          eps=eps,
          capturable=capturable,
-         differentiable=differentiable)
+         differentiable=differentiable,
+         has_complex=has_complex)
 
 
 def _single_tensor_nadam(params: List[Tensor],
@@ -257,7 +263,8 @@ def _single_tensor_nadam(params: List[Tensor],
                          eps: float,
                          decoupled_weight_decay: bool,
                          capturable: bool,
-                         differentiable: bool):
+                         differentiable: bool,
+                         has_complex: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -265,6 +272,12 @@ def _single_tensor_nadam(params: List[Tensor],
         exp_avg_sq = exp_avg_sqs[i]
         mu_product = mu_products[i]
         step_t = state_steps[i]
+
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
@@ -333,7 +346,8 @@ def _multi_tensor_nadam(params: List[Tensor],
                         eps: float,
                         decoupled_weight_decay: bool,
                         capturable: bool,
-                        differentiable: bool):
+                        differentiable: bool,
+                        has_complex: bool):
 
     if len(params) == 0:
         return
@@ -350,6 +364,15 @@ def _multi_tensor_nadam(params: List[Tensor],
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps])
     for ((grouped_params, grouped_grads, grouped_exp_avgs,
          grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps), _) in grouped_tensors.values():
+
+        # handle complex
+        if has_complex:
+            for i in range(len(grouped_params)):
+                if torch.is_complex(grouped_params[i]):
+                    grouped_params[i] = torch.view_as_real(grouped_params[i])
+                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
+                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
 
         # update steps
         torch._foreach_add_(grouped_state_steps, 1)

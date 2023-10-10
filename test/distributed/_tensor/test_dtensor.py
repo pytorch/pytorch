@@ -246,6 +246,23 @@ class DTensorTest(DTensorTestBase):
             self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
 
     @with_comms
+    def test_to_local_grad_hint(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = (Shard(0),)
+        global_tensor = torch.ones(8, 3, requires_grad=True)
+
+        sharded_dtensor = distribute_tensor(global_tensor, device_mesh, shard_spec)
+        local_out = sharded_dtensor.redistribute(placements=[Replicate()]).to_local(
+            grad_placements=[_Partial()]
+        )
+        local_out.sum().backward()
+
+        replica_grad = sharded_dtensor.grad.redistribute(
+            placements=[Replicate()]
+        ).to_local()
+        self.assertEqual(replica_grad, global_tensor * self.world_size)
+
+    @with_comms
     def test_dtensor_new_empty_strided(self):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.randn(8, 8, requires_grad=True, device=self.device_type)
@@ -530,13 +547,15 @@ class DTensorMeshTest(DTensorTestBase):
             ),
         ]
 
-        from torch.distributed._tensor._utils import compute_local_offset
+        from torch.distributed._tensor._utils import (
+            compute_local_shape_and_global_offset,
+        )
 
         # loop through all sharding specs and check local shard offsets
         logical_tensor = torch.randn(tensor_shape)
         for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
-            offset = compute_local_offset(
+            _, offset = compute_local_shape_and_global_offset(
                 dtensor.shape, device_mesh, dtensor.placements
             )
             self.assertEqual(expected_shard_offsets, offset)

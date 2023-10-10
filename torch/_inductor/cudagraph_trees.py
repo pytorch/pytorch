@@ -136,7 +136,7 @@ def clear_cublass_cache():
     Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for
     doing warmup within a CUDAGraph private pool because we do not want persistent allocations from
     one one run to the next. When we begin a new run of a cudagraphs path (generation), all tensors
-    from the previous generation are freed. This frees them the the memory pool, but not elsewhere.
+    from the previous generation are freed. This frees them the memory pool, but not elsewhere.
     A tensor in the cublas workspace would continue to be in use the workspace but would also get allocated
     in the next run. The memory would be in use in two places.
 
@@ -1069,7 +1069,7 @@ class CUDAGraphNode:
                 for i, elem in enumerate(inputs)
                 if isinstance(elem, torch.Tensor)
                 and i not in self.wrapped_function.static_input_idxs
-                and elem.data_ptr() != 0
+                and elem.untyped_storage().data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
@@ -1133,7 +1133,7 @@ class CUDAGraphNode:
             )
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
-            is_empty_storage = o.data_ptr() == 0
+            is_empty_storage = o.untyped_storage().data_ptr() == 0
             if ref and ref() is not None or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o

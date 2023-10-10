@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import logging
 import math
 import warnings
@@ -541,7 +542,7 @@ def _sharded_post_state_dict_hook(
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
-        if not fsdp_state._state_dict_config.use_dtensor:
+        if not fsdp_state._state_dict_config._use_dtensor:
             sharded_tensor = _ext_chunk_tensor(
                 tensor=param,
                 rank=fsdp_state.rank,
@@ -603,9 +604,17 @@ def _sharded_pre_load_state_dict_hook(
             fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
         else:
             fqn_from_global_root = f"{prefix}{fqn}"
-        param = state_dict.pop(fqn_from_global_root)
+        try:
+            param = state_dict.pop(fqn_from_global_root)
+        except KeyError:
+            logger.warning(
+                f"Did not find param with FQN {fqn_from_global_root}, skipping it. "  # noqa: G004
+                "The weight will not be filled if you expect it to be."
+            )
+            continue  # TODO: Improve unittesting for state_dict finetuning
+            # cases: https://github.com/pytorch/pytorch/issues/109134
 
-        if not fsdp_state._state_dict_config.use_dtensor:
+        if not fsdp_state._state_dict_config._use_dtensor:
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
 
@@ -661,9 +670,11 @@ def _sharded_pre_load_state_dict_hook(
         else:
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
-
+            placements = list(copy.deepcopy(param.placements))
+            placements[-1] = Replicate()
             param = param.redistribute(
-                device_mesh=param.device_mesh, placements=[Replicate()]
+                device_mesh=param.device_mesh,
+                placements=placements,
             )
             state_dict[fqn_from_global_root] = param.to_local()
 
@@ -760,6 +771,7 @@ def _pre_state_dict_hook(
             "be returned."
         )
     else:
+        _set_use_dtensor(module, fsdp_state)
         context = contextlib.nullcontext()
 
     with context:
@@ -774,6 +786,17 @@ def _pre_state_dict_hook(
             *args,
             **kwargs,
         )
+
+
+@no_type_check
+def _set_use_dtensor(fsdp_state: _FSDPState, module: nn.Module) -> None:
+    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # _use_dtensor flag to be true for ShardedStateDictConfig().
+    if (
+        getattr(module, "device_mesh", None)
+        and fsdp_state._state_dict_type == StateDictType.SHARDED_STATE_DICT
+    ):
+        fsdp_state._state_dict_config._use_dtensor = True
 
 
 @no_type_check
@@ -797,6 +820,7 @@ def _pre_load_state_dict_hook(
             "be returned."
         )
     else:
+        _set_use_dtensor(module, fsdp_state)
         context = contextlib.nullcontext()
 
     _lazy_init(fsdp_state, module)

@@ -525,7 +525,7 @@ mobile::Module _load_for_mobile_impl(
   }
 
   const size_t model_size = rai != nullptr ? rai->size() : 0;
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
   if (module_load_options &
       MobileModuleLoadOptions::PARSE_ALL_EXTRA_FILE_MAPS) {
     // ExtraFilesMap is serialized with a "extra/", hence it is necessary to
@@ -564,7 +564,7 @@ mobile::Module _load_for_mobile_impl(
       // Add model_name and model_size to metadata_map
       extra_files.insert(std::make_pair("model_name", result.name()));
       extra_files.insert(
-          std::make_pair("model_size", c10::guts::to_string(model_size)));
+          std::make_pair("model_size", std::to_string(model_size)));
       metadata_map = observer->processMetadataFromExtra(extra_files);
       observer->onExitLoadModel(instance_key, metadata_map);
     }
@@ -694,7 +694,7 @@ void _load_extra_only_for_mobile(
     case FileFormat::ZipFileFormat: {
       std::unique_ptr<FileAdapter> rai =
           std::make_unique<FileAdapter>(filename);
-      auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+      auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);
       break;

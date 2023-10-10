@@ -169,7 +169,8 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
   else {
     TORCH_CHECK(
         ndim >= 1 && ndim <= 4,
-        "Texture storage only valid for 1 <= ndim <= 4!");
+        "Texture storage only valid for 1 <= ndim <= 4, received: ",
+        ndim);
 
     c10::SmallVector<int64_t, 6u> gpu_sizes(ndim == 4 ? 4 : 3);
 

@@ -130,7 +130,16 @@ __all__ = [
 
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
-_OBS_DTYPE_LIST = [torch.quint8, torch.qint8, torch.qint32, torch.float16]
+_OBS_DTYPE_LIST = [
+    torch.quint8,
+    torch.qint8,
+    torch.qint32,
+    torch.float16,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32
+]
 
 _DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
 
@@ -146,20 +155,9 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
 
-# TODO: add support for torch dtype in quant code base
-# this includes observers and prepare/convert code
-_TORCH_DTYPE_TO_QDTYPE = {
-    torch.int8: torch.qint8,
-    torch.uint8: torch.quint8,
-    torch.int32: torch.qint32,
-    torch.float16: torch.float16,
-    torch.float32: torch.float32,
-}
 
 def _get_observer_kwargs(quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec]):
     kwargs_dict = asdict(quant_spec)
-    # TODO: refactor observer to accept plain types
-    kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
     return copy.deepcopy(kwargs_dict)
 
 def _get_qspec_for_arg(
@@ -194,7 +192,7 @@ def _create_obs_or_fq_from_qspec(
     elif isinstance(quantization_spec, DerivedQuantizationSpec):
         # can't use asdict, so not calling get_observer_kwargs here
         kwargs = {
-            "dtype": _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype],
+            "dtype": quantization_spec.dtype,
             "derive_qparams_fn": quantization_spec.derive_qparams_fn,
             "quant_min": quantization_spec.quant_min,
             "quant_max": quantization_spec.quant_max,
@@ -366,7 +364,7 @@ def _is_observer_in_same_graph(
     """
     node_output_dtype = _get_arg_target_dtype_as_output(node, named_modules, obs_or_fq_map, is_qat)
     if len(node.args) > 0 and isinstance(node.args[0], Node):
-        if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
+        if node_output_dtype in [torch.quint8, torch.uint8] and node.args[0].op == 'placeholder':
             return False
     return True
 

@@ -520,6 +520,13 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         Note that :func:`torch.view_as_real` can be used to recover a real
         tensor with an extra last dimension for real and imaginary components.
 
+    .. warning::
+        From version 2.1, a warning will be provided if a :attr:`window` is
+        not specified. In a future release, this attribute will be required.
+        Not providing a window currently defaults to using a rectangular window,
+        which may result in undesirable artifacts. Consider using tapered windows,
+        such as :func:`torch.hann_window`.
+
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
     time. The interface of this function is modeled after (but *not* a drop-in
@@ -658,6 +665,11 @@ istft = _add_docstr(
     r"""
 Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
 
+.. warning::
+    From version 2.1, a warning will be provided if a :attr:`window` is
+    not specified. In a future release, this attribute will be required.
+    Please provide the same window used in the stft call.
+
 It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
 least squares estimation of the original signal. The algorithm will check using the NOLA condition (
 nonzero overlap).
@@ -760,8 +772,11 @@ def _unique_impl(input: Tensor, sorted: bool = True,
             elements in the original input ended up in the returned unique list.
         return_counts (bool): Whether to also return the counts for each unique
             element.
-        dim (int): the dimension to apply unique. If ``None``, the unique of the
-            flattened input is returned. default: ``None``
+        dim (int, optional): the dimension to operate upon. If ``None``, the
+            unique of the flattened input is returned. Otherwise, each of the
+            tensors indexed by the given dimension is treated as one of the
+            elements to apply the unique operation upon. See examples for more
+            details. Default: ``None``
 
     Returns:
         (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
@@ -799,6 +814,76 @@ def _unique_impl(input: Tensor, sorted: bool = True,
         tensor([[0, 2],
                 [1, 2]])
 
+        >>> a = torch.tensor([
+        ...     [
+        ...         [1, 1, 0, 0],
+        ...         [1, 1, 0, 0],
+        ...         [0, 0, 1, 1],
+        ...     ],
+        ...     [
+        ...         [0, 0, 1, 1],
+        ...         [0, 0, 1, 1],
+        ...         [1, 1, 1, 1],
+        ...     ],
+        ...     [
+        ...         [1, 1, 0, 0],
+        ...         [1, 1, 0, 0],
+        ...         [0, 0, 1, 1],
+        ...     ],
+        ... ])
+
+        >>> # If we call `torch.unique(a, dim=0)`, each of the tensors `a[idx, :, :]`
+        >>> # will be compared. We can see that `a[0, :, :]` and `a[2, :, :]` match
+        >>> # each other, so one of them will be removed.
+        >>> (a[0, :, :] == a[2, :, :]).all()
+        tensor(True)
+        >>> a_unique_dim0 = torch.unique(a, dim=0)
+        >>> a_unique_dim0
+        tensor([[[0, 0, 1, 1],
+                 [0, 0, 1, 1],
+                 [1, 1, 1, 1]],
+                [[1, 1, 0, 0],
+                 [1, 1, 0, 0],
+                 [0, 0, 1, 1]]])
+
+        >>> # Notice which sub-tensors from `a` match with the sub-tensors from
+        >>> # `a_unique_dim0`:
+        >>> (a_unique_dim0[0, :, :] == a[1, :, :]).all()
+        tensor(True)
+        >>> (a_unique_dim0[1, :, :] == a[0, :, :]).all()
+        tensor(True)
+
+        >>> # For `torch.unique(a, dim=1)`, each of the tensors `a[:, idx, :]` are
+        >>> # compared. `a[:, 0, :]` and `a[:, 1, :]` match each other, so one of
+        >>> # them will be removed.
+        >>> (a[:, 0, :] == a[:, 1, :]).all()
+        tensor(True)
+        >>> torch.unique(a, dim=1)
+        tensor([[[0, 0, 1, 1],
+                 [1, 1, 0, 0]],
+                [[1, 1, 1, 1],
+                 [0, 0, 1, 1]],
+                [[0, 0, 1, 1],
+                 [1, 1, 0, 0]]])
+
+        >>> # For `torch.unique(a, dim=2)`, the tensors `a[:, :, idx]` are compared.
+        >>> # `a[:, :, 0]` and `a[:, :, 1]` match each other. Also, `a[:, :, 2]` and
+        >>> # `a[:, :, 3]` match each other as well. So in this case, two of the
+        >>> # sub-tensors will be removed.
+        >>> (a[:, :, 0] == a[:, :, 1]).all()
+        tensor(True)
+        >>> (a[:, :, 2] == a[:, :, 3]).all()
+        tensor(True)
+        >>> torch.unique(a, dim=2)
+        tensor([[[0, 1],
+                 [0, 1],
+                 [1, 0]],
+                [[1, 0],
+                 [1, 0],
+                 [1, 1]],
+                [[0, 1],
+                 [0, 1],
+                 [1, 0]]])
     """
     if has_torch_function_unary(input):
         return handle_torch_function(

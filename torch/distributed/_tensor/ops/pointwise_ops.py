@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import torch
+from torch.distributed._tensor.op_schema import RuntimeSchemaInfo
 
 from torch.distributed._tensor.ops.common_rules import (
     linear_pointwise_rule,
@@ -189,6 +190,10 @@ pointwise_ops = [
     aten.ge.Scalar,
     aten.ge.Tensor,
     aten.gelu.default,
+    aten.gt.Tensor,
+    aten.gt.Tensor_out,
+    aten.gt.Scalar,
+    aten.gt.Scalar_out,
     aten.gt.Scalar,
     aten.gt.Tensor,
     aten.hypot.default,
@@ -207,6 +212,10 @@ pointwise_ops = [
     aten.ldexp.default,
     aten.ldexp.out,
     aten.ldexp_.default,
+    aten.lt.Tensor,
+    aten.lt.Tensor_out,
+    aten.lt.Scalar,
+    aten.lt.Scalar_out,
     aten.le.Scalar,
     aten.le.Tensor,
     aten.lerp.Scalar,
@@ -349,6 +358,7 @@ pointwise_ops = [
     aten.trunc.out,
     aten.trunc_.default,
     aten.where.self,
+    aten.where.self_out,
     aten.xlogy.OutScalar_Self,
     aten.xlogy.OutScalar_Other,
     aten.xlogy.OutTensor,
@@ -371,4 +381,6 @@ for op in linear_pointwise_ops:
 
 
 for op in pointwise_ops:
-    register_prop_rule(op)(pointwise_rule)
+    register_prop_rule(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_rule
+    )

@@ -11,6 +11,7 @@ quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
 _DTYPE_TO_QVALUE_BOUNDS = {
     torch.uint8: (0, 255),
     torch.int8: (-128, 127),
+    torch.int16: (-(2**15), 2**15 - 1),
     torch.int32: (-(2**31), 2**31 - 1)
 }
 
@@ -160,7 +161,7 @@ def dequantize_per_tensor(
        dequantized float32 Tensor
     """
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
-    if dtype in [torch.uint8, torch.int8, torch.int32]:
+    if dtype in _DTYPE_TO_QVALUE_BOUNDS:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale
         # failed the test
@@ -196,7 +197,7 @@ def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
-    if dtype in [torch.uint8, torch.int8, torch.int32]:
+    if dtype in _DTYPE_TO_QVALUE_BOUNDS:
         return torch.empty_like(input, dtype=torch.float32)
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
@@ -254,8 +255,8 @@ def choose_qparams_tensor(
        zero_point (int): quantization parameter for the target quantized Tensor
     """
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-    assert dtype == torch.int8 or dtype == torch.uint8 or dtype == torch.int32, \
-        f"Expecting target dtype to be int8 uint8 or int32, but got: {dtype}"
+    assert dtype in _DTYPE_TO_QVALUE_BOUNDS, \
+        f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
 
     min_val, max_val = torch.aminmax(input)
@@ -289,8 +290,8 @@ def choose_qparams_symmetric_tensor(
        zero_point (int): quantization parameter for the target quantized Tensor
     """
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-    assert dtype == torch.int8 or dtype == torch.uint8 or dtype == torch.int32, \
-        f"Expecting target dtype to be int8 uint8 or int32, but got: {dtype}"
+    assert dtype in _DTYPE_TO_QVALUE_BOUNDS, \
+        f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
 
     min_val, max_val = torch.aminmax(input)

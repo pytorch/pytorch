@@ -10,6 +10,7 @@ import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
+from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
@@ -1039,16 +1040,16 @@ class Module:
         return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
-    def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
-           non_blocking: bool = ...) -> T:
+    def to(self, device: Optional[Union[int, str, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
+           non_blocking: bool = ...) -> Self:
         ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T:
+    def to(self, dtype: Union[dtype, str], non_blocking: bool = ...) -> Self:
         ...
 
     @overload
-    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T:
+    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self:
         ...
 
     def to(self, *args, **kwargs):
