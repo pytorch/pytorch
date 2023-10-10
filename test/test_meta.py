@@ -543,6 +543,10 @@ def run_meta_crossref(
                 else:
                     indices.append(meta_index)
             meta_args = (meta_args[0], indices)
+        elif func is torch.nn.functional.ctc_loss and all([isinstance(args[2], list), isinstance(args[3], list)]):
+            # torch.ops.aten._ctc_loss.IntList has a meta kernel but
+            # torch.ops.aten._ctc_loss.Tensor does not
+            test_expect = TestExpect.SUCCESS
 
         if kwargs.get("device", None) is not None:
             meta_kwargs["device"] = "meta"
@@ -614,8 +618,8 @@ meta_function_expected_failures = {
     torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
-    torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
+    torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, f16, i8, f32},
+    torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32, f16},
     torch.functional.istft : {f64, c64, c128, f32},
     torch.geqrf : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
@@ -660,7 +664,7 @@ meta_function_skips = {
     torch.functional.atleast_3d : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cartesian_prod : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.einsum : {bf16, c128, f64, f32, f16, c64},
-    torch.inner : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
+    torch.inner : {f16, bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.linalg.matrix_norm : {c128, f32, c64, f64},
     torch.linalg.matrix_rank : {c128, c64},
     torch.linalg.svd : {c128, c64},
@@ -790,7 +794,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten._to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten._ctc_loss.default : {f32, f64},  # Shape of second output depends on data.
     aten._ctc_loss.Tensor : {f32, f64},  # Shape of second output depends on data.
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
@@ -808,6 +811,7 @@ meta_dispatch_expected_failures = {
     aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
+
 }
 
 # these sometimes pass and sometimes fail
@@ -1328,7 +1332,7 @@ class TestMeta(TestCase):
         assertEqualShapes(out_kwargs["out2"], expected_shapes[2])
 
     @onlyCPU
-    @parametrize("output_mask", itertools.product([True, False], [True, False], [True, False]))
+    @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_layer_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_layer_norm
 
@@ -1361,7 +1365,7 @@ class TestMeta(TestCase):
                                                  args, output_mask, expected_shapes)
 
     @onlyCPU
-    @parametrize("output_mask", itertools.product([True, False], [True, False], [True, False]))
+    @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_group_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_group_norm
 
@@ -1392,7 +1396,7 @@ class TestMeta(TestCase):
                                                  args, output_mask, expected_shapes)
 
     @onlyCPU
-    @parametrize("output_mask", itertools.product([True], [True, False], [True, False]))
+    @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
 
