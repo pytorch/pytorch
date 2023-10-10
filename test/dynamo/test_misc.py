@@ -584,7 +584,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             lambda line: "id" not in line and "lookup_backend" not in line,
             sorted(guard_code),
         )
-        self.assertExpected("\n".join(guard_code))
+        self.assertExpectedInline("\n".join(guard_code), """\
+2 <= L['x'].size()[0]
+L['x'] is L['y']
+L['x'].ndimension() == 2
+L['x'].requires_grad == False
+L['x'].size()[1] == L['x'].size()[0]
+L['x'].storage_offset() == 0
+___dict_contains('builtins', G['sys'].modules)
+___dict_contains('operator', G['sys'].modules)
+___dict_contains('operator', G['sys'].modules)
+hasattr(L['x'], '_dynamo_dynamic_indices') == False
+not ___dict_contains('aaaaaaaa', G['sys'].modules)
+not ___dict_contains('bbbbbbbb', G['sys'].modules)
+not ___dict_contains('cccccccc', G['sys'].modules)
+str(L['x'].device) == 'cpu'
+str(L['x'].dtype) == 'torch.float32'
+utils_device.CURRENT_DEVICE == None""")
 
     def test_fold(self):
         def fn(a):
