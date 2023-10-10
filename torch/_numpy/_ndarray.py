@@ -469,7 +469,7 @@ class ndarray:
 
 
 def _tolist(obj):
-    """Recusrively convert tensors into lists."""
+    """Recursively convert tensors into lists."""
     a1 = []
     for elem in obj:
         if isinstance(elem, (list, tuple)):
@@ -510,7 +510,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     if isinstance(obj, ndarray):
         obj = obj.tensor
 
-    # is a specific dtype requrested?
+    # is a specific dtype requested?
     torch_dtype = None
     if dtype is not None:
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
