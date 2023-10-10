@@ -500,19 +500,11 @@ lazy_tensor_core_python_sources = [
     "torch/csrc/lazy/python/python_util.cpp",
 ]
 
-inductor_core_resources = [
-    "torch/csrc/inductor/aoti_model_runner.cpp",
-    "torch/csrc/inductor/aoti_torch/shim_common.cpp",
-    "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
-    "torch/csrc/inductor/inductor_ops.cpp",
-]
-
 libtorch_core_sources = sorted(
     core_sources_common +
     torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
-    inductor_core_resources +
     libtorch_profiler_sources +
     lazy_tensor_core_sources,
 )
@@ -639,9 +631,16 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
+inductor_core_resources = [
+    "torch/csrc/inductor/aoti_model_runner.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_common.cpp",
+    "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
+    "torch/csrc/inductor/inductor_ops.cpp",
+]
 
-libtorch_extra_sources = libtorch_core_jit_sources + [
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + inductor_core_resources
+
+libtorch_extra_sources = libtorch_core_jit_sources + inductor_core_resources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/FunctionsManual.cpp",
