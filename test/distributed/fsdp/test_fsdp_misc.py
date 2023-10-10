@@ -189,7 +189,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             model1,
         )
         x = torch.randn(8, 1, 28, 28, device='cuda').requires_grad_()
-        y = torch.randint(low=0,high=9,size=(8,), device='cuda')
+        y = torch.randint(low=0, high=9, size=(8,), device="cuda")
         x1 = x.clone().detach().requires_grad_()
         y1 = y.clone().detach()
         seed = 20231010
