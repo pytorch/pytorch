@@ -532,6 +532,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         """
         Test whether `source_fn_stack` is preserved after QAT fusion.
         """
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -579,6 +580,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             assert isinstance(weight_node, torch.fx.Node)
             assert isinstance(bias_node, torch.fx.Node)
             return (weight_node, bias_node)
+
         first_conv_weight, first_conv_bias = get_conv_weight_and_bias(first_conv)
         second_conv_weight, second_conv_bias = get_conv_weight_and_bias(second_conv)
 
@@ -586,6 +588,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         def get_source_fn(node: torch.fx.Node):
             # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
             return node.meta["source_fn_stack"][0][0]
+
         self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_weight))
         self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_bias))
         self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_weight))
