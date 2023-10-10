@@ -74,6 +74,7 @@ namespace c10 {
   _(at::BFloat16, BFloat16)                                        \
   _(at::Float8_e5m2, Float8_e5m2)                                  \
   _(at::Float8_e4m3fn, Float8_e4m3fn)
+#undef Bool
 
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
   _(uint8_t, Byte)                             \
@@ -91,6 +92,7 @@ namespace c10 {
   _(at::BFloat16, BFloat16)                    \
   _(at::Float8_e5m2, Float8_e5m2)              \
   _(at::Float8_e4m3fn, Float8_e4m3fn)
+#undef Bool
 
 enum class ScalarType : int8_t {
 #define DEFINE_ST_ENUM_VAL_(_1, n) n,
