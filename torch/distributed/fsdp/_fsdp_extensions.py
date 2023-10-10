@@ -75,7 +75,7 @@ class FSDPExtensions(ABC):
     def all_gather_dtensor(
         self,
         tensor: DTensor,
-        parent_mesh: DeviceMesh,
+        parent_mesh: Optional[DeviceMesh],
     ) -> torch.Tensor:
         """
         This is to be called before loading a *sharded* DTensor state dict.
@@ -160,7 +160,7 @@ def _ext_pre_load_state_dict_transform(
 
 
 def _ext_all_gather_dtensor(
-    tensor: torch.Tensor,
+    tensor: DTensor,
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
     all_gather_dtensor_fn = (
