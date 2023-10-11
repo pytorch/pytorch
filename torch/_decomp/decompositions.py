@@ -3188,15 +3188,19 @@ def _compute_indices_weights_aa(
     xsize = torch.clamp((center + support + 0.5).to(torch.long), max=in_size) - xmin
     xsize = torch.clamp(xsize, max=max_interp_size)
 
-    # compute weights
-    j = torch.arange(max_interp_size, dtype=torch.long, device=device).view(-1, 1)
+    # compute weights with shape: (out_size, max_interp_size)
+    j = torch.arange(max_interp_size, dtype=torch.long, device=device)
+    center = center.view(-1, 1)
+    xmin = xmin.view(-1, 1)
+    xsize = xsize.view(-1, 1)
+
     # TODO: use a generic function aa_filter defined for bilinear and bicubic
     weights = aa_linear_filter((j + xmin - center + 0.5) * invscale)
     weights = torch.where(j < xsize, weights, 0.0)
-    total_weights = weights.sum(dim=0)
+    total_weights = weights.sum(dim=-1).unsqueeze(dim=-1)
     weights = weights / total_weights
 
-    return xmin, weights
+    return xmin.view(-1), weights
 
 
 def _separable_upsample_bilinear2d_aa_single_dim(
@@ -3211,9 +3215,6 @@ def _separable_upsample_bilinear2d_aa_single_dim(
 
     memory_format = utils.suggest_memory_format(in_tensor)
 
-    n_idx = torch.arange(n, device=in_tensor.device).view(n, 1, 1, 1)
-    c_idx = torch.arange(c, device=in_tensor.device).view(1, c, 1, 1)
-
     src_idx_min, weights = _compute_indices_weights_aa(
         out_size,
         in_size,
@@ -3222,35 +3223,28 @@ def _separable_upsample_bilinear2d_aa_single_dim(
         align_corners,
         device=in_tensor.device,
     )
-    max_interp_size = len(weights)
+    max_interp_size = weights.shape[-1]
+    k = torch.arange(max_interp_size, device=in_tensor.device)
+    src_idx_min = src_idx_min.unsqueeze(dim=-1)
 
     if interp_dim % 4 == 3:
         # horizontal pass
-        in_y = torch.arange(in_h, device=in_tensor.device).view((1, 1, in_h, 1))
-        src_idx_min = src_idx_min.view(1, 1, 1, out_size)
-
-        in_tensor_list = [
-            in_tensor[
-                n_idx, c_idx, in_y, torch.clamp(src_idx_min + k, max=in_w - 1)
-            ].contiguous(memory_format=memory_format)
-            for k in range(max_interp_size)
-        ]
+        indices = torch.clamp(src_idx_min + k, max=in_w - 1)
+        in_tensor_selected = in_tensor[:, :, :, indices]
+        sum_dim = -1
     else:
         # vertical pass
         assert interp_dim % 4 == 2
-        in_x = torch.arange(in_w, device=in_tensor.device).view((1, 1, 1, in_w))
-        src_idx_min = src_idx_min.view(1, 1, out_size, 1)
+        indices = torch.clamp(src_idx_min + k, max=in_h - 1)
+        in_tensor_selected = in_tensor[:, :, indices, :]
+        weights = weights.unsqueeze(dim=-1)
+        sum_dim = -2
 
-        in_tensor_list = [
-            in_tensor[
-                n_idx, c_idx, torch.clamp(src_idx_min + k, max=in_h - 1), in_x
-            ].contiguous(memory_format=memory_format)
-            for k in range(max_interp_size)
-        ]
-        weights = weights.unsqueeze(-1)
-
-    w_tensor_list = weights.unbind(dim=0)
-    return _sum_tensors(in_t * w_t for in_t, w_t in zip(in_tensor_list, w_tensor_list))
+    # at this point we weights.shape = (out_w, max_interp_size) or (out_h, max_interp_size, 1)
+    # and in_tensor_selected.shape = (N, C, H, out_w, max_interp_size) or (N, C, out_h, max_interp_size, W)
+    output = (weights * in_tensor_selected).sum(dim=sum_dim)
+    output = output.contiguous(memory_format=memory_format)
+    return output
 
 
 @register_decomposition(aten._upsample_bilinear2d_aa.default)
