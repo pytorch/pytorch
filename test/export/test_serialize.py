@@ -148,8 +148,8 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "torch.ops.aten.var.correction")
-        self.assertEqual(len(node.outputs), 1)
+        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
+        self.assertEqual(len(node.outputs), 2)
 
         # check the names are unique
         seen = set()

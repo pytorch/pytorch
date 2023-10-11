@@ -431,11 +431,6 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
-core_not_decomposed = {
-    skip('max', 'binary'),  # binary max aliases to maximum, so will not be decomposed
-    skip('min', 'binary'),  # binary min aliases to minimum, so will not be decomposed
-}
-
 core_backward_failures = {
     skip('_softmax_backward_data'),  # slow: fails with --timeout=360 secs
     xfail('addcdiv'),
@@ -446,8 +441,6 @@ core_backward_failures = {
     skip('grid_sampler_2d'),  # slow: fails with --timeout=360 secs
     xfail('lerp'),
     skip('logaddexp'),  # slow: fails with --timeout=360 secs
-    skip('max', 'binary'),  # slow: fails with --timeout=360 secs
-    skip('min', 'binary'),  # slow: fails with --timeout=360 secs
     skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.binary_cross_entropy_with_logits'),
     skip('nn.functional.glu'),  # slow: fails with --timeout=360 secs
@@ -480,7 +473,6 @@ class TestDecomp(TestCase):
     # runs on things that are definitely decomposed so it's a lot faster
     # to run
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @skipOps('TestDecomp', 'test_quick', core_not_decomposed)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
@@ -508,7 +500,6 @@ class TestDecomp(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
-    @skipOps('TestDecomp', 'test_comprehensive', core_not_decomposed)
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
