@@ -293,6 +293,26 @@ def _pre_load_state_dict(
     return (tensor, shards if len(shards) > 0 else [])
 
 
+def _all_gather_dtensor(
+    tensor: DTensor,
+    parent_mesh: Optional[DeviceMesh],
+) -> torch.Tensor:
+    """
+    All gather a DTensor in its FSDP dimension and return the local tensor.
+    """
+    assert parent_mesh == tensor.device_mesh
+
+    placements = list(copy.deepcopy(tensor.placements))
+    # FSDP + TP: [Shard(0), tp_placement] -> [Replicate(), tp_placement]
+    placements[0] = Replicate()
+    tensor = tensor.redistribute(
+        device_mesh=tensor.device_mesh,
+        placements=placements,
+    )
+
+    return tensor.to_local()
+
+
 class DTensorExtensions(FSDPExtensions):
     """
     DTensorExtension is the TensorFlattener extension needed for 2D FSDP + TP.
@@ -337,6 +357,13 @@ class DTensorExtensions(FSDPExtensions):
         tensor: torch.Tensor,
     ) -> Tuple[torch.Tensor, List[Shard]]:
         return _pre_load_state_dict(tensor)
+
+    def all_gather_dtensor(
+        self,
+        tensor: DTensor,
+        parent_mesh: Optional[DeviceMesh],
+    ) -> torch.Tensor:
+        return _all_gather_dtensor(tensor, parent_mesh)
 
 
 # TODO: remove enable_2d_with_fsdp() once we roll out the new 2D flow.

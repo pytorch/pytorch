@@ -920,6 +920,8 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           "] NCCL watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
+      // TODO(whc) clean up the rethrow - why is it stored in a class var and
+      // rethrown?
       watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
       std::rethrow_exception(watchDogException_);
     }
