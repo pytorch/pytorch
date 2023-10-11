@@ -634,17 +634,33 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.original:
             return self.original
         else:
+
+            def get_val(v):
+                if isinstance(v, variables.UserDefinedObjectVariable):
+                    return v.value
+                else:
+                    return v.as_python_constant()
+
             return functools.partial(
                 self.func.fn,
-                *[arg.as_python_constant for arg in self.args],
-                **{k: v.as_python_constant() for k, v in self.keywords.items()},
+                *[get_val(arg) for arg in self.args],
+                **{k: get_val(v) for k, v in self.keywords.items()},
             )
 
 
 class TritonKernelVariable(VariableTracker):
-    def __init__(self, kernel, grid, **kwargs):
+    def __init__(self, kernel, kernel_idx, grid, **kwargs):
         super().__init__(**kwargs)
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        assert kernel is not None
+
         self.kernel = kernel
+        self.kernel_idx = kernel_side_table.add_kernel(kernel)
+
+        assert kernel_idx is None or self.kernel_idx == kernel_idx
+
         self.grid = grid
 
     def call_function(
@@ -680,21 +696,15 @@ class TritonKernelVariable(VariableTracker):
             triton_kernel_wrapper_mutation,
         )
 
-        fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
-        # FX graph needs __name__ and __module__ attributes
-        fn.__name__ = triton_kernel_wrapper_mutation.__name__
-        if not hasattr(fn, "__module__"):
-            # Super hacky but on AMD __module__ is not set
-            fn.__module__ = "itertools"
-
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
         tx.output.create_proxy(
             "call_function",
-            fn,
+            triton_kernel_wrapper_mutation,
             (),
             {
+                "kernel_idx": self.kernel_idx,
                 "grid": grid,
                 "kwargs": meta.as_proxy(),
             },
@@ -720,9 +730,11 @@ class TritonKernelVariable(VariableTracker):
                     "Triton kernels should be called with only a single grid"
                 )
 
-            grid = args[0]
             return TritonKernelVariable(
-                self.kernel, grid, **VariableTracker.propagate(self)
+                kernel=self.kernel,
+                kernel_idx=self.kernel_idx,
+                grid=args[0],
+                **VariableTracker.propagate(self),
             )
 
         # Bail out to parent's implementation

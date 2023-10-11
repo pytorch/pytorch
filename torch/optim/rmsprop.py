@@ -338,20 +338,21 @@ def _multi_tensor_rmsprop(
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_square_avgs = _view_complex_as_real(grouped_square_avgs)
+        grouped_grads = list(grouped_grads)
+        for i in range(len(grouped_params)):
+            if torch.is_complex(grouped_params[i]):
+                grouped_params[i] = torch.view_as_real(grouped_params[i])
+                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                grouped_square_avgs[i] = torch.view_as_real(grouped_square_avgs[i])
+                if momentum > 0:
+                    grouped_momentum_buffer_list[i] = torch.view_as_real(grouped_momentum_buffer_list[i])
+                if centered:
+                    grouped_grad_avgs[i] = torch.view_as_real(grouped_grad_avgs[i])
 
         torch._foreach_mul_(grouped_square_avgs, alpha)
         torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)
 
         if centered:
-            grouped_grad_avgs = _view_complex_as_real(grouped_grad_avgs)
             torch._foreach_lerp_(grouped_grad_avgs, grouped_grads, 1 - alpha)
             avg = torch._foreach_addcmul(grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1)
             torch._foreach_sqrt_(avg)
@@ -361,7 +362,6 @@ def _multi_tensor_rmsprop(
             torch._foreach_add_(avg, eps)
 
         if momentum > 0:
-            grouped_momentum_buffer_list = _view_complex_as_real(grouped_momentum_buffer_list)
             torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
             torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
             torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)
