@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

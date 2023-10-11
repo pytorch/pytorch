@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>

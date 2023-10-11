@@ -1,9 +1,11 @@
 import datetime
 import difflib
 import functools
+import inspect
 import json
 import os
 import tempfile
+import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -13,12 +15,21 @@ import torch._dynamo
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._subclasses.schema_check_mode import SchemaCheckMode
+from torch._utils_internal import get_file_path_2
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.optests import (
     aot_autograd_check,
     autograd_registration_check,
     fake_check,
 )
+
+
+def dontGenerateOpCheckTests(reason: str):
+    def inner(fun):
+        fun._torch_dont_generate_opcheck_tests = True
+        return fun
+
+    return inner
 
 
 def is_abstract(tensor: torch.Tensor) -> bool:
@@ -108,13 +119,21 @@ ALL_TEST_UTILS = {
 
 GDOC = "https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
 
+DEFAULT_TEST_UTILS = [
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_static",
+    "test_aot_dispatch_dynamic",
+]
+
 
 def generate_opcheck_tests(
     testcase: Any,
     namespaces: List[str],
-    failures_dict_path: str,
-    additional_decorators: List[Callable],
-    test_utils: List[str],
+    failures_dict_path: Optional[str] = None,
+    additional_decorators: Dict[str, Callable] = None,
+    test_utils: List[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -148,11 +167,21 @@ def generate_opcheck_tests(
         failures_dict_path: See ``validate_failures_dict_structure`` for more details
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
+    if additional_decorators is None:
+        additional_decorators = {}
     test_methods = [
         m
         for m in dir(testcase)
         if m.startswith("test_") and callable(getattr(testcase, m))
     ]
+    if failures_dict_path is None:
+        # The default failures_dict_path is failures_dict.json in
+        # the same directory as the test file.
+        prev_frame = inspect.currentframe().f_back
+        filename = inspect.getframeinfo(prev_frame)[0]
+        failures_dict_path = get_file_path_2(
+            os.path.dirname(filename), "failures_dict.json"
+        )
     failures_dict = FailuresDict.load(
         failures_dict_path, create_file=should_update_failures_dict()
     )
@@ -161,6 +190,8 @@ def generate_opcheck_tests(
 
     def construct_method(attr, prefix, tester):
         method = getattr(testcase, attr)
+        if getattr(method, "_torch_dont_generate_opcheck_tests", False):
+            return
         new_method_name = prefix + "__" + attr
 
         @functools.wraps(method)
@@ -170,7 +201,7 @@ def generate_opcheck_tests(
                 prefix,
                 tester,
                 failures_dict,
-                new_method_name,
+                f"{testcase.__name__}.{new_method_name}",
                 failures_dict_path,
             ):
                 result = method(*args, **kwargs)
@@ -293,20 +324,23 @@ def validate_failures_dict_structure(
                 raise RuntimeError(
                     f"In failures_dict, got status={test_option} but it needs to be in {TEST_OPTIONS}"
                 )
-            if not any(test_name.startswith(test) for test in test_utils):
+            test_class, actual_test_name = test_name.split(".")
+            if not any(actual_test_name.startswith(test) for test in test_utils):
                 raise RuntimeError(
                     f"In failures_dict, test name '{test_name}' should begin with one of {test_utils}"
                 )
             for test in test_utils:
-                if not test_name.startswith(test):
+                if not actual_test_name.startswith(test):
                     continue
-                base_test_name = test_name[len(test) + 2 :]
+                base_test_name = actual_test_name[len(test) + 2 :]
+                if testcase.__name__ != test_class:
+                    continue
                 if hasattr(testcase, base_test_name):
                     continue
                 raise RuntimeError(
                     f"In failures dict, got test name '{test_name}'. We parsed this as "
                     f"running test '{test}' on '{base_test_name}', but "
-                    f"{base_test_name} does not exist on the TestCase. "
+                    f"{base_test_name} does not exist on the TestCase '{testcase.__name__}]. "
                     f"Maybe you need to change the test name?"
                 )
 
@@ -314,6 +348,14 @@ def validate_failures_dict_structure(
 def should_update_failures_dict() -> bool:
     key = "PYTORCH_OPCHECK_ACCEPT"
     return key in os.environ and os.environ[key] == "1"
+
+
+_is_inside_opcheck_mode = threading.local()
+_is_inside_opcheck_mode.value = False
+
+
+def is_inside_opcheck_mode():
+    return _is_inside_opcheck_mode.value
 
 
 class OpCheckMode(TorchFunctionMode):
@@ -405,7 +447,13 @@ class OpCheckMode(TorchFunctionMode):
             f"To reproduce this problem locally, try to run the following:\n{repro_command}"
         ) from ex
 
+    def __enter__(self, *args, **kwargs):
+        self.prev_is_opcheck_mode = _is_inside_opcheck_mode.value
+        _is_inside_opcheck_mode.value = True
+        return super().__enter__(*args, **kwargs)
+
     def __exit__(self, *args, **kwargs):
+        _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():

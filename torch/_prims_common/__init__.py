@@ -76,6 +76,8 @@ TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
+CustomOutParamAnnotation = "__custom_out_param__"
+
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
@@ -500,7 +502,11 @@ def validate_dim_length(length: int):
     dimension length.
     """
 
-    assert length >= 0
+    if isinstance(length, (int, torch.SymInt)):
+        torch._check_is_size(length)
+    else:
+        # sometimes called with sympy expression by inductor
+        assert length >= 0
 
 
 def validate_shape(shape: ShapeType):
@@ -1332,7 +1338,7 @@ def elementwise_dtypes(
     computation dtype the same as the result dtype when it's selected. NO_OPMATH is appropriate for kernels
     which perform no mathematical operations on their tensors (see below for examples).
 
-    The INT_TO_FLOAT type promotion kind maps boolean and integer maps result dtypes to the default floating point dtype,
+    The INT_TO_FLOAT type promotion kind maps boolean and integer result dtypes to the default floating point dtype,
     and computation dtypes to the appropriate op math dtype.
 
     The COMPLEX_TO_FLOAT type promotion kind maps complex result dtypes to the corresponding float dtype, following this
@@ -1488,11 +1494,17 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    def _ensure_at_least(a, thresh):
+        # sym_max() isn't supported for SingletonSymNode
+        if hasattr(a, "node") and a.node.singleton_int() is not None:
+            return a
+        return sym_max(a, thresh)
+
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= sym_max(l, 1)
+        multiplier *= _ensure_at_least(l, 1)
 
     result = tuple(reversed(strides))
 

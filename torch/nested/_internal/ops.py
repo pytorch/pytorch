@@ -64,8 +64,7 @@ def check_ragged_dim_same(
     func, a: NestedTensor, a_name: str, b: NestedTensor, b_name: str
 ) -> None:
     # Calling into .shape here
-    assert len(a._size) == 3, "NestedTensor must be [B, *, D]"
-    if a._size[1] != b._size[1]:
+    if a._size[a._ragged_idx] != b._size[b._ragged_idx]:
         raise RuntimeError(
             f"NestedTensor {func.__name__}: expected {a_name} and {b_name} to have the "
             "same exact offsets tensor."
@@ -145,6 +144,8 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         torch.ops.aten.sym_size.default,
         torch.ops.aten.dim.default,
         torch.ops.aten.sym_numel.default,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.sym_storage_offset.default,
     ],
     "self: jt",
 )
@@ -161,14 +162,18 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.sym_numel.default:
         return args[0]._values.numel()
 
+    if func == torch.ops.aten.sym_stride.default:
+        return args[0]._strides
+
+    if func == torch.ops.aten.sym_storage_offset.default:
+        return 0
+
 
 @register_jagged_func(
     [
         torch.ops.aten.size.default,
-        torch.ops.aten.sym_stride.default,
         torch.ops.aten.is_contiguous.default,
         torch.ops.aten.is_contiguous.memory_format,
-        torch.ops.aten.sym_storage_offset.default,
     ],
     "self: jt, memory_format: any?",
 )
@@ -187,10 +192,18 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
 def linear_default(func, *args, **kwargs):
-    new_values = torch.mm(args[0]._values, args[1])
-    if len(args) == 3:
-        new_values += args[2]
-    return NestedTensor(new_values, args[0]._offsets)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    weight = new_kwargs["weight"]
+    bias = new_kwargs["bias"]
+
+    new_values = torch.mm(inp._values, weight)
+    if bias is not None:
+        new_values += bias
+    return NestedTensor(new_values, inp._offsets)
 
 
 @register_jagged_func(
@@ -198,24 +211,33 @@ def linear_default(func, *args, **kwargs):
     "self: jt, grad_output: jt, weight: t, output_mask: any",
 )
 def linear_backward_default(func, *args, **kwargs):
-    check_ragged_dim_same(func, args[0], "self", args[1], "grad_output")
-    ds = NestedTensor(torch.mm(args[1]._values, args[2].T), args[1]._offsets)
-    dw = torch.mm(args[0]._values.T, args[1]._values)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    grad_output = new_kwargs.pop("grad_output")
+    weight = new_kwargs.pop("weight")
+
+    check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
+    ds = NestedTensor(torch.mm(grad_output._values, weight.T), grad_output._offsets)
+    dw = torch.mm(inp._values.T, grad_output._values)
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
 
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt")
 def to_copy_default(func, *args, **kwargs):
-    return NestedTensor(
-        args[0]._values.to(
-            device=kwargs["device"],
-            dtype=kwargs["dtype"],
-            non_blocking=kwargs["non_blocking"],
-            copy=True,
-        ),
-        args[0]._offsets,
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
+
+    inp = new_kwargs.pop("input")
+
+    new_values = func(inp._values, **new_kwargs)
+    # Purposefully keep offsets on their previous device. TODO: Figure out if this is correct!
+    new_offsets = inp._offsets  # .to(new_values.device)
+    return NestedTensor(new_values, new_offsets)
 
 
 register_jagged_func(

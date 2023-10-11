@@ -549,7 +549,7 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
 )
 def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
     """
-    Erase the the orphant copy_ that generated when tracing optimizer.
+    Erase the orphant copy_ that generated when tracing optimizer.
     Two reasons why we could not simply use the DCE of fx.Graph.
     1. fx.Graph treats copy_ as a side-effect node and does not erase it.
     2. Users may want to preserve some orphan `copy_` that is not from the

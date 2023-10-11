@@ -573,7 +573,7 @@ _default_pg_init_method = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
-def _get_pg_default_device(group: Optional[ProcessGroup] = None):
+def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device:
     """
     Returns the device to use with ``group`` for control flow usage (object collectives, barrier).
     There are selection rules:
@@ -965,6 +965,8 @@ def _get_default_store():
 
 def _update_default_pg(pg):
     _world.default_pg = pg
+    rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
+    torch._C._distributed_c10d._set_global_rank(rank)
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     if group is None:
@@ -1779,8 +1781,8 @@ def batch_isend_irecv(p2p_op_list):
 
     Examples:
         >>> # xdoctest: +SKIP("no rank")
-        >>> send_tensor = torch.arange(2) + 2 * rank
-        >>> recv_tensor = torch.randn(2)
+        >>> send_tensor = torch.arange(2, dtype=torch.float32) + 2 * rank
+        >>> recv_tensor = torch.randn(2, dtype=torch.float32)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
         >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank - 1 + world_size)%world_size)
         >>> reqs = batch_isend_irecv([send_op, recv_op])
@@ -3935,7 +3937,7 @@ def _new_group_with_tag(
         for rank in ranks:
             if rank < 0 or rank >= global_world_size:
                 raise ValueError(
-                    "The new group's rank should be within the "
+                    "The new group's rank should be within "
                     "the world_size set by init_process_group"
                 )
         if global_rank in ranks:
