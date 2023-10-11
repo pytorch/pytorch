@@ -286,7 +286,8 @@ PyObject* THPEngine_run_backward(
 
   std::vector<Edge> output_edges;
   if (inputs != nullptr) {
-    TORCH_CHECK(PyTuple_CheckExact(inputs), "inputs to run_backward must be a tuple");
+    TORCH_CHECK(
+        PyTuple_CheckExact(inputs), "inputs to run_backward must be a tuple");
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
     for (const auto i : c10::irange(num_inputs)) {
