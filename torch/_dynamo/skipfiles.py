@@ -218,12 +218,6 @@ SUBMODULE_INLINELIST = {
 }
 
 
-if torch.distributed.is_available():
-    from torch.distributed import _functional_collectives
-
-    SUBMODULE_INLINELIST.add(_functional_collectives)
-
-
 # skip some standard python builtin libs
 SKIP_DIRS = [
     "<frozen importlib",
@@ -319,6 +313,11 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
+    if torch.distributed.is_available():
+        from torch.distributed import _functional_collectives
+
+        SUBMODULE_INLINELIST.add(_functional_collectives)
+
     return any(filename.startswith(_module_dir(mod)) for mod in SUBMODULE_INLINELIST)
 
 

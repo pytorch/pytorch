@@ -156,7 +156,7 @@ def _allowed_function_ids():
         # Tensor.set_ with a Storage, and Storages cannot be traced with
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
-        disallowed_modules = (
+        disallowed_modules = [
             "torch.optim.",
             "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
             "torch.utils._pytree",
@@ -175,7 +175,10 @@ def _allowed_function_ids():
             # issues observed in
             # https://github.com/pytorch/pytorch/issues/108269
             "torch.distributed.algorithms.",
-        )
+        ]
+        if config.trace_distributed:
+            disallowed_modules.append("torch.distributed.")
+
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
         if module is None:
@@ -232,6 +235,17 @@ def _allowed_function_ids():
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
+
+    if config.trace_distributed:
+        for f in [
+            torch.distributed._functional_collectives_impl._all_gather_into_tensor,
+            torch.distributed._functional_collectives_impl._all_reduce,
+            torch.distributed._functional_collectives_impl._reduce_scatter_tensor,
+            torch.distributed._functional_collectives_impl._all_reduce_coalesced,
+            torch.distributed._functional_collectives_impl._all_gather_into_tensor_coalesced,
+            torch.distributed._functional_collectives_impl._reduce_scatter_tensor_coalesced,
+        ]:
+            torch_object_ids[id(f)] = repr(f)
 
     # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
@@ -307,40 +321,7 @@ def _builtin_constant_ids():
     return rv
 
 
-# A subcheck of is_allowed, we utilize this for patching is_allowed around distributed.
-# We do this because we want to allow these to be traced, and hence covered in skipfiles, but we do not want them to
-# become TorchVariable
-def _is_allowed_distributed(obj):
-    if not torch.distributed.is_available():
-        return True
-    if (
-        hasattr(obj, "__module__")
-        and obj.__module__
-        and "torch.distributed" in obj.__module__
-    ):
-        if obj in [
-            torch.distributed._functional_collectives_impl._all_gather_into_tensor,
-            torch.distributed._functional_collectives_impl._all_reduce,
-            torch.distributed._functional_collectives_impl._reduce_scatter_tensor,
-            torch.distributed._functional_collectives_impl._all_reduce_coalesced,
-            torch.distributed._functional_collectives_impl._all_gather_into_tensor_coalesced,
-            torch.distributed._functional_collectives_impl._reduce_scatter_tensor_coalesced,
-        ]:
-            return True
-        return False
-    # Hack, because dicts in these files go through
-    if (
-        isinstance(obj, dict)
-        and obj in vars(torch.distributed.distributed_c10d).values()
-    ):
-        return False
-    return True
-
-
 def is_allowed(obj):
-    if config.trace_distributed and not _is_allowed_distributed(obj):
-        return False
-
     """Is this safe to trace like torch.add ?"""
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
