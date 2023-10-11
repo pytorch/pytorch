@@ -197,7 +197,6 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/index_propagation.py',
     'torch/_inductor/ir.py',
     'torch/_inductor/scheduler.py',
 ]
@@ -224,7 +223,7 @@ include_patterns = [
     'tools/**/*.py',
     'torchgen/**/*.py',
     'torch/utils/_pytree.py',
-    'torch/utils/pytree.py',
+    'torch/utils/_cxx_pytree.py',
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
@@ -262,7 +261,6 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
-    'c10/test/**',
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/functions/**',

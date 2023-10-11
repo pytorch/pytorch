@@ -33,27 +33,30 @@ try:
 except ModuleNotFoundError:
     np = None
 
-import torch._logging
-import torch._numpy as tnp
-from torch._guards import detect_fake_mode  # noqa: F401
-from torch._logging import LazyString
-from . import config
+try:
+    import torch._logging
+    import torch._numpy as tnp
+    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._logging import LazyString
+    from . import config
 
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+    if np:
+        NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-if np:
-    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+        NP_TO_TNP_MODULE = {
+            np: tnp,
+            np.fft: tnp.fft,
+            np.linalg: tnp.linalg,
+            np.random: tnp.random,
+        }
+    else:
+        NP_SUPPORTED_MODULES = {}
 
-    NP_TO_TNP_MODULE = {
-        np: tnp,
-        np.fft: tnp.fft,
-        np.linalg: tnp.linalg,
-        np.random: tnp.random,
-    }
-else:
-    NP_SUPPORTED_MODULES = {}
-
-    NP_TO_TNP_MODULE = {}
+        NP_TO_TNP_MODULE = {}
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+except ImportError:
+    pass
 
 import importlib
 
@@ -62,7 +65,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
@@ -93,10 +96,14 @@ def tabulate(rows, headers):
         )
 
 
-def dynamo_profiled(func):
+CPROFILE_ENABLED = False
+
+
+def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
-        global timer_counter
+        global timer_counter, CPROFILE_ENABLED
+        CPROFILE_ENABLED = True
         datafn = (
             func.__name__ + f"{next(timer_counter)}.profile"
         )  # Name the data file sensibly
@@ -178,8 +185,13 @@ def print_time_report():
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+
+
 def dynamo_timed(original_function=None, phase_name=None):
     def dynamo_timed_inner(func):
+        if CPROFILE_ENABLED:
+            return func
+
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
@@ -1412,7 +1424,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
 
-    Behavior is dicatated by a node's op.
+    Behavior is dictated by a node's op.
 
     run_node is useful for extracting real values out of nodes.
     See get_real_value for more info on common usage.
@@ -1581,7 +1593,7 @@ def tensor_always_has_static_shape(
 
     Args:
     tensor - the real tensor to evaluate, parameters force a static shape.
-    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    is_tensor - internal dynamo check, essentially "is_tensor": target_cls is TensorVariable,
     tensors not in a TensorVariable for whatever reason are forced static.
 
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
@@ -1820,7 +1832,7 @@ def defake(x):
 
 
 def is_utils_checkpoint(obj):
-    # Lazy import to avoid circular dependenices
+    # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
@@ -1830,8 +1842,8 @@ def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
-    # TODO - This is a temporary sitaution where we have two versions of
-    # checkpointing implemetation. We will converge on one and remove the other.
+    # TODO - This is a temporary situation where we have two versions of
+    # checkpointing implementation. We will converge on one and remove the other.
     activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
@@ -2137,3 +2149,13 @@ def is_rng_state_getter_or_setter(value):
         torch.cuda.set_rng_state,
     )
     return value in (*setters, *getters)
+
+
+def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables.tensor import TensorWithTFOverrideVariable
+
+    return isinstance(vt, TensorWithTFOverrideVariable) or (
+        isinstance(vt, UserDefinedObjectVariable)
+        and hasattr(vt.value, "__torch_function__")
+    )
