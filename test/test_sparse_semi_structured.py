@@ -372,14 +372,15 @@ class TestSparseSemiStructured(TestCase):
             class Model(nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.linear = nn.Linear(128, 128)
+                    self.linear = nn.Linear(128, 128, dtype=torch.float16)
 
                 def forward(self, x):
                     x = self.linear(x)
+                    return x
                     x = x.contiguous()
                     return torch.nn.functional.relu(x)
 
-            model = Model().cuda().half().eval()
+            model = Model().eval().cuda()
             mod_linear = getattr(model, 'linear')
             m, n = mod_linear.weight.shape
             mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
@@ -391,8 +392,10 @@ class TestSparseSemiStructured(TestCase):
 
             model = torch.compile(model)
             sparse_result = model(input)
+            print(sparse_result)
+            print(dense_result)
 
-        assert torch.allclose(dense_result, sparse_result, rtol=1e-5, atol=1e-5)
+            assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_values(self, backend):

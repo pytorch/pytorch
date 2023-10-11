@@ -100,6 +100,8 @@ at::Tensor _cslt_sparse_mm(
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
     const c10::optional<c10::ScalarType> out_dtype_opt,
+    const c10::optional<Tensor>& out,
+    const float beta,
     bool transpose_result
 )
 {
@@ -203,7 +205,10 @@ at::Tensor _cslt_sparse_mm(
 
   // create result tensor
   at::Tensor res;
-  if (mixed_dtype_mode)
+  if (out.has_value()) {
+    res = out.value();
+  }
+  else if (mixed_dtype_mode)
   {
       res = (transpose_result) ? at::empty({n, m}, c10::TensorOptions().dtype(pytorch_output_type).device(dense_B.device()))
                                : at::empty({m, n}, c10::TensorOptions().dtype(pytorch_output_type).device(dense_B.device()));
@@ -302,6 +307,8 @@ at::Tensor _cslt_sparse_mm(
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
     const c10::optional<c10::ScalarType> out_dtype,
+    const c10::optional<Tensor>& out,
+    const float beta,
     bool transpose_result)
 {
     TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
