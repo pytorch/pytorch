@@ -4232,6 +4232,100 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
         return aten.squeeze.dims(self, [dim])
 
 
+@register_decomposition(
+    [aten.max.default, aten.max.unary_out, aten.max.dim, aten.max.dim_max]
+)
+def unary_max(
+    self: Tensor,
+    dim: Optional[int] = None,
+    keepdim: Optional[bool] = None,
+    max_values: Optional[Tensor] = None,
+    max_indices: Optional[Tensor] = None,
+):
+    # aten.max.default or aten.max.unary_out, case
+    if keepdim is None and dim is None:
+        assert max_indices is None
+
+        if max_values is None:
+            return aten.amax(self)
+        else:
+            return aten.amax(self, out=max_values)
+
+    # keepdim defaults to False
+    if keepdim is None:
+        keepdim = False
+
+    # If keepdim is provided, and no dim is provided, then dim defaults to 0
+    if keepdim is not None and dim is None:
+        dim = 0
+
+    # If max_values is provided, max_indices must also be provided
+    if max_values is not None:
+        assert max_indices is not None
+
+    # Addresses RuntimeError: "argmax_cpu" not implemented for 'Bool'
+    self_for_argmax = self
+    if self.dtype == torch.bool:
+        self_for_argmax = self.to(torch.uint8)
+
+    # aten.max.dim case
+    if max_values is None:
+        return torch.amax(self, dim, keepdim), torch.argmax(
+            self_for_argmax, dim, keepdim
+        )
+    else:
+        return torch.amax(self, dim, keepdim, out=max_values), torch.argmax(
+            self_for_argmax, dim, keepdim, out=max_indices
+        )
+
+
+@register_decomposition(
+    [aten.min.default, aten.min.unary_out, aten.min.dim, aten.min.dim_min]
+)
+def unary_min(
+    self: Tensor,
+    dim: Optional[int] = None,
+    keepdim: Optional[bool] = None,
+    min_values: Optional[Tensor] = None,
+    min_indices: Optional[Tensor] = None,
+):
+    # aten.min.default or aten.min.unary_out case
+    if keepdim is None and dim is None:
+        assert min_indices is None
+
+        if min_values is None:
+            return aten.amin(self)
+        else:
+            return aten.amin(self, out=min_values)
+
+    # keepdim defaults to False
+    if keepdim is None:
+        keepdim = False
+
+    # If keepdim is provided, and no dim is provided, then dim defaults to 0
+    if keepdim is not None and dim is None:
+        dim = 0
+
+    # If min_values is provided, min_indices must also be provided
+    if min_values is not None:
+        assert min_indices is not None
+
+    # Addresses RuntimeError: "argmin_cpu" not implemented for 'Bool'
+    self_for_argmin = self
+    if self.dtype == torch.bool:
+        self_for_argmin = self.to(torch.uint8)
+
+    # aten.min.dim case
+    if min_values is None:
+        return torch.amin(self, dim, keepdim), torch.argmin(
+            self_for_argmin, dim, keepdim
+        )
+    else:
+        return torch.amin(self, dim, keepdim, out=min_values), torch.argmin(
+            self_for_argmin, dim, keepdim, out=min_indices
+        )
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

@@ -495,8 +495,6 @@ aten::upsample_nearest2d
 aten::upsample_nearest3d
 aten::var.correction
 aten::var.correction_out
-aten::var_mean.correction
-aten::var_mean.correction_out
 aten::view
 aten::where.self
 aten::where.self_out
