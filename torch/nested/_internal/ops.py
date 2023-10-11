@@ -106,6 +106,7 @@ def extract_kwargs(arg):
     }
     return kwargs
 
+
 def jagged_unary_pointwise(func, *args, **kwargs):
     return NestedTensor(func(args[0].values(), **kwargs), **extract_kwargs(args[0]))
 
