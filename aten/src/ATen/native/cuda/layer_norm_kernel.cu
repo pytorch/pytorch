@@ -416,23 +416,24 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   const vec_t* gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
   vec_t gamma_vec_reg;
   for (int k = 0; k < vec_size; ++k) {
-    gamma_vec_reg.val[k] = T_ACC(1);
+    gamma_vec_reg.val[k] = T(1);
   }
 
   T_ACC stats_x1{0}, stats_x2{0};
   unsigned int l = threadIdx.x;
   unsigned int n_vec_to_read = N / blockDim.x / vec_size;
   for (unsigned int i = 0; i < n_vec_to_read; ++i) {
-    vec_t c_h = X_i_vec[l];
-    vec_t c_loss = dY_i_vec[l];
     if (gamma != nullptr) {
       gamma_vec_reg = gamma_vec[l];
     }
 
     #pragma unroll
     for (int k = 0; k < vec_size; ++k) {
-      stats_x1 += c_loss.val[k] * gamma_vec_reg.val[k];
-      stats_x2 += c_loss.val[k] * gamma_vec_reg.val[k] * (c_h.val[k] - mean_val) * rstd_val;
+      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const T_ACC c_h = static_cast<T_ACC>(X_i_vec[l].val[k]);
+      const T_ACC c_loss = static_cast<T_ACC>(dY_i_vec[l].val[k]);
+      stats_x1 += c_loss * gamma_val;
+      stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
 
     l += blockDim.x;
@@ -465,18 +466,17 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   l = threadIdx.x;
   for (unsigned int i = 0; i < n_vec_to_read; ++i) {
-    vec_t x_vec_reg = X_i_vec[l];
-    vec_t dy_vec_reg = dY_i_vec[l];
     if (gamma != nullptr) {
       gamma_vec_reg = gamma_vec[l];
     }
 
     #pragma unroll
     for (int k = 0; k < vec_size; ++k) {
-      T_ACC x = x_vec_reg.val[k];
-      T_ACC dy = dy_vec_reg.val[k];
+      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const T_ACC x = static_cast<T_ACC>(X_i_vec[l].val[k]);
+      const T_ACC dy = static_cast<T_ACC>(dY_i_vec[l].val[k]);
 
-      T_ACC f_grad_input = fH * gamma_vec_reg.val[k] * dy;
+      T_ACC f_grad_input = fH * gamma_val * dy;
       f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
       f_grad_input -= stats_x1;
       f_grad_input *= term1;
