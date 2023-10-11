@@ -100,7 +100,7 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-        exported_module = export(MyModule(), (input,))
+        exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
