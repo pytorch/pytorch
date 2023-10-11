@@ -1768,9 +1768,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
 
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('xlogy', decorator=skipIfRocm),
-
         # numerical inconsistencies, look like bugs
         skip('matrix_exp', dtypes=(torch.float32,), device_type='cuda'),  # fails on linux, passes on windows
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
