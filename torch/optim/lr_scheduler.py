@@ -1365,12 +1365,14 @@ class CyclicLR(LRScheduler):
 
     def state_dict(self):
         state = super().state_dict()
-        # We are dropping the `_scale_fn_ref` attribute because it is a `weakref.WeakMethod` and can't be pickled
+        # We are dropping the `_scale_fn_ref` attribute because it is a
+        # `weakref.WeakMethod` and can't be pickled.
         state.pop('_scale_fn_ref')
         fn = state.pop('_scale_fn_custom')
         state['_scale_fn_custom'] = None
         if fn is not None and not isinstance(fn, types.FunctionType):
-            # The _scale_fn_custom will only be saved if it is a callable object and not if it is a function or lambda.
+            # The _scale_fn_custom will only be saved if it is a callable object
+            # and not if it is a function or lambda.
             state['_scale_fn_custom'] = fn.__dict__.copy()
 
         return state
@@ -1381,7 +1383,6 @@ class CyclicLR(LRScheduler):
         if fn is not None:
             self._scale_fn_custom.__dict__.update(fn)
         self._init_scale_fn()
-
 
 
 class CosineAnnealingWarmRestarts(LRScheduler):

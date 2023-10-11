@@ -1530,10 +1530,23 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_state_dict_picklable(self):
         adam_opt = Adam(self.net.parameters())
+
+        # Case 1: Built-in mode
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
         self.assertIsInstance(scheduler._scale_fn_ref, types.FunctionType)
         state = scheduler.state_dict()
         self.assertNotIn("_scale_fn_ref", state)
+        self.assertIs(state["_scale_fn_custom"], None)
+        pickle.dumps(state)
+
+        # Case 2: Custom `scale_fn`
+        def scale_fn(_):
+            return 0.5
+
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
+        state = scheduler.state_dict()
+        self.assertNotIn("_scale_fn_ref", state)
+        self.assertIs(state["_scale_fn_custom"], None)
         pickle.dumps(state)
 
     def test_cycle_lr_scale_fn_restored_from_state_dict(self):
