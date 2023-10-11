@@ -159,7 +159,10 @@ def _module_dir(m: types.ModuleType):
 
 # TODO: Add a decoractor for easily adding functions to FUNC_INLINELIST
 # after resolving all circular import issues.
-FUNC_INLINELIST = set()
+FUNC_INLINELIST = {
+    "torch._constrain_as_size",
+    "torch._constrain_as_value",
+}
 
 
 # Force inline functions in these files or directories, even they are in *_SKIPLIST.
@@ -171,7 +174,6 @@ FILE_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.external_utils",
     "torch._dynamo.polyfill",
-    "torch._export.constraints",
     "torch._export.db.examples",
     "torch._export.wrappers",
     "torch._functorch.apis",
