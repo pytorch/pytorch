@@ -16,6 +16,7 @@ __all__ = [
     "allow_mutation_on_saved_tensors",
     "Node",
     "GradientEdge",
+    "get_gradient_edge",
     "increment_version",
 ]
 
