@@ -32,7 +32,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
-    disable_gc, gradcheck, gradgradcheck, parametrize,
+    disable_gc, gradcheck, gradgradcheck, parametrize, subtest,
     instantiate_parametrized_tests, skipIfMps, set_warn_always_context)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available, _calculate_shape
 from torch.autograd.function import InplaceFunction
@@ -2524,9 +2524,8 @@ class TestAutograd(TestCase):
             y = MyOp.apply(x)
         self.assertFalse(y.requires_grad)
 
-    def test_indexing(self):
-        x = torch.arange(1., 17).view(4, 4)
-        y = Variable(x, requires_grad=True)
+
+    def _test_indexing(self, x, y, idx):
 
         def compare(x, y, idx, indexed_tensor, indexed_var):
             indexed_var_t = indexed_var.data
@@ -2539,58 +2538,74 @@ class TestAutograd(TestCase):
             expected_grad[idx] = 1
             self.assertEqual(y.grad, expected_grad)
 
-        def check_index(x, y, idx):
-            if y.grad is not None:
-                with torch.no_grad():
-                    y.grad.zero_()
-            indexed_tensor = x[idx]
-            indexed_var = y[idx]
-            compare(x, y, idx, indexed_tensor, indexed_var)
+        if y.grad is not None:
+            with torch.no_grad():
+                y.grad.zero_()
+        indexed_tensor = x[idx]
+        indexed_var = y[idx]
+        compare(x, y, idx, indexed_tensor, indexed_var)
 
-        check_index(x, y, 1)
-        check_index(x, y, (1, 1))
-        check_index(x, y, slice(1, None))
-        check_index(x, y, slice(None, 2))
-        check_index(x, y, (slice(None, 2), 2))
-        check_index(x, y, (slice(1, 2), 2))
-        check_index(x, y, (1, slice(2, None)))
-        check_index(x, y, (slice(None, None), slice(2, None)))
-        check_index(x, y, torch.LongTensor([0, 2]))
-        check_index(x, y, torch.rand(4, 4).bernoulli().bool())
-        check_index(x, y, (Ellipsis, slice(2, None)))
-        check_index(x, y, ([0], [0]))
-        check_index(x, y, ([1, 2, 3], [0]))
-        check_index(x, y, ([1, 2], [2, 1]))
-        check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
-        check_index(x, y, ([slice(None), [2, 3]]))
-        check_index(x, y, ([[2, 3], slice(None)]))
+
+    @parametrize(
+        "index", [
+        subtest(1, name="0"),
+        subtest((1, 1), name="1"),
+        subtest(slice(1, None), name="2"),
+        subtest(slice(None, 2), name="3"),
+        subtest((slice(None, 2), 2), name="4"),
+        subtest((slice(1, 2), 2), name="5"),
+        subtest((1, slice(2, None)), name="6"),
+        subtest((slice(None, None), slice(2, None)), name="7"),
+        subtest(torch.LongTensor([0, 2]), name="8"),
+        subtest(torch.rand(4, 4).bernoulli().bool(), name="9"),
+        subtest((Ellipsis, slice(2, None)), name="10"),
+        subtest(([0], [0]), name="11"),
+        subtest(([1, 2, 3], [0]), name="12"),
+        subtest(([1, 2], [2, 1]), name="14"),
+        subtest(([[1, 2], [3, 0]], [[0, 1], [2, 3]]), name="15"),
+        subtest(([slice(None), [2, 3]]), name="16"),
+        subtest(([[2, 3], slice(None)]), name="17"),
+    ])
+    def test_simple_indexing(self, index):
+        x = torch.arange(1., 17).view(4, 4)
+        y = Variable(x, requires_grad=True)
+        self._test_indexing(x, y, index)
+
+    @parametrize(
+        "index", [
+        # advanced indexing, with less dim, or ellipsis
+        subtest(([0]), name="0"),
+        subtest(([0], ), name="1"),
+
+        subtest((slice(None), [0], [0]), name="2"),
+        subtest(([0], [0], slice(None)), name="3"),
+        subtest((slice(None), [0, 1, 2], [0]), name="4"),
+        subtest(([0, 1, 2], [0], slice(None)), name="5"),
+        subtest((slice(None), [1, 2], [2, 1]), name="6"),
+        subtest(([1, 2], [2, 1], slice(None)), name="7"),
+        subtest((slice(None), [[1, 2], [2, 0]], [[0, 1], [2, 3]]), name="8"),
+        subtest(([[1, 2], [3, 0]], [[0, 1], [2, 2]], slice(None)), name="9"),
+        subtest((slice(None), slice(None), [2, 1]), name="10"),
+        subtest((slice(None), [2, 1], slice(None)), name="11"),
+        subtest(([2, 1], slice(None), slice(None)), name="12"),
 
         # advanced indexing, with less dim, or ellipsis
-        check_index(x, y, ([0]))
-        check_index(x, y, ([0], ))
-
+        subtest(([0], ), name="13"),
+        subtest(([0], slice(None)), name="14"),
+        subtest(([0], Ellipsis), name="15"),
+        subtest(([1, 2], [0, 1]), name="16"),
+        subtest(([1, 2], [0, 1], Ellipsis), name="17"),
+        subtest((Ellipsis, [1, 2], [0, 1]), name="18"),
+    ]
+    )
+    def test_advanced_indexing(self, index):
         x = torch.arange(1., 49).view(4, 3, 4)
         y = Variable(x, requires_grad=True)
+        self._test_indexing(x, y, index)
 
-        check_index(x, y, (slice(None), [0], [0]))
-        check_index(x, y, ([0], [0], slice(None)))
-        check_index(x, y, (slice(None), [0, 1, 2], [0]))
-        check_index(x, y, ([0, 1, 2], [0], slice(None)))
-        check_index(x, y, (slice(None), [1, 2], [2, 1]))
-        check_index(x, y, ([1, 2], [2, 1], slice(None)))
-        check_index(x, y, (slice(None), [[1, 2], [2, 0]], [[0, 1], [2, 3]]))
-        check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 2]], slice(None)))
-        check_index(x, y, (slice(None), slice(None), [2, 1]))
-        check_index(x, y, (slice(None), [2, 1], slice(None)))
-        check_index(x, y, ([2, 1], slice(None), slice(None)))
-
-        # advanced indexing, with less dim, or ellipsis
-        check_index(x, y, ([0], ))
-        check_index(x, y, ([0], slice(None)))
-        check_index(x, y, ([0], Ellipsis))
-        check_index(x, y, ([1, 2], [0, 1]))
-        check_index(x, y, ([1, 2], [0, 1], Ellipsis))
-        check_index(x, y, (Ellipsis, [1, 2], [0, 1]))
+    def test_advanced_indexing_tensor_wrapped_var(self):
+        x = torch.arange(1., 49).view(4, 3, 4)
+        y = Variable(x, requires_grad=True)
 
         # advanced indexing, with a tensor wrapped in a variable
         z = torch.LongTensor([0, 1])
@@ -2603,7 +2618,20 @@ class TestAutograd(TestCase):
                 y.grad.zero_()
         indexed_tensor = x[seq]
         indexed_var = y[seqv]
+
+        def compare(x, y, idx, indexed_tensor, indexed_var):
+            indexed_var_t = indexed_var.data
+            if not isinstance(indexed_tensor, torch.Tensor):
+                indexed_var_t = indexed_var_t[0]
+            self.assertEqual(indexed_tensor, indexed_var_t)
+
+            indexed_var.sum().backward()
+            expected_grad = torch.empty(x.size()).fill_(0)
+            expected_grad[idx] = 1
+            self.assertEqual(y.grad, expected_grad)
+
         compare(x, y, seq, indexed_tensor, indexed_var)
+
 
     def test_indexing_duplicates(self):
         x = torch.arange(1., 17).view(4, 4)
