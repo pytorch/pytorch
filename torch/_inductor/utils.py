@@ -256,6 +256,14 @@ def convert_shape_to_symint(
     ]
 
 
+def is_view(op: torch._ops.OpOverload):
+    """
+    Does this op overload have aliasing
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    return any(a.alias_info is not None for a in op._schema.arguments)
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
@@ -840,7 +848,7 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 @contextlib.contextmanager
 def override_lowering(aten_op, override_fn):
     """
-    Override the lowering of aten_op with overide_fn.
+    Override the lowering of aten_op with override_fn.
     The first argument of override_fn is the original lowering fn.
     """
     from torch._inductor import lowering
@@ -1132,6 +1140,7 @@ def try_find_schema(schemas, args, kwargs):
     return None
 
 
+@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1145,6 +1154,7 @@ def get_device_tflops(dtype):
         return get_max_simd_tflops(torch.float32)
 
 
+@functools.lru_cache(None)
 def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 

@@ -4,6 +4,7 @@ import functools
 import json
 import os
 import tempfile
+import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -19,6 +20,14 @@ from torch.testing._internal.optests import (
     autograd_registration_check,
     fake_check,
 )
+
+
+def dontGenerateOpCheckTests(reason: str):
+    def inner(fun):
+        fun._torch_dont_generate_opcheck_tests = True
+        return fun
+
+    return inner
 
 
 def is_abstract(tensor: torch.Tensor) -> bool:
@@ -161,6 +170,8 @@ def generate_opcheck_tests(
 
     def construct_method(attr, prefix, tester):
         method = getattr(testcase, attr)
+        if getattr(method, "_torch_dont_generate_opcheck_tests", False):
+            return
         new_method_name = prefix + "__" + attr
 
         @functools.wraps(method)
@@ -319,6 +330,14 @@ def should_update_failures_dict() -> bool:
     return key in os.environ and os.environ[key] == "1"
 
 
+_is_inside_opcheck_mode = threading.local()
+_is_inside_opcheck_mode.value = False
+
+
+def is_inside_opcheck_mode():
+    return _is_inside_opcheck_mode.value
+
+
 class OpCheckMode(TorchFunctionMode):
     """
     For a given test, OpCheckMode intercepts calls to operators and runs
@@ -408,7 +427,13 @@ class OpCheckMode(TorchFunctionMode):
             f"To reproduce this problem locally, try to run the following:\n{repro_command}"
         ) from ex
 
+    def __enter__(self, *args, **kwargs):
+        self.prev_is_opcheck_mode = _is_inside_opcheck_mode.value
+        _is_inside_opcheck_mode.value = True
+        return super().__enter__(*args, **kwargs)
+
     def __exit__(self, *args, **kwargs):
+        _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():

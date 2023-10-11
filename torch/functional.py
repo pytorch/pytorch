@@ -520,6 +520,13 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         Note that :func:`torch.view_as_real` can be used to recover a real
         tensor with an extra last dimension for real and imaginary components.
 
+    .. warning::
+        From version 2.1, a warning will be provided if a :attr:`window` is
+        not specified. In a future release, this attribute will be required.
+        Not providing a window currently defaults to using a rectangular window,
+        which may result in undesirable artifacts. Consider using tapered windows,
+        such as :func:`torch.hann_window`.
+
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
     time. The interface of this function is modeled after (but *not* a drop-in
@@ -657,6 +664,11 @@ istft = _add_docstr(
     "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:\n"
     r"""
 Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
+
+.. warning::
+    From version 2.1, a warning will be provided if a :attr:`window` is
+    not specified. In a future release, this attribute will be required.
+    Please provide the same window used in the stft call.
 
 It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
 least squares estimation of the original signal. The algorithm will check using the NOLA condition (

@@ -32,7 +32,6 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
 )
-from torch._export.constraints import constrain_as_size
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -1463,6 +1462,12 @@ class CommonTemplate:
             )
 
         self.common(fn, (1024, 100))
+
+    def test_div9(self):
+        def fn(x):
+            return (torch.div(42, x), aten.true_divide(42, x), aten.div.Tensor(42, x))
+
+        self.common(fn, (torch.randn(8),))
 
     def test_div_zero_dim(self):
         def fn(a, b):
@@ -7322,7 +7327,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return a[y.to(torch.int64)]
 
             def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                constrain_as_size(b.shape[0], 2, 100)
+                torch._constrain_as_size(b.shape[0], 2, 100)
                 return fn1(a, b)
 
             fn1_opt = torch._dynamo.optimize("inductor")(fn1)

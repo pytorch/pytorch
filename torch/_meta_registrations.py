@@ -2994,6 +2994,8 @@ def _check_foreach_binop_tensor_lists(self, other):
         aten._foreach_div.List,
         aten._foreach_maximum.List,
         aten._foreach_minimum.List,
+        aten._foreach_clamp_min.List,
+        aten._foreach_clamp_max.List,
     ]
 )
 def meta__foreach_binop_list(self, other, alpha=1):
@@ -3009,6 +3011,8 @@ def meta__foreach_binop_list(self, other, alpha=1):
         aten._foreach_div_.List,
         aten._foreach_maximum_.List,
         aten._foreach_minimum_.List,
+        aten._foreach_clamp_min_.List,
+        aten._foreach_clamp_max_.List,
     ]
 )
 def meta__foreach_binop__list(self, other, alpha=1):
@@ -5075,6 +5079,7 @@ def meta__scaled_dot_product_efficient_backward(
     num_heads = query.size(1)
     max_q = query.size(2)
     head_dim = query.size(3)
+    head_dim_v = value.size(3)
 
     max_k = key.size(2)
 
@@ -5091,7 +5096,7 @@ def meta__scaled_dot_product_efficient_backward(
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads, max_k, head_dim_v),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
