@@ -214,12 +214,19 @@ When creating a new :class:`Function`, the following methods are available to `c
 Numerical gradient checking
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+
+.. automodule:: torch.autograd.gradcheck
+.. currentmodule:: torch.autograd.gradcheck
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     gradcheck
     gradgradcheck
+
+.. Just to reset the base path for the rest of this file
+.. currentmodule:: torch.autograd
 
 Profiler
 ^^^^^^^^
@@ -309,3 +316,17 @@ Also see :ref:`saved-tensors-hooks-doc`.
 .. autoclass:: torch.autograd.graph.register_multi_grad_hook
 
 .. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.autograd.anomaly_mode
+.. py:module:: torch.autograd.forward_ad
+.. py:module:: torch.autograd.function
+.. py:module:: torch.autograd.functional
+.. py:module:: torch.autograd.grad_mode
+.. py:module:: torch.autograd.graph
+.. py:module:: torch.autograd.profiler
+.. py:module:: torch.autograd.profiler_legacy
+.. py:module:: torch.autograd.profiler_util
+.. py:module:: torch.autograd.variable

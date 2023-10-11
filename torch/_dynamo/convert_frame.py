@@ -57,6 +57,7 @@ from .utils import (
     CleanupManager,
     CompilationMetrics,
     counters,
+    cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
@@ -129,6 +130,7 @@ def wrap_convert_context(fn):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
         prior_deterministic = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
@@ -141,7 +143,9 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
-            torch.use_deterministic_algorithms(prior_deterministic)
+            torch.use_deterministic_algorithms(
+                prior_deterministic, warn_only=prior_warn_only
+            )
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
@@ -256,15 +260,20 @@ def convert_frame_assert(
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():
-                message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
-                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                failures = str(guard_failures[code][-1])
+                if config.report_all_guard_failures:
+                    failures = failures.strip().split("\n")  # type: ignore[assignment]
+                guard_failure_details = (
+                    f"triggered by the following guard failure(s): {failures}"
                 )
             else:
-                message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
-                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                guard_failure_details = (
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further"
                 )
+            message = (
+                f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
+                guard_failure_details,
+            )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message, stack_info=True)
@@ -402,6 +411,13 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
+@maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
