@@ -12,20 +12,29 @@ class Net(torch.nn.Module):
     def forward(self, x, y):
         return self.fc(torch.sin(x) + torch.cos(y))
 
-model = Net().to(device="cuda")
-x = torch.randn((32, 64), device="cuda")
-y = torch.randn((32, 64), device="cuda")
-with torch.no_grad():
-    ref_output = model(x, y)
+data = {}
 
-torch._dynamo.reset()
-with torch.no_grad():
-    constraints = [
-        dynamic_dim(x, 0) >= 1,
-        dynamic_dim(x, 0) <= 1024,
-        dynamic_dim(x, 0) == dynamic_dim(y, 0),
-    ]
-    model_so_path, _ = aot_compile(model, (x, y), constraints=constraints)
+for device in ["cpu", "cuda"]:
+    model = Net().to(device=device)
+    x = torch.randn((32, 64), device=device)
+    y = torch.randn((32, 64), device=device)
+    with torch.no_grad():
+        ref_output = model(x, y)
+
+    torch._dynamo.reset()
+    with torch.no_grad():
+        constraints = [
+            dynamic_dim(x, 0) >= 1,
+            dynamic_dim(x, 0) <= 1024,
+            dynamic_dim(x, 0) == dynamic_dim(y, 0),
+        ]
+        model_so_path, _ = aot_compile(model, (x, y), constraints=constraints)
+
+    data.update({
+        f"model_so_path_{device}": model_so_path,
+        f"inputs_{device}": [x, y],
+        f"outputs_{device}": [ref_output],
+    })
 
 # Use this to communicate tensors to the cpp code
 class Serializer(torch.nn.Module):
@@ -33,11 +42,5 @@ class Serializer(torch.nn.Module):
         super().__init__()
         for key in data:
             setattr(self, key, data[key])
-
-data = {
-    "model_so_path": model_so_path,
-    "inputs": [x, y],
-    "outputs": [ref_output],
-}
 
 torch.jit.script(Serializer(data)).save("data.pt")
