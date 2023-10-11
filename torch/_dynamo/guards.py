@@ -43,7 +43,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_symbolic,
+    SYMPY_INTERP,
+)
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -1108,7 +1112,7 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if isinstance(dim, int):
+                    if not is_symbolic(dim):
                         converted.append(dim)
                     else:
                         assert isinstance(dim, torch.SymInt)
@@ -1409,7 +1413,7 @@ def make_dupe_guard(obj_source, dupe_source):
     # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
     # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
     # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-    # In the the fn(x, x) example call above look like a graph with a single input.
+    # In the fn(x, x) example call above look like a graph with a single input.
     # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
 
     # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
