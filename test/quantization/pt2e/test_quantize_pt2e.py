@@ -1,13 +1,10 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import operator
 from typing import List, Tuple
 
 import torch
-import torch._dynamo as torchdynamo
 from torch._export import capture_pre_autograd_graph
 from torch import Tensor
-from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
     observer,
     ObserverOrFakeQuantize,
@@ -44,19 +41,16 @@ from torch.ao.quantization.quantize_pt2e import (
 )
 from torch.ao.quantization.backend_config import (
     get_executorch_backend_config,
-    get_qnnpack_backend_config,
 )
 
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qconfig,
-    default_symmetric_qnnpack_qconfig,
     float_qparams_weight_only_qconfig,
     per_channel_weight_observer_range_neg_127_to_127,
     QConfig,
     weight_observer_range_neg_127_to_127,
 )
 from torch.ao.quantization.quantize_fx import (
-    convert_to_reference_fx,
     prepare_fx,
 )
 from torch.fx import Node
@@ -64,17 +58,12 @@ from torch.fx import Node
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
-    skip_if_no_torchvision,
     skipIfNoQNNPACK,
     TestHelperModules,
 )
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
 )
-from torch.ao.quantization import (
-    default_dynamic_qconfig,
-)
-from torch.testing._internal.common_quantized import override_quantized_engine
 from torch._export import dynamic_dim
 
 

@@ -1,19 +1,50 @@
 import torch
+import operator
+import torch._dynamo as torchdynamo
+from torch.ao.quantization.backend_config import (
+    get_qnnpack_backend_config,
+)
+from torch.ao.ns.fx.utils import compute_sqnr
+from torch._export import capture_pre_autograd_graph
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    get_symmetric_quantization_config,
+    XNNPACKQuantizer,
+)
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
     TestHelperModules,
 )
-from torch.ao.quantization.quantizer.xnnpack_quantizer import (
-    XNNPACKQuantizer,
-    get_symmetric_quantization_config,
+from torch.ao.quantization import (
+    QConfig,
+    QConfigMapping,
+    default_dynamic_qconfig,
+    observer,
 )
-from torch._export import capture_pre_autograd_graph
+from torch.ao.quantization.quantize_fx import (
+    _convert_to_reference_decomposed_fx,
+    convert_to_reference_fx,
+    prepare_fx,
+)
+from torch.ao.quantization.quantize_pt2e import (
+    prepare_pt2e,
+    convert_pt2e,
+)
+from torch.ao.quantization.qconfig import (
+    default_symmetric_qnnpack_qconfig,
+    default_per_channel_symmetric_qnnpack_qconfig,
+    per_channel_weight_observer_range_neg_127_to_127,
+    weight_observer_range_neg_127_to_127,
+)
+from torch.testing._internal.common_quantized import override_quantized_engine
+import copy
+
 from .test_quantize_pt2e import PT2EQuantizationTestCase
 
+
 @skipIfNoQNNPACK
-class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
+class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
     def test_conv1d(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
@@ -447,17 +478,18 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
         )
 
     def test_gru(self):
-        """ this is a test for annotating fp32 GRU so that it produces
+        """this is a test for annotating fp32 GRU so that it produces
         q -> dq -> fp32_gru -> q -> dq, this is currently enough for our use cases,
         but we may change the annotation to be more precise in the future
         """
+
         class RNNDynamicModel(torch.nn.Module):
             def __init__(self, mod_type):
                 super().__init__()
                 self.qconfig = default_dynamic_qconfig
-                if mod_type == 'GRU':
+                if mod_type == "GRU":
                     self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-                if mod_type == 'LSTM':
+                if mod_type == "LSTM":
                     self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
             def forward(self, input_tensor, hidden_tensor):
@@ -472,17 +504,24 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
             niter = 10
             example_inputs = (
                 # input_tensor
-                torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
+                torch.tensor([[100, -155], [-155, 100], [100, -155]], dtype=torch.float)
+                .unsqueeze(0)
+                .repeat(niter, 1, 1),
                 # hidden_tensor
                 # (D * num_layers, N, H_out)
                 torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
             )
             model_graph = copy.deepcopy(model_fx)
 
-            qconfig_mapping = QConfigMapping().set_object_type(operator.mul, default_symmetric_qnnpack_qconfig)
-            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+            qconfig_mapping = QConfigMapping().set_object_type(
+                operator.mul, default_symmetric_qnnpack_qconfig
+            )
+            model_fx = prepare_fx(
+                model_fx,
+                qconfig_mapping,
+                example_inputs,
+                backend_config=get_qnnpack_backend_config(),
+            )
             model_fx(*example_inputs)
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
@@ -501,18 +540,17 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
             model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
-
     def test_linear_gru(self):
-        """ this test is to make sure GRU annotation does not interfere with linear annotation
-        """
+        """this test is to make sure GRU annotation does not interfere with linear annotation"""
+
         class RNNDynamicModel(torch.nn.Module):
             def __init__(self, mod_type):
                 super().__init__()
                 self.qconfig = default_dynamic_qconfig
                 self.linear = torch.nn.Linear(2, 2)
-                if mod_type == 'GRU':
+                if mod_type == "GRU":
                     self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-                if mod_type == 'LSTM':
+                if mod_type == "LSTM":
                     self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
             def forward(self, input_tensor, hidden_tensor):
@@ -528,9 +566,9 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
             niter = 10
             example_inputs = (
                 # input_tensor
-                torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
+                torch.tensor([[100, -155], [-155, 100], [100, -155]], dtype=torch.float)
+                .unsqueeze(0)
+                .repeat(niter, 1, 1),
                 # hidden_tensor
                 # (D * num_layers, N, H_out)
                 torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
@@ -538,13 +576,16 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
             model_graph = copy.deepcopy(model_fx)
 
             qconfig_mapping = (
-                QConfigMapping().set_object_type(
-                    operator.mul, default_symmetric_qnnpack_qconfig
-                ).set_object_type(
-                    torch.nn.Linear, default_symmetric_qnnpack_qconfig
-                )
+                QConfigMapping()
+                .set_object_type(operator.mul, default_symmetric_qnnpack_qconfig)
+                .set_object_type(torch.nn.Linear, default_symmetric_qnnpack_qconfig)
             )
-            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+            model_fx = prepare_fx(
+                model_fx,
+                qconfig_mapping,
+                example_inputs,
+                backend_config=get_qnnpack_backend_config(),
+            )
             model_fx(*example_inputs)
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
@@ -567,7 +608,10 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
-        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5),)
+        example_inputs = (
+            torch.randn(1, 3, 5, 5),
+            torch.randn(1, 3, 5, 5),
+        )
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
@@ -594,7 +638,10 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
-        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5),)
+        example_inputs = (
+            torch.randn(1, 3, 5, 5),
+            torch.randn(1, 3, 5, 5),
+        )
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
@@ -617,8 +664,9 @@ class TestQuantizePT2EXNNPACK(PT2EQuantizationTestCase):
             node_list,
         )
 
+
 # TODO: express this using self._test_quantizer, add test for inception_v4
-class TestQuantizePT2EXNNPACKModels(PT2EQuantizationTestCase):
+class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
     def test_resnet18(self):

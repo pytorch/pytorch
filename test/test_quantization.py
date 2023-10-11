@@ -87,8 +87,8 @@ try:
     from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
-    from quantization.pt2e.test_xnnpack_quantizer import TestQuantizePT2EXNNPACK  # noqa: F401
-    from quantization.pt2e.test_xnnpack_quantizer import TestQuantizePT2EXNNPACKModels  # noqa: F401
+    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401
+    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizerModels  # noqa: F401
     from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQATModels  # noqa: F401
