@@ -63,10 +63,6 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif(MSVC)
 
-  if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
-  endif()
-
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
   set(GEN_ROCM_FLAG)
@@ -350,7 +346,7 @@ if(INTERN_BUILD_ATEN_OPS)
 endif()
 
 function(append_filelist name outputvar)
-  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
+  set(_rootdir "${Torch_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
       ${PROJECT_SOURCE_DIR}/build_variables.bzl

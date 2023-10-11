@@ -4472,7 +4472,7 @@ def mul(a, b):
 #   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
 def div_prim(a, b):
-    is_integral = is_boolean_type(a) or is_integer_type(a)
+    is_integral = all(is_boolean_type(x) or is_integer_type(x) for x in [a, b])
 
     if is_integral:
         return truncdiv(a, b)
@@ -4661,6 +4661,8 @@ register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
+
+register_lowering(aten._neg_view)(neg)
 
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
