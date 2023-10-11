@@ -3421,19 +3421,27 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = (
-            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
-            and torch.is_grad_enabled()
-        )
-
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
-                    keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                    keep_input_mutations=False # delay this since we want to set it based off of needs_autograd
                 )(*fake_flat_args)
+
+        needs_autograd = (
+            any(x.requires_grad for x in fw_metadata.output_info if isinstance(x, Tensor))
+            and torch.is_grad_enabled()
+        )
+        fw_metadata = ViewAndMutationMeta(
+            input_info=fw_metadata.input_info,
+            requires_grad_info=fw_metadata.requires_grad_info,
+            output_info=fw_metadata.output_info,
+            num_intermediate_bases=fw_metadata.num_intermediate_bases,
+            keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+            traced_tangents=fw_metadata.traced_tangents
+        )
 
         if aot_config.is_export:
             # aot_export: ban input metadata mutations for now to keep shared code paths simpler.

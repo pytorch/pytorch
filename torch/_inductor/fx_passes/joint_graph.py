@@ -29,7 +29,8 @@ def lazy_init():
     from .fuse_attention import _sfdp_init
     from .pad_mm import _pad_mm_init
 
-    _pad_mm_init()
+    # breaks for some reason
+    # _pad_mm_init()
     _sfdp_init()
 
 
