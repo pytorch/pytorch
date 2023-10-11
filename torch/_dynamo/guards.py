@@ -43,7 +43,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_symbolic,
+    SYMPY_INTERP,
+)
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -1108,7 +1112,7 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if isinstance(dim, int):
+                    if not is_symbolic(dim):
                         converted.append(dim)
                     else:
                         assert isinstance(dim, torch.SymInt)
@@ -1331,7 +1335,7 @@ def guard_fail_hook(
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reason = None
+    reason = ""
     for part in guard_fn.code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
@@ -1339,12 +1343,15 @@ def guard_fail_hook(
             fail_reason = eval(part, global_scope, scope)
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
+
+        if isinstance(fail_reason, bool) and not fail_reason:
+            fail_reason = part
         if isinstance(fail_reason, str):
-            reason = fail_reason
-            break
-        elif isinstance(fail_reason, bool) and not fail_reason:
-            reason = part
-            break
+            reason += fail_reason
+            if config.report_all_guard_failures:
+                reason += "\n"
+            else:
+                break
 
     if first:
         stashed_first_fail_reason = reason
