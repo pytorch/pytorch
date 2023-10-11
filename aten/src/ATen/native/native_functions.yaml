@@ -11653,6 +11653,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_out
+    MPS: softshrink_out_mps
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: softshrink.out
@@ -11665,6 +11666,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_backward_out
+    MPS: softshrink_backward_out_mps
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: softshrink_backward.grad_input
