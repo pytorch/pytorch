@@ -30,7 +30,7 @@ if is_available():
         Store,
         FileStore,
         TCPStore,
-        ProcessGroup,
+        ProcessGroup as ProcessGroup,
         Backend as _Backend,
         PrefixStore,
         Reducer,

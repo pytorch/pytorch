@@ -14,6 +14,9 @@ public:
   //  Returns true if you successfully registered yourself (that means
   //  you are in the hot seat for doing the operator registrations!)
   static bool registerInterpreter(c10::impl::PyInterpreter*);
+
+  // Returns nullptr if no interpreter has been registered yet.
+  static c10::impl::PyInterpreter* getInterpreter();
 };
 
 } // namespace impl

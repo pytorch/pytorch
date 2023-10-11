@@ -15,27 +15,20 @@ from torch.fx.experimental.symbolic_shapes import SymInt
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-    InputDim,
-)
-
 
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
 # Remove when migration is done.
 from torch.export import (
-    ArgumentKind,
-    ArgumentSpec,
     ExportBackwardSignature,
     ExportGraphSignature,
     ExportedProgram,
+    InputDim,
     ModuleCallEntry,
     ModuleCallSignature,
 )
 
 
 __all__ = [
-    "ArgumentKind",
-    "ArgumentSpec",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "ExportedProgram",
@@ -337,10 +330,9 @@ def _process_constraints(
     range_constraints: Dict[sympy.Symbol, ValueRanges] = {}
 
     # Add inline constraints to range_constraints
-    for symbol, value_range in inline_constraints.items():
-        range_constraints[symbol] = ValueRanges(value_range.lower, value_range.upper)
+    range_constraints = {symbol: inline_constraints[symbol] for symbol in inline_constraints}
 
-    # Add input range constraints to range_constraintss
+    # Add input range constraints to range_constraints
     for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
         # Simplify the range constraints into a single range constraint
         # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]

@@ -13027,7 +13027,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
@@ -13058,7 +13058,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13091,7 +13091,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13117,6 +13117,38 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = _construct_tensor_for_quantization_test(
             (3, 4, 8, 8), offset=-384, max_val=12
         )
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_linear_relu_fused(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.linear = torch.nn.Linear(4, 2)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.ao.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.linear(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.fuse_modules(model.eval(), [["linear", "relu"]])
+        model = torch.ao.quantization.prepare_qat(model.train())
+        # Set fixed weight and bias to avoid flaky test.
+        model.linear.weight = torch.nn.Parameter(
+            _construct_tensor_for_quantization_test((2, 4), max_val=2)
+        )
+        model.linear.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
+        model = torch.ao.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((3, 4), offset=-384, max_val=12)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)

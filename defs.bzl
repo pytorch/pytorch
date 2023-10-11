@@ -29,7 +29,6 @@ default_compiler_flags = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-DHAVE_MALLOC_USABLE_SIZE=1",
-    "-DTH_HAVE_THREAD",
     "-DCPU_CAPABILITY_DEFAULT",
     "-DTH_INDEX_BASE=0",
     "-DMAGMA_V2",
