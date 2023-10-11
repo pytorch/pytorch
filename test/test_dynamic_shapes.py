@@ -743,7 +743,9 @@ class TestSymNumberMagicMethods(TestCase):
         unhashable = (
             create_symint(shape_env, 3),
             create_symbool(shape_env, True),
-            create_symfloat(shape_env, 4.2),
+            # We should be passing in float here, but create_symbol currently
+            # only supports int
+            create_symfloat(shape_env, 3),
         )
 
         for x in unhashable:
