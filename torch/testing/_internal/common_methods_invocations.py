@@ -3140,33 +3140,36 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     for accumulate in [False, True]:
+
         # Test with indices arg
         yield SampleInput(
             make_arg((S, S,)),
-            (index_variable(2, S, device=device),),
+            (index_variable(2, S, device=device, allow_duplicates=accumulate),),
             make_arg((2, S)),
             accumulate=accumulate)
 
         # Test with index as scalar
         yield SampleInput(
-            make_arg((S, S,)),
-            (torch.tensor(0),),
+            make_arg((S, S)),
+            (torch.tensor(0, device=device), ),
             make_arg((S,)),
+            accumulate=accumulate)
+
+        # Test broadcasting indices
+        yield SampleInput(
+            make_arg((S, S, S, S)),
+            (index_variable(S, S, device=device, allow_duplicates=accumulate),
+             torch.tensor(0, device=device),
+             index_variable(1, S, device=device, allow_duplicates=accumulate)),
+            make_arg((S, S)),
             accumulate=accumulate)
 
         # Test broadcasting values
         yield SampleInput(
            make_arg(S, S),
-           (index_variable(2, S, device=device),),
-           make_arg((1, 1)),
+           (index_variable(2, S, device=device, allow_duplicates=accumulate),),
+           make_arg(1),
            accumulate=accumulate)
-
-        # Test index broadcasting
-        yield SampleInput(
-            make_arg((S, S, S, S)),
-            (index_variable((2, S), S, device=device), torch.tensor(0, device=device), index_variable((1, S), S, device=device)),
-            make_arg((2, S, S)),
-            accumulate=accumulate)
 
         # Test with mask arg
         mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
@@ -21768,10 +21771,20 @@ reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswit
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
 
 # TODO: review porting these to make_tensor
-def index_variable(shape, max_indices, device=torch.device('cpu')):
-    if not isinstance(shape, tuple):
-        shape = (shape,)
-    index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
+def index_variable(shape, max_indices, device=torch.device('cpu'), allow_duplicates=True):
+    if allow_duplicates:
+        if not isinstance(shape, tuple):
+            shape = (shape,)
+        index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
+    else:
+        if isinstance(shape, tuple):
+            n = functools.reduce(operator.mul, shape)
+        else:
+            n = shape
+            shape = (shape, )
+        assert n <= max_indices
+        index = torch.rand(max_indices, dtype=torch.double, device=device).multinomial(n, replacement=False).view(shape)
+
     return index
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):

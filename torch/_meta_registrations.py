@@ -3645,7 +3645,6 @@ def meta_relu_(self):
 
 def check_index_put_inputs(self, indices, values, accumulate=False):
     torch._check(bool(indices), lambda: "at least one index must be provided")
-
     # Most of the checks on the `indices` can be done by calling `meta_index_Tensor`.
     # The result of that gives the expected shape for `values` which can be used to
     # assert that `values` is of the correct shape. If the indices contain byte/bool
@@ -3673,14 +3672,12 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
                     dim=i, index=index
                 ).squeeze()
         else:
-            indices_without_scalars.append(index)
+            indices_without_scalars.append(slice(None))
 
     import torch._refs as refs  # avoid import cycle in mypy
 
     if len(indices_without_scalars) != 0:
-        expected_values_shape = meta_index_Tensor(
-            expected_values_shape, indices_without_scalars
-        )
+        expected_values_shape = expected_values_shape[indices_without_scalars]
 
     list(refs._maybe_broadcast(expected_values_shape, values))
 
