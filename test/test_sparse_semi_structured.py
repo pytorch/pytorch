@@ -351,7 +351,7 @@ class TestSparseSemiStructured(TestCase):
             mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
 
             dense_result = model(input)
-            mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight, mask=mask))
+            mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
 
             model = torch.compile(model)
             sparse_result = model(input)
