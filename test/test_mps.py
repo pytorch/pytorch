@@ -168,7 +168,7 @@ def mps_ops_grad_modifier(ops):
         'cumprod': [torch.float32],
     }
 
-    XPASSLIST_GRAD = {
+    SKIPLIST_GRAD = {
         'nn.functional.pairwise_distance': [torch.float16],
         # failed assertion `destination datatype must be fp32'
         'nn.functional.conv1d': [torch.float16],
@@ -177,6 +177,8 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
+        # Segfaults
+        'all': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -198,10 +200,10 @@ def mps_ops_grad_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=XFAILLIST_GRAD[key]))
 
-        if key in XPASSLIST_GRAD:
+        if key in SKIPLIST_GRAD:
             addDecorator(op, DecorateInfo(
                          unittest.skip,
-                         dtypes=XPASSLIST_GRAD[key]))
+                         dtypes=SKIPLIST_GRAD[key]))
 
         if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
             addDecorator(op, DecorateInfo(
