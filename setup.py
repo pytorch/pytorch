@@ -1283,8 +1283,6 @@ def main():
         "include/torch/csrc/jit/tensorexpr/*.h",
         "include/torch/csrc/jit/tensorexpr/operators/*.h",
         "include/torch/csrc/jit/codegen/cuda/*.h",
-        "include/torch/csrc/jit/codegen/cuda/ops/*.h",
-        "include/torch/csrc/jit/codegen/cuda/scheduler/*.h",
         "include/torch/csrc/onnx/*.h",
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
