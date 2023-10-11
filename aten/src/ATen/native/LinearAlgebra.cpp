@@ -2172,7 +2172,7 @@ using array2d = std::array<std::array<scalar_t, COL>, ROW>;
 // we consider 6 Taylor expansions of degree
 // 1, 2, 4, 8, 12, 18
 constexpr int total_n_degs = 6;
-constexpr int large_batch_threshold = 350;
+constexpr int large_batch_threshold = 2 << 9;
 
 Tensor operator_1_norm(const Tensor& tensor) {
   return std::get<0>(tensor.abs().sum(-2).max(-1));
@@ -2554,8 +2554,8 @@ Tensor compute_T18_scale_square(
   // use the cumulative matrix multiplication.
   // With about example, `mul_times` will be [0, 1, 3].
   auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
-  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong);
-  auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1})).to(at::kCPU);
+  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kCPU).to(at::kLong);
+  auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1}));
 
   // Square
   TORCH_INTERNAL_ASSERT(split_counts_cpu.is_contiguous());
