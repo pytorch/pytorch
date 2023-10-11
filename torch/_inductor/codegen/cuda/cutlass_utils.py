@@ -50,33 +50,25 @@ def try_import_cutlass() -> bool:
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.join(
-        inductor_cuda_config.cutlass_dir, "tools/library/scripts"
+        inductor_cuda_config.cutlass_dir, "python/cutlass_library"
     )
     tmp_cutlass_py_full_path = os.path.abspath(
-        os.path.join(cache_dir(), "torch_cutlass_script")
+        os.path.join(cache_dir(), "torch_cutlass_library")
     )
 
     if os.path.isdir(cutlass_py_full_path):
-        cutlass_file_names = [
-            file_name
-            for file_name in os.listdir(cutlass_py_full_path)
-            if file_name.endswith(".py")
-        ]
-        cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-        if not os.path.isdir(tmp_cutlass_py_full_path):
-            os.mkdir(tmp_cutlass_py_full_path)
-        for file_name in cutlass_file_names:
-            _gen_cutlass_file(
-                file_name,
-                cutlass_module_names,
-                cutlass_py_full_path,
-                tmp_cutlass_py_full_path,
+        if tmp_cutlass_py_full_path not in sys.path:
+            os.makedirs(tmp_cutlass_py_full_path, exist_ok=True)
+            package_symlink_path = os.path.join(
+                tmp_cutlass_py_full_path, "cutlass_library"
             )
-        sys.path.append(tmp_cutlass_py_full_path)
+            if not os.path.exists(package_symlink_path):
+                os.symlink(dst=package_symlink_path, src=cutlass_py_full_path)
+            sys.path.append(tmp_cutlass_py_full_path)
         try:
-            import cutlass_generator  # type: ignore[import]  # noqa: F401
-            import cutlass_library  # type: ignore[import]  # noqa: F401
-            import cutlass_manifest  # type: ignore[import]  # noqa: F401
+            import cutlass_library.generator as cutlass_generator  # type: ignore[import]  # noqa: F401
+            import cutlass_library.library as cutlass_library  # type: ignore[import]  # noqa: F401
+            import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]  # noqa: F401
 
             return True
 
@@ -136,18 +128,14 @@ class CUTLASSArgs:
 
 
 @functools.lru_cache(None)
-def gen_ops() -> List[Any]:
-    """
-    Generates all supported CUTLASS operations.
-    """
+def _gen_ops_cached(arch, version) -> List[Any]:
+    # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_generator  # type: ignore[import]
-    import cutlass_manifest  # type: ignore[import]
+    import cutlass_library.generator as cutlass_generator  # type: ignore[import]
+    import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
 
-    arch = get_cuda_arch()
-    version = get_cuda_version()
     if arch is None or version is None:
         log.error(
             "Cannot detect cuda arch %s or cuda version %s. "
@@ -172,13 +160,21 @@ def gen_ops() -> List[Any]:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
             ) from e
-
     return manifest.operations
+
+
+def gen_ops() -> List[Any]:
+    """
+    Generates all supported CUTLASS operations.
+    """
+    arch = get_cuda_arch()
+    version = get_cuda_version()
+    return _gen_ops_cached(arch, version)
 
 
 def dtype_match(
     torch_dtype: torch.dtype,
-    cutlass_dtype: "cutlass_library.DataType",  # type: ignore[name-defined]
+    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()
@@ -186,13 +182,13 @@ def dtype_match(
 
     if torch_dtype == torch.float:
         return (
-            cutlass_dtype == cutlass_library.DataType.f32
-            or cutlass_dtype == cutlass_library.DataType.tf32
+            cutlass_dtype == cutlass_library.library.DataType.f32
+            or cutlass_dtype == cutlass_library.library.DataType.tf32
         )
     elif torch_dtype == torch.half:
-        return cutlass_dtype == cutlass_library.DataType.f16
+        return cutlass_dtype == cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
-        return cutlass_dtype == cutlass_library.DataType.bf16
+        return cutlass_dtype == cutlass_library.library.DataType.bf16
     else:
         return False
 

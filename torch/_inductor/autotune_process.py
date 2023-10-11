@@ -567,6 +567,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             "Things need to be fixed to support non-zero workspace_size: "
             "1) max autotune cache needs to store workspace size; "
             "2) memory allocation needs to allocate / deallocate workspace correctly; "
+            "3) CUDATemplateBuffer.workspace_size needs to be set correctly"
         )
 
         # Generate partial function.

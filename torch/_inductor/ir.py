@@ -2934,17 +2934,76 @@ class TritonTemplateBuffer(TemplateBuffer):
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(
         self,
-        layout,
-        inputs,
-        make_kernel_render,
-        workspace_size: int = 0,
+        template: "CUDATemplate",  # type: ignore[name-defined]
+        workspace_size: Optional[
+            Union[int, Callable[[], int]]
+        ] = None,  # May be an int or a callback returning an int
+        **render_kwargs,  # passed through to template_node.render
     ):
-        super().__init__(layout, inputs, make_kernel_render)
+        """
+        Initializes a new instance of the CUDATemplateBuffer class.
+
+        Args:
+            template (CUDATemplate): The CUDATemplate object that this buffer uses to generate the Kernel source code
+            workspace_size (Optional[Union[int, Callable[[], int]]]): The size of the workspace needed for this buffer.
+                         It can be an integer or a callable function that returns an integer. Default is None.
+            merged_input_nodes (Optional[List[IRNode]]): A list of IRNodes representing the merged input
+                                                        nodes for this buffer. Default is None.
+            **render_kwargs: Additional keyword arguments passed through to template_node.render.
+
+        """
+        super().__init__(
+            template.layout, template.input_nodes, self._make_kernel_render
+        )
+        self.template = template
+        self.layout = template.layout
+        self._render_kwargs = render_kwargs  # includes "op" if present in kwargs
         # Global memory (in bytes) needed for this template.
-        self.workspace_size = workspace_size
+        self._workspace_size = workspace_size
+
+    @property
+    def workspace_size(self):
+        """
+        Read-only property that returns the workspace size for the CUDATemplateBuffer, possibly retrieved
+        lazily via a callback.
+        """
+        return self.get_workspace_size()
 
     def get_workspace_size(self):
-        return self.workspace_size if self.workspace_size is not None else 0
+        """
+        See self.workspace_size property
+        """
+        if callable(self._workspace_size):
+            return self._workspace_size()
+        return self._workspace_size if self._workspace_size is not None else 0
+
+    def _make_kernel_render(
+        self, output_node, epilogue_nodes: Optional[List[ComputedBuffer]] = None
+    ):
+        """
+        Private method that may be passed as a callback bound to this instance,
+        which returns the parameterless kernel render function and a CUDATemplateKernel.
+
+        This callback is required for the parent class (TemplateBuffer) and is used by
+        CUDAScheduling.codegen_template(...) to render the Kernel source.
+        """
+        from .codegen.cuda.cuda_kernel import CUDATemplateKernel
+
+        assert output_node is self
+        assert self.workspace_size >= 0
+        kernel = CUDATemplateKernel(
+            kernel_name="KERNEL_NAME",
+        )
+
+        def render():
+            return self.template.render(
+                kernel=kernel,
+                template_node=self,
+                epilogue_nodes=epilogue_nodes,
+                **self._render_kwargs,
+            )
+
+        return kernel, render
 
 
 @dataclasses.dataclass
