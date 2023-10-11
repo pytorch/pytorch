@@ -907,9 +907,10 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
-      LOG(INFO) << "[Rank " << rank_
-                << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
-                << " (Watchdog caught exception: " << e.what();
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
+          << " (Watchdog caught exception: " << e.what();
 
     } else {
       // Append error message reported from workCleanupLoop
@@ -1076,13 +1077,13 @@ void ProcessGroupNCCL::runHookLoop() {
       }
     } catch (std::exception& e) {
       if (std::string(e.what()).find("driver shutting down") !=
-        std::string::npos) {
-        LOG(INFO) << "[Rank " << rank_
-                  << "] main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
-                  << " (runHookLoop caught exception: " << e.what();
+          std::string::npos) {
+        LOG(INFO)
+            << "[Rank " << rank_
+            << "] main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
+            << " (runHookLoop caught exception: " << e.what();
 
       } else {
-
         // PythonOnCompletionHook has already extracted Python exception message
         // and wrapped it with a cpp one. So we no longer need to acquire GIL
         // here.
@@ -1093,9 +1094,10 @@ void ProcessGroupNCCL::runHookLoop() {
             e.what(),
             ". Aborting all communicators.");
 
-        // No need to call abort() on WorkNCCL here as that collective has already
-        // finished successfully at this point. We just need to abort the process
-        // Abort all NCCL Communicators on this ProcessGroupNCCL instance.
+        // No need to call abort() on WorkNCCL here as that collective has
+        // already finished successfully at this point. We just need to abort
+        // the process Abort all NCCL Communicators on this ProcessGroupNCCL
+        // instance.
         abort(errorStr);
       }
     }
