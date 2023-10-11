@@ -21,6 +21,7 @@ jobs:
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      test-infra-ref: 'release/2.1'
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -68,6 +69,7 @@ jobs:
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      test-infra-ref: 'release/2.1'
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -122,6 +124,7 @@ jobs:
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      test-infra-ref: 'release/2.1'
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -157,6 +160,7 @@ jobs:
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      test-infra-ref: 'release/2.1'
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -195,6 +199,7 @@ jobs:
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      test-infra-ref: 'release/2.1'
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
