@@ -367,7 +367,6 @@ __device__ __inline__ void compute_gI(
   }
 
 
-
 template<typename T, typename T_ACC>
 __global__ void layer_norm_grad_input_kernel(
   const T* __restrict__ dY,
@@ -382,6 +381,87 @@ __global__ void layer_norm_grad_input_kernel(
 
     compute_gI(dY, X, mean, rstd, gamma, dX, N, buf);
   }
+
+
+template<typename T, typename T_ACC>
+__global__ void layer_norm_grad_input_kernel_vectorized(
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T* dX,
+  const int N) {
+
+  alignas(sizeof(double)) extern __shared__ char shared_data[];
+  T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
+
+  const auto bIdx = blockIdx.x;
+  const T_ACC mean_val = mean[bIdx];
+  const T_ACC rstd_val = rstd[bIdx];
+
+  using vec_t = aligned_vector<T, vec_size>;
+  const vec_t* X_i_vec = reinterpret_cast<const vec_t*>(X + bIdx * N);
+  const vec_t* dY_i_vec = reinterpret_cast<const vec_t*>(dY + bIdx * N);
+  const vec_t* gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+  vec_t gamma_vec_reg;
+  for (int k = 0; k < vec_size; ++k) {
+    gamma_vec_reg.val[k] = T_ACC(1);
+  }
+
+  T_ACC stats_x1{0}, stats_x2{0};
+  for (int l = threadIdx.x; l < N / vec_size; l += blockDim.x) {
+    vec_t c_h = X_i_vec[l];
+    vec_t c_loss = dY_i_vec[l];
+    if (gamma != nullptr) {
+      gamma_vec_reg = gamma_vec[l];
+    }
+
+    #pragma unroll
+    for (int k = 0; k < vec_size; ++k) {
+      stats_x1 += c_loss.val[k] * gamma_vec_reg.val[k];
+      stats_x2 += c_loss.val[k] * gamma_vec_reg.val[k] * (c_h.val[k] - mean_val) * rstd_val;
+    }
+  }
+
+  stats_x1 = cuda_utils::BlockReduceSum(stats_x1, reduce_buf);
+  stats_x2 = cuda_utils::BlockReduceSum(stats_x2, reduce_buf);
+  if (threadIdx.x == 0) {
+    reduce_buf[0] = stats_x1;
+    reduce_buf[1] = stats_x2;
+  }
+  __syncthreads();
+  stats_x1 = reduce_buf[0];
+  stats_x2 = reduce_buf[1];
+
+  T_ACC fH = N;
+  T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
+  vec_t* dX_i_vec = reinterpret_cast<vec_t*>(dX + bIdx * N);
+  vec_t dX_i_vec_reg;
+
+  for (int l = threadIdx.x; l < N / vec_size; l += blockDim.x) {
+    vec_t x_vec_reg = X_i_vec[l];
+    vec_t dy_vec_reg = dY_i_vec[l];
+    if (gamma != nullptr) {
+      gamma_vec_reg = gamma_vec[l];
+    }
+
+    #pragma unroll
+    for (int k = 0; k < vec_size; ++k) {
+      T_ACC x = x_vec_reg.val[k];
+      T_ACC dy = dy_vec_reg.val[k];
+
+      T_ACC f_grad_input = fH * gamma_vec_reg.val[k] * dy;
+      f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
+      f_grad_input -= stats_x1;
+      f_grad_input *= term1;
+      dX_i_vec_reg.val[k] = f_grad_input;
+    }
+
+    dX_i_vec[l] = dX_i_vec_reg;
+  }
+}
+
 
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
@@ -1061,10 +1141,20 @@ void LayerNormBackwardKernelImplInternal(
     }
 #else
     const dim3 blocks(M);
-    int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
-    layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
-    X_data, mean_data, rstd_data, gamma_data, dX_data, N);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
+    const unsigned int alignment = sizeof(T) * vec_size;
+    bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
+      can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
+
+    if ((N % (num_threads() * vec_size) == 0) && bAlignedBuffers) {
+      layer_norm_grad_input_kernel_vectorized<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+          X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+          X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
 #endif
   }
 
