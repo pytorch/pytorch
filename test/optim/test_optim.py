@@ -970,8 +970,8 @@ class TestOptim(TestCase):
         # We coerce step to always be float32
         default_dtype = torch.tensor(0.0).dtype
         for dtype in [torch.float64, torch.float16]:
-            torch.set_default_dtype(dtype)
             try:
+                torch.set_default_dtype(dtype)
                 self._test_derived_optimizers(
                     self._multi_tensor_optimizer_configs,
                     "foreach",
