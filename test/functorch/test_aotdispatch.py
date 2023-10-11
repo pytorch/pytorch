@@ -2745,7 +2745,7 @@ class TestPartitioning(AOTTestCase):
                 return torch.mul(x, x)
 
         inference_graph_cell = [None]
-        inference_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=inference_graph_cell))
+        inference_compiler = make_boxed_compiler(partial(extract_graph, graph_cell=inference_graph_cell))
         aot_fn = aot_function(generate, nop, inference_compiler=inference_compiler)
         # Even though x requires grad, we should still get an inference graph
         x = torch.randn(4, requires_grad=True)
