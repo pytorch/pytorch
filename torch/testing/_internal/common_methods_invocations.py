@@ -9801,7 +9801,14 @@ def wrapper_set_seed(op, *args, **kwargs):
     """
     with freeze_rng_state():
         torch.manual_seed(42)
-        return op(*args, **kwargs)
+        output = op(*args, **kwargs)
+
+        if isinstance(output, torch.Tensor) and output.device.type == "lazy":
+            # We need to call mark step inside freeze_rng_state so that numerics
+            # match eager execution
+            torch._lazy.mark_step()
+
+        return output
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -18342,8 +18349,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             # Lazy tensor failures
             DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
-            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
-            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
         ),
     ),
     OpInfo(
