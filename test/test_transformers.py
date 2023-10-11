@@ -2441,6 +2441,9 @@ class TestSDPACudaOnly(NNTestCase):
 
         if isSM86or89Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86 and sm89 for headdim > 192 currently disabled")
+        if is_causal and seq_len_q != seq_len_k:
+            self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
+
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
@@ -2572,6 +2575,9 @@ class TestSDPACudaOnly(NNTestCase):
                     dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
                 dropout_mask = softmax_mask >= 0
                 return dropout_mask
+
+        if fused_kernel == SDPBackend.FLASH_ATTENTION and is_causal and seq_len_q != seq_len_k:
+            self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
 
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
