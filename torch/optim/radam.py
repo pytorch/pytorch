@@ -371,7 +371,12 @@ def _multi_tensor_radam(
         grouped_state_steps,
     ), _) in grouped_tensors.values():
         # Update steps
-        torch._foreach_add_(grouped_state_steps, 1)
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it now and passed it to the API as a tensor already. So we wrap it now.
+        step_device = grouped_state_steps[0].device
+        one = torch.tensor(1.0, device=step_device) if str(step_device) == "cpu" else 1
+        torch._foreach_add_(grouped_state_steps, one)
 
         if has_complex:
             for i in range(len(grouped_params)):
