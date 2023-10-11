@@ -10,6 +10,8 @@ import sys
 sys.setrecursionlimit(5000)  # by default it is 1000
 
 HIGH_KERNEL_VOLUMN = 36864
+import sys
+sys.setrecursionlimit(5000)  # set the recursion limit to 5000
 
 def temporary_log_path(temp_log_path):
     # Store original configuration
@@ -327,7 +329,7 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 20))
+        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 31))
         self.stream_pool = [0] * (self.stream_pool_size + 1)
         self.arg_to_stream = {}
         self.final_order = []
@@ -446,9 +448,9 @@ class SSGraph:
                 else:
                     # fix nop node bug in super_slomo. there are corrosing references between two nop nodes.
                     nop_node_count = 0
-                    for successors in cur_node.successors.values():
-                        if successors.is_nop_node:
-                            nop_node_count += 1
+                    # for successors in cur_node.successors.values():
+                    #     if successors.is_nop_node:
+                    #         nop_node_count += 1
                     if nop_node_count >= 2:
                         cur_node.stream_id = 0
                     else:
@@ -459,9 +461,9 @@ class SSGraph:
             else:
                 # fix nop node bug in super_slomo. there are corrosing references between two nop nodes.
                 nop_node_count = 0
-                for successors in cur_node.successors.values():
-                    if successors.is_nop_node:
-                        nop_node_count += 1
+                # for successors in cur_node.successors.values():
+                #     if successors.is_nop_node:
+                #         nop_node_count += 1
                 if nop_node_count >= 2:
                     cur_node.stream_id = 0
                 else:

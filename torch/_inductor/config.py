@@ -30,8 +30,11 @@ pick_loop_orders = True
 # reuse a kernel input as the output
 inplace_buffers = True
 
+# Enable mutiple streams for codegen
+multiple_streams = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS", "1") == "1"
+
 # allow reusing buffers for more efficient memory use
-allow_buffer_reuse = False
+allow_buffer_reuse = not multiple_streams
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -138,8 +141,7 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
-# Enable mutiple streams for codegen
-multiple_streams = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS", "1") == "1"
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
