@@ -2546,8 +2546,9 @@ def var_mean(
     correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    v = var(a, dim, unbiased, keepdim, correction=correction)
-    m = mean(a, dim, keepdim)
+    correction = utils.set_correction(unbiased, correction)
+    v = torch.var(a, dim, correction=correction, keepdim=keepdim)
+    m = torch.mean(a, dim, keepdim)
     return v, m
 
 
@@ -4821,10 +4822,16 @@ def arange(
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    torch._check(
-        (step > 0 and end >= start) or (step < 0 and end <= start),
-        lambda: "upper bound and lower bound inconsistent with step sign",
-    )
+    if step > 0:
+        torch._check(
+            end >= start,
+            lambda: "upper bound and lower bound inconsistent with step sign",
+        )
+    elif step < 0:
+        torch._check(
+            end <= start,
+            lambda: "upper bound and lower bound inconsistent with step sign",
+        )
 
     def is_finite(x):
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
