@@ -548,7 +548,7 @@ def _export(
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 
