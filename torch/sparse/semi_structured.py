@@ -52,7 +52,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     _FUSE_TRANSPOSE = False
-    _FORCE_CUTLASS = True
+    _FORCE_CUTLASS = False
     _PROTOTYPE_WARNING_SHOWN = False
 
     @staticmethod
@@ -213,6 +213,25 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.sparse_tensor_cutlass = sparse_tensor_cutlass
         self.meta_tensor_cutlass = meta_tensor_cutlass
         self.transposed = transposed
+        self.original_shape = original_shape
+
+    def __tensor_flatten__(self):
+        return ['compressed_tensor_cusparselt', 'sparse_tensor_cutlass'], (self.original_shape, self.transposed, self.meta_tensor_cutlass)
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta):
+        original_shape, transposed, meta_tensor_cutlass = meta
+        assert len(inner_tensors) == 2
+        compressed_tensor_cusparselt = inner_tensors['compressed_tensor_cusparselt']
+        sparse_tensor_cutlass = inner_tensors['sparse_tensor_cutlass']
+        return SparseSemiStructuredTensor(
+            None,
+            original_shape=original_shape,
+            compressed_tensor_cusparselt=compressed_tensor_cusparselt,
+            sparse_tensor_cutlass=sparse_tensor_cutlass,
+            meta_tensor_cutlass=meta_tensor_cutlass,
+            transposed=transposed,
+        )
 
     def __repr__(self) -> str:  # type: ignore[override]
         """Return string representation of SparseSemiStructuredTensor
@@ -247,13 +266,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
         to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
         to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
         if to_pad_m or to_pad_n:
-            warnings.warn(
-                (
-                    "Attempting to do matmul with a dense tensor that does not meet shape requirements."
-                    f"Padding dense input tensor of shape ({m}, {n}) to ({m+to_pad_m}, {n+to_pad_n})."
-                ),
-                UserWarning,
-            )
+            # warnings.warn(
+            #     (
+            #         "Attempting to do matmul with a dense tensor that does not meet shape requirements."
+            #         f"Padding dense input tensor of shape ({m}, {n}) to ({m+to_pad_m}, {n+to_pad_n})."
+            #     ),
+            #     UserWarning,
+            # )
             return torch.nn.functional.pad(original_tensor, (0, to_pad_n, 0, to_pad_m))
         else:
             return original_tensor
@@ -278,11 +297,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
         Raises:
             NotImplementedError: If the dispatched operation is not implemented.
         """
-        #print(func)
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
-                args[0].original_tensor,
+                None,
                 original_shape=args[0].shape,
                 compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
                 sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
@@ -386,14 +404,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         weight.meta_tensor_cutlass,
                         bias=bias
                     )
-                    return res[:row, :]
                 else:
                     res = torch._cslt_sparse_mm(
                         weight.compressed_tensor_cusparselt,  # type: ignore[arg-type]
                         input_tensor_2d_padded.t(),
                         bias
                     ).t()
-                    return res[:row, :].view(*shape[:-1], -1)
+                return res[:row, :].view(*shape[:-1], -1)
 
 
         # handle values
