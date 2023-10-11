@@ -2647,10 +2647,11 @@ def index_impl(x, indices, check):
 
     x_size = x.get_size()
 
-    indexed_size = [x_size[i] for i in range(len(indices))]
+    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
     if 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
+    indexed_size = [x_size[i] for i in range(len(indices))]
     output_size, inner_fn = index_output_size_and_inner_fn(
         x_size,
         indices,
