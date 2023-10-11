@@ -185,11 +185,6 @@ FILE_INLINELIST = {
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
-    "torch.distributed._tensor.api",
-    "torch.distributed._tensor.device_mesh",
-    "torch.distributed.tensor.parallel._data_parallel_utils",
-    "torch.distributed.tensor.parallel._utils",
-    "torch.distributed.tensor.parallel.style",
     "torch.nn.modules.container",
     "torch.optim._functional",
     "torch.random",
@@ -199,8 +194,14 @@ FILE_INLINELIST = {
 
 
 if torch.distributed.is_available():
-    # Inline the checkpoint code from distributed
-    FILE_INLINELIST |= {"torch.distributed.algorithms._checkpoint.checkpoint_wrapper"}
+    FILE_INLINELIST |= {
+        "torch.distributed._tensor.api",
+        "torch.distributed._tensor.device_mesh",
+        "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
+        "torch.distributed.tensor.parallel._data_parallel_utils",
+        "torch.distributed.tensor.parallel._utils",
+        "torch.distributed.tensor.parallel.style",
+    }
 
 # Include optimizer code for tracing
 FILE_INLINELIST |= {
