@@ -17913,7 +17913,7 @@ op_db: List[OpInfo] = [
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
             # MPS failures
-            DecorateInfo(unittest.skip("Crashes"), "TestConsistencyCPU", "test_output_grad_match")
+            DecorateInfo(unittest.skip("Crashes"), "TestConsistency", "test_output_grad_match"),
         ),
     ),
     ReductionOpInfo(
