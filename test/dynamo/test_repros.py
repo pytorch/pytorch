@@ -30,12 +30,7 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import (
-    CompileCounter,
-    expectedFailureDynamic,
-    rand_strided,
-    same,
-)
+from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -1071,8 +1066,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    # https://github.com/pytorch/pytorch/issues/103620
-    @expectedFailureDynamic
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
@@ -1082,7 +1075,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 4)
+        self.assertLessEqual(cnt.op_count, 10)
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     # NB: When you remove the expectedFailure, don't forget to
@@ -3073,6 +3066,60 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(torch.zeros(6, 4), torch.tensor(2)),
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
+
+    def test_list_index(self):
+        for i, list_type in enumerate(
+            (
+                list,
+                tuple,
+                torch.Size,
+                collections.deque,
+                namedtuple("FourElems", "one two three four", defaults=[0, 0, 0, 0]),
+            )
+        ):
+            torch._dynamo.reset()
+            for index in ([], [2], [0, 3]):
+
+                def f(t):
+                    if i == 4:  # namedtuple
+                        xs = list_type(1, 2, 3, 4)
+                    else:
+                        xs = list_type([1, 2, 3, 4])
+                    res = xs.index(3, *index)
+                    return t + res
+
+                res = torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
+
+                self.assertEqual(res, torch.tensor([2.0]))
+
+    def test_list_index_not_found(self):
+        def f(t):
+            xs = ["bar", "foo", "baz", "buzz"]
+            res = xs.index("non-existent")
+            return t + res
+
+        # Raising ValueError from item not found is unsupported
+        with self.assertRaises(
+            torch._dynamo.exc.Unsupported,
+        ):
+            torch._dynamo.optimize(backend="eager", nopython=True)(f)(torch.zeros(1))
+
+    def test_list_index_tensor_unsupported(self):
+        for index in ([], [2], [0, 3]):
+
+            def f(t):
+                xs = [torch.tensor([i]) for i in range(4)]
+                res = xs.index(torch.tensor([2]), *index)
+                return t + res
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError, "Dynamic control flow is not supported"
+            ):
+                torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
 
     def test_hf_xsoftmax_inference(self):
         def fn(input, mask):

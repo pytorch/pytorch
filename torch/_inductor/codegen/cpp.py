@@ -381,6 +381,10 @@ class CppPrinter(ExprPrinter):
             il = "{" + ", ".join(args) + "}"
             return f"std::max({il})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"std::abs({self._print(expr.args[0])})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint
@@ -843,7 +847,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def to_dtype_bitcast(x, dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"reinterpret_cast<{DTYPE_TO_CPP[dtype]}&>({x})"
+        return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):

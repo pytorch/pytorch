@@ -126,9 +126,9 @@ jobs:
           { config: "default",
             shard: 1,
             num_shards: 1,
-            runner: "macos-12",
+            runner: "macos-13-xlarge",
             ios_platform: "SIMULATOR",
-            ios_arch: "x86_64",
+            ios_arch: "arm64",
             use_lite_interpreter: 1,
             use_metal: 0,
             use_coreml: 1,
@@ -137,7 +137,7 @@ jobs:
           { config: "default",
             shard: 1,
             num_shards: 1,
-            runner: "macos-12",
+            runner: "macos-13-xlarge",
             ios_platform: "OS",
             ios_arch: "arm64",
             use_lite_interpreter: 1,
@@ -189,7 +189,14 @@ jobs:
     with:
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-20.04-16x" },
+          { config: 'default',
+            shard: 1,
+            num_shards: 1,
+            runner: 'ubuntu-20.04-16x',
+            use_lite_interpreter: 1,
+            # Just set x86 for testing here
+            support_abi: 'x86',
+          },
         ]}
 
   linux-vulkan-focal-py3_11-clang10-build:

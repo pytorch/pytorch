@@ -317,6 +317,12 @@ class BaseSchedulerNode:
                                 ir.AliasedLayout,
                             ),
                         )
+                        and not (
+                            isinstance(
+                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
+                            )
+                            and input_node.node.has_aliasing()
+                        )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
@@ -500,6 +506,8 @@ class BaseSchedulerNode:
         dtype = None
         if not self.node:
             assert self.snodes
+            if not self.snodes[0].node:
+                return 0
             layout = self.snodes[0].node.get_layout()
             dtype = self.snodes[0].node.get_dtype()
         else:
@@ -530,19 +538,23 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(input) for input in self.node.inputs
+                        ir_node_to_tensor(input, guard_shape=False)
+                        for input in self.node.inputs
                     ]
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
 
                     # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
-                    factor = 0.5
+                    factor = 1.0
                     counted_flops = flop_counter_mode.get_total_flops()
-                    return factor * counted_flops / gpu_flops
+
+                    # Return estimated runtime in nanoseconds
+                    return (factor * counted_flops / gpu_flops) * 1e9
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
         ):
+            # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
         # TODO(xmfan): add support for CollectiveKernel
@@ -684,20 +696,21 @@ class SchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def _get_atomic_add_buffers(self) -> Set[str]:
         buffers_store_as_atomic_add = set()
-        for node in self._body.get_nodes():
-            if (
-                node.op == "call_method"
-                and node.target == "store"
-                and (
-                    ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
-                    or (len(node.args) == 5 and node.args[4] == "atomic_add")
-                )
-            ):
-                buffers_store_as_atomic_add.add(
-                    node.kwargs["name"]
-                    if "name" in node.kwargs
-                    else (node.args[1] if len(node.args) >= 2 else "")
-                )
+        if isinstance(self._body, ir.LoopBody):
+            for node in self._body.get_nodes():
+                if (
+                    node.op == "call_method"
+                    and node.target == "store"
+                    and (
+                        ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
+                        or (len(node.args) == 5 and node.args[4] == "atomic_add")
+                    )
+                ):
+                    buffers_store_as_atomic_add.add(
+                        node.kwargs["name"]
+                        if "name" in node.kwargs
+                        else (node.args[1] if len(node.args) >= 2 else "")
+                    )
         return buffers_store_as_atomic_add
 
     def has_atomic_add(self, check_buf):
@@ -944,6 +957,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
+            self.node = None
 
             self.node = None
             self.users = None
@@ -1232,8 +1246,11 @@ class Scheduler:
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
-                assert s not in unbacked_symbol_to_origin_node
-                unbacked_symbol_to_origin_node[s] = node
+                # Pick the first definer as canonical.  There may be multiple
+                # because if a MultiOutputLayout buffer propagates an unbacked
+                # symint to multiple outputs, they will all claim to def it.
+                if s not in unbacked_symbol_to_origin_node:
+                    unbacked_symbol_to_origin_node[s] = node
 
             # if a kernel takes unbacked symints, register dependencies
             for s in node.node.get_unbacked_symbol_uses():
@@ -1502,7 +1519,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heursitic would be to use live
+        A better but difficult to implement heurisitic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of
@@ -1822,6 +1839,18 @@ class Scheduler:
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            try:
+                log.debug(
+                    "Generating code for node %s with estimated runtime %f",
+                    node.get_name(),
+                    node.get_estimated_runtime(),
+                )
+            except Exception:
+                log.error(
+                    "Generating code for node %s with estimated runtime 0.0",
+                    node.get_name(),
+                )
+
             self.enter_context(node)
 
             if not isinstance(node, NopKernelSchedulerNode):
@@ -1861,6 +1890,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.debug_check_inf_and_nan:
+                V.graph.wrapper_code.generate_inf_and_nan_checker(node)
 
             if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()
