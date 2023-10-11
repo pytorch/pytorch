@@ -16,7 +16,6 @@ from .wrapper import (
     FreeIfNotReusedLine,
     MemoryPlanningLine,
     NullLine,
-    pexpr,
     ReuseLine,
 )
 
@@ -193,8 +192,9 @@ class Allocation(AllocationTreeNode):
         node = self.node
         shape = tuple(node.get_size())
         stride = tuple(node.get_stride())
-        return wrapper.codegen_alloc_from_pool(self.pool.name, self.offset, node.get_dtype(),
-                                               shape, stride)
+        return wrapper.codegen_alloc_from_pool(
+            self.pool.name, self.offset, node.get_dtype(), shape, stride
+        )
 
     def __repr__(self):
         return (

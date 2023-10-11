@@ -908,7 +908,7 @@ class WrapperCodeGen(CodeGen):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
-        del_line = ""
+        del_line = ";"
         if old_name not in V.graph.get_output_names() and delete_old:
             del_line = f"; {self.make_buffer_free(old)}"
 
@@ -918,7 +918,7 @@ class WrapperCodeGen(CodeGen):
         reinterpret_view = self.codegen_reinterpret_view(
             old_name, new.get_size(), new.get_stride(), 0, self.wrapper_call
         )
-        return f"{self.declare}{new_name} = {reinterpret_view}{del_line};  {self.comment} reuse"
+        return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
