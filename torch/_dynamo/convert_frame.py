@@ -427,8 +427,8 @@ def patch_config_if_changed():
     if saved_config_hash != current_config_hash:
         patch = eval_frame.DYNAMO_SAVED_CONFIG
         recompiles_log.debug(
-            "Restoring Dynamo config due to hash mismatch",
-            f"Saved: {saved_config_hash}, Current: {current_config_hash}",
+            "Restoring Dynamo config due to hash mismatch. Saved: %s, Current: %s",
+            saved_config_hash, current_config_hash
         )
 
 
