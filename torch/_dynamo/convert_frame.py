@@ -427,9 +427,26 @@ def patch_config_if_changed():
     if saved_config_hash != current_config_hash:
         patch = eval_frame.DYNAMO_SAVED_CONFIG
         recompiles_log.debug(
-            "Restoring Dynamo config due to hash mismatch. Saved: %s, Current: %s",
-            saved_config_hash, current_config_hash
+            "Current config does not match config saved when compiling"
         )
+        recompiles_log.debug(
+            "Saved hash: %s, Current hash: %s",
+            saved_config_hash,
+            current_config_hash,
+        )
+        config_dict_ref = config.to_dict()
+        recompiles_log.debug("Restoring saved config.")
+        if recompiles_log.isEnabledFor(logging.DEBUG):
+            for key in patch:
+                if patch[key] != config_dict_ref[key]:
+                    recompiles_log.debug(
+                        "Restoring: %s=%s (prev: %s)",
+                        key,
+                        patch[key],
+                        config_dict_ref[key],
+                    )
+
+    return patch
 
 
 def maybe_cprofile(func):

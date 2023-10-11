@@ -333,24 +333,25 @@ def get_config_and_hash(dynamic=None):
     dynamo_config = config.get_config_copy()
     for k in dynamo_config_guard_ignorelist:
         dynamo_config.pop(k)
-    for key in dynamo_config_guard_string_serialization_list:
-        dynamo_config.update({key: str(dynamo_config[key])})
 
     # Set appropriate dynamo config flags
     if dynamic is None:
         pass
     elif dynamic:
+        dynamo_config.update({"assume_static_by_default": False})
+    else:
         dynamo_config.update(
             {"automatic_dynamic_shapes": False, "assume_static_by_default": True}
         )
-    else:
-        dynamo_config.update({"assume_static_by_default": False})
 
-    dynamo_config_bytes = pickle.dumps(
-        dict(
-            sorted(dynamo_config.items())
-        )  # Try to make serialization more deterministic
-    )
+    serialized_config = dict(dynamo_config)
+    # Only string-serialize for the hash
+    for key in dynamo_config_guard_string_serialization_list:
+        serialized_config.update({key: str(dynamo_config[key])})
+
+    # Try to make serialization more deterministic
+    dynamo_config_bytes = pickle.dumps(dict(sorted(serialized_config.items())))
+
     sha256_hash = hashlib.sha256(dynamo_config_bytes).hexdigest()
     return dynamo_config, sha256_hash
 
