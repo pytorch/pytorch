@@ -46,7 +46,7 @@ cxx_library(
     link_whole = True,
     platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
     preprocessor_flags = [
-        '-DC10_BUILD_MAIN_LIB'
+        '-DC10_BUILD_MAIN_LIB',
         '-DHAVE_MMAP=1',
         '-DHAVE_SHM_OPEN=1',
         '-DHAVE_SHM_UNLINK=1',
