@@ -185,7 +185,7 @@ class FileManager:
     def write(
         self,
         filename: str,
-        env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]],
+        env_callable: Callable[[], Union[str, Dict[str, Any]]],
     ) -> None:
         self.write_with_template(filename, filename, env_callable)
 

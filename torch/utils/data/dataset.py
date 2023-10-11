@@ -4,7 +4,6 @@ import math
 from typing import (
     Generic,
     Iterable,
-    Iterator,
     List,
     Optional,
     Sequence,
@@ -72,7 +71,7 @@ class Dataset(Generic[T_co]):
     # in pytorch/torch/utils/data/sampler.py
 
 
-class IterableDataset(Dataset[T_co]):
+class IterableDataset(Dataset[T_co], Iterable[T_co]):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -180,8 +179,6 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-    def __iter__(self) -> Iterator[T_co]:
-        raise NotImplementedError("Subclasses of IterableDataset should implement __iter__.")
 
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
@@ -253,6 +250,39 @@ class StackDataset(Dataset[T_stack]):
         if isinstance(self.datasets, dict):
             return {k: dataset[index] for k, dataset in self.datasets.items()}
         return tuple(dataset[index] for dataset in self.datasets)
+
+    def __getitems__(self, indices: list):
+        # add batched sampling support when parent datasets supports it.
+        if isinstance(self.datasets, dict):
+            dict_batch: List[T_dict] = [{} for _ in indices]
+            for k, dataset in self.datasets.items():
+                if callable(getattr(dataset, "__getitems__", None)):
+                    items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
+                    if len(items) != len(indices):
+                        raise ValueError("Nested dataset's output size mismatch."
+                                         f" Expected {len(indices)}, got {len(items)}")
+                    for data, d_sample in zip(items, dict_batch):
+                        d_sample[k] = data
+                else:
+                    for idx, d_sample in zip(indices, dict_batch):
+                        d_sample[k] = dataset[idx]
+            return dict_batch
+
+        # tuple data
+        list_batch: List[list] = [[] for _ in indices]
+        for dataset in self.datasets:
+            if callable(getattr(dataset, "__getitems__", None)):
+                items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
+                if len(items) != len(indices):
+                    raise ValueError("Nested dataset's output size mismatch."
+                                     f" Expected {len(indices)}, got {len(items)}")
+                for data, t_sample in zip(items, list_batch):
+                    t_sample.append(data)
+            else:
+                for idx, t_sample in zip(indices, list_batch):
+                    t_sample.append(dataset[idx])
+        tuple_batch: List[T_tuple] = [tuple(sample) for sample in list_batch]
+        return tuple_batch
 
     def __len__(self):
         return self._length

@@ -212,6 +212,9 @@ try:
             self.validator.add_assertion(number >= 0)
             return number ** 0.5
 
+        def abs(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.Abs(number)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -263,6 +266,7 @@ try:
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
+            operator.abs: lift(ops.abs),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -643,6 +647,7 @@ def bisect(shape_env):
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
             tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
             new_with_shape_env(shape_env, fake.storage_offset()),
+            fake.is_nested,
         )
 
     # Checks whether the given shape_env fails when produce_guards is called.

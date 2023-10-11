@@ -4,15 +4,15 @@ import operator
 import traceback
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, List, Tuple
 
 import sympy
 
 import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
-from torch.export import InputDim
 from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
+from torch.export import InputDim
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -88,7 +88,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         # We use post-order traversal to collect all the proxies callbacks needed, construct
         # the error message callbacks, and at the top-level traversal tree we execute all the callbacks.
         # We need the callbacks because, in order to call the function to create a proxy for shape[0], we
-        # need the proxy for shape, which further requries the proxy for ret[1], etc.
+        # need the proxy for shape, which further requires the proxy for ret[1], etc.
         def add_assertions(val):
             call_backs = []
             messages = []
@@ -255,7 +255,7 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
         # input dim N >=2 generalizes to N < 2. Ideally we should check that:
         # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
         # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
-        # Above can be achieved via a seperate pass.
+        # Above can be achieved via a separate pass.
         with graph.inserting_after(dim_node):
             if min_val > 2:
                 self._insert_assert_async_inplace(

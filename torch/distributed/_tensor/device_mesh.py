@@ -93,10 +93,10 @@ def _get_device_handle(device_type: str = "cuda"):
     """
     Get the module corresponding to the device_type which is cuda or cuda-like device.
     For example, when the device_type is cuda, the module `torch.cuda` is returned.
-    Return None when device_type is cpu or there is no corresponding module,
-    otherwise return the corresponding module.
+    Return None when there is no corresponding module for device_type, otherwise
+    return the corresponding module.
     """
-    return getattr(torch, device_type, None) if device_type != "cpu" else None
+    return getattr(torch, device_type, None)
 
 
 class DeviceMesh:
@@ -160,6 +160,10 @@ class DeviceMesh:
             else torch.tensor(mesh, dtype=torch.int)
         )
         self.mesh_dim_names = mesh_dim_names
+
+        # private field to pre-generate DeviceMesh's hash
+        self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -208,7 +212,7 @@ class DeviceMesh:
             )
 
         # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type)
+        self_mesh = self.mesh.to(self.device_type).contiguous()
         mesh_tensor = funcol.all_gather_tensor(
             self_mesh, gather_dim=0, group=_get_default_group()
         )
@@ -278,14 +282,17 @@ class DeviceMesh:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash((self.mesh, id(self)))
+        return self._hash
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
-        if id(self) == id(other):
+        if id(self.mesh) == id(other.mesh):
             return True
-        return self.mesh.equal(other.mesh)
+        return (
+            self.mesh.shape == other.mesh.shape
+            and self._flatten_mesh_list == other._flatten_mesh_list
+        )
 
     def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
         """

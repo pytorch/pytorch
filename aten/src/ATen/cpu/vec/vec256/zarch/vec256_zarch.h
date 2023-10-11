@@ -1045,6 +1045,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> atan() const {
     return mapSleef(Sleef_atanf4_u10, Sleef_atand2_u10);
   }
+  Vectorized<T> atanh() const {
+    return mapSleef(Sleef_atanhf4_u10, Sleef_atanhd2_u10);
+  }
 
   Vectorized<T> erf() const {
     return mapSleef(Sleef_erff4_u10, Sleef_erfd2_u10);
@@ -1136,6 +1139,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   Vectorized<T> erfinv() const {
     return mapOrdinary(calc_erfinv);
+  }
+
+  Vectorized<T> digamma() const {
+    return mapOrdinary(calc_digamma);
   }
 
   Vectorized<T> igamma(const Vectorized<T>& x) const {

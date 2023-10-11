@@ -743,7 +743,9 @@ class TestSymNumberMagicMethods(TestCase):
         unhashable = (
             create_symint(shape_env, 3),
             create_symbool(shape_env, True),
-            create_symfloat(shape_env, 4.2),
+            # We should be passing in float here, but create_symbol currently
+            # only supports int
+            create_symfloat(shape_env, 3),
         )
 
         for x in unhashable:
@@ -751,9 +753,9 @@ class TestSymNumberMagicMethods(TestCase):
                 hash(x)
 
         # Singleton SymInt, constant SymBool, SymNode are hashable
-        j1 = torch._C._get_singleton_int(1)
-        j1_copy = torch._C._get_singleton_int(1)
-        j2 = torch._C._get_singleton_int(2)
+        j1 = torch._C._get_singleton_int(1, 1)
+        j1_copy = torch._C._get_singleton_int(1, 1)
+        j2 = torch._C._get_singleton_int(2, 1)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
@@ -773,9 +775,9 @@ class TestSymNumberMagicMethods(TestCase):
         hash(m)
 
     def test_non_symbolic_symnode(self):
-        j1 = torch._C._get_singleton_int(1)
-        j2 = torch._C._get_singleton_int(1)
-        j3 = torch._C._get_singleton_int(3)
+        j1 = torch._C._get_singleton_int(1, 1)
+        j2 = torch._C._get_singleton_int(1, 1)
+        j3 = torch._C._get_singleton_int(3, 1)
 
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)
@@ -784,7 +786,8 @@ class TestSymNumberMagicMethods(TestCase):
             j1 + 3
 
         self.assertFalse(j1 == 3)
-        self.assertFalse(3 >= j2)
+        with self.assertRaisesRegex(RuntimeError, "indeterminate"):
+            self.assertFalse(3 >= j2)
 
         self.assertIs(j1 == j1, True)
         self.assertIs(j1 == j2, True)
@@ -1035,7 +1038,7 @@ class TestDimConstraints(TestCase):
         from torch.fx.experimental.symbolic_shapes import DimConstraints
 
         s = Symbol("s", positive=True, integer=True)
-        dim_constraints = DimConstraints({}, {}, set())
+        dim_constraints = DimConstraints({}, {}, set(), {})
         dim_constraints._congruences[s] = {
             (s / 2) % 2,
             (s / 2) % 8,
@@ -1130,7 +1133,7 @@ class TestDimConstraints(TestCase):
         }
         var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
         marked_dynamic = {s0, s1, s5, s6}
-        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic)
+        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic, {})
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
         dim_constraints.add_equality(src4, s0)
