@@ -9465,6 +9465,14 @@ op_db: List[OpInfo] = [
                        # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_out_arg_all_dtypes',
                                     dtypes=[torch.cfloat, torch.cdouble]),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_inplace',
+                                    dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_inplace',
+                                    dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace',
+                                    dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace_all_strides',
+                                    dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
                    ),
                    supports_fwgrad_bwgrad=True,
                    assert_autodiffed=True,
@@ -9473,8 +9481,7 @@ op_db: List[OpInfo] = [
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
-                   supports_forward_ad=True,
-                   promotes_int_to_float=True),
+                   supports_forward_ad=True),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    aliases=('arccos', ),
@@ -10814,7 +10821,6 @@ op_db: List[OpInfo] = [
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
-                    promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     assert_autodiffed=True,
@@ -10831,7 +10837,6 @@ op_db: List[OpInfo] = [
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
-                    promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     assert_autodiffed=True,
@@ -12241,7 +12246,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           promotes_int_to_float=True,
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided_partial_views,
@@ -15229,7 +15233,6 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.complex64: 3e-4, torch.bfloat16: 3e-1}),),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   promotes_int_to_float=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/52549
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -15246,6 +15249,12 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.bfloat16]),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_inplace',
+                                    dtypes=[torch.bool]),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_inplace',
+                                    dtypes=[torch.bool]),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace',
+                                    dtypes=[torch.bool]),
                    ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
