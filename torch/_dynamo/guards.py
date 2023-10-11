@@ -109,7 +109,10 @@ CLOSURE_VARS = collections.OrderedDict(
             "___skip_backend_check",
             lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode,
         ),
-        ("___current_config_hash", lambda: torch._dynamo.eval_frame.DYNAMO_SAVED_CONFIG_HASH),
+        (
+            "___current_config_hash",
+            lambda: torch._dynamo.eval_frame.DYNAMO_SAVED_CONFIG_HASH,
+        ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),

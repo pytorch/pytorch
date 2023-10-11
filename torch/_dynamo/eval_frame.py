@@ -292,8 +292,12 @@ dynamo_config_guard_ignorelist = {
 
 dynamo_config_guard_nonserializable_list = {
     # "is_fbcode",  # function def (removed by ConfigModule visit)
+    # "traceable_tensor_subclasses",
+}
+
+dynamo_config_guard_string_serialization_list = {
     "constant_functions",  # PyCapsules (i.e. function ptrs)
-    "skipfiles_inline_module_allowlist",  # cannot pickle module (unused)
+    "traceable_tensor_subclasses",  # Cannot pickle local object
 }
 
 # The config to restore to should dynamo compile / recompile when
@@ -334,6 +338,8 @@ def get_config_and_hash(dynamic=None):
         dynamo_config.pop(k)
     for k in dynamo_config_guard_nonserializable_list:
         dynamo_config.pop(k)
+    for key in dynamo_config_guard_string_serialization_list:
+        dynamo_config.update({key: str(dynamo_config[key])})
 
     # Set appropriate dynamo config flags
     if dynamic is None:
@@ -391,7 +397,10 @@ class _TorchDynamoContext:
     def save_and_hash_config(self):
         # save current value of dynamo configs
         self.saved_config, self.saved_config_hash = get_config_and_hash(self.dynamic)
-        log.debug("Saved dynamo config and hash for new compiled object. Hash: %s", self.saved_config_hash)
+        log.debug(
+            "Saved dynamo config and hash for new compiled object. Hash: %s",
+            self.saved_config_hash,
+        )
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
