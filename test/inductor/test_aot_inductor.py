@@ -63,6 +63,7 @@ class AOTInductorModelRunner:
             example_inputs,
             options=options,
             constraints=constraints,
+            remove_runtime_assertions=True,
         )
         return so_path, exported
 
@@ -186,6 +187,19 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_small_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"always_keep_tensor_constants": True}):
+            self.check_model(Model().to(self.device), example_inputs)
 
     def test_output_path(self):
         class Model(torch.nn.Module):
@@ -685,10 +699,18 @@ class AOTInductorTestsTemplate:
             torch.tensor([1, 1, 1], device="cuda"),
             torch.randn((1, 32), dtype=torch.float16, device="cuda"),
         )
-        with torch._dynamo.config.patch(
-            {"add_runtime_assertions_for_inline_constraints": False}
-        ):
-            self.check_model(Repro(), example_inputs)
+        self.check_model(Repro(), example_inputs)
+
+    def test_repeat_interleave(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
+
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
         class Model(torch.nn.Module):
@@ -837,9 +859,6 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cpu",), is_skip=True
-        ),
     },
 )
 
@@ -856,11 +875,6 @@ copy_tests(
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cuda",), is_skip=True
-        ),
-    },
 )
 
 

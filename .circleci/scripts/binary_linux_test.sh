@@ -54,7 +54,7 @@ fi
 
 
 
-# Move debug wheels out of the the package dir so they don't get installed
+# Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
 mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to move"
 
