@@ -396,6 +396,7 @@ aten::_masked_softmax
 aten::_masked_softmax.out
 aten::_masked_softmax_backward
 aten::_masked_softmax_backward.out
+aten::_mixed_dtypes_linear
 aten::_mkldnn_reshape
 aten::_mkldnn_reshape.out
 aten::_mkldnn_transpose
