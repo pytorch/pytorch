@@ -2,11 +2,10 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
-//#include <c10/core/Allocator.h>
 
 namespace c10 {
 struct StorageImpl;
-struct DataPtr;
+class DataPtr;
 }; // namespace c10
 
 namespace c10::impl::cow {
