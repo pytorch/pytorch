@@ -45,6 +45,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
@@ -3951,6 +3952,18 @@ class FallbackKernel(ExternKernelAlloc):
             return devices[0]
         return None
 
+    def has_side_effects(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return get_schema_info(self.op_overload).is_mutable()
+
+    def has_aliasing(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return torch._inductor.utils.is_view(self.op_overload)
+
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
     # and run it with a host side proxy executor to address the ABI problem
@@ -4061,6 +4074,15 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
+
+        def tensor_to_layout(output: torch.Tensor):
+            return FixedLayout(
+                output.device,
+                output.dtype,
+                convert_shape_to_inductor(output.size()),
+                convert_shape_to_inductor(output.stride()),
+            )
+
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -4078,12 +4100,7 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
-                    FixedLayout(
-                        output.device,
-                        output.dtype,
-                        convert_shape_to_inductor(output.size()),
-                        convert_shape_to_inductor(output.stride()),
-                    ),
+                    tensor_to_layout(output),
                     packed,
                     indices,
                 )
@@ -4150,6 +4167,12 @@ class MultiOutput(ExternKernel):
 
     def should_allocate(self):
         return False
+
+    def has_aliasing(self):
+        return any(
+            isinstance(inp, FallbackKernel) and inp.has_aliasing()
+            for inp in self.inputs
+        )
 
 
 def _prepare_convolution_fusion_create(
