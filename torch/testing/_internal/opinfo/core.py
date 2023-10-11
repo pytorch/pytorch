@@ -1502,12 +1502,11 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault("inplace_variant", None)
         kwargs.setdefault("sample_inputs_func", sample_inputs_func)
-        super().__init__(name, **kwargs)
+        super().__init__(name, promotes_int_to_float=promotes_int_to_float, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
         self.supports_multiple_dims = supports_multiple_dims
-        self.promotes_int_to_float = promotes_int_to_float
         self.promotes_int_to_int64 = promotes_int_to_int64
         self.complex_to_real = complex_to_real
         self.result_dtype = result_dtype
