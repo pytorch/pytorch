@@ -73,6 +73,8 @@ decomps_to_exclude = [
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
     aten.split.Tensor,  # inductor lowers this directly
+    aten.squeeze,  # inductor lowers this directly
+    aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
 ]
 

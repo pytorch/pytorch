@@ -1283,6 +1283,11 @@ void initJITBindings(PyObject* module) {
           "singleton_int",
           [](const c10::SymNode& node) {
             return node->singleton_int();
+          })
+      .def(
+          "singleton_coeff",
+          [](const c10::SymNode& node) {
+            return node->singleton_coeff();
           });
 
   // clang-format on
