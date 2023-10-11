@@ -124,6 +124,7 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
 // f16 vector types
 struct __align__(2) f16x1 {
   __half vals[1];
@@ -714,6 +715,67 @@ void launch_tinygemm_kernel(
       func));
 }
 
+// FIXME: parallelize better, smem staging etc?
+template <int InnerKTiles>
+__global__ void matrix_to_m16n8k16_Bint4_layout(
+    // size [n][k]
+    const at::PackedTensorAccessor32<int32_t, 2, at::RestrictPtrTraits> in,
+    // size [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]
+    at::PackedTensorAccessor32<int32_t, 4, at::RestrictPtrTraits> out) {
+  // int4 values are packed into int32 values, which require at least 8. Given
+  // m16n8k16 B layout requires 4 scalar values/lane, the minimum number of
+  // innermost k-tiles that we can use is 2.
+  static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles), "");
+
+  constexpr int32_t kMTileSize = 16;
+  constexpr int32_t kNTileSize = 8;
+  constexpr int32_t kKTileSize = 16;
+
+  // gridDim.x corresponds to the number of k-tiles divided by InnerKTiles
+  auto kOuterTile = blockIdx.x;
+  auto nTile = blockIdx.y;
+  auto t = threadIdx.x;
+
+  // Two k-tiles are packed into an int32 at a time
+#pragma unroll
+  for (int innerKTile = 0; innerKTile < InnerKTiles; innerKTile += 2) {
+    // n dimension that this lane loads from
+    auto n0 = nTile * kNTileSize + (t / 4);
+
+    bool n0Valid = n0 < in.size(0);
+
+    int32_t ks[8];
+
+    auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize;
+    ks[0] = kBase0 + (t % 4) * 2;
+    ks[1] = ks[0] + 1;
+    ks[2] = ks[0] + 8;
+    ks[3] = ks[0] + 8 + 1;
+
+    auto kBase1 = kBase0 + kKTileSize;
+    ks[4] = kBase1 + (t % 4) * 2;
+    ks[5] = ks[4] + 1;
+    ks[6] = ks[4] + 8;
+    ks[7] = ks[4] + 8 + 1;
+
+    auto pIn = &in[n0][0];
+
+    uint32_t v[8];
+#pragma unroll
+    for (int i = 0; i < 8; ++i) {
+      v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint32_t(0);
+    }
+
+    int32_t pack = (v[7] << 28) | (v[5] << 24) | (v[3] << 20) | (v[1] << 16) |
+        (v[6] << 12) | (v[4] << 8) | (v[2] << 4) | v[0];
+
+    // inner k-tiles pack two at a time
+    out[nTile][kOuterTile][t][innerKTile / 2] = pack;
+  }
+}
+
+#endif
+
 
 torch::Tensor _weight_int4pack_mm_cuda(
     const torch::Tensor& A,
@@ -892,65 +954,6 @@ torch::Tensor _weight_int4pack_mm_cuda(
 #endif
   TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
   return C_final;
-}
-
-// FIXME: parallelize better, smem staging etc?
-template <int InnerKTiles>
-__global__ void matrix_to_m16n8k16_Bint4_layout(
-    // size [n][k]
-    const at::PackedTensorAccessor32<int32_t, 2, at::RestrictPtrTraits> in,
-    // size [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]
-    at::PackedTensorAccessor32<int32_t, 4, at::RestrictPtrTraits> out) {
-  // int4 values are packed into int32 values, which require at least 8. Given
-  // m16n8k16 B layout requires 4 scalar values/lane, the minimum number of
-  // innermost k-tiles that we can use is 2.
-  static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles), "");
-
-  constexpr int32_t kMTileSize = 16;
-  constexpr int32_t kNTileSize = 8;
-  constexpr int32_t kKTileSize = 16;
-
-  // gridDim.x corresponds to the number of k-tiles divided by InnerKTiles
-  auto kOuterTile = blockIdx.x;
-  auto nTile = blockIdx.y;
-  auto t = threadIdx.x;
-
-  // Two k-tiles are packed into an int32 at a time
-#pragma unroll
-  for (int innerKTile = 0; innerKTile < InnerKTiles; innerKTile += 2) {
-    // n dimension that this lane loads from
-    auto n0 = nTile * kNTileSize + (t / 4);
-
-    bool n0Valid = n0 < in.size(0);
-
-    int32_t ks[8];
-
-    auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize;
-    ks[0] = kBase0 + (t % 4) * 2;
-    ks[1] = ks[0] + 1;
-    ks[2] = ks[0] + 8;
-    ks[3] = ks[0] + 8 + 1;
-
-    auto kBase1 = kBase0 + kKTileSize;
-    ks[4] = kBase1 + (t % 4) * 2;
-    ks[5] = ks[4] + 1;
-    ks[6] = ks[4] + 8;
-    ks[7] = ks[4] + 8 + 1;
-
-    auto pIn = &in[n0][0];
-
-    uint32_t v[8];
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-      v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint32_t(0);
-    }
-
-    int32_t pack = (v[7] << 28) | (v[5] << 24) | (v[3] << 20) | (v[1] << 16) |
-        (v[6] << 12) | (v[4] << 8) | (v[2] << 4) | v[0];
-
-    // inner k-tiles pack two at a time
-    out[nTile][kOuterTile][t][innerKTile / 2] = pack;
-  }
 }
 
 // input is [n][k] (int32 dtype)
