@@ -75,7 +75,7 @@ class Adam(Optimizer):
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s['step'] = torch.tensor(float(s['step']), dtype=torch.float)
 
     def _init_group(
         self,
@@ -105,7 +105,7 @@ class Adam(Optimizer):
                     state['step'] = (
                         torch.zeros((), dtype=torch.float, device=p.device)
                         if group['capturable'] or group['fused']
-                        else torch.tensor(0.)
+                        else torch.tensor(0.0, dtype=torch.float)
                     )
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
