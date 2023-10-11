@@ -117,10 +117,13 @@ class NestedTensor(torch.Tensor):
 
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
+
         # SymNodes are not serializable
-        if "_size" in state:
-            state = dict(state)
-            del state["_size"]
+        assert "_size" in state and "_strides" in state
+        state = dict(state)
+        del state["_size"]
+        del state["_strides"]
+
         func = NestedTensor
         args = (self._values, self._offsets)
         return (torch._tensor._rebuild_from_type_v2, (func, type(self), args, state))
@@ -190,12 +193,22 @@ def jagged_from_list(
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
     assert len(set(t.dtype for t in tensors)) == 1  # noqa: C401
     assert len(set(t.device for t in tensors)) == 1  # noqa: C401
+
+    # Check that the NT is representable by the jagged layout.
+    # Jagged layout represents (B, *, D_0, D_1, ..., D_N), where the only
+    # raggedness allowed is for the single dim immediately adjacent to the batch dim.
     sizes = [t.shape for t in tensors]
     non_first_sizes = [s[1:] for s in sizes]
     at_most_first_ragged = all(s == non_first_sizes[0] for s in non_first_sizes)
-    assert at_most_first_ragged
+    if not at_most_first_ragged:
+        raise RuntimeError(
+            "Cannot represent given tensor list as a nested tensor with the jagged layout. "
+            "Note that the jagged layout only represents shapes of the form "
+            "(B, *, D_0, D_1, ..., D_N), with only * allowed to be ragged."
+        )
 
     values = torch.cat(tensors, dim=0)
+    # Jagged layout specifies that offsets are stored as int64 on the buffer's device.
     _offsets = torch.cat(
         [
             torch.zeros(1, dtype=torch.int64, device=values.device),
