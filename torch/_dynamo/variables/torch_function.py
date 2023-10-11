@@ -70,7 +70,7 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
     from .tensor import TensorWithTFOverrideVariable
 
-    all_args = args + tree_flatten(kwargs)[0]
+    all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
         lambda x: x.subclass_type,
@@ -80,7 +80,7 @@ def dispatch_torch_function(tx, fn, args, kwargs):
         res = arg.call_torch_function(
             tx,
             fn,
-            TupleVariable(list({arg.subclass_type_var() for arg in overloaded_args})),
+            TupleVariable([arg.subclass_type_var() for arg in overloaded_args]),
             args,
             kwargs,
         )

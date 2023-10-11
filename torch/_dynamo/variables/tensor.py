@@ -856,25 +856,16 @@ class TensorWithTFOverrideVariable(VariableTracker):
         # of `call_method`.
         if tx.output.torch_function_enabled:
             import torch
-            from torch.utils._pytree import tree_flatten
             from .builder import SourcelessBuilder
-            from .lists import TupleVariable
+            from .torch_function import dispatch_torch_function
 
             options = VariableTracker.propagate(self, args, kwargs.values())
-            args = [self] + list(args)
             # [Note: __torch_function__] Currently we only support methods that are defined on tensor
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
-            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
-            all_args = args + tree_flatten(kwargs)[0]
-            types = TupleVariable(
-                [
-                    a.subclass_type_var()
-                    for a in all_args
-                    if isinstance(a, TensorWithTFOverrideVariable)
-                ]
+            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name)).add_options(
+                options
             )
-
-            return self.call_torch_function(tx, func_var, types, args, kwargs)
+            return dispatch_torch_function(tx, func_var, args, kwargs)
         else:
             return self.tensor_variable.call_method(tx, name, args, kwargs)
 
