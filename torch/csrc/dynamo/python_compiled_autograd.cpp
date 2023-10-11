@@ -320,6 +320,7 @@ variable_list compiled_autograd(
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
+
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
         .mark_output(output_edges[i].input_nr, i);
@@ -464,13 +465,15 @@ variable_list compiled_autograd(
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
     cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
-  }
+  } // End cache miss region
 
   // TODO(jansel): we should release all the variables and then use a
   //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
-  for (auto& call : calls) {
-    call->node->release_variables();
+  if (!graph_task.keep_graph_) {
+    for (auto& call : calls) {
+      call->node->release_variables();
+    }
   }
 
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));

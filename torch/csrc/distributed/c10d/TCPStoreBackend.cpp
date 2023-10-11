@@ -165,7 +165,21 @@ void TCPStoreMasterDaemon::closeStopSignal() {
 
 void TCPStoreMasterDaemon::stop() {
   if (controlPipeFd_[1] != -1) {
-    ::write(controlPipeFd_[1], "\0", 1);
+    ssize_t written_bytes = -1;
+    while (true) {
+      written_bytes = ::write(controlPipeFd_[1], "\0", 1);
+      if (written_bytes < 0) {
+        if (errno == EAGAIN) {
+          continue;
+        }
+        TORCH_CHECK(false, "Failed to write the control pipe:", errno);
+      }
+      break;
+    }
+    if (written_bytes == 0) {
+      TORCH_CHECK(false, "Failed to write the control pipe");
+    }
+
     // close the write end of the pipe
     ::close(controlPipeFd_[1]);
     controlPipeFd_[1] = -1;
