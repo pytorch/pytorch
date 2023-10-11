@@ -390,6 +390,11 @@ __global__ void layer_norm_grad_input_kernel(
   }
 
 
+// This implementation gets called when input buffers (dY, X, gamma and dX) are aligned
+// to vec_size * sizeof(T). Compared to the unvectorized implementation, it is about 10%
+// faster measuread at PT operator level, with cases seeing a 2X speedup (where N >> M).
+// There are no noticeable regressions on the rest of the sizes.
+
 template<typename T, typename T_ACC>
 __global__ void layer_norm_grad_input_kernel_vectorized(
   const T* __restrict__ dY,
@@ -406,9 +411,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   const auto bIdx = blockIdx.x;
   const T_ACC mean_val = mean[bIdx];
   const T_ACC rstd_val = rstd[bIdx];
-  const T * X_i = X + bIdx * N;
-  const T * dY_i = dY + bIdx * N;
-  T * dX_i = dX + bIdx * N;
+  const T* X_i = X + bIdx * N;
+  const T* dY_i = dY + bIdx * N;
+  T* dX_i = dX + bIdx * N;
 
   using vec_t = aligned_vector<T, vec_size>;
   const vec_t* X_i_vec = reinterpret_cast<const vec_t*>(X_i);
@@ -449,6 +454,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
   }
 
+  // Reduction in Shared Memory
   stats_x1 = cuda_utils::BlockReduceSum(stats_x1, reduce_buf);
   stats_x2 = cuda_utils::BlockReduceSum(stats_x2, reduce_buf);
   if (threadIdx.x == 0) {
