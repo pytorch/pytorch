@@ -1896,47 +1896,6 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("type", ["dense", "nested"])
-    @parametrize("is_contiguous", [True, False])
-    @parametrize("head_dims_match", [True, False])
-    def test_scaled_dot_product_attention_fused_kernels(self, device, type: str, is_contiguous: bool, head_dims_match: bool):
-        make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=torch.float16)
-
-        batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
-        shape = (batch, seq_len, num_heads, head_dim)
-        if head_dims_match:
-            shape_v = shape
-        else:
-            head_dim_v = 96
-            shape_v = (batch, seq_len, num_heads, head_dim_v)
-
-        query = make_tensor(shape)
-        key = make_tensor(shape)
-        value = make_tensor(shape_v)
-
-        # Lets switch seq_len and num_heads
-        # B x S X H X D -> B x H x S x D
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
-
-        if is_contiguous:
-            query = query.contiguous()
-            key = key.contiguous()
-            value = value.contiguous()
-
-        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                query.contiguous(), key.contiguous(), value.contiguous(),
-                attn_mask=None, dropout_p=0.0, is_causal=False)
-
-        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
