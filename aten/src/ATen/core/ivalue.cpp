@@ -645,7 +645,10 @@ std::ostream& IValue::repr(
       return out << ")";
     }
     case IValue::Tag::Generator: {
-      out << "torch.Generator(current_seed=" << v.toGenerator().current_seed() << ")";
+      auto generator = v.toGenerator();
+      out << "torch.Generator(device=";
+      c10::printQuotedString(out, generator.device().str());
+      out << ", seed=" << generator.current_seed() << ")";
       return out;
     }
     case IValue::Tag::GenericDict:

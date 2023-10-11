@@ -1,4 +1,5 @@
 #include <ATen/autocast_mode.h>
+#include <ATen/core/Generator.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -2489,8 +2490,45 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         // TODO return generator object when torchscript supports RNG
         // first-class
-        TORCH_SELECTIVE_SCHEMA("aten::manual_seed(int seed) -> ()"),
+        TORCH_SELECTIVE_SCHEMA("aten::manual_seed.default_(int seed) -> ()"),
         [](Stack& stack) { at::manual_seed(pop(stack).toInt()); },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::Generator(*, str? device=None, int? seed=None) -> Generator"),
+        [](Stack& stack) {
+          auto seed = pop(stack).toOptional<int64_t>();
+          auto device_str = pop(stack);
+          auto device = c10::Device(
+              device_str.isString() ? device_str.toStringRef() : "cpu");
+          push(stack, at::make_generator_for_device(device, seed));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::initial_seed(Generator self) -> int"),
+        [](Stack& stack) {
+          auto generator = pop(stack);
+          auto current_seed = generator.toGenerator().current_seed();
+          push(stack, (int64_t)current_seed);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::manual_seed.generator(Generator self, int seed) -> Generator"),
+        [](Stack& stack) {
+          auto seed = pop(stack).toInt();
+          auto generator = pop(stack);
+          generator.toGenerator().set_current_seed(seed);
+          push(stack, generator);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::seed(Generator self) -> int"),
+        [](Stack& stack) {
+          auto generator = pop(stack);
+          auto current_seed = generator.toGenerator().seed();
+          push(stack, (int64_t)current_seed);
+        },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::cuda(Tensor(a) self) -> Tensor(a|b)"),
