@@ -21,8 +21,12 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils._triton import has_triton
+
+HAS_TRITON = has_triton()
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 
 class MyModel(torch.nn.Module):
@@ -76,6 +80,7 @@ class TestFxGraphCache(TestCase):
     def setUp(self):
         counters.clear()
 
+    @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
     @parametrize("dtype", (torch.float, torch.bfloat16))
@@ -113,9 +118,10 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float, torch.bfloat16))
+    @parametrize("dtype", (torch.float, torch.float16))
     def test_cache_load_model(self, device, dtype):
         """
         Verify that we can populate and load models from the cache.
@@ -123,11 +129,7 @@ class TestFxGraphCache(TestCase):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("requires CUDA")
 
-        model = MyModel().to(device)
-        if dtype == torch.float:
-            model = model.float()
-        elif dtype == torch.bfloat16:
-            model = model.bfloat16()
+        model = MyModel().to(dtype=dtype, device=device)
 
         a = torch.rand(10, 10, dtype=dtype, device=device)
 
