@@ -432,7 +432,6 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
       gamma_vec_reg = gamma_vec[l];
     }
 
-    #pragma unroll
     for (int k = 0; k < vec_size; ++k) {
       const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
       const T_ACC c_h = static_cast<T_ACC>(X_i_vec[l].val[k]);
@@ -476,7 +475,6 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
       gamma_vec_reg = gamma_vec[l];
     }
 
-    #pragma unroll
     for (int k = 0; k < vec_size; ++k) {
       const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
       const T_ACC x = static_cast<T_ACC>(X_i_vec[l].val[k]);
