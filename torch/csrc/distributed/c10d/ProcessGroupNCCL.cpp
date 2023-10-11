@@ -690,13 +690,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
   LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options:"
-#ifdef NCCL_VERSION_CODE
-            // NCCL > 2.3.5 should have NCCL_VERSION_CODE defined
-            << "NCCL VERSION: " << NCCL_VERSION_CODE
-#else
-            << "NCCL VERSION: " << NCCL_MAJOR << NCCL_MINOR << NCCL_PATCH
-#endif
+            << "] ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion()
             << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
