@@ -4,7 +4,14 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only, TreeSpec
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+except ImportError:
+    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_map_only,
+        TreeSpec,
+    )
 
 
 # Common type aliases

@@ -820,8 +820,6 @@ class TestTorchDeviceType(TestCase):
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
-        # nvfuser deprecation warning filter
-        warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
 
         def cpp_warn_fn():
             out = torch.empty((5,))

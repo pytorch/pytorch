@@ -132,7 +132,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   // the strided input has to be "tilable" to (..., b1, x) with
   // any x >= 1 such that all the shapes are (block) matrix product
   // compatible. The matrix product will then have shape (..., b0, x).
-  // This in turn means the the result has to be "tilable" to
+  // This in turn means the result has to be "tilable" to
   // (..., b0, x).
   //
   // These observations imply the following restrictions:
