@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import importlib
+import sys
 import types
 import unittest
 
@@ -11,6 +12,32 @@ from torch._dynamo.skipfiles import (
     SUBMODULE_INLINELIST,
 )
 from torch._dynamo.utils import istype
+
+
+module_code = """
+def add(x):
+    return x + 1
+"""
+
+
+def create_dummy_module_and_function():
+    module = types.ModuleType("dummy_module")
+    exec(module_code, module.__dict__)
+    sys.modules["dummy_module"] = module
+    return module, module.add
+
+
+def gen_get_func_inlinelist(dummy_func_inlinelist):
+    def get_func_inlinelist():
+        inlinelist = set()
+        for f in dummy_func_inlinelist:
+            module_name, fn_name = f.rsplit(".", 1)
+            m = importlib.import_module(module_name)
+            fn = getattr(m, fn_name)
+            inlinelist.add(fn.__code__)
+        return inlinelist
+
+    return get_func_inlinelist
 
 
 class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
@@ -25,21 +52,15 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
             m = importlib.import_module(module_name)
             self.assertTrue(isinstance(getattr(m, fn_name), types.FunctionType))
 
-    def test_func_inlinelist(self):
+    def test_func_inlinelist_torch_functions(self):
         def fn(x):
             if istype(x, torch.Tensor):
                 return x + 1
             else:
                 return x - 1
 
-        my_func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
-        my_func_inlinelist.add("torch._dynamo.utils.istype")
-
-        def my_get_func_inlinelist():
-            inlinelist = set()
-            for f in my_func_inlinelist:
-                inlinelist.add(eval(f).__code__)
-            return inlinelist
+        func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
+        func_inlinelist.add("torch._dynamo.utils.istype")
 
         self.assertTrue(
             "torch._dynamo.utils" not in torch._dynamo.skipfiles.FILE_INLINELIST
@@ -50,7 +71,29 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
 
         with unittest.mock.patch(
             "torch._dynamo.skipfiles.get_func_inlinelist",
-            my_get_func_inlinelist,
+            gen_get_func_inlinelist(func_inlinelist),
+        ):
+            x = torch.rand(3)
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
+    def test_func_inlinelist_custom_functions(self):
+        mod, func = create_dummy_module_and_function()
+
+        def fn(x):
+            return func(x)
+
+        func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
+        func_inlinelist.add(f"{mod.__name__}.{func.__name__}")
+
+        with unittest.mock.patch(
+            "torch._dynamo.skipfiles.get_func_inlinelist",
+            gen_get_func_inlinelist(func_inlinelist),
+        ), unittest.mock.patch(
+            "torch._dynamo.skipfiles.THIRDPARTY_SKIPLIST",
+            torch._dynamo.skipfiles.THIRDPARTY_SKIPLIST + ({mod.__name__},),
         ):
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
