@@ -1287,7 +1287,7 @@ class AotCodeCache:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
-    ) -> Callable[..., Any]:
+    ) -> str:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
@@ -1433,11 +1433,7 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        def wrapper_call(*args) -> Any:
-            assert graph.graph_outputs is not None and len(graph.graph_outputs) > 0
-            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
-
-        return wrapper_call
+        return cls.cache[key]
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.

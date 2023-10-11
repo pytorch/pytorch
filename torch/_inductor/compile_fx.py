@@ -294,7 +294,7 @@ def compile_fx_inner(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-):
+) -> Union[CompiledFxGraph, str]:
     """
     Inductor API that compiles a single graph.
 
@@ -343,7 +343,7 @@ def compile_fx_inner(
     start = time.time()
 
     if config.fx_graph_cache:
-        compiled_graph: CompiledFxGraph = FxGraphCache.load(
+        compiled_graph = FxGraphCache.load(
             fx_codegen_and_compile, graph_args, graph_kwargs
         )
     else:
@@ -485,7 +485,7 @@ def fx_codegen_and_compile(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-) -> CompiledFxGraph:
+) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -861,7 +861,7 @@ def compile_fx_aot(
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
-        return compile_fx(
+        compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -871,6 +871,10 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
+        assert isinstance(
+            compiled_lib_path, str
+        ), "AOTInductor compilation result should be the path to the generated shared library"
+        return compiled_lib_path
 
 
 _graph_counter = itertools.count(0)
