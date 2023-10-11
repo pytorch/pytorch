@@ -146,21 +146,6 @@ Tensor baddbmm_decomp(
   return out;
 }
 
-Tensor linear_decomp(
-    const Tensor& input, const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt) {
-  auto result = input.matmul(weight.t());
-  if (bias_opt) {
-    // NB: It's too much work to figure out how to actually fuse the bias so
-    // we're not going to.
-    // TODO: if the result isn't batched but bias is, then we need to do the following.
-    // Otherwise, it can just be in-place. We should write a more nuanced
-    // decomposition rule
-    return result.add(*bias_opt);
-  }
-  return result;
-}
-
 Tensor addmm_decomp(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   // Decomposition that is probably not very fast...
   return at::add(self * beta, at::mm(mat1, mat2), alpha);
@@ -343,14 +328,6 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
   const auto A_ = moveBatchDimToFront(A, A_bdim);
   const auto res = at::linalg_lu_factor_ex(A_, pivot, check_errors);
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
-}
-
-twoOutputs linalg_lu_factor_batch_rule(
-    const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot) {
-  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
-  const auto A_ = moveBatchDimToFront(A, A_bdim);
-  const auto res = at::linalg_lu_factor(A_, pivot);
-  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
 }
 
 oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
