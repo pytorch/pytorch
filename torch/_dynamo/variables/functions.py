@@ -634,10 +634,17 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.original:
             return self.original
         else:
+
+            def get_val(v):
+                if isinstance(v, variables.UserDefinedObjectVariable):
+                    return v.value
+                else:
+                    return v.as_python_constant()
+
             return functools.partial(
                 self.func.fn,
-                *[arg.as_python_constant for arg in self.args],
-                **{k: v.as_python_constant() for k, v in self.keywords.items()},
+                *[get_val(arg) for arg in self.args],
+                **{k: get_val(v) for k, v in self.keywords.items()},
             )
 
 

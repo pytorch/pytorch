@@ -177,21 +177,17 @@ def _create_chunk_dtensor(
     Shard a tensor to chunks along the first dimension. The local rank will gets its
     corresponding chunk as the local tensor to create a DTensor.
     """
-    inner_dim = device_mesh.ndim - 1
-    shard_placement = DShard(0)
-    tensor_list, _ = shard_placement._split_tensor(
-        tensor,
-        device_mesh.size(dim=inner_dim),
-        with_padding=False,
-        contiguous=True,
-    )
-    # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
-    # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    local_tensor = tensor_list[rank].clone().detach()
+    tensor = tensor.clone().detach()
 
     # FSDP placements: [Shard(0)]
     # HSDP placements: [Replicate(), Shard(0)]
-    placements = [Replicate() for _ in range(device_mesh.ndim)]
-    placements[-1] = shard_placement  # type: ignore[call-overload]
-    return DTensor.from_local(local_tensor, device_mesh, placements)
+    replicate_placements = [Replicate() for _ in range(device_mesh.ndim)]
+    shard_placements = [Replicate() for _ in range(device_mesh.ndim)]
+    shard_placements[-1] = DShard(0)  # type: ignore[call-overload]
+    shard_placements = tuple(shard_placements)
+
+    return DTensor.from_local(tensor, device_mesh, replicate_placements).redistribute(
+        device_mesh=device_mesh,
+        placements=shard_placements,
+    )
