@@ -2,7 +2,7 @@
 import math
 import warnings
 
-from torch import Generator, Tensor
+from torch import Tensor
 import torch
 from typing import Optional as _Optional
 
@@ -125,7 +125,7 @@ def uniform_(
     tensor: Tensor,
     a: float = 0.0,
     b: float = 1.0,
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""Fill the input Tensor with values drawn from the uniform distribution.
 
@@ -152,7 +152,7 @@ def normal_(
     tensor: Tensor,
     mean: float = 0.0,
     std: float = 1.0,
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""Fill the input Tensor with values drawn from the normal distribution.
 
@@ -180,7 +180,7 @@ def trunc_normal_(
     std: float = 1.,
     a: float = -2.,
     b: float = 2.,
-    generator: _Optional[Generator] = None
+    generator: _Optional[torch.Generator] = None
 ) -> Tensor:
     r"""Fill the input Tensor with values drawn from a truncated normal distribution.
 
@@ -332,7 +332,7 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform_(
-    tensor: Tensor, gain: float = 1.0, generator: _Optional[Generator] = None
+    tensor: Tensor, gain: float = 1.0, generator: _Optional[torch.Generator] = None
 ) -> Tensor:
     r"""Fill the input `Tensor` with values using a Xavier uniform distribution.
 
@@ -365,7 +365,7 @@ def xavier_uniform_(
 def xavier_normal_(
     tensor: Tensor,
     gain: float = 1.0,
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""Fill the input `Tensor` with values using a Xavier normal distribution.
 
@@ -408,7 +408,7 @@ def kaiming_uniform_(
     a: float = 0,
     mode: str = "fan_in",
     nonlinearity: str = "leaky_relu",
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ):
     r"""Fill the input `Tensor` with values using a Kaiming uniform distribution.
 
@@ -464,7 +464,7 @@ def kaiming_normal_(
     a: float = 0,
     mode: str = "fan_in",
     nonlinearity: str = "leaky_relu",
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ):
     r"""Fill the input `Tensor` with values using a Kaiming normal distribution.
 
@@ -507,7 +507,7 @@ def kaiming_normal_(
 def orthogonal_(
     tensor,
     gain=1,
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ):
     r"""Fill the input `Tensor` with a (semi) orthogonal matrix.
 
@@ -559,7 +559,7 @@ def sparse_(
     tensor,
     sparsity,
     std=0.01,
-    generator: _Optional[Generator] = None,
+    generator: _Optional[torch.Generator] = None,
 ):
     r"""Fill the 2D input `Tensor` as a sparse matrix.
 
