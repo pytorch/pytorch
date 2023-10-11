@@ -5,8 +5,9 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed.fsdp._shard_utils import (
+    _all_gather_dtensor,
     _create_chunk_dtensor,
     _create_chunk_sharded_tensor,
 )
@@ -67,6 +68,19 @@ class FSDPExtensions(ABC):
         """
         This is to be called before loading a *sharded* model state dict and
         should return the tensor and list of shards from which to load data.
+        """
+        ...
+
+    @abstractmethod
+    def all_gather_dtensor(
+        self,
+        tensor: DTensor,
+        parent_mesh: Optional[DeviceMesh],
+    ) -> torch.Tensor:
+        """
+        This is to be called before loading a *sharded* DTensor state dict.
+        This gathers tensor in FSDP dimension and returns local tensor of
+        TP DTensor.
         """
         ...
 
@@ -143,3 +157,15 @@ def _ext_pre_load_state_dict_transform(
     assert type(tensor) is ShardedTensor
     shards = tensor.local_shards()
     return (tensor, shards)
+
+
+def _ext_all_gather_dtensor(
+    tensor: DTensor,
+    parent_mesh: Optional[DeviceMesh],
+) -> torch.Tensor:
+    all_gather_dtensor_fn = (
+        _extensions.all_gather_dtensor
+        if _extensions is not None
+        else _all_gather_dtensor
+    )
+    return all_gather_dtensor_fn(tensor, parent_mesh)
