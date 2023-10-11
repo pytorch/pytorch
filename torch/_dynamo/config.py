@@ -258,6 +258,9 @@ error_on_recompile = False
 # causing recompilations.
 report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
 
+# Whether to report all guard failures or just the first one that fails
+report_all_guard_failures = False
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 

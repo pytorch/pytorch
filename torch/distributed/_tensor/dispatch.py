@@ -21,7 +21,14 @@ from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, Te
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
-from torch.utils._pytree import tree_flatten, tree_unflatten
+
+try:
+    from torch.utils._cxx_pytree import tree_flatten, tree_unflatten
+except ImportError:
+    from torch.utils._pytree import (  # type: ignore[assignment]
+        tree_flatten,
+        tree_unflatten,
+    )
 
 
 def _is_random_op(op):

@@ -993,6 +993,19 @@ def forward(self, x_1, y_1):
     return index_select"""  # noqa: B950
         )
 
+    def test_arange_unbacked_output_size(self):
+        def f(x):
+            return torch.arange(0, x)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return arange"""  # noqa: B950
+        )
+
     def test_adv_index_batch(self):
         def f(src_tokens):
             bsz, src_len = src_tokens.size()[:2]
