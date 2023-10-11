@@ -33,7 +33,8 @@ at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
 
 bool is_simple_data_ptr(const c10::DataPtr& data_ptr) {
 #ifdef C10_MOBILE
-  return static_cast<size_t>(data_ptr.get()) == static_cast<size_t>(data_ptr.get_context()) + c10::gAlignment;
+  return reinterpret_cast<size_t>(data_ptr.get()) ==
+      reinterpret_cast<size_t>(data_ptr.get_context()) + c10::gAlignment;
 #else
   return data_ptr.get() == data_ptr.get_context();
 #endif
