@@ -3714,10 +3714,12 @@ class TestSparseCompressedTritonKernels(TestCase):
                                     blocks[0] @ others[1],
                                     blocks[1] @ others[1]])
 
-            tasks2 = (torch.tensor([0, 2, 3, 4], dtype=torch.int32, device=device),
-                      torch.tensor([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=torch.int32, device=device))
+            indices_data = (
+                'scatter_mm',
+                torch.tensor([0, 2, 3, 4], dtype=torch.int32, device=device),
+                torch.tensor([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=torch.int32, device=device))
 
-            result = scatter_mm(blocks, others, indices_data=dict(tasks2=tasks2))
+            result = scatter_mm(blocks, others, indices_data=indices_data)
 
             self.assertEqual(result, expected)
 
@@ -3727,16 +3729,17 @@ class TestSparseCompressedTritonKernels(TestCase):
                 torch.cat([blocks[1], blocks[0]], dim=1),
                 torch.cat([torch.zeros_like(blocks[0]), blocks[1]], dim=1)], dim=0) @ other
 
-            tasks5 = (torch.tensor([0, 2, 4, 5, 6], dtype=torch.int32, device=device),
-                      torch.tensor([0, n, 2 * n * m, 2 * n * m + n], dtype=torch.int32, device=device),
-                      torch.tensor([[1, 0], [0, 2 * k * n],
-                                    [1, n], [0, 2 * k * n + n],
-                                    [1, 2 * k * n],
-                                    [1, 2 * k * n + n]], dtype=torch.int32, device=device),
-                      2)
+            indices_data = (
+                'bsr_strided_mm',
+                torch.tensor([0, 2, 4, 5, 6], dtype=torch.int32, device=device),
+                torch.tensor([0, n, 2 * n * m, 2 * n * m + n], dtype=torch.int32, device=device),
+                torch.tensor([1, 0, 1, 0, 1, 1], dtype=torch.int32, device=device),
+                torch.tensor([0, 2 * k * n, n, 2 * k * n + n, 2 * k * n, 2 * k * n + n],
+                             dtype=torch.int32, device=device),
+                dict(SPLIT_N=2, is_compressed=False, TILE_M=m, TILE_N=n, GROUP_SIZE=1)
+            )
 
-            result = scatter_mm(blocks, other, indices_data=dict(tasks5=tasks5))
-
+            result = scatter_mm(blocks, other, indices_data=indices_data)
             self.assertEqual(result, expected)
 
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
@@ -3761,22 +3764,32 @@ class TestSparseCompressedTritonKernels(TestCase):
         sizes = [blocksize[0], 2 * blocksize[0], 4 * blocksize[0]]
         sizes_K = [blocksize[1], 2 * blocksize[1]]
 
-        for bd, bs, M, K, N in itertools.product(batches, batches, sizes, sizes_K, sizes):
-            bsr = tensor(bs + (M, K)).to_sparse_bsr(blocksize)
+        for bd, bs, M, K, N, has_zero_row_block in itertools.product(batches, batches, sizes, sizes_K, sizes, (False, True)):
+            bsr_dense = tensor(bs + (M, K))
+            if has_zero_row_block:
+                if M > blocksize[0]:
+                    bsr_dense[:blocksize[0]].zero_()
+                else:
+                    continue
+            bsr = bsr_dense.to_sparse_bsr(blocksize)
             dense = tensor(bd + (K, N))
             expected = bsr.to_dense() @ dense
 
-            splits_N = [N]
-            while splits_N[-1] > 1:
-                splits_N.append(max(1, splits_N[-1] // 2))
-
-            for SPLIT_N in splits_N:
-                for tasks_name, tasks in bsr_scatter_mm_indices_data(bsr, dense, SPLIT_N=SPLIT_N).items():
+            for indices_format in ('bsr_strided_mm', 'bsr_strided_mm_compressed', 'scatter_mm'):
+                if indices_format in {'bsr_strided_mm', 'bsr_strided_mm_compressed'}:
+                    SPLIT_N_list = [N]
+                    while SPLIT_N_list[-1] > 1:
+                        SPLIT_N_list.append(max(1, SPLIT_N_list[-1] // 2))
+                else:
+                    SPLIT_N_list = [1]
+                for SPLIT_N in SPLIT_N_list:
+                    indices_data = bsr_scatter_mm_indices_data(
+                        bsr, dense, indices_format=indices_format, SPLIT_N=SPLIT_N)
                     try:
-                        result = bsr_scatter_mm(bsr, dense, indices_data={tasks_name: tasks})
+                        result = bsr_scatter_mm(bsr, dense, indices_data=indices_data)
                     except triton.compiler.OutOfResources:
                         # ensure that there was at least one succesful test:
-                        assert SPLIT_N < splits_N[0]
+                        assert SPLIT_N < SPLIT_N_list[0]
                         break
                     self.assertEqual(result, expected)
 

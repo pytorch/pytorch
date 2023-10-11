@@ -1,4 +1,3 @@
-from typing import Dict, List
 import math
 import torch
 from torch.utils._triton import has_triton
@@ -210,199 +209,378 @@ def tile_to_blocksize(t, blocksize):
 
 
 def scatter_mm(blocks, others, indices_data, *, accumulators=None):
-    """Performs matrix multiplication of matrices scattered in batches of tensors.
+    """Scattered matrix multiplication of tensors.
 
-    If :attr:`blocks` is a :math:`(* \times M \times K) tensor,
-    :attr:`others` is a :math:`(* \times K \times N)` tensor,
-    :attr:`accumulators` is a :math:`(* \times M \times N)` tensor,
-    and :attr:`indices = indices_data['indices']` is a :math:`(*
-    \times 3)` tensor, then the operation is equivalent to the
-    following code::
+    A scattered matrix multiplication is defined as a series of matrix
+    multiplications applied to input tensors according to the input
+    and output mappings specified by indices data.
 
-      for r, p, q in indices:
-          accumulators[r] += blocks[p] @ others[q]
+    The following indices data formats are supported for defining a
+    scattered matrix multiplication operation (:attr:`indices_data[0]`
+    holds the name of the indices data format as specified below):
 
-    If :attr:`blocks` is a :math:`(* \times M \times K) tensor,
-    :attr:`others` is a :math:`(BK \times BN)` tensor,
-    :attr:`accumulators` is a :math:`(BM \times BN)` tensor, then the
-    operation is equivalent to the following code::
+    - ``"scatter_mm"`` - matrix multiplications scattered in batches
+      of tensors.
 
-      for r, p, q in indices_data['tasks4'][0]:
-          r0, r1 = divmod(r, BN)
-          q0, q1 = divmod(q, BN)
-          accumulators[r0:r0 + M, r1:r1 + N] += blocks[p] @ others[q0:q0 + K, q1:q1 + N]
+      If :attr:`blocks` is a :math:`(* \times M \times K) tensor,
+      :attr:`others` is a :math:`(* \times K \times N)` tensor,
+      :attr:`accumulators` is a :math:`(* \times M \times N)` tensor,
+      and :attr:`indices = indices_data['indices']` is a :math:`(*
+      \times 3)` tensor, then the operation is equivalent to the
+      following code::
 
-    where ``N = BN // indices_data['tasks4'][1]``.
+        c_offsets, pq = indices_data[1:]
+        for r in range(len(c_offsets) - 1):
+            for g in range(c_offsets[r], c_offsets[r + 1]):
+                p, q = pq[g]
+                accumulators[r] += blocks[p] @ others[q]
+
+    - ``"bsr_strided_mm"`` - matrix multiplications scattered in
+      batches of tensors and a tensor.
+
+      If :attr:`blocks` is a :math:`(* \times Ms \times Ks) tensor,
+      :attr:`others` is a :math:`(K \times N)` tensor,
+      :attr:`accumulators` is a :math:`(M \times N)` tensor, then
+      the operation is equivalent to the following code::
+
+        c_indices, r_offsets, p_offsets, q_offsets, meta = indices_data[1:]
+        for i, r in enumerate(r_offsets):
+            r0, r1 = divmod(r, N)
+            for g in range(c_indices[i], c_indices[i+1]):
+                p = p_offsets[g]
+                q0, q1 = divmod(q_offsets[g], N)
+                accumulators[r0:r0 + Ms, r1:r1 + Ns] += blocks[p] @ others[q0:q0 + Ks, q1:q1 + Ns]
+
+      where ``Ns = N // meta['SPLIT_N']``, and ``M`` and ``K`` are
+      integer multiples of ``Ms`` and ``Ks``, respectively.
+
+    - ``"bsr_strided_mm_compressed"`` - matrix multiplications
+      scattered in batches of tensors and a tensor. A memory and
+      processor efficient version of ``"bsr_strided_mm"`` format.
+      If :attr:`blocks` is a :math:`(* \times Ms \times Ks) tensor,
+      :attr:`others` is a :math:`(K \times N)` tensor,
+      :attr:`accumulators` is a :math:`(M \times N)` tensor, then
+      the operation is equivalent to the following code::
+
+        c_indices, r_offsets, q_offsets, meta = indices_data[1:]
+        for r in r_offsets:
+            m = (r // N) // Ms
+            n = (r % N) // Ns
+            r0, r1 = divmod(r, N)
+            c0, c1 = c_indices[m], c_indices[m + 1]
+            for i, p in enumerate(range(c0, c1)):
+                q = q_offsets[n * c1 + (SPLIT_N - n) * c0 + i]
+                q0, q1 = divmod(q, N)
+                accumulators[r0:r0 + Ms, r1:r1 + Ns] += blocks[p] @ others[q0:q0 + Ks, q1:q1 + Ns]
+
+      where ``Ns = N // meta['SPLIT_N']``, and ``M`` and ``K`` are
+      integer multiples of ``Ms`` and ``Ks``, respectively.
+
+      Notice that the order of ``r_offsets`` items can be arbitrary;
+      this property enables defining swizzle operators via
+      rearrangements of ``r_offsets`` items..
+
+    Auxilary functions are provided for pre-computing
+    :attr:`indices_data`. For example,
+    :func:`bsr_scatter_mm_indices_data` is used to define indices data
+    for matrix multiplication of BSR and strided tensors.
 
     Parameters
     ----------
     blocks (Tensor): a 3-D tensor of first matrices to be multiplied
-    others (Tensor): a 3-D tensor of second matrices to be multiplied
-    indices_data (dict): a mapping to define which matrices in blocks
-      participate in matrix multiplications and which matrices
-      accumulate the results.
+
+    others (Tensor): a tensor of second matrices to be multiplied. If
+      ``indices_data[0]=="scatter_mm"``, the tensor is a 1-D batch
+      tensor of second input matrices to be multiplied. Otherwise, the
+      second input matrices are slices of the :attr:`others` tensor.
+    indices_data (tuple): a format data that defines the inputs and
+      outputs of scattered matrix multiplications.
 
     Keyword arguments
     -----------------
-    accumulators (Tensor, optional): a 3-D tensor of matrix product
-      accumulators. When specified, the caller is responsible for
-      initializing the accumulators, say, with zeros.
+
+    accumulators (Tensor, optional): a tensor of matrix product
+      accumulators. If ``indices_data[0]=="scatter_mm"``, the tensor
+      is a 1-D batch tensor of output matrices. Otherwise, output
+      matrices are slices of the :attr:`accumulators` tensor.
 
     """
-    tasks2 = indices_data.get('tasks2')
-    tasks5 = indices_data.get('tasks5')
-    assert tasks2 is not None or tasks5 is not None
+    indices_format = indices_data[0]
 
     assert blocks.ndim == 3
-    P, M, K = blocks.shape
+    P, Ms, Ks = blocks.shape
 
-    if tasks5 is not None:
-        assert others.ndim == 2
-        BK, BN = others.shape
-        assert BK % K == 0
+    if indices_format == 'scatter_mm':
+        c_offsets, pq = indices_data[1:]
 
-        compressed_indices, r_offsets, pq_offsets, SPLIT_N = tasks5
+        assert others.ndim == 3
+        Q, Ks_, Ns = others.shape
+        assert Ks == Ks_
 
         if accumulators is None:
-            BM = M + (r_offsets.max().item() + 1) // BN
-            accumulators = torch.zeros((BM, BN), dtype=blocks.dtype, device=blocks.device)
+            R = c_offsets.shape[0] - 1
+            accumulators = torch.zeros((R, Ms, Ns), dtype=blocks.dtype, device=blocks.device)
         else:
-            BM, BN_ = accumulators.shape
-            assert BN_ == BN
+            R, Ms_, Ns_ = accumulators.shape
+            assert Ms_ == Ms
+            assert Ns_ == Ns
 
-        N = BN // SPLIT_N
-
-        if M % 16 or K % 16 or N % 16 or _scatter_mm5 is None:
-            accumulators.zero_()
-            for r in range(len(compressed_indices) - 1):
-                g0 = compressed_indices[r]
-                g1 = compressed_indices[r + 1]
-                r0, r1 = divmod(r_offsets[r].item(), BN)
-                acc = accumulators[r0:r0 + M, r1:r1 + N]
-                for g in range(g0, g1):
-                    p, q = pq_offsets[g]
-                    q0, q1 = divmod(q.item(), BN)
-                    acc += blocks[p] @ others[q0:q0 + K, q1:q1 + N]
-        else:
-            _scatter_mm5(blocks, others, compressed_indices, r_offsets, pq_offsets, SPLIT_N, accumulators)
-        return accumulators
-
-    assert others.ndim == 3
-    Q, K_, N = others.shape
-    assert K == K_
-
-    if tasks2 is not None:
-        if accumulators is None:
-            R = tasks2[0].shape[0] - 1
-            accumulators = torch.zeros((R, M, N), dtype=blocks.dtype, device=blocks.device)
-        else:
-            R, M_, N_ = accumulators.shape
-            assert M_ == M
-            assert N_ == N
-
-        if M % 16 or K % 16 or N % 16 or _scatter_mm2 is None:
-            pq_offsets, pq = tasks2
-            for r in range(pq_offsets.shape[0] - 1):
-                g0 = pq_offsets[r]
-                g1 = pq_offsets[r + 1]
+        if Ms % 16 or Ks % 16 or Ns % 16 or _scatter_mm2 is None:
+            for r in range(c_offsets.shape[0] - 1):
+                g0 = c_offsets[r]
+                g1 = c_offsets[r + 1]
                 for g in range(g0, g1):
                     p, q = pq[g]
                     accumulators[r] += blocks[p] @ others[q]
         else:
-            pq_offsets, pq = tasks2
-            _scatter_mm2(blocks, others, pq_offsets, pq, accumulators)
+            _scatter_mm2(blocks, others, c_offsets, pq, accumulators)
         return accumulators
 
-    assert 0
+    elif indices_format == 'bsr_strided_mm':
+
+        assert others.ndim == 2
+        K, N = others.shape
+        assert K % Ks == 0
+
+        c_indices, r_offsets, p_offsets, q_offsets, meta = indices_data[1:]
+        SPLIT_N = meta['SPLIT_N']
+
+        if accumulators is None:
+            M = Ms + (r_offsets.max().item() + 1) // N
+            accumulators = torch.zeros((M, N), dtype=blocks.dtype, device=blocks.device)
+        else:
+            M, N_ = accumulators.shape
+            assert N_ == N
+
+        Ns = N // SPLIT_N
+
+        if Ms % 16 or Ks % 16 or Ns % 16 or _scatter_mm6 is None:
+            accumulators.zero_()
+            for r in range(r_offsets.shape[0]):
+                r_ = r_offsets[r].item()
+                g0 = c_indices[r].item()
+                g1 = c_indices[r + 1].item()
+                r0, r1 = divmod(r_, N)
+                acc = accumulators[r0:r0 + Ms, r1:r1 + Ns]
+                for g in range(g0, g1):
+                    p, q = p_offsets[g], q_offsets[g]
+                    q0, q1 = divmod(q.item(), N)
+                    acc += blocks[p] @ others[q0:q0 + Ks, q1:q1 + Ns]
+        else:
+            _scatter_mm6(blocks, others, c_indices, r_offsets, p_offsets, q_offsets, meta, accumulators)
+        return accumulators
+
+    elif indices_format == 'bsr_strided_mm_compressed':
+
+        assert others.ndim == 2
+        K, N = others.shape
+        assert K % Ks == 0
+
+        c_indices, r_offsets, q_offsets, meta = indices_data[1:]
+        SPLIT_N = meta['SPLIT_N']
+
+        if accumulators is None:
+            M = Ms + (r_offsets.max().item() + 1) // N
+            accumulators = torch.zeros((M, N), dtype=blocks.dtype, device=blocks.device)
+        else:
+            M, N_ = accumulators.shape
+            assert N_ == N
+
+        Ns = N // SPLIT_N
+
+        if Ms % 16 or Ks % 16 or Ns % 16 or _scatter_mm6 is None:
+            for j in range(len(r_offsets)):
+                r0, r1 = divmod(r_offsets[j].item(), N)
+                m = r0 // Ms
+                n = r1 // Ns
+                c0 = c_indices[m].item()
+                c1 = c_indices[m + 1].item()
+                acc = accumulators[r0:r0 + Ms, r1:r1 + Ns]
+                for i, p in enumerate(range(c0, c1)):
+                    q = q_offsets[n * c1 + (SPLIT_N - n) * c0 + i].item()
+                    q0, q1 = divmod(q, N)
+                    acc += blocks[p] @ others[q0:q0 + Ks, q1:q1 + Ns]
+        else:
+            p_offsets = torch.empty((0, ), dtype=q_offsets.dtype, device=q_offsets.device)
+            _scatter_mm6(blocks, others, c_indices, r_offsets, p_offsets, q_offsets, meta, accumulators)
+        return accumulators
+
+    else:
+        raise NotImplementedError(indices_format)
 
 
-def bsr_scatter_mm_indices_data(bsr, other, SPLIT_N=1):
+def scatter_mm_meta(M, K, N, Ms, Ks,
+                    GROUP_SIZE=None, TILE_M=None, TILE_N=None, SPLIT_N=None, num_warps=None, num_stages=None, **extra):
+    if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
+        if (M, K, N) == (256,) * 3:
+            if (Ms, Ks) == (16, 16):
+                SPLIT_N=1;TILE_M=16;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                SPLIT_N=2;TILE_M=32;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                SPLIT_N=1;TILE_M=32;TILE_N=32;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                SPLIT_N=1;TILE_M=32;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        elif (M, K, N) == (512,) * 3:
+            if (Ms, Ks) == (16, 16):
+                SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                SPLIT_N=4;TILE_M=32;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        elif (M, K, N) == (1024,) * 3:
+            if (Ms, Ks) == (16, 16):
+                SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (256, 256):
+                SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        elif (M, K, N) == (2048,) * 3:
+            if (Ms, Ks) == (16, 16):
+                SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=8;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                SPLIT_N=4;TILE_M=64;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (256, 256):
+                SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        elif (M, K, N) == (4096,) * 3:
+            if (Ms, Ks) == (16, 16):
+                SPLIT_N=2;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                SPLIT_N=2;TILE_M=64;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
 
+    if SPLIT_N is None:
+        # With the probality of 92% (99.9% when N > 512), the
+        # performance will not be worse more than 2% from the
+        # performance when using an optimal value.  Otherwise, when N
+        # <= 512, using the following heuristics may give upto 15%
+        # lower performance.
+        SPLIT_N = {16: 1, 32: 2, 64: 4, 128: 8, 256: 16, 512: 8, 1024: 16, 4096: 32, 8192: 64}.get(N, 16)
+        if Ms >= 512 and N >= 2048:
+            SPLIT_N = 1
+    Ns = N // SPLIT_N
+    if TILE_M is None:
+        TILE_M = min(64 if Ns < 512 else 32, Ms)
+    if TILE_N is None:
+        TILE_N = min(64 if Ns < 512 else 32, Ns)
+    num_stages = num_stages or 1
+    if num_warps is None:
+        if min(M, N) > 1024:
+            num_warps = {16: 1, 32: 1, 64: 2}.get(Ms, 4)
+        elif min(M, N) == 1024:
+            num_warps = {16: 1, 32: 1, 64: 2}.get(Ms, 4)
+        elif min(M, N) == 256:
+            num_warps = {16: 1, 32: 4}.get(Ms, 4)
+        else:
+            num_warps = {16: 1, 32: 2}.get(Ms, 4)
+    GROUP_SIZE = GROUP_SIZE or 4
+
+    assert TILE_M <= Ms, dict(TILE_M=TILE_M, Ms=Ms)
+    assert TILE_N <= Ns, dict(TILE_B=TILE_N, Ns=Ns)
+    assert Ms <= M, dict(M=M, Ms=Ms)
+    assert Ns <= N, dict(N=N, Ns=Ns)
+    assert Ks <= K, dict(K=K, Ks=Ks)
+
+    return dict(TILE_M=TILE_M, TILE_N=TILE_N, GROUP_SIZE=GROUP_SIZE,
+                num_stages=num_stages, num_warps=num_warps, SPLIT_N=SPLIT_N, **extra)
+
+
+def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compressed', **meta_input):
+    """Computes indices data for :func:`scatter_mm` used in BSR and
+    strided tensor matrix multiplication.
+    """
     assert bsr.dense_dim() == 0
     assert bsr.ndim == 2  # no batch dims
     crow_indices = bsr.crow_indices()
     col_indices = bsr.col_indices()
     blocksize = bsr.values().shape[-2:]
-    if 1:
-        BM, BK = bsr.shape
-        BK_, BN = other.shape
-        assert BK_ == BK
-        M, K = blocksize
-        assert BN % SPLIT_N == 0, (BN, SPLIT_N)
-        N = BN // SPLIT_N
-        tasks: Dict[int, list] = {}
-        for m in range(BM // M):
+    M, K = bsr.shape
+    Ms, Ks = blocksize
+    K_, N = other.shape
+    assert K_ == K
+
+    meta = scatter_mm_meta(M, K, N, Ms, Ks, **meta_input)
+    if 'allow_tf32' not in meta_input:
+        meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
+
+    if indices_format == 'bsr_strided_mm_compressed':
+        meta.update(is_compressed=True)
+        SPLIT_N = meta['SPLIT_N']
+        Ns = N // SPLIT_N
+        q_offsets_lst = []
+        b = torch.arange(SPLIT_N, dtype=torch.int32, device=bsr.device) * Ns
+        for m in range(M // Ms):
             r0 = crow_indices[m].item()
             r1 = crow_indices[m + 1].item()
-            for n in range(SPLIT_N):
-                for t in range(r1 - r0):
-                    r = n * N + m * M * BN
-                    p = r0 + t
-                    q = n * N + col_indices[p].item() * K * BN
+            if r1 == r0:
+                continue
+            q_offsets_lst.append((col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N) + b.repeat_interleave(r1 - r0))
+        q_offsets = torch.cat(q_offsets_lst)
+        crow_indices_diff = crow_indices.diff()
+        non_zero_row_indices = crow_indices_diff.nonzero()
+        a = non_zero_row_indices * (Ms * N)
+        r_offsets = (a + b).view(-1)
+        c_indices = crow_indices
+        # swizzle operation: mm elements with longer sums are computed first:
+        nnz_per_row = crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N)
+        nnz_per_row, indices = nnz_per_row.sort(descending=True, stable=True)
+        r_offsets = r_offsets[indices]
+        return (indices_format, c_indices, r_offsets, q_offsets, meta)
+    elif indices_format == 'bsr_strided_mm':
+        meta.update(is_compressed=False)
+        SPLIT_N = meta['SPLIT_N']
+        Ns = N // SPLIT_N
+        p_offsets_lst = []
+        q_offsets_lst = []
+        b = torch.arange(SPLIT_N, dtype=torch.int32, device=bsr.device) * Ns
+        for m in range(M // Ms):
+            r0 = crow_indices[m].item()
+            r1 = crow_indices[m + 1].item()
+            if r1 == r0:
+                continue
+            p_offsets_lst.append(torch.arange(r0, r1, dtype=torch.int32, device=bsr.device).repeat(SPLIT_N))
+            q_offsets_lst.append((col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N) + b.repeat_interleave(r1 - r0))
+        q_offsets = torch.cat(q_offsets_lst)
+        crow_indices_diff = crow_indices.diff()
+        non_zero_row_indices = crow_indices_diff.nonzero()
+        a = non_zero_row_indices * (Ms * N)
+        r_offsets = (a + b).view(-1)
+        c_indices = torch.cat((crow_indices[:1],
+                               torch.cumsum(crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N), 0)))
+        p_offsets = torch.cat(p_offsets_lst)
+        return (indices_format, c_indices, r_offsets, p_offsets, q_offsets, meta)
 
-                    lst = tasks.get(r)
-                    if lst is None:
-                        lst = tasks[r] = []
-                    lst.append([p, q])
-        rpq_full = []
-
-        for r in sorted(tasks):
-            pq = tasks[r]
-            for p, q in pq:
-                rpq_full.append([r, p, q])
-
-        compressed_indices = [0]
-        r_offsets = []
+    elif indices_format == 'scatter_mm':
+        Ns = Ms
+        c_indices = [0]
         pq_offsets = []
-        last_r = None
-        for r, p, q in sorted(rpq_full, key=lambda item: (item[0], item[1], item[2])):
-            # assume that rpq_full is sorted with respect to r
-            if r == last_r:
-                compressed_indices[-1] += 1
-            else:
-                compressed_indices.append(compressed_indices[-1] + 1)
-                r_offsets.append(r)
-            pq_offsets.append([p, q])
-            last_r = r
-
-        tasks5 = (torch.tensor(compressed_indices, dtype=torch.int32, device=bsr.device),
-                  torch.tensor(r_offsets, dtype=torch.int32, device=bsr.device),
-                  torch.tensor(pq_offsets, dtype=torch.int32, device=bsr.device),
-                  SPLIT_N)
-
-    if 1:
-        M, K, N = bsr.shape[-2], bsr.shape[-1], other.shape[-1]
-
-        BM = M // blocksize[0]
-        BN = N // blocksize[0]
-        BK = K // blocksize[1]
-        assert (len(crow_indices) - 1) == BM
-
-        tasks2: Dict[int, list] = {}
-        for m in range(BM):
+        # todo: eliminate inner for-loops for efficiency
+        for m in range(M // Ms):
             r0 = crow_indices[m].item()
             r1 = crow_indices[m + 1].item()
-            for n in range(BN):
+            for n in range(N // Ns):
+                c_indices.append(c_indices[-1] + r1 - r0)
                 for t in range(r1 - r0):
                     p = r0 + t
-                    q = col_indices[p].item() * BN + n
-                    r = m * BN + n
-                    lst = tasks2.get(r)
-                    if lst is None:
-                        lst = tasks2[r] = []
-                    lst.append([p, q])
+                    q = col_indices[p].item() * (N // Ns) + n
+                    pq_offsets.append([p, q])
 
-        pq_offsets2: List[int] = [0]
-        pq_full = []
-        for r in sorted(tasks2):
-            pq = tasks2[r]
-            pq_offsets2.append(pq_offsets2[-1] + len(pq))
-            pq_full.extend(pq)
+        return (indices_format,
+                torch.tensor(c_indices, dtype=torch.int32, device=crow_indices.device),
+                torch.tensor(pq_offsets, dtype=torch.int32, device=crow_indices.device))
 
-        tasks2 = (torch.tensor(pq_offsets2, dtype=torch.int32, device=crow_indices.device),
-                  torch.tensor(pq_full, dtype=torch.int32, device=crow_indices.device).view((len(pq_full), 2)))
-
-    return dict(tasks2=tasks2, tasks5=tasks5)
+    raise NotImplementedError(indices_format)
 
 
 def bsr_scatter_mm(bsr, other, indices_data=None):
@@ -412,39 +590,38 @@ def bsr_scatter_mm(bsr, other, indices_data=None):
     assert bsr.ndim == 2
     assert other.ndim == 2
 
-    M, K, N = bsr.shape[-2], bsr.shape[-1], other.shape[1]
+    Ms, Ks, Ns = bsr.shape[-2], bsr.shape[-1], other.shape[1]
     blocksize = bsr.values().shape[-2:]
 
     if indices_data is None:
-        indices_data = bsr_scatter_mm_indices_data(bsr, other)
+        indices_data = bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compressed')
+
+    indices_format = indices_data[0]
 
     if bsr._nnz() == 0:
-        # TFLOPS is 770
-        result = torch.zeros((M, N), dtype=bsr.dtype, device=bsr.device)
-
-    elif 'tasks5' in indices_data:
-        result = torch.zeros((M, N), dtype=bsr.dtype, device=bsr.device)
-        scatter_mm(bsr.values(), other, dict(tasks5=indices_data['tasks5']), accumulators=result)
-    elif 'tasks2' in indices_data:
-        # Using torch.zeros is equivalent to using torch.empty followed by zero_() call
-        accumulators = torch.zeros((M // blocksize[0] * N // blocksize[0], blocksize[0], blocksize[0]),
+        result = torch.zeros((Ms, Ns), dtype=bsr.dtype, device=bsr.device)
+    elif indices_format in {'bsr_strided_mm_compressed', 'bsr_strided_mm'}:
+        result = torch.zeros((Ms, Ns), dtype=bsr.dtype, device=bsr.device)
+        scatter_mm(bsr.values(), other, indices_data, accumulators=result)
+    elif indices_format == 'scatter_mm':
+        accumulators = torch.zeros((Ms // blocksize[0] * Ns // blocksize[0], blocksize[0], blocksize[0]),
                                    dtype=bsr.dtype, device=bsr.device)
 
         others = (other.transpose(0, 1)
-                  .view(N // blocksize[0], blocksize[0], K // blocksize[1], blocksize[1])
+                  .view(Ns // blocksize[0], blocksize[0], Ks // blocksize[1], blocksize[1])
                   .movedim((2, 0, 3, 1), (0, 1, 2, 3))  # equivalent to .transpose(1, 2).transpose(2, 3).transpose(0, 1)
-                  .flatten(0, 1)  # when nnz==0, drops TFLOPS from 770 to 188
-                  )  # it's a copy
+                  .flatten(0, 1)
+                  )
 
         scatter_mm(bsr.values(), others, indices_data, accumulators=accumulators)
 
         result = (accumulators
-                  .unflatten(0, (M // blocksize[0], N // blocksize[0]))
+                  .unflatten(0, (Ms // blocksize[0], Ns // blocksize[0]))
                   .movedim((0, 1, 2, 3), (2, 0, 3, 1))  # equivalent to .transpose(0, 1).transpose(2, 3).transpose(1, 2)
-                  .reshape(N, M)  # drops TFLOPS from 770 to 105
-                  .transpose(0, 1))  # it's a copy
+                  .reshape(Ns, Ms)
+                  .transpose(0, 1))
     else:
-        raise NotImplementedError(f'{indices_data.keys()}')
+        raise NotImplementedError(indices_format)
 
     return result
 
@@ -1140,14 +1317,14 @@ if has_triton():
             TILE_M: tl.constexpr,
             TILE_N: tl.constexpr):
 
-        BLOCK_M = M // TILE_M
-        BLOCK_N = N // TILE_N
+        Ms = M // TILE_M
+        Ns = N // TILE_N
 
         pid_t = tl.program_id(axis=0)
 
         pid = tl.program_id(axis=1)
-        pid_m = pid // BLOCK_M
-        pid_n = pid % BLOCK_M
+        pid_m = pid // Ms
+        pid_n = pid % Ms
 
         rm = (pid_m * TILE_M + tl.arange(0, TILE_M))
         rn = (pid_n * TILE_N + tl.arange(0, TILE_N))
@@ -1186,7 +1363,7 @@ if has_triton():
         Q, _, N = others.shape
         R, _, _ = accumulators.shape
 
-        meta = dict(TILE_M=max(16, M // 4), TILE_N=max(16, N // 4), num_stages=1, num_warps=2)  # TODO: optimize
+        meta = dict(TILE_M=max(16, M // 4), TILE_N=max(16, N // 4), num_stages=1, num_warps=2)
 
         def grid(META):
             return (pq_offsets.shape[0] - 1, triton.cdiv(M, META['TILE_M']) * triton.cdiv(N, META['TILE_N']), 1)
@@ -1207,104 +1384,135 @@ if has_triton():
             **meta
         )
 
-
-
     @triton.jit
-    def _scatter_mm5_kernel(
-            M: tl.constexpr, K: tl.constexpr, N: tl.constexpr, BN: tl.constexpr,
+    def _scatter_mm6_kernel(
+            Ms: tl.constexpr, Ks: tl.constexpr, N: tl.constexpr,
             blocks_ptr, blocks_stride_P, blocks_stride_M, blocks_stride_K,
             others_ptr, others_stride_K, others_stride_N,
             accumulators_ptr, accumulators_stride_M, accumulators_stride_N,
-            compressed_indices_ptr, compressed_indices_stride,
-            r_offsets_ptr, r_offsets_stride,
-            pq_offsets_ptr, pq_offsets_stride_T, pq_offsets_stride_1,
+            c_indices_ptr, r_offsets_ptr,
+            p_offsets_ptr, q_offsets_ptr,
+            is_compressed: tl.constexpr,
             dot_out_dtype: tl.constexpr,
+            SPLIT_N: tl.constexpr,
             TILE_M: tl.constexpr,
-            TILE_N: tl.constexpr):
+            TILE_N: tl.constexpr,
+            GROUP_SIZE: tl.constexpr,
+            allow_tf32: tl.constexpr):
+        Ns = N // SPLIT_N
+        BLOCKS_M = Ms // TILE_M
+        BLOCKS_N = Ns // TILE_N
 
         pid_t = tl.program_id(axis=0)
-
-        BLOCK_M = M // TILE_M
-        BLOCK_N = N // TILE_N
         pid = tl.program_id(axis=1)
-        pid_m = pid // BLOCK_N
-        pid_n = pid % BLOCK_N
+
+        num_pid_in_group = GROUP_SIZE * BLOCKS_N
+        group_id = pid // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE
+        group_size_m = min(BLOCKS_M - first_pid_m, GROUP_SIZE)
+        pid_m = first_pid_m + (pid % group_size_m)
+        pid_n = (pid % num_pid_in_group) // group_size_m
 
         rm = (pid_m * TILE_M + tl.arange(0, TILE_M))
         rn = (pid_n * TILE_N + tl.arange(0, TILE_N))
-        rk = tl.arange(0, K)
-
+        rk = tl.arange(0, Ks)
         A_ptr = blocks_ptr + (rm[:, None] * blocks_stride_M + rk[None, :] * blocks_stride_K)
         B_ptr = others_ptr + (rk[:, None] * others_stride_K + rn[None, :] * others_stride_N)
 
+        # When is_compressed is True, r is the only variable that
+        # depends on pid_t. This property allows sorting r values
+        # before calling the kernel. The sorting of r is equivalent to
+        # defining swizzle operator outside of the kernel.
+        r = tl.load(r_offsets_ptr + pid_t)
+
+        if is_compressed:
+            m = (r // N) // Ms
+            n = (r % N) // Ns
+            r0 = tl.load(c_indices_ptr + m)
+            r1 = tl.load(c_indices_ptr + m + 1)
+            g0 = n * r1 + (SPLIT_N - n) * r0
+            nnz = r1 - r0
+        else:
+            g0 = tl.load(c_indices_ptr + pid_t)
+            g1 = tl.load(c_indices_ptr + pid_t + 1)
+            nnz = g1 - g0
+
+        q_ptr = q_offsets_ptr + g0
         acc_block = tl.zeros((TILE_M, TILE_N), dtype=dot_out_dtype)
 
-        g0 = tl.load(compressed_indices_ptr + pid_t * compressed_indices_stride)
-        g1 = tl.load(compressed_indices_ptr + (pid_t + 1) * compressed_indices_stride)
+        if is_compressed:
+            A_ptr += r0 * blocks_stride_P
+            for _ in range(nnz):
+                q = tl.load(q_ptr)
+                B = tl.load(B_ptr + q)
+                A = tl.load(A_ptr)
+                acc_block += tl.dot(A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
+                A_ptr += blocks_stride_P
+                q_ptr += 1
+        else:
+            p_ptr = p_offsets_ptr + g0
+            for _ in range(nnz):
+                q = tl.load(q_ptr)
+                B = tl.load(B_ptr + q)
+                p = tl.load(p_ptr)
+                A = tl.load(A_ptr + p * blocks_stride_P)
+                p_ptr += 1
+                q_ptr += 1
+                acc_block += tl.dot(A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
 
-        if g0 == g1:
-            return
-
-        for i in range(g0, g1):
-            p = tl.load(pq_offsets_ptr + i * pq_offsets_stride_T)
-            q = tl.load(pq_offsets_ptr + i * pq_offsets_stride_T + pq_offsets_stride_1)
-
-            A = tl.load(A_ptr + p * blocks_stride_P)
-            q0 = q // BN
-            q1 = q % BN
-            B = tl.load(B_ptr + others_stride_K * q0 + others_stride_N * q1)
-            acc_block += tl.dot(A, B, out_dtype=dot_out_dtype)
-
-        r = tl.load(r_offsets_ptr + pid_t * r_offsets_stride)
-        r0 = r // BN
-        r1 = r % BN
-        C_ptr = accumulators_ptr + (accumulators_stride_M * r0 + accumulators_stride_N * r1) + (
+        C_ptr = accumulators_ptr + r + (
             rm[:, None] * accumulators_stride_M + rn[None, :] * accumulators_stride_N)
         tl.store(C_ptr, acc_block.to(accumulators_ptr.dtype.element_ty))
 
-    def _scatter_mm5(
+    def _scatter_mm6(
             blocks: torch.Tensor,
             others: torch.Tensor,
-            compressed_indices: torch.Tensor,
+            c_indices: torch.Tensor,
             r_offsets: torch.Tensor,
-            pq_offsets: torch.Tensor,
-            SPLIT_N: int,
+            p_offsets: torch.Tensor,
+            q_offsets: torch.Tensor,
+            meta: dict,
             accumulators: torch.Tensor
     ):
-        P, M, K = blocks.shape
-        BK, BN = others.shape
-        BM, BN_ = accumulators.shape
-        assert BN_ == BN
-        N = BN // SPLIT_N
-
-        meta = dict(TILE_M=max(16, M // 1), TILE_N=max(16, N // 32), num_stages=1, num_warps=8)
-        meta = dict(TILE_M=max(16, M // 2), TILE_N=max(16, N // 8), num_stages=1, num_warps=8 // 2)
-        meta = dict(TILE_M=max(16, M // 2), TILE_N=max(16, N // 32), num_stages=1, num_warps=8 // 2)
-        meta = dict(TILE_M=M, TILE_N=N, num_stages=1, num_warps=8 // 2)
-        meta = dict(TILE_M=min(64, M), TILE_N=min(64, N), num_stages=1, num_warps=2)
+        SPLIT_N = meta['SPLIT_N']
+        P, Ms, Ks = blocks.shape
+        K_, N = others.shape
+        M, N_ = accumulators.shape
+        assert N_ == N
+        Ns = N // SPLIT_N
 
         def grid(META):
-            return (r_offsets.shape[0], triton.cdiv(M, META['TILE_M']) * triton.cdiv(N, META['TILE_N']), 1)
+            return (r_offsets.shape[0], triton.cdiv(Ms, META['TILE_M']) * triton.cdiv(Ns, META['TILE_N']))
 
         dot_out_dtype = {torch.float16: tl.float32,
                          torch.bfloat16: tl.float32,
                          torch.float32: tl.float64,
                          torch.float64: tl.float64}[accumulators.dtype]
-        _scatter_mm5_kernel[grid](
-            M, K, N, BN,
+        if 'allow_tf32' not in meta:
+            meta.update(allow_tf32=dot_out_dtype == tl.float32)
+
+        assert c_indices.stride(0) == 1
+        assert r_offsets.stride(0) == 1
+        assert p_offsets.stride(0) == 1
+        assert q_offsets.stride(0) == 1
+
+        _scatter_mm6_kernel[grid](
+            Ms, Ks, N,
             blocks, blocks.stride(0), blocks.stride(1), blocks.stride(2),
             others, others.stride(0), others.stride(1),
             accumulators, accumulators.stride(0), accumulators.stride(1),
-            compressed_indices, compressed_indices.stride(0),
-            r_offsets, r_offsets.stride(0),
-            pq_offsets, pq_offsets.stride(0), pq_offsets.stride(1),
+            c_indices,
+            r_offsets,
+            p_offsets,
+            q_offsets,
             dot_out_dtype=dot_out_dtype,
             **meta
         )
+
 else:
     bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
     sampled_addmm = None  # type: ignore[assignment]
     _scaled_dot_product_attention = None  # type: ignore[assignment]
     _scatter_mm2 = None  # type: ignore[assignment]
-    _scatter_mm5 = None  # type: ignore[assignment]
+    _scatter_mm6 = None  # type: ignore[assignment]
