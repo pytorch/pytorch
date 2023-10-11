@@ -349,7 +349,6 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
-trace_distributed = True
 
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
