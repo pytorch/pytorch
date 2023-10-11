@@ -12,7 +12,11 @@ from pdb import set_trace as st
 
 
 class MovingAveragePerChannelNormObserver(PerChannelMinMaxObserver):
-    ### taken from MovingAveragePerChannelMinMaxObserver
+    r"""
+    Adapted from MovingAveragePerChannelMinMaxObserver
+
+    The activation statistics per input channel are stored in `min_val`.
+    """
     def __init__(
         self,
         averaging_constant=0.01,
@@ -66,7 +70,30 @@ class MovingAveragePerChannelNormObserver(PerChannelMinMaxObserver):
         return x_orig
 
 class WandaSparsifier(BaseSparsifier):
+    r"""Wanda sparsifier
+
+    Wanda (Pruning by Weights and activations), proposed in https://arxiv.org/abs/2306.11695 
+    is an activation aware pruning method. The sparsifier removes weights based on the product
+    of the input activation norm and the weight magnitude.
+
+    This sparsifier is controlled by three variables:
+    1. `sparsity_level` defines the number of *sparse blocks* that are zeroed-out;
+    2. `model` defines the model to be sparsified;
+
+    Args:
+        sparsity_level: The target level of sparsity;
+        model: The model to be sparsified;
+    """
     def __init__(self, sparsity_level, model):
+        r""" Initialization function for WandaSparsifier class
+
+        In this function, forward hooks (observer class from quantization API) 
+        will be registered on the model. This hook will store average activation
+        statistics per input channels.
+
+        averaging_constant is hard set to 1.0 in order to register a forward_pre_hook
+        https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/quantize.py#L201.
+        """
         defaults = {
             'sparsity_level': sparsity_level
         }
@@ -79,6 +106,13 @@ class WandaSparsifier(BaseSparsifier):
         quantization.prepare(model, inplace=True)
 
     def update_mask(self, module, tensor_name, sparsity_level, **kwargs):
+        r""" Pruning function for WandaSparsifier
+
+        The activation statistics is retrieved first in the `act_per_input` variable. 
+        Then the Wanda pruning metric is computed. The weight matrix is then pruned 
+        by comparing this metric across the whole current layer.
+        """
+
         # Step 1: get the tensor and the mask from the parametrizations
         mask = getattr(module.parametrizations, tensor_name)[0].mask
         tensor = getattr(module.parametrizations, tensor_name).original
