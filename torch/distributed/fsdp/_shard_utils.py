@@ -190,3 +190,24 @@ def _create_chunk_dtensor(
         device_mesh=device_mesh,
         placements=shard_placements,
     )
+
+
+def _all_gather_dtensor(
+    tensor: DTensor,
+    parent_mesh: Optional[DeviceMesh],
+) -> torch.Tensor:
+    """
+    All gather a DTensor in its sharded dimension and return the local tensor.
+    """
+    assert parent_mesh is None
+
+    placements = list(copy.deepcopy(tensor.placements))
+    # FSDP placements: [Shard(0)] -> [Replicate()]
+    # HSDP placements: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+    placements[-1] = Replicate()
+    tensor = tensor.redistribute(
+        device_mesh=tensor.device_mesh,
+        placements=placements,
+    )
+
+    return tensor.to_local()
