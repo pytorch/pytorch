@@ -1626,7 +1626,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             stride = self.codegen_shape_tuple(tuple(stride))
             device_type, device_id = device.split(",")
             args = [
-                str(len(size)),
+                str(len(shape)),
                 self.codegen_int_array_var(size, self.wrapper_call),
                 self.codegen_int_array_var(stride, self.wrapper_call),
                 dtype,
@@ -1662,7 +1662,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             size = self.codegen_shape_tuple(shape)
             stride = self.codegen_shape_tuple(stride)
-            ndim = str(len(shape))
+            ndim = len(shape)
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             args = list(
                 map(
@@ -1699,13 +1699,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
         )
 
-    def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
-        size = self.codegen_shape_tuple(size)
+    def codegen_reinterpret_view(self, name, shape, stride, offset, writer) -> str:
+        size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
 
         if config.aot_inductor.abi_compatible:
-            dim = str(len(size))
+            dim = str(len(shape))
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
