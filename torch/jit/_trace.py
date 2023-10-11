@@ -583,7 +583,6 @@ class TracerWarning(Warning):
         warnings.filterwarnings(
             "ignore", category=TracerWarning, module="torch.(?!jit)"
         )
-        warnings.filterwarnings("ignore", "torch::jit::fuser::cuda")
 
 
 # We ignore the tracer warnings coming form inside the library, because all our shape
