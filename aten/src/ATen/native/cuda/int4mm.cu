@@ -1,9 +1,9 @@
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
 #include <cuda_bf16.h>
-#endif
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <mma.h>
+#endif
 #include <ATen/ATen.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -772,6 +772,7 @@ torch::Tensor _weight_int4pack_mm_cuda(
       {m, n},
       torch::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE)          \
   do {                                                                        \
     using ACLayout = ALayout_RM<K_TILES_PER_WARP, REDUCE_TYPE>;               \
@@ -888,6 +889,9 @@ torch::Tensor _weight_int4pack_mm_cuda(
 #undef RUN_GEMM
 
   return C_final;
+#endif
+  TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
+  return C_final;
 }
 
 // FIXME: parallelize better, smem staging etc?
@@ -986,6 +990,7 @@ torch::Tensor _convert_weight_to_int4pack_cuda(
       {nTiles, kSuperTiles, 32, innerKTiles / 2},
       torch::TensorOptions().dtype(torch::kInt32).device(in.device()));
 
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
   dim3 grid(kSuperTiles, nTiles);
 
   if (innerKTiles == 2) {
@@ -1002,6 +1007,9 @@ torch::Tensor _convert_weight_to_int4pack_cuda(
         out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
   }
 
+  return out;
+#endif
+  TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not available for build.")
   return out;
 }
 
