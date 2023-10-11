@@ -1208,9 +1208,8 @@ def run_functionalized_fw_and_collect_metadata(
 
         def clone(x):
             if isinstance(x, NestedTensor):
-                should_prop = any(any(is_symbolic(s) for s in _inner.shape) for _inner in (x._values, x._offsets))
-                ragged_size = x._size[x._ragged_idx] if should_prop else None
-                return NestedTensor(x._values, x._offsets.clone(), ragged_size=ragged_size)
+                assert is_fake(x)
+                return NestedTensor(x._values, x._offsets.clone(), ragged_size=x._size[x._ragged_idx])
             else:
                 return x
 
