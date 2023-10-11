@@ -215,6 +215,42 @@ cudnn_grid_sample_backward_batch_rule(
   return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
 }
 
+// TODO: replace with targetable functionalization
+static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
+    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
+    auto shape = self.sizes().vec();
+
+    // empty tensor could be converted to one hot representation,
+    // but shape inference is not possible.
+    if (self.numel() == 0) {
+        if (num_classes <= 0) {
+            AT_ERROR("Can not infer total number of classes from empty tensor.");
+        } else {
+            shape.push_back(num_classes);
+            return at::empty(shape, self.options());
+        }
+    }
+
+    TORCH_CHECK(num_classes > 0, "When vmap-ing torch.nn.functional.one_hot, please "
+        "provide an explicit positive num_classes argument.");
+
+    // Disabling all of the following checks. This is OK because scatter has checks too.
+    // Maybe one_hot should be a primitive wrt autograd so we don't have to deal with this.
+    // // non-empty tensor
+    // if (self.device().type() != at::kCUDA) {
+    //   //for cuda, rely on device assert thrown by scatter
+    //   TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
+    // }
+    // if (self.device().type() != at::kCUDA) {
+    //   //rely on device asserts from scatter to avoid sync here
+    //   TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+    // }
+
+    shape.push_back(num_classes);
+    Tensor ret = at::zeros(shape, self.options());
+    return ret.scatter(-1, self.unsqueeze(-1), 1);
+}
+
 template <typename A, A a, typename C>
 struct UpsampleBackwardBatchRuleHelper;
 
@@ -364,5 +400,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BACKWARD(_upsample_bilinear2d_aa_backward);
   UPSAMPLE_BACKWARD(_upsample_bicubic2d_aa_backward);
 
+  m.impl("one_hot", one_hot_decomposition_hack);
 }
 }}
