@@ -268,6 +268,10 @@ test_failures = {
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
+    # The input of this case has only 1 elements
+    "test_mutations_loop_fusion_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
 }
 
 
