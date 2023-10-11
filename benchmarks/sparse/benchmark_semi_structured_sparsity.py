@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
+from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 from tqdm import tqdm
 
 
@@ -47,7 +47,7 @@ def rand_sparse_semi_structured_mask(
         .contiguous()
     )
 
-
+#@torch.inference_mode()
 def test_linear(m, k, n, dtype, contiguous, backend):
     SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
     mask = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
@@ -61,6 +61,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     ).blocked_autorange()
 
     dense_output = model(input_tensor)
+    print(dense_output.shape)
 
     # sparsify weights
     model.linear.weight = nn.Parameter(
@@ -70,6 +71,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     )
 
     sparse_output = model(input_tensor)
+    print(sparse_output.shape)
 
     sparse_measurement = benchmark.Timer(
         stmt="model(input_tensor)",
@@ -157,7 +159,6 @@ if __name__ == "__main__":
             "nvidia-bert",
             "nvidia-fixed-k",
             "nvidia-fixed-mn",
-            "test-padding",
         ],
     )
     parser.add_argument(
@@ -241,25 +242,6 @@ if __name__ == "__main__":
         results = (
             eval_fn(10240, k, 10240, dtype, args.contiguous, args.backend)
             for k in tqdm(k_vals)
-        )
-    elif args.mode == "test-padding":
-        bert_shapes = [
-            # mm_qkv
-            (24576, 8192, 1),
-            (24576, 8192, 32),
-            # mm out_proj
-            (8192, 8192, 1),
-            (8192, 8192, 32),
-            # mm_fc_1/2
-            (22016, 8192, 1),
-            (22016, 8192, 32),
-            # mm _proj
-            (8192, 22016, 1),
-            (8192, 22016, 32),
-        ]
-        results = (
-            eval_fn(m, k, n, dtype, args.contiguous, args.backend)
-            for (m, k, n) in tqdm(bert_shapes)
         )
 
     df = pd.DataFrame.from_records(results)
