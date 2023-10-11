@@ -31,7 +31,7 @@ from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals, is_symbolic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transform_subclass
@@ -1204,6 +1204,17 @@ def run_functionalized_fw_and_collect_metadata(
             [x for x in input_info if x.mutates_data or x.mutates_metadata]
         )
 
+        from torch.nested._internal.nested_tensor import NestedTensor
+
+        def clone(x):
+            if isinstance(x, NestedTensor):
+                should_prop = any(any(is_symbolic(s) for s in _inner.shape) for _inner in (x._values, x._offsets))
+                ragged_size = x._size[x._ragged_idx] if should_prop else None
+                print(x._values.shape, ragged_size)
+                return NestedTensor(x._values, x._offsets.clone(), ragged_size=ragged_size)
+            else:
+                return x
+
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
@@ -1221,7 +1232,10 @@ def run_functionalized_fw_and_collect_metadata(
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
+
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
+        traced_tangents = pytree.tree_map(clone, traced_tangents)
+
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
         f_mutated_inputs = [
