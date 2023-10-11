@@ -975,7 +975,7 @@ class TestOptim(TestCase):
                 self._test_derived_optimizers(
                     self._multi_tensor_optimizer_configs,
                     "foreach",
-                    reduced_precision=dtype==torch.float16
+                    reduced_precision=dtype == torch.float16
                 )
             finally:
                 torch.set_default_dtype(default_dtype)
