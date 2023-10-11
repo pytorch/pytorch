@@ -154,7 +154,6 @@ class ConfigModule(ModuleType):
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
 
         if changes == {}:
-            print("NOT PATCHING DUE TO EMPTY")
             return contextlib.nullcontext()
 
         prior = {}
