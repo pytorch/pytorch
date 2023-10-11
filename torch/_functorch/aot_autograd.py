@@ -3431,8 +3431,7 @@ def create_aot_dispatcher_function(
                 )(*fake_flat_args)
 
         needs_autograd = (
-            any(x.requires_grad for x in fw_metadata.output_info if isinstance(x, Tensor))
-            and torch.is_grad_enabled()
+            any(x.requires_grad for x in fw_metadata.output_info)
         )
         fw_metadata = ViewAndMutationMeta(
             input_info=fw_metadata.input_info,
