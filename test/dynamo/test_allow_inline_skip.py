@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import importlib
-import sys
 import types
 import unittest
 
@@ -13,18 +12,10 @@ from torch._dynamo.skipfiles import (
 )
 from torch._dynamo.utils import istype
 
-
-module_code = """
-def add(x):
-    return x + 1
-"""
-
-
-def create_dummy_module_and_function():
-    module = types.ModuleType("dummy_module")
-    exec(module_code, module.__dict__)
-    sys.modules["dummy_module"] = module
-    return module, module.add
+try:
+    from .utils import create_dummy_module_and_function
+except ImportError:
+    from utils import create_dummy_module_and_function
 
 
 def gen_get_func_inlinelist(dummy_func_inlinelist):
@@ -52,7 +43,7 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
             m = importlib.import_module(module_name)
             self.assertTrue(isinstance(getattr(m, fn_name), types.FunctionType))
 
-    def test_func_inlinelist_torch_functions(self):
+    def test_func_inlinelist_torch_function(self):
         def fn(x):
             if istype(x, torch.Tensor):
                 return x + 1
@@ -79,7 +70,7 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
-    def test_func_inlinelist_custom_functions(self):
+    def test_func_inlinelist_third_party_function(self):
         mod, func = create_dummy_module_and_function()
 
         def fn(x):
@@ -92,9 +83,11 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
             "torch._dynamo.skipfiles.get_func_inlinelist",
             gen_get_func_inlinelist(func_inlinelist),
         ), unittest.mock.patch(
-            "torch._dynamo.skipfiles.THIRDPARTY_SKIPLIST",
-            torch._dynamo.skipfiles.THIRDPARTY_SKIPLIST + ({mod.__name__},),
+            "torch._dynamo.skipfiles.SKIP_DIRS",
+            torch._dynamo.skipfiles.SKIP_DIRS.copy(),
         ):
+            # First adding the module to SKIP_DIRS so that it will be skipped.
+            torch._dynamo.skipfiles.add(mod.__name__)
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
             ref = fn(x)
