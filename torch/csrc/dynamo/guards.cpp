@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/disable_torch_function.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/extension.h>
@@ -586,180 +585,13 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
-typedef struct {
-  /* Dict for an attr of the nn module */
-  PyDictObject* dict; // borrowed reference
-  /* version tag of the attr dict to watch mutations */
-  uint64_t dict_version_tag;
-} AttrTag;
-
-static const char* module_guard_attrs[] = {
-    "_parameters",
-    "_buffers",
-    "_modules",
-    "_forward_hooks",
-    "_forward_pre_hooks",
-    "_backward_hooks",
-    "_backward_pre_hooks",
-};
-
-typedef struct {
-  PyObject_HEAD;
-  PyObject* mod; // borrowed reference
-  unsigned int version_tag;
-  uint64_t dict_version_tag;
-  AttrTag attr_tags[sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0])];
-} NNModuleGuard;
-
-static void NNModuleGuard_dealloc(NNModuleGuard* self) {
-  self->mod = nullptr;
-  Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
-static PyTypeObject NNModuleGuardType = {
-    // NOLINTNEXTLINE
-    PyVarObject_HEAD_INIT(nullptr, 0)};
-
-static PyObject* NNModuleGuard_call(
-    PyObject* callable,
-    PyObject* args,
-    PyObject* kwargs) {
-  NNModuleGuard* guard = (NNModuleGuard*)callable;
-
-  if (PyTuple_GET_SIZE(args) != 1) {
-    PyErr_SetString(
-        PyExc_TypeError, "NNModuleGuardType: expected one argument");
-    return nullptr;
-  }
-
-  PyObject* mod = PyTuple_GET_ITEM(args, 0);
-  if (guard->mod != mod) {
-    Py_RETURN_FALSE;
-  }
-
-  // TODO(sgross): temporarily disable tp_version_tag check due to
-  // torch.fx._symbolic_trace patching __getattr__ and __call__.  Modifying
-  // those attributes on the class changes the tp_version_tag, invalidating
-  // the guard.
-  // if (Py_TYPE(mod)->tp_version_tag != guard->version_tag) {
-  //   Py_RETURN_FALSE;
-  // }
-
-  // NOTE: we must check the dict version tag before we check the attributes,
-  // because the attributes may be dead references if the dict has been updated.
-  PyObject* dict = PyObject_GenericGetDict(mod, nullptr);
-  if (((PyDictObject*)dict)->ma_version_tag != guard->dict_version_tag) {
-    Py_DECREF(dict);
-    Py_RETURN_FALSE;
-  }
-  Py_DECREF(dict);
-
-  for (auto& attr_tag : guard->attr_tags) {
-    if (attr_tag.dict->ma_version_tag != attr_tag.dict_version_tag) {
-      Py_RETURN_FALSE;
-    }
-  }
-  Py_RETURN_TRUE;
-}
-
-static PyObject* NNModuleGuard_repr(PyObject* self) {
-  // Prints versions of the module and the attributes.
-  NNModuleGuard* guard = (NNModuleGuard*)self;
-  std::ostringstream oss;
-  oss << "versions(mod=" << guard->dict_version_tag;
-
-  for (size_t index = 0;
-       index < sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0]);
-       index++) {
-    oss << ", " << module_guard_attrs[index] << "="
-        << guard->attr_tags[index].dict_version_tag;
-  }
-
-  oss << ")";
-  return Py_BuildValue("s", oss.str().c_str());
-}
-
-static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
-  // Uses a private tags introduced in PEP 509 - ma_version_tag to check if
-  // there are any changes in the dict.
-  // TODO(jansel,janimesh) Note that this ma_version_tag be removed/repurposed
-  // in Python 3.12 under PEP 699. We can rely on newly introduced dict watchers
-  // in 3.12 - https://docs.python.org/3.12/c-api/dict.html#c.PyDict_Watch
-
-  NNModuleGuard* guard =
-      (NNModuleGuard*)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
-  if (guard == nullptr) {
-    return nullptr;
-  }
-
-  guard->mod = obj;
-
-  PyObject* dict = PyObject_GenericGetDict(obj, nullptr);
-  if (dict == nullptr) {
-    Py_DECREF(guard);
-    return nullptr;
-  }
-  guard->dict_version_tag = ((PyDictObject*)dict)->ma_version_tag;
-
-  Py_ssize_t idx = 0;
-  for (const char* name : module_guard_attrs) {
-    auto& tag = guard->attr_tags[idx];
-
-    PyObject* key = PyUnicode_FromString(name);
-    if (key == nullptr) {
-      Py_DECREF(dict);
-      Py_DECREF(guard);
-      return nullptr;
-    }
-
-    PyObject* attr_obj = PyDict_GetItemWithError(dict, key);
-    if (attr_obj == nullptr) {
-      if (!PyErr_Occurred()) {
-        // this module doesn't have the specific attribute
-        PyErr_Format(
-            PyExc_AttributeError,
-            "'%s' object has no attribute '%s'",
-            Py_TYPE(obj)->tp_name,
-            name);
-      }
-      Py_DECREF(dict);
-      Py_DECREF(guard);
-      return nullptr;
-    }
-
-    tag.dict = (PyDictObject*)attr_obj;
-    tag.dict_version_tag = tag.dict->ma_version_tag;
-    idx++;
-  }
-  Py_DECREF(dict);
-
-  if (Py_TYPE(obj)->tp_version_tag == 0) {
-    // The tp_version_tag may be lazily set on attribute access. If we don't
-    // have a valid tag, perform a property lookup to force the tag to be set.
-    PyObject* tmp = PyObject_GetAttrString(obj, "__dict__");
-    if (tmp == nullptr) {
-      Py_DECREF(guard);
-      return nullptr;
-    }
-    Py_DECREF(tmp);
-  }
-
-  guard->version_tag = Py_TYPE(obj)->tp_version_tag;
-  if (guard->version_tag == 0) {
-    Py_DECREF(guard);
-    PyErr_SetString(PyExc_ValueError, "object has no version tag");
-    return nullptr;
-  }
-  return (PyObject*)guard;
-}
-
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
-    {"check_type_id", check_type_id, METH_VARARGS, NULL},
-    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
-    {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
-    {"nn_module_guard", nn_module_guard, METH_O, NULL},
+    {"check_type_id", check_type_id, METH_VARARGS, nullptr},
+    {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
+    {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, NULL},
-    {NULL, NULL, 0, NULL}};
+    {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
@@ -771,10 +603,6 @@ static struct PyModuleDef _module = {
 } // namespace
 
 PyObject* torch_c_dynamo_guards_init() {
-  PyObject* m = PyModule_Create(&_module);
-  if (m == nullptr)
-    return nullptr;
-
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
   TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
@@ -786,12 +614,8 @@ PyObject* torch_c_dynamo_guards_init() {
   TensorGuardsType.tp_init = (initproc)TensorGuards_init;
   TensorGuardsType.tp_new = TensorGuards_new;
 
-  NNModuleGuardType.tp_name = "torch._C._dynamo.guards.NNModuleGuard";
-  NNModuleGuardType.tp_basicsize = sizeof(NNModuleGuard);
-  NNModuleGuardType.tp_call = NNModuleGuard_call;
-  NNModuleGuardType.tp_dealloc = (destructor)NNModuleGuard_dealloc;
-  NNModuleGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
-  NNModuleGuardType.tp_repr = NNModuleGuard_repr;
+  if (PyType_Ready(&TensorGuardsType) < 0)
+    return nullptr;
 
   GlobalStateGuardType.tp_name = "torch._C._dynamo.guards.GlobalStateGuard";
   GlobalStateGuardType.tp_basicsize = sizeof(GlobalStateGuard);
@@ -802,13 +626,11 @@ PyObject* torch_c_dynamo_guards_init() {
   GlobalStateGuardType.tp_init = (initproc)GlobalStateGuard_init;
   GlobalStateGuardType.tp_new = PyType_GenericNew;
 
-  if (PyType_Ready(&TensorGuardsType) < 0)
-    return nullptr;
-
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  if (PyType_Ready(&NNModuleGuardType) < 0)
+  auto m = PyModule_Create(&_module);
+  if (m == nullptr)
     return nullptr;
 
   Py_INCREF(&TensorGuardsType);
@@ -822,13 +644,6 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyModule_AddObject(
           m, "GlobalStateGuard", (PyObject*)&GlobalStateGuardType) < 0) {
     Py_DECREF(&GlobalStateGuardType);
-    Py_DECREF(m);
-    return nullptr;
-  }
-
-  if (PyModule_AddObject(
-          m, "NNModuleGuardType", Py_NewRef(&NNModuleGuardType)) < 0) {
-    Py_DECREF(&NNModuleGuardType);
     Py_DECREF(m);
     return nullptr;
   }
