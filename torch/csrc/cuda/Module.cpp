@@ -1127,6 +1127,18 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
   });
 
+  m.def("_tensors_data_ptrs_equal", [](py::list& tensors, py::list& data_ptrs) {
+    TORCH_INTERNAL_ASSERT(tensors.size() == data_ptrs.size());
+    for (size_t i = 0, end = tensors.size(); i < end; ++i) {
+      auto t = tensors[i].cast<at::Tensor>();
+      auto data_ptr = data_ptrs[i].cast<int64_t>();
+      if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+        return false;
+      }
+    }
+    return true;
+  });
+
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",
       [](py::dict& metadata, c10::Storage s) {
