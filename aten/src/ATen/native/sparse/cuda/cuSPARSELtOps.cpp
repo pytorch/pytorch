@@ -119,7 +119,6 @@ at::Tensor _cslt_sparse_mm(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-  c10::ScalarType pytorch_output_type;
 
 
   switch(compressed_A.scalar_type())
@@ -158,13 +157,6 @@ at::Tensor _cslt_sparse_mm(
     {
         output_type = CUDA_R_16F;
         mixed_dtype_mode = true;
-        pytorch_output_type = out_dtype;
-    }
-    else if (input_type == CUDA_R_8I and out_dtype == at::ScalarType::Int)
-    {
-        output_type = CUDA_R_32I;
-        mixed_dtype_mode = true;
-        pytorch_output_type = out_dtype;
     }
     else
     {
@@ -205,8 +197,8 @@ at::Tensor _cslt_sparse_mm(
   at::Tensor res;
   if (mixed_dtype_mode)
   {
-      res = (transpose_result) ? at::empty({n, m}, c10::TensorOptions().dtype(pytorch_output_type).device(dense_B.device()))
-                               : at::empty({m, n}, c10::TensorOptions().dtype(pytorch_output_type).device(dense_B.device()));
+      res = (transpose_result) ? at::empty({n, m}, c10::TensorOptions().dtype(c10::kHalf).device(dense_B.device()))
+                               : at::empty({m, n}, c10::TensorOptions().dtype(c10::kHalf).device(dense_B.device()));
   }
   else
   {
