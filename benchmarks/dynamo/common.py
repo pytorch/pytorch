@@ -1397,9 +1397,6 @@ class OnnxModel(abc.ABC):
     def run_and_serialize_inputs_outputs(self, pt_inputs):
         onnx_inputs = self.adapt_pt_inputs_to_onnx(pt_inputs)
         onnx_outputs = self.run_with_onnx_inputs(onnx_inputs)
-        # TODO: how to serialize to a format that is compatible with onnx_test_runner?
-        # TODO: The output is not guaranteed to be correct.
-        # How to store pt_output?
 
         test_data_dir = self.model_dir / "test_data_set_0"
         test_data_dir.mkdir(parents=True, exist_ok=True)
