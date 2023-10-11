@@ -4,7 +4,6 @@ import functools
 import itertools
 import logging
 import sys
-import time
 import warnings
 
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
@@ -23,7 +22,7 @@ from torch._dynamo import (
 )
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
-from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
+from torch._inductor.codecache import code_hash, CompiledFxGraph
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._ops import OpOverload
@@ -324,8 +323,6 @@ def compile_fx_inner(
         cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     # Inputs to fx_codegen_and_compile
-    # Anything that affects codegen should go here, so if the signature
-    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
     graph_args = [gm, example_inputs]
     graph_kwargs = {
         "cudagraphs": cudagraphs,
@@ -340,18 +337,9 @@ def compile_fx_inner(
         "extern_node_serializer": extern_node_serializer,
     }
 
-    start = time.time()
-
-    if config.fx_graph_cache:
-        compiled_graph: CompiledFxGraph = FxGraphCache.load(
-            fx_codegen_and_compile, graph_args, graph_kwargs
-        )
-    else:
-        compiled_graph = fx_codegen_and_compile(
-            *graph_args, **graph_kwargs  # type: ignore[arg-type]
-        )
-
-    log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+    compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
+        *graph_args, **graph_kwargs  # type: ignore[arg-type]
+    )
 
     if aot_mode:
         return compiled_graph
@@ -559,7 +547,6 @@ def fx_codegen_and_compile(
                         )
                     else:
                         context.output_strides.append(None)
-
             compiled_fn = graph.compile_to_fn()
 
             if V.aot_compilation is True:
@@ -577,7 +564,6 @@ def fx_codegen_and_compile(
                 device_idxs=graph.device_idxs,
                 mutated_inputs=graph.mutated_inputs,
                 mutated_input_idxs=set(graph.mutated_input_idxs),
-                constants=graph.constants,
             )
     return compiled_graph
 
