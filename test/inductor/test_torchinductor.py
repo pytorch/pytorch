@@ -4434,12 +4434,19 @@ class CommonTemplate:
         def fn(a):
             x = torch.tensor([1, 2], device=self.device)
             y = torch.tensor([2, 3], device=self.device)
+            xx = torch.tensor([1, 2], device=self.device).view(1, 2)
+            yy = torch.tensor([1, 2, 3], device=self.device).view(3, 1)
             return [
                 a[x, y],
                 a[:, x, y],
                 a[:, x, y, :],
                 a[x, :, y],
                 a[:, x, :, y, :],
+                a[xx, yy],
+                a[:, xx, yy],
+                a[xx, :, yy],
+                a[xx, yy, :],
+                a[:, xx, :, yy],
             ]
 
         a = torch.arange(3 * 4 * 5 * 6 * 7, device=self.device).view(3, 4, 5, 6, 7)
@@ -4449,9 +4456,14 @@ class CommonTemplate:
             torch.testing.assert_close(ref, test)
 
     def test_tensor_index_put_slice(self):
+        torch._dynamo.config.cache_size_limit = 10
+
         def fn(a, version):
             x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)
             y = torch.tensor([2, 3], device=self.device, dtype=torch.int32)
+
+            xx = torch.tensor([1, 2], device=self.device).view(1, 2)
+            yy = torch.tensor([1, 2, 3], device=self.device).view(3, 1)
 
             if version == 0:
                 a[x, y] = torch.zeros_like(a[x, y])
@@ -4463,13 +4475,23 @@ class CommonTemplate:
                 a[x, :, y] = torch.zeros_like(a[x, :, y])
             elif version == 4:
                 a[:, x, :, y, :] = torch.zeros_like(a[:, x, :, y, :])
+            elif version == 5:
+                a[xx, yy] = torch.zeros_like(a[xx, yy])
+            elif version == 6:
+                a[:, xx, yy] = torch.zeros_like(a[:, xx, yy])
+            elif version == 7:
+                a[xx, :, yy] = torch.zeros_like(a[xx, :, yy])
+            elif version == 8:
+                a[xx, yy, :] = torch.zeros_like(a[xx, yy, :])
+            elif version == 9:
+                a[:, xx, :, yy] = torch.zeros_like(a[:, xx, :, yy])
 
             return a
 
         a = torch.arange(3 * 4 * 5 * 6 * 7, device=self.device, dtype=torch.int32).view(
             3, 4, 5, 6, 7
         )
-        for i in range(5):
+        for i in range(10):
             ref = fn(torch.clone(a), i)
             test = torch.compile(fn)(torch.clone(a), i)
             torch.testing.assert_close(ref, test)

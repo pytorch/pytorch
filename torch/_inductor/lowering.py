@@ -2575,19 +2575,30 @@ def check_and_broadcast_indices(indices, device):
 
 
 def index_output_size_and_inner_fn(
-    x_size, indices, valid_idxs, tensor_size, indices_loaders, indexed_size, x_loader
+    x_size,
+    indices,
+    tensor_indices,
+    tensor_size,
+    indices_loaders,
+    indexed_size,
+    x_loader,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
+    #
+    # Suppose a = torch.arange(3 * 4 * 5 * 6 * 7).view(3, 4, 5, 6, 7)
+    #         x = torch.tensor[1,2]
+    # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
+    # be pulled to the front.
     non_consecutive_tensors = False
-    for previous, current in zip(valid_idxs, valid_idxs[1:]):
+    for previous, current in zip(tensor_indices, tensor_indices[1:]):
         if current - previous != 1:
             non_consecutive_tensors = True
 
     output_size = [x_size[i] for i, val in enumerate(indices) if val is None]
-    output_size = [*output_size, *x_size[len(output_size) + len(valid_idxs) :]]
+    output_size = [*output_size, *x_size[len(output_size) + len(tensor_indices) :]]
 
-    first_tensor_index = valid_idxs[0]
+    first_tensor_index = tensor_indices[0]
     if non_consecutive_tensors:
         output_size = tensor_size + output_size
     else:
@@ -2603,10 +2614,10 @@ def index_output_size_and_inner_fn(
 
         rank = len(tensor_size)
         new_index = []
-        first_tensor_index = valid_idxs[0]
+        first_tensor_index = tensor_indices[0]
         start_offset = 0 if non_consecutive_tensors else first_tensor_index
         next_idx = 0
-        for i in range(valid_idxs[-1] + 1):
+        for i in range(tensor_indices[-1] + 1):
             if i == start_offset:
                 next_idx += rank
             if indices[i] is None:
@@ -2636,14 +2647,14 @@ def index_output_size_and_inner_fn(
 def index_impl(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices, valid_idxs = check_and_broadcast_indices(indices, x.get_device())
-    assert len(valid_idxs) > 0, "Must have at least one valid idx"
+    indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
+    assert len(tensor_indices) > 0, "Must have at least one valid idx"
 
     indices_loaders = [i.make_loader() if i is not None else None for i in indices]
     # no guards on output size, all the guards are set in broadcast_tensors
 
     # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[valid_idxs[0]].get_size())
+    tensor_size = list(indices[tensor_indices[0]].get_size())
 
     x_size = x.get_size()
 
@@ -2655,7 +2666,7 @@ def index_impl(x, indices, check):
     output_size, inner_fn = index_output_size_and_inner_fn(
         x_size,
         indices,
-        valid_idxs,
+        tensor_indices,
         tensor_size,
         indices_loaders,
         indexed_size,
@@ -2763,7 +2774,9 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     try:
         # Note that code will only get here when dtype is uint32
-        indices, valid_idxs = check_and_broadcast_indices(indices, self.get_device())
+        indices, tensor_indices = check_and_broadcast_indices(
+            indices, self.get_device()
+        )
     except NotImplementedError:
         return index_put_fallback(self, indices, values, accumulate)
 
@@ -2777,11 +2790,17 @@ def index_put_impl_(self, indices, values, accumulate, check):
         self = view(self, [1])
 
     # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[valid_idxs[0]].get_size())
+    tensor_size = list(indices[tensor_indices[0]].get_size())
     indexed_size = [x_size[i] for i in range(len(indices))]
 
     expected_vals_size, inner_fn = index_output_size_and_inner_fn(
-        x_size, indices, valid_idxs, tensor_size, indices_loaders, indexed_size, None
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        None,
     )
 
     values = expand(values, expected_vals_size)
