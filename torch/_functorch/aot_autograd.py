@@ -1432,6 +1432,21 @@ def create_functionalized_graph(
                     assert inpt_new is not inpt_old
                     inpt_old.copy_(inpt_new)
 
+        if aot_config.keep_inference_input_mutations and trace_joint:
+            for i, (inpt_old, inpt_f) in enumerate(zip(args[0], f_args[0])):
+                if not isinstance(inpt_f, torch.Tensor):
+                    continue
+                assert is_fun(inpt_f)
+                inpt_new = from_fun(inpt_f)
+                if meta.input_info[i].mutates_data and not meta.input_info[i].mutates_metadata:
+                    # We found an input that had a (data-only) mutation.
+                    # Since keep_input_mutations is set, we need to faithfully apply a copy_()
+                    # so the compiler will see the input mutation in the graph.
+                    # TODO crappy way of checking if this is buffer.
+                    assert inpt_new is not inpt_old
+                    if not inpt_old.requires_grad:
+                        inpt_old.copy_(inpt_new)
+
         return pytree.tree_map(from_fun, f_outs)
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
@@ -1449,6 +1464,7 @@ def create_functionalized_graph(
 
     with enable_python_dispatcher():
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
+        print("MAKE_FX", helper, fx_g.graph)
 
     return fx_g
 
@@ -2571,13 +2587,18 @@ def create_runtime_wrapper(
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
+        print("DATA", runtime_metadata)
+
+        graph_handled_inps = [ix for ix, info in enumerate(runtime_metadata.input_info) if info.mutates_data]
+        num_graph_handled_inps = len(graph_handled_inps)
+
         if keep_input_mutations:
             assert (
                 len(all_outs)
-                == num_metadata_mutated_inps + runtime_metadata.num_outputs + num_intermediate_bases
+                == num_metadata_mutated_inps + runtime_metadata.num_outputs + num_intermediate_bases + num_graph_handled_inps
             )
             assert (
-                len(runtime_metadata.mutated_inp_runtime_indices) == num_metadata_mutated_inps
+                len(runtime_metadata.mutated_inp_runtime_indices) == num_metadata_mutated_inps + num_graph_handled_inps
             )
         else:
             assert (
@@ -2588,7 +2609,7 @@ def create_runtime_wrapper(
                 len(runtime_metadata.mutated_inp_runtime_indices) == num_mutated_inps
             )
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices)
+        num_mutations_to_apply = len(runtime_metadata.mutated_inp_runtime_indices) - num_graph_handled_inps
         if num_mutations_to_apply > 0:
             updated_inputs = all_outs[: num_mutations_to_apply]
             fw_outs = all_outs[num_mutations_to_apply :]
@@ -2654,7 +2675,11 @@ def create_runtime_wrapper(
                     else:
                         original_inpt.copy_(updated_inpt)
         else:
-            fw_outs = all_outs
+            #fw_outs = all_outs
+            fw_outs = []
+            for ix, out in enumerate(all_outs):
+                if ix not in graph_handled_inps:
+                    fw_outs.append(out)
 
         # Step 4: Manually regenerate any outputs that are aliased to inputs, instead of
         # compiling them.
@@ -2818,7 +2843,7 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     )
 
     # There should be *NO* mutating ops in the graph at this point.
-    assert_functional_graph(fx_g.graph)
+    assert_functional_graph(fx_g.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
 
     # Redudant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
@@ -3029,6 +3054,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
+            marked_dirty = deduped_flat_tensor_args[1]
             if CompiledFunction.metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -3268,7 +3294,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         runtime_metadata=fw_metadata,
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
-        keep_input_mutations=False,
+        keep_input_mutations=True,
         disable_amp=disable_amp
     )
 
@@ -4096,6 +4122,7 @@ https://github.com/pytorch/pytorch/issues/101192
                     assert grad is None
             return *fw_outs, *output_gradients
         fx_g = make_fx(flattened_joint)(*full_args)
+        print("JOINT", fx_g.graph)
 
     user_args_flat, _ = pytree.tree_flatten(args)
     return fx_g, create_graph_signature(

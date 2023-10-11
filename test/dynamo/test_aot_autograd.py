@@ -940,6 +940,27 @@ SeqNr|OrigAten|SrcFn
                     bwd_set.add(event.sequence_nr)
         self.assertTrue(len(bwd_set), 13)
 
+    def test_aot_autograd_buffer_mutation(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                x.add_(1)
+                self.buf.add_(1)
+                return (self.w*x).sum() + self.buf.sum()
+
+        model = MyModel()
+        x = torch.rand(1)
+        compiled_fn = torch.compile(backend="inductor")(model)
+        # optimizer_1 = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+        # optimizer_1.zero_grad()
+        # y = compiled_fn(x)
+        # y.sum().backward()
+        self.assertTrue(torch.allclose(compiled_fn(x), MyModel()(x)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

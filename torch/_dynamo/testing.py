@@ -202,6 +202,7 @@ class CompileCounterWithBackend:
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         from .backends.registry import lookup_backend
+        print(gm.graph)
 
         self.frame_count += 1
         for node in gm.graph.nodes:

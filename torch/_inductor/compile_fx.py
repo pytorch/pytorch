@@ -960,6 +960,7 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+    print("MODEL\n", model_.graph)
     if config_patches:
         with config.patch(config_patches):  # type: ignore[attr-defined]
             return compile_fx(
