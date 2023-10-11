@@ -1196,6 +1196,17 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+            from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+
+            if isinstance(obj, AutogradFunctionContextVariable):
+                # Will fail if no as_proxy on attr, not a big deal
+                try:
+                    val.as_proxy().node.meta["context_stored"] = True
+
+                except (NotImplementedError, AttributeError):
+                    # Not unimplemented - constant structures propagate fine on their own
+                    pass
+
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):

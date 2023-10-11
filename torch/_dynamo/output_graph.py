@@ -428,11 +428,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             tracer = SubgraphTracer(
                 self, parent=self.current_tracer, source_target=source_target
             )
+            log.debug("Pushed subtracer - %s", id(tracer))
             self.tracers.append(tracer)
             yield tracer
         finally:
             new_scope_ctx.__exit__(None, None, None)
-            self.tracers.pop()
+            popped = self.tracers.pop()
+            log.debug("Popped subtracer - %s", id(popped))
 
     @property
     def output(self):
@@ -1400,7 +1402,7 @@ class SubgraphTracer(fx.Tracer):
                 if not isinstance(arg, torch.fx.Node):
                     continue
                 # Special case for autograd.Function tracing
-                if "saved_tensor_marked" in arg.meta:
+                if "saved_tensor_marked" in arg.meta or "context_stored" in arg.meta:
                     continue
                 assert (
                     arg.graph == self.graph
@@ -1490,6 +1492,7 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
+        breakpoint()
         assert (
             self.parent is not None
         ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
@@ -1516,7 +1519,9 @@ class SubgraphTracer(fx.Tracer):
         elif arg.tracer == self:
             return arg
         # Special case for autograd.Function tracing
-        elif "saved_tensor_marked" in arg.node.meta:
+        elif (
+            "saved_tensor_marked" in arg.node.meta or "context_stored" in arg.node.meta
+        ):
             return arg
         return self.lift_tracked_freevar_to_input(arg)
 
