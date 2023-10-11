@@ -9,6 +9,7 @@ set(INDUCTOR_TEST_SRCS
 add_executable(test_aot_inductor
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${INDUCTOR_TEST_SRCS}
+  data.pt
 )
 
 # TODO temporary until we can delete the old gtest polyfills.
@@ -16,22 +17,18 @@ target_compile_definitions(test_aot_inductor PRIVATE USE_GTEST)
 
 # Define a custom command to generate the library
 add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libmodel.so
+        OUTPUT data.pt
         COMMAND python ${AOT_INDUCTOR_TEST_ROOT}/test.py
         DEPENDS ${AOT_INDUCTOR_TEST_ROOT}/test.py
 )
-add_custom_target(model_so ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libmodel.so)
-add_dependencies(test_aot_inductor model_so)
 
 target_link_libraries(test_aot_inductor PRIVATE
   torch
   gtest
-  ${CMAKE_CURRENT_BINARY_DIR}/libmodel.so
 )
 
 if(USE_CUDA)
   target_include_directories(test_aot_inductor PRIVATE ${ATen_CUDA_INCLUDE})
-
   target_compile_definitions(test_aot_inductor PRIVATE USE_CUDA CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
