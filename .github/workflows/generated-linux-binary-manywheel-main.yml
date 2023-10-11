@@ -47,7 +47,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-test:  # Testing

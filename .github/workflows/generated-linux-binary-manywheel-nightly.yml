@@ -51,7 +51,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-test:  # Testing
@@ -110,7 +109,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-cxx11-abi-test:  # Testing
@@ -171,7 +169,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-test:  # Testing
@@ -293,7 +290,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_1-test:  # Testing
@@ -354,7 +350,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-rocm5_6-test:  # Testing
@@ -456,7 +451,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_7
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-rocm5_7-test:  # Testing
@@ -557,7 +551,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-test:  # Testing
@@ -616,7 +609,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-test:  # Testing
@@ -677,7 +669,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-test:  # Testing
@@ -799,7 +790,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-test:  # Testing
@@ -860,7 +850,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm5_6-test:  # Testing
@@ -962,7 +951,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_7
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm5_7-test:  # Testing
@@ -1063,7 +1051,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-test:  # Testing
@@ -1122,7 +1109,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-test:  # Testing
@@ -1183,7 +1169,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-test:  # Testing
@@ -1305,7 +1290,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-test:  # Testing
@@ -1366,7 +1350,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm5_6-test:  # Testing
@@ -1468,7 +1451,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_7
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm5_7-test:  # Testing
@@ -1569,7 +1551,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-test:  # Testing
@@ -1628,7 +1609,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-test:  # Testing
@@ -1689,7 +1669,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-test:  # Testing
@@ -1811,7 +1790,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-test:  # Testing
@@ -1872,7 +1850,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm5_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm5_6-test:  # Testing
@@ -1974,7 +1951,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm5_7
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: 
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm5_7-test:  # Testing
