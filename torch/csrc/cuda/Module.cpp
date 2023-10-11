@@ -5,7 +5,6 @@
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
