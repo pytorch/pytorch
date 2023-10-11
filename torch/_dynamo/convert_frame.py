@@ -418,14 +418,14 @@ def patch_config_if_changed():
 
     eval_frame = torch._dynamo.eval_frame
 
-    saved_config_hash = eval_frame.DYNAMO_SAVED_CONFIG_HASH
+    saved_config_hash = eval_frame.config_cache.saved_config_hash
     current_config_hash = eval_frame.get_cached_recompile_hash()
 
     assert saved_config_hash is not None
     assert current_config_hash is not None
 
     if saved_config_hash != current_config_hash:
-        patch = eval_frame.DYNAMO_SAVED_CONFIG
+        patch = eval_frame.config_cache.saved_config
         recompiles_log.debug(
             "Current config does not match config saved when compiling"
         )

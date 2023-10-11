@@ -297,12 +297,15 @@ dynamo_config_guard_string_serialization_list = {
     "traceable_tensor_subclasses",  # Cannot pickle local object
 }
 
+config_cache = threading.local()
 # The config to restore to should dynamo compile / recompile when
 # executing from the compiled function's _TorchDynamoContext
-DYNAMO_SAVED_CONFIG: Optional[Dict[str, Any]] = None
-DYNAMO_SAVED_CONFIG_HASH: Optional[str] = None
 
-DYNAMO_CACHED_RECOMPILE_HASH: Optional[str] = None
+
+def _maybe_init_guarded_config_cache():
+    for c in ["saved_config", "saved_config_hash", "cached_recompile_hash"]:
+        if not hasattr(config_cache, c):
+            setattr(config_cache, c, None)
 
 
 @contextlib.contextmanager
@@ -311,24 +314,27 @@ def restore_compiled_dynamo_config(
     saved_config: Dict[str, Any],
     saved_config_hash: str,
 ):
-    global DYNAMO_SAVED_CONFIG, DYNAMO_SAVED_CONFIG_HASH
+    _maybe_init_guarded_config_cache()
     # Set exactly once from top-level compile
     is_top_level = False
     try:
-        if DYNAMO_SAVED_CONFIG_HASH == DYNAMO_SAVED_CONFIG is None:
+        if config_cache.saved_config is None and config_cache.saved_config_hash is None:
             is_top_level = True
-            DYNAMO_SAVED_CONFIG = saved_config
-            DYNAMO_SAVED_CONFIG_HASH = saved_config_hash
-            log.debug("Set top-level compile config hash: %s", DYNAMO_SAVED_CONFIG_HASH)
+            config_cache.saved_config = saved_config
+            config_cache.saved_config_hash = saved_config_hash
+            log.debug(
+                "Set top-level compile config hash: %s", config_cache.saved_config_hash
+            )
         else:
             log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
         yield
     finally:
         if is_top_level:
-            DYNAMO_SAVED_CONFIG_HASH = DYNAMO_SAVED_CONFIG = None
+            config_cache.saved_config_hash = config_cache.saved_config = None
 
 
 def get_config_and_hash(dynamic=None):
+    _maybe_init_guarded_config_cache()
     # get current value of dynamo configs
     dynamo_config = config.get_config_copy()
     for k in dynamo_config_guard_ignorelist:
@@ -359,11 +365,11 @@ def get_config_and_hash(dynamic=None):
 # Used to test if the config needs to be restored by checking the current hash.
 # We cache this, only to recompute it when config is possibly out of sync (i.e. is dirty).
 def get_cached_recompile_hash():
-    global DYNAMO_CACHED_RECOMPILE_HASH
-    if config._is_dirty or DYNAMO_CACHED_RECOMPILE_HASH is None:
-        _, DYNAMO_CACHED_RECOMPILE_HASH = get_config_and_hash(dynamic=None)
+    global config_cache
+    if config._is_dirty or config_cache.cached_recompile_hash is None:
+        _, config_cache.cached_recompile_hash = get_config_and_hash(dynamic=None)
         config._is_dirty = False
-    return DYNAMO_CACHED_RECOMPILE_HASH
+    return config_cache.cached_recompile_hash
 
 
 class _TorchDynamoContext:
