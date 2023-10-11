@@ -1,9 +1,25 @@
 # Owner(s): ["module: inductor"]
 import functools
+import pickle
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
-from torch._inductor.codecache import AsyncCompile
+from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.utils import counters
+from torch._inductor import config
+from torch._inductor.codecache import (
+    AsyncCompile,
+    FxGraphCachePickler,
+    FxGraphHashDetails,
+    TensorMetadata,
+    TensorMetadataAndValues,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._triton import has_triton
 
