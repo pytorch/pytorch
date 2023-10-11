@@ -34,6 +34,7 @@ from .codegen.common import (
 )
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
+    CppWrapperCodeGenError,
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
@@ -463,11 +464,6 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def disable_cpp_wrapper(self, cond):
-        metrics.disable_cpp_wrapper += 1
-        self.cpp_wrapper = False
-        log.debug("Set cpp_wrapper to False due to %s", cond)
-
     def register_buffer(self, buffer: ir.ComputedBuffer):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
@@ -723,6 +719,15 @@ class GraphLowering(torch.fx.Interpreter):
         for buf in self.buffers:
             buf.decide_layout()
 
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
+
     def run_node(self, n: torch.fx.Node):
         log.debug("lowering %s", LazyString(lambda: n.format_node()))
         origins = {n}
@@ -876,15 +881,15 @@ class GraphLowering(torch.fx.Interpreter):
 
         return result
 
-    def check_cpp_codegen_disabled(self):
+    def validate_can_generate_cpp_wrapper(self):
         if config.disable_cpp_codegen:
-            self.disable_cpp_wrapper("cpp codegen disabled")
+            metrics.disable_cpp_wrapper += 1
+            raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-    def check_platform(self):
         if sys.platform != "linux":
-            self.disable_cpp_wrapper("platform not linux")
+            metrics.disable_cpp_wrapper += 1
+            raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
-    def check_input_for_cpp_buffer(self):
         for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
@@ -895,35 +900,17 @@ class GraphLowering(torch.fx.Interpreter):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
-                self.disable_cpp_wrapper("unsupported inputs dtype")
-
-    @contextmanager
-    def set_current_node(self, node: torch.fx.Node):
-        old = self.current_node
-        try:
-            self.current_node = node
-            yield
-        finally:
-            self.current_node = old
-
-    def check_cpp_wrapper(self):
-        self.check_cpp_codegen_disabled()
-        self.check_platform()
-        self.check_input_for_cpp_buffer()
+                metrics.disable_cpp_wrapper += 1
+                raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            # Re-check self.cpp_wrapper because it might be disabled due to failed checking
-            if self.cuda:
-                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
-
-            if self.cpp_wrapper:
-                self.wrapper_code = (
-                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
-                )
-                return
+            self.validate_can_generate_cpp_wrapper()
+            self.wrapper_code = (
+                CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
+            )
+            return
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to

@@ -66,6 +66,10 @@ class InvalidCxxCompiler(RuntimeError):
             f"No working C++ compiler found in {config.__name__}.cpp.cxx: {config.cpp.cxx}"
         )
 
+class CppWrapperCodeGenError(RuntimeError):
+    def __init__(self, msg: str):
+        super().__init__(f"C++ wrapper codegen error: {msg}")
+
 
 class CppCompileError(RuntimeError):
     def __init__(self, cmd: list[str], output: str):
