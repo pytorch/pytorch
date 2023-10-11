@@ -1,4 +1,4 @@
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <ATen/DynamicLibrary.h>
 
 #include <torch/csrc/inductor/aoti_model_runner.h>
