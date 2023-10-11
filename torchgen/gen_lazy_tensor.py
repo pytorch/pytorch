@@ -155,7 +155,7 @@ def validate_shape_inference_header(
         raise Exception(
             f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
-and implement it in the the corresponding shape_inference.cpp file.\n
+and implement it in the corresponding shape_inference.cpp file.\n
 {os.linesep.join(missing_decls)}"""
         )
 

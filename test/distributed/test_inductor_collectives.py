@@ -314,13 +314,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = a2a / a2a.sum(dim=0)
             return out
 
-        with (
-            _dynamo_dist_per_rank_init(self.rank, self.world_size),
-            torch._dynamo.config.patch(
-                dynamic_shapes=True,
-                capture_dynamic_output_shape_ops=True,
-                capture_scalar_outputs=True,
-            )
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
             input_split_sizes_tensor = torch.tensor([(i + 1) * (self.rank + 1) for i in range(self.world_size)], dtype=torch.int64)
@@ -400,13 +397,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = a2a / a2a.sum(dim=0)
             return out
 
-        with (
-            _dynamo_dist_per_rank_init(self.rank, self.world_size),
-            torch._dynamo.config.patch(
-                dynamic_shapes=True,
-                capture_dynamic_output_shape_ops=True,
-                capture_scalar_outputs=True,
-            )
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
         ):
             output_split_sizes_tensor = torch.tensor([1] * self.world_size, dtype=torch.int64)
             inputs = (

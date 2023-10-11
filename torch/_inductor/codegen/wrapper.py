@@ -564,6 +564,7 @@ class WrapperCodeGen(CodeGen):
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
+
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
@@ -668,6 +669,22 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         return self.codegen_python_shape_tuple(shape)
+
+    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
+        return "alloc_from_pool({})".format(
+            ", ".join(
+                map(
+                    str,
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        dtype,
+                        self.codegen_shape_tuple(shape),
+                        self.codegen_shape_tuple(stride),
+                    ],
+                )
+            )
+        )
 
     def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
         size = self.codegen_shape_tuple(size)
@@ -870,6 +887,9 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device.type}', dtype={dtype})"
             )
 
+    def make_destroy_allocation(self, names_to_del: List[str]):
+        return f"del {', '.join(names_to_del)}"
+
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
@@ -898,7 +918,7 @@ class WrapperCodeGen(CodeGen):
         reinterpret_view = self.codegen_reinterpret_view(
             old_name, new.get_size(), new.get_stride(), 0, self.wrapper_call
         )
-        return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return f"{self.declare}{new_name} = {reinterpret_view}{del_line};  {self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
@@ -1107,15 +1127,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
+                #define alloc_from_pool torch::inductor::_alloc_from_pool
+                #define align(x) torch::inductor::_align(x, {ALIGN_BYTES})
                 """
             )
-
-        self.header.splice(
-            """
-            #define alloc_from_pool torch::inductor::_alloc_from_pool
-            #define align(x) torch::inductor::_align(x, {ALIGN_BYTES})
-            """
-        )
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
@@ -1595,15 +1610,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return var
 
     def make_buffer_allocation(self, buffer):
-        name = buffer.get_name()
+        return self.make_allocation(
+            buffer.get_name(),
+            buffer.get_device(),
+            buffer.get_dtype(),
+            buffer.get_size(),
+            buffer.get_stride(),
+        )
+
+    def make_allocation(self, name, device, dtype, shape, stride):
         if config.aot_inductor.abi_compatible:
-            device = self.codegen_device(buffer.get_device())
-            dtype = self.codegen_dtype(buffer.get_dtype())
-            size = self.codegen_shape_tuple(tuple(buffer.get_size()))
-            stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
+            device = self.codegen_device(device)
+            dtype = self.codegen_dtype(dtype)
+            size = self.codegen_shape_tuple(tuple(shape))
+            stride = self.codegen_shape_tuple(tuple(stride))
             device_type, device_id = device.split(",")
             args = [
-                str(len(buffer.get_size())),
+                str(len(size)),
                 self.codegen_int_array_var(size, self.wrapper_call),
                 self.codegen_int_array_var(stride, self.wrapper_call),
                 dtype,
@@ -1616,16 +1639,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
-        else:
-            return self.make_allocation(
-                name,
-                buffer.get_device(),
-                buffer.get_dtype(),
-                buffer.get_size(),
-                buffer.get_stride(),
-            )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
         device_str = self.codegen_device(device)
         if V.graph.aot_mode and device_str.startswith("c10::Device("):
             tensor_device = f"{device_str.split(',')[0]}, this->device_idx_)"
@@ -1640,13 +1654,58 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f".dtype({self.codegen_dtype(dtype)})){self.ending}"
         )
 
+    def make_destroy_allocation(self, names_to_del: List[str]):
+        # TODO will RAIIAtenTensorHandle handle this for us?
+        return ""
+
+    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
+        if config.aot_inductor.abi_compatible:
+            size = self.codegen_shape_tuple(shape)
+            stride = self.codegen_shape_tuple(stride)
+            ndim = str(len(shape))
+            tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
+            args = list(
+                map(
+                    str,
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        self.codegen_dtype(dtype),
+                        ndim,
+                        self.codegen_int_array_var(size, self.wrapper_call),
+                        self.codegen_int_array_var(stride, self.wrapper_call),
+                        f"&{tmp_name}",
+                    ],
+                )
+            )
+            self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
+            self.wrapper_call.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));"
+            )
+            return f"RAIIAtenTensorHandle({tmp_name})"
+
+        return "alloc_from_pool({})".format(
+            ", ".join(
+                map(
+                    str,
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        self.codegen_dtype(dtype),
+                        self.codegen_shape_tuple(shape),
+                        self.codegen_shape_tuple(stride),
+                    ],
+                )
+            )
+        )
+
     def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
-        dim = str(len(size))
         size = self.codegen_shape_tuple(size)
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
 
         if config.aot_inductor.abi_compatible:
+            dim = str(len(size))
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.

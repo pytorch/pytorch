@@ -193,26 +193,14 @@ class Allocation(AllocationTreeNode):
         node = self.node
         shape = tuple(node.get_size())
         stride = tuple(node.get_stride())
-        return "alloc_from_pool({})".format(
-            ", ".join(
-                map(
-                    str,
-                    [
-                        self.pool.name,
-                        pexpr(self.offset),  # bytes not numel
-                        node.get_dtype(),
-                        wrapper.codegen_shape_tuple(shape),
-                        wrapper.codegen_shape_tuple(stride),
-                    ],
-                )
-            )
-        )
+        return wrapper.codegen_alloc_from_pool(self.pool.name, self.offset, node.get_dtype(),
+                                               shape, stride)
 
     def __repr__(self):
         return (
             f"{self.__class__.__name__}("
             f"node={self.node.get_name()}, "
-            f"live_Range={self.live_range}, "
+            f"live_range={self.live_range}, "
             f"size_hint={self.size_hint}, "
             f"symbolic_size={self.symbolic_size}, "
             f"pool={self.pool.name if self.pool else None}, "
@@ -468,9 +456,9 @@ class AllocationPool:
                 )
             )
 
-    def codegen_destroy(self, code: IndentedBuffer):
+    def codegen_destroy(self, wrapper, code: IndentedBuffer):
         assert self.names_to_del
-        code.writeline(f"del {', '.join(self.names_to_del)}")
+        code.writeline(wrapper.make_destroy_allocation(self.names_to_del))
 
     def __eq__(self, other):
         return self is other
@@ -569,8 +557,8 @@ class BufferGroup:
         assert not self.allocation, "multiple allocations"
         assert isinstance(self.live_range.begin, int), "live ranges not computed"
         nbytes = self.sym_nbytes()
-        try: # FIXME
-            size_hint=V.graph.sizevars.size_hint(nbytes)
+        try:  # FIXME
+            size_hint = V.graph.sizevars.size_hint(nbytes)
         except TypeError:
             size_hint = 1
         self.allocation = Allocation(
@@ -610,13 +598,13 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
         assert allocation and allocation.pool
         pool = allocation.pool
         name = self.node.get_name()
-        alloc_from_pool = allocation.codegen_alloc_from_pool(self.wrapper)
 
         if self.is_first_pool_usage:
             pool.codegen_create(self.wrapper, code)
 
         assert pool.names_to_del and (pool.creation_cache is not None)
         pool.names_to_del.extend(self.group.names)
+        alloc_from_pool = allocation.codegen_alloc_from_pool(self.wrapper)
         if alloc_from_pool in pool.creation_cache:
             code.writeline(
                 self.wrapper.make_tensor_alias(
@@ -639,7 +627,7 @@ class DeallocFromPoolLine(PoolMemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         if self.is_last_pool_usage:
             assert self.group.allocation and self.group.allocation.pool
-            self.group.allocation.pool.codegen_destroy(code)
+            self.group.allocation.pool.codegen_destroy(self.wrapper, code)
 
 
 class ReuseFromPoolLine(ReuseLine):
