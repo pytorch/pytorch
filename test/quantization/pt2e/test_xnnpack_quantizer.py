@@ -1,11 +1,29 @@
-import torch
+import copy
 import operator
+
+import torch
 import torch._dynamo as torchdynamo
-from torch.ao.quantization.backend_config import (
-    get_qnnpack_backend_config,
-)
-from torch.ao.ns.fx.utils import compute_sqnr
 from torch._export import capture_pre_autograd_graph
+from torch.ao.ns.fx.utils import compute_sqnr
+from torch.ao.quantization import (
+    default_dynamic_qconfig,
+    observer,
+    QConfig,
+    QConfigMapping,
+)
+from torch.ao.quantization.backend_config import get_qnnpack_backend_config
+from torch.ao.quantization.qconfig import (
+    default_per_channel_symmetric_qnnpack_qconfig,
+    default_symmetric_qnnpack_qconfig,
+    per_channel_weight_observer_range_neg_127_to_127,
+    weight_observer_range_neg_127_to_127,
+)
+from torch.ao.quantization.quantize_fx import (
+    _convert_to_reference_decomposed_fx,
+    convert_to_reference_fx,
+    prepare_fx,
+)
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
@@ -16,29 +34,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     TestHelperModules,
 )
-from torch.ao.quantization import (
-    QConfig,
-    QConfigMapping,
-    default_dynamic_qconfig,
-    observer,
-)
-from torch.ao.quantization.quantize_fx import (
-    _convert_to_reference_decomposed_fx,
-    convert_to_reference_fx,
-    prepare_fx,
-)
-from torch.ao.quantization.quantize_pt2e import (
-    prepare_pt2e,
-    convert_pt2e,
-)
-from torch.ao.quantization.qconfig import (
-    default_symmetric_qnnpack_qconfig,
-    default_per_channel_symmetric_qnnpack_qconfig,
-    per_channel_weight_observer_range_neg_127_to_127,
-    weight_observer_range_neg_127_to_127,
-)
 from torch.testing._internal.common_quantized import override_quantized_engine
-import copy
 
 from .test_quantize_pt2e import PT2EQuantizationTestCase
 
