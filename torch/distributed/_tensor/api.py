@@ -1,11 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import Callable, cast, Optional, Sequence, Tuple
+from typing import Callable, Union, cast, Optional, Sequence, Tuple
 
 import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
+import torch.distributed._tensor._xla.distribute_tensor as xla_distribute_tensor
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
@@ -447,7 +448,12 @@ def distribute_tensor(
             first rank of each dimension of the `device_mesh`.
 
     Returns:
-        A :class:`DTensor` object
+        A :class:`DTensor` or `XLAShardedTensor` object.
+
+    Note:
+        When initialize the DeviceMesh with the `xla` device_type, `distribute_tensor`
+        return `XLAShardedTensor` instead. see [link](https://github.com/pytorch/pytorch/issues/92909)
+        for more details.
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
@@ -455,6 +461,10 @@ def distribute_tensor(
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
+    if device_type == 'xla':
+        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
+        # This returns XLAShardedTensor
+        return xla_distribute_tensor(tensor, device_mesh, placements)  # type:ignore
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -481,7 +491,6 @@ def distribute_tensor(
             f"`placements` must have the same length as `device_mesh.ndim`! "
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
-
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we just need to check if the
         # device mesh and placements are the same
