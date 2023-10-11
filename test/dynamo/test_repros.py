@@ -3068,18 +3068,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_list_index(self):
-        for index in ([], [2], [0, 3]):
-
-            def f(t):
-                xs = ["bar", "foo", "baz", "buzz"]
-                res = xs.index("baz", *index)
-                return t + res
-
-            res = torch._dynamo.optimize(backend="eager", nopython=True)(f)(
-                torch.zeros(1)
+        for i, list_type in enumerate(
+            (
+                list,
+                tuple,
+                torch.Size,
+                collections.deque,
+                namedtuple("FourElems", "one two three four", defaults=[0, 0, 0, 0]),
             )
+        ):
+            torch._dynamo.reset()
+            for index in ([], [2], [0, 3]):
 
-            self.assertEqual(res, torch.tensor([2.0]))
+                def f(t):
+                    if i == 4:  # namedtuple
+                        xs = list_type(1, 2, 3, 4)
+                    else:
+                        xs = list_type([1, 2, 3, 4])
+                    res = xs.index(3, *index)
+                    return t + res
+
+                res = torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
+
+                self.assertEqual(res, torch.tensor([2.0]))
 
     def test_list_index_not_found(self):
         def f(t):
