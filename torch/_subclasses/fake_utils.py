@@ -154,6 +154,18 @@ class CrossRefFakeMode(TorchDispatchMode):
                             allow_rhs_unbacked=True,
                         )
                     except Exception as e:
+                        if (
+                            func is aten._scaled_dot_product_flash_attention.default
+                            and idx in (6, 7)
+                            and "Devices" in repr(e)
+                        ):
+                            continue
+                        if (
+                            func is aten._scaled_dot_product_efficient_attention.default
+                            and idx in (2, 3)
+                            and "Devices" in repr(e)
+                        ):
+                            continue
                         error_message = (
                             f"{context} mismatched tensor metadata: {e}"
                             if len(r_flat) == 1

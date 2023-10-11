@@ -8,7 +8,6 @@ import zipfile
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import export, save, load
-from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -412,7 +411,7 @@ class TestDeserialize(TestCase):
     def test_constraints(self):
         def f(x, y):
             n = x.item()
-            constrain_as_size(n, min=2)
+            torch._constrain_as_size(n, min=2)
             return y.sum() + torch.ones(n, 5).sum()
 
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
