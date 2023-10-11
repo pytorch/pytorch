@@ -347,7 +347,9 @@ def get_config_and_hash(dynamic=None):
         dynamo_config.update({"assume_static_by_default": False})
 
     dynamo_config_bytes = pickle.dumps(
-        dict(sorted(dynamo_config.items()))  # Try to make serialization more deterministic
+        dict(
+            sorted(dynamo_config.items())
+        )  # Try to make serialization more deterministic
     )
     sha256_hash = hashlib.sha256(dynamo_config_bytes).hexdigest()
     return dynamo_config, sha256_hash
