@@ -5,8 +5,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class UpgradersMap {
  public:
@@ -44,5 +43,4 @@ TORCH_API void test_only_populate_upgraders(
 TORCH_API void test_only_remove_upgraders(
     const std::unordered_map<std::string, std::string>& content);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
