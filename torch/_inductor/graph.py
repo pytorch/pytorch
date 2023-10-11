@@ -508,11 +508,16 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 
+        realized_bufs: Set[str] = set()
+
         if name not in self.name_to_users:
-            return
+            return realized_bufs
 
         for user in self.name_to_users[name]:
             user.realize()
+            realized_bufs.add(user.get_name())
+
+        return realized_bufs
 
     def add_tensor_constant(self, data, name=None):
         def allocate(name):

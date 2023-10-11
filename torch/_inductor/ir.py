@@ -2332,27 +2332,45 @@ class MutationLayout(Layout):
         # NOTE: We must realize users of `dst` before we realize `src`, since
         # realization order determines scheduling order. Otherwise, src's
         # mutation would be scheduled before the existing users of dst!
-        V.graph.mark_buffer_mutated(dst.get_name())
+        realized_bufs = V.graph.mark_buffer_mutated(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
 
-        if src.is_user_of(dst.get_name()) and (
+        need_copy = True
+
+        if (
             isinstance(src.data, Buffer)
             and isinstance(src.get_layout(), FlexibleLayout)
+            and not src.is_zero_elements()
+            and (
+                (src.get_name() in realized_bufs)
+                or (
+                    src.get_name() not in realized_bufs
+                    and (
+                        len(V.graph.name_to_users[src.get_name()]) == 0
+                        or (
+                            len(V.graph.name_to_users[src.get_name()]) == 1
+                            and V.graph.name_to_users[src.get_name()].get_name()
+                            == dst.get_name()
+                        )
+                    )
+                )
+            )
         ):
-            # Skip the copy when
-            # 1. If src is_user_of dst, we suppose it has been realize in previous
-            #    step of: V.graph.mark_buffer_mutated(dst.get_name())
-            # 2. The src must be FlexibleLayout, since it will be changed to MutationLayout with dst
+            # Skip the copy:
+            # Case 1: src created in above V.graph.mark_buffer_mutated
+            # Case 2: src not created in above V.graph.mark_buffer_mutated, but src has no users or 1 user of dst
             need_copy = False
-        elif not isinstance(src, StorageBox) or src.is_zero_elements():
-            need_copy = True
-        else:
-            src.realize()
-            need_copy = not isinstance(src.get_layout(), FlexibleLayout)
 
         if need_copy:
+            # We copy the contents of src into dst. In most cases this should
+            # be fused into a single kernel by the scheduler.
+            # NOTE: We cannot change src's layout to mutate dst directly as this
+            # would alias src to dst, which is not correct as further mutations to
+            # dst would effect users of src.
+            src.realize_hint()
+
             src = Pointwise.create(
                 device=src.get_device(),
                 dtype=src.get_dtype(),
