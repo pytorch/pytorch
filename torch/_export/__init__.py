@@ -35,6 +35,11 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
+from torch.export.exported_program import (
+    ExportBackwardSignature,
+    ExportedProgram,
+    ExportGraphSignature,
+)
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -51,9 +56,6 @@ from .exported_program import (
     _process_constraints,
     CallSpec,
     combine_args_kwargs,
-    ExportBackwardSignature,
-    ExportedProgram,
-    ExportGraphSignature,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -63,6 +65,7 @@ from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
 from .wrappers import _wrap_submodules
 
 
@@ -145,9 +148,6 @@ def export__RC__(
                     f"got {dynamic_shapes} instead",
                 )
 
-    from collections import defaultdict
-    symbols = defaultdict(list)
-
     def to_constraint(dim, tensor, i):
         constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
         if dim.min != 2:
@@ -156,10 +156,30 @@ def export__RC__(
             constraint = constraint <= dim.max
         return constraint
 
+    from collections import defaultdict
+    symbols = defaultdict(list)
+    bounds: Dict[str, Tuple[int, int]] = {}
+
+    def check_same_bounds(dim):
+        if dim.__name__ in symbols:
+            min_, max_ = bounds[dim.__name__]
+            if dim.min != min_ or dim.max != max_:
+                this_ = _Dim.readable(dim.__name__, min_, max_)
+                that_ = _Dim.readable(dim.__name__, dim.min, dim.max)
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Found different definitions {this_} and {that_} "
+                    f"for the same symbolic dimension {dim}!"
+                )
+
+        else:
+            bounds[dim.__name__] = (dim.min, dim.max)
+
     def update_symbols(tensor, shape):
         if isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
+                    check_same_bounds(dim)
                     symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
                     if dim is not None:
@@ -171,6 +191,7 @@ def export__RC__(
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
+                    check_same_bounds(dim)
                     symbols[dim.__name__].append(to_constraint(dim, tensor, i))
                 else:
                     if dim is not None:
@@ -529,7 +550,7 @@ def _export(
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 
@@ -627,7 +648,6 @@ def _export(
     gm, graph_signature = aot_export_module(
         gm_torch_level,
         (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
-        decompositions=DECOMP_TABLE,
         trace_joint=False
     )
 
@@ -732,11 +752,10 @@ def _export(
         (args, kwargs),
     )
 
-    if torch._dynamo.config.add_runtime_assertions_for_inline_constraints:
-        if len(range_constraints) > 0 or len(equality_constraints) > 0:
-            exported_program = exported_program._transform(
-                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-            )
+    if len(range_constraints) > 0 or len(equality_constraints) > 0:
+        exported_program = exported_program._transform(
+            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+        )
     exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
@@ -821,6 +840,7 @@ def aot_compile(
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
+    remove_runtime_assertions: bool = False,
 ) -> Tuple[str, ExportedProgram]:
     """
     Note: this function is not stable yet
@@ -847,6 +867,10 @@ def aot_compile(
 
         options: A dictionary of options to control inductor
 
+        remove_runtime_assertions: Whether the runtime assertion fx nodes
+            (and the related fx nodes) inserted by export should be removed
+            from the graph before running _inductor.aot_compile.
+
     Returns:
         Path to the generated shared library, and the exported program
     """
@@ -856,16 +880,16 @@ def aot_compile(
             "Please use dynamic_shapes instead."
         )
 
-    from torch._inductor.decomposition import select_decomp_table
-
-    global DECOMP_TABLE
-    DECOMP_TABLE = select_decomp_table()
     if constraints is not None:
         ep = export(f, args, kwargs, constraints)
     else:
         ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
-    # Reset the global value
-    DECOMP_TABLE = core_aten_decompositions()
+
+    from torch._inductor.decomposition import select_decomp_table
+    ep = ep.run_decompositions(select_decomp_table())
+
+    if remove_runtime_assertions:
+        ep = ep._transform(_RemoveRuntimeAssertionsPass())
 
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]

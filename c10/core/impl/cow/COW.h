@@ -2,9 +2,11 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
+//#include <c10/core/Allocator.h>
 
 namespace c10 {
 struct StorageImpl;
+struct DataPtr;
 }; // namespace c10
 
 namespace c10::impl::cow {
@@ -18,5 +20,11 @@ namespace c10::impl::cow {
 // returned.
 C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage);
+
+// Check if a DataPtr is a simple DataPtr with no abnormal context
+C10_API bool is_simple_data_ptr(const c10::DataPtr& data_ptr);
+
+// Check if a DataPtr is COW
+C10_API bool is_cow_data_ptr(const c10::DataPtr& data_ptr);
 
 } // namespace c10::impl::cow

@@ -2,6 +2,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/StorageImpl.h>
+#include <c10/core/alignment.h>
 #include <c10/core/impl/cow/COWDeleter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -9,7 +10,7 @@
 #include <memory>
 #include <optional>
 
-namespace c10::impl {
+namespace c10::impl::cow {
 
 namespace {
 
@@ -30,8 +31,19 @@ at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
 
 } // namespace
 
-c10::intrusive_ptr<StorageImpl> C10_API
-cow::lazy_clone_storage(StorageImpl& storage) {
+bool is_simple_data_ptr(const c10::DataPtr& data_ptr) {
+#ifdef C10_MOBILE
+  return data_ptr.get() == data_ptr.get_context() + c10::gAlignment;
+#else
+  return data_ptr.get() == data_ptr.get_context();
+#endif
+}
+
+bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
+  return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
+}
+
+c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
@@ -43,12 +55,7 @@ cow::lazy_clone_storage(StorageImpl& storage) {
   //
   //    No locking is required in this case.
   //
-  // 2) The storage has a context that is not the copy on write
-  //    context. This is not supported, so we just return null.
-  //
-  //    No locking is required in this case.
-  //
-  // 3) The storage already has a copy on write context. There
+  // 2) The storage already has a copy on write context. There
   //    is a potential race condition with a blind alias (i.e. an
   //    alias that the user is not required to synchronize
   //    with). Because our input storage is bound to a live reference
@@ -58,10 +65,15 @@ cow::lazy_clone_storage(StorageImpl& storage) {
   //
   //    We do not need to lock in this case either, because we're just
   //    wrapping a context that we know isn't going away.
+  //
+  // 3) The storage has a context that is not the copy on write
+  //    context. This is not supported, so we just return null.
+  //
+  //    No locking is required in this case.
 
   std::optional<DataPtr> new_data_ptr; // must be set below
 
-  if (data_ptr.get() == data_ptr.get_context()) {
+  if (is_simple_data_ptr(data_ptr)) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage.mutable_data_ptr().move_context();
@@ -73,14 +85,14 @@ cow::lazy_clone_storage(StorageImpl& storage) {
 
     // Update this storage to the new copy on write context.
     storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
-  } else if ((void*)data_ptr.get_deleter() != (void*)&cow::cow_deleter) {
-    // Case 2) There is a context and it's not copy-on-write. Nothing
-    // we can do here.
-    return nullptr;
-  } else {
-    // Case 3): there is already a copy on write context. Just return a
+  } else if (is_cow_data_ptr(data_ptr)) {
+    // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
     new_data_ptr = copy_data_ptr(data_ptr);
+  } else {
+    // Case 3) There is a context and it's not copy-on-write. Nothing
+    // we can do here.
+    return nullptr;
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
@@ -93,4 +105,4 @@ cow::lazy_clone_storage(StorageImpl& storage) {
       storage.resizable());
 }
 
-} // namespace c10::impl
+} // namespace c10::impl::cow

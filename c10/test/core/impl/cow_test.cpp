@@ -81,16 +81,14 @@ TEST_F(ContextTest, cow_deleter) {
 
 MATCHER(is_copy_on_write, "") {
   const c10::StorageImpl& storage = std::ref(arg);
-  return storage.data_ptr().get_deleter() == cow::cow_deleter;
+  return cow::is_cow_data_ptr(storage.data_ptr());
 }
 
 TEST(lazy_clone_storage_test, no_context) {
   StorageImpl original_storage(
       {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
   ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
-  ASSERT_THAT(
-      original_storage.data_ptr().get(),
-      testing::Eq(original_storage.data_ptr().get_context()));
+  ASSERT_TRUE(cow::is_simple_data_ptr(original_storage.data_ptr()));
 
   intrusive_ptr<StorageImpl> new_storage =
       cow::lazy_clone_storage(original_storage);
