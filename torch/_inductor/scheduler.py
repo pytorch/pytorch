@@ -17,7 +17,7 @@ from torch.utils._triton import has_triton
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
 from .dependencies import StarDep, WeakDep
-from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .ir import ComputedBuffer, CUDATemplateBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -1134,7 +1134,6 @@ class Scheduler:
         assert (
             node.origins is not None
         ), "All nodes passed to scheduling must have an origin"
-        from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateBuffer
 
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
@@ -1847,7 +1846,7 @@ class Scheduler:
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateBuffer
+                from torch._inductor.ir import CUDATemplateBuffer
 
                 if isinstance(node.node, CUDATemplateBuffer):
                     from .codegen.cuda.cuda_scheduling import CUDAScheduling

@@ -1,18 +1,18 @@
 import itertools
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
-from ...ir import Buffer, IRNode, Layout
+from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
 
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
-from .cuda_kernel import CUDATemplateBuffer, CUDATemplateCaller, CUDATemplateKernel
+from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +46,7 @@ class CUDATemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
-        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]
-        epilogue_nodes: Optional[List[IRNode]] = None,
+        op: Any = None,  # type: ignore[name-defined]
         **kwargs,
     ) -> CUDATemplateCaller:
         """
@@ -55,8 +54,7 @@ class CUDATemplate(KernelTemplate):
         may be used to call and benchmark the generated CUDA kernel in a standalone manner to enable Autotuning.
 
         Args:
-            op: The cutlass_gemm_op.GemmOperation object representing the operation to be generated.
-            epilogue_nodes: Optional list of IRNodes representing the epilogue operations.
+            op: A cutlass_library object representing the operation to be generated.
             kwargs: Additional keyword arguments.
 
         Returns:
@@ -68,9 +66,7 @@ class CUDATemplate(KernelTemplate):
         ), CUDATemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
-            code = self.render(
-                kernel=kernel, op=op, epilogue_nodes=epilogue_nodes, **kwargs
-            )
+            code = self.render(kernel=kernel, op=op, **kwargs)
             _, call_args, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
@@ -109,10 +105,8 @@ class CUDATemplate(KernelTemplate):
         cuda_template_buffer = CUDATemplateBuffer(
             template=self,
             op=op,
-            epilogue_nodes=epilogue_nodes,
             workspace_size=lambda: bmreq.workspace_size,  # Not known yet, determined via CUDABenchmarkRequest
         )
-
         return CUDATemplateCaller(
             kernel_hash_name,
             self.name,
@@ -156,15 +150,6 @@ class CUDATemplate(KernelTemplate):
 
     def render(self, **kwargs) -> str:
         raise NotImplementedError
-
-    def can_fuse_node(self, node: IRNode) -> bool:
-        """Returns true if a given node may be fused into this template.
-        to be overridden
-        """
-        return False
-
-    def fuse_node(self, node: IRNode):
-        raise NotImplementedError()
 
 
 class CUTLASSTemplate(CUDATemplate):

@@ -1,13 +1,93 @@
+import logging
 from typing import cast, List
 
-from ... import config
+from ... import config, ir
 from ...codecache import code_hash, get_path
-from ...scheduler import FusedSchedulerNode, Scheduler, SchedulerNode
+from ...ir import ComputedBuffer, CUDATemplateBuffer, Pointwise
+from ...scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
 from ..common import IndentedBuffer
 from ..triton import TritonScheduling
-from .cuda_kernel import CUDATemplateBuffer
+
+log = logging.getLogger(__name__)
+
+
+def _can_fuse_epilogue(
+    cuda_template_buffer: CUDATemplateBuffer,
+    epilogue_nodes: List[ir.Buffer],
+    additional_node: ir.Buffer,
+) -> bool:
+    """
+
+    Check if the given node can be fused with the epilogue. At the moment, Kernels
+    support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
+
+    Args:
+        cuda_template_buffer : A CUDATemplateBuffer object representing the CUDA template and it's result buffer
+        epilogue_nodes : List[ir.Buffer]: The list of already fused epilogue nodes.
+        additional_node: The ir.Buffer node to be checked if it can be fused with the epilogue.
+    Returns:
+    - bool: True if the given node can be fused with the epilogue, False otherwise.
+
+    """
+    if not cuda_template_buffer.template.can_fuse_epilogue:
+        # The used GEMM op does not support fusing epilogues
+        return False
+
+    if not isinstance(additional_node, ComputedBuffer):
+        return False
+    if not isinstance(additional_node.data, Pointwise):
+        return False
+
+    # We can fuse a Pointwise op that depends on the last fused epilogue node
+    # if any. If there is no epilogue node yet, it needs to depend on the template
+    # node
+    node_name = additional_node.name if additional_node.name is not None else additional_node.data.name  # type: ignore[attr-defined]
+    if node_name is None:
+        return False
+
+    if len(epilogue_nodes) == 0:
+        if cuda_template_buffer.name not in additional_node.get_read_names():
+            return False
+    else:
+        last_epilogue_node = epilogue_nodes[-1]
+        last_epilogue_name = (
+            last_epilogue_node.name
+            if last_epilogue_node.name is not None
+            else last_epilogue_node.data.name  # type: ignore[attr-defined]
+        )
+        if last_epilogue_name not in additional_node.get_read_names():
+            return False
+    if additional_node.layout != cuda_template_buffer.layout:
+        return False
+    try:
+        from torch._inductor.codegen.cuda.cutlass_epilogue_gen import (
+            CutlassEVTEpilogueArgumentFormatter,
+            CutlassEVTEpilogueTypeFormatter,
+        )
+
+        CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
+            cast(str, cuda_template_buffer.name), "anything", [additional_node]
+        )
+        CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
+            cast(str, cuda_template_buffer.name), [additional_node]
+        )
+    except NotImplementedError as e:
+        not_implemented_op = str(e)
+        if not_implemented_op.startswith("_op_"):
+            not_implemented_op = not_implemented_op[4:]
+            log.warning(
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+            )
+            return False
+        else:
+            # Likely due to unsupported dtype.
+            log.warning(
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
+            )
+            return False
+    return True
 
 
 class CUDASchedulerNode(SchedulerNode):
@@ -33,32 +113,21 @@ class CUDASchedulerNode(SchedulerNode):
 
     def can_fuse_epilogue(self, other_node: SchedulerNode) -> bool:
         """
-        Determines whether this Scheduler node can fuse another node as epilogue.
-        If the nodes don't have the same device, they cannot be fused. If the device
-        is compatible, delegates the decision to CUDATemplateBuffer.can_fuse_epilogue
+        Determines whether this FusedCUDASchedulerNode can fuse another node as epilogue.
         """
-        cnode: CUDATemplateBuffer = cast(CUDATemplateBuffer, self.node)  # type: ignore[has-type]
         if other_node.get_device() != self.get_device():
             return False
-        return cnode.can_fuse_epilogue(other_node.node)
+        return _can_fuse_epilogue(
+            cast(CUDATemplateBuffer, self.node), [], other_node.node
+        )
 
     def fuse_epilogue(self, other_node: SchedulerNode) -> FusedSchedulerNode:
         """
-        Fuses thecurrent CUDA Scheduler Node with another (Epilogue) Scheduler Node.
-
-        :param other_node: The other Scheduler Node to fuse with
-        :return: The resulting Fused Scheduler Node.
+        Fuses the current FusedCUDASchedulerNode with another (Epilogue) Scheduler Node
+        and returns a new FusedCUDASchedulerNode
         """
         assert self.can_fuse_epilogue(other_node)
-        epilogue_nodes = [other_node]
-
-        cnode: CUDATemplateBuffer = cast(CUDATemplateBuffer, self.node)  # type: ignore[has-type]
-        fused_template_buffer = cnode.create_fused_buffer(
-            other_node.node, self.scheduler
-        )
-        self.node = fused_template_buffer
-        fused_node = FusedCUDASchedulerNode(self, self.scheduler, epilogue_nodes)
-        return fused_node
+        return FusedCUDASchedulerNode(self, self.scheduler, [other_node])  # type: ignore[arg-type]
 
 
 class FusedCUDASchedulerNode(FusedSchedulerNode):
@@ -99,11 +168,17 @@ class FusedCUDASchedulerNode(FusedSchedulerNode):
         """
         return self.snodes[1:]
 
-    def can_fuse_epilogue(self, node: SchedulerNode) -> bool:
+    def can_fuse_epilogue(self, other_node: SchedulerNode) -> bool:
         """
         Determines whether this FusedCUDASchedulerNode can fuse another node as epilogue.
         """
-        return self.get_cuda_scheduler_node().can_fuse_epilogue(node)
+        if other_node.get_device() != self.get_device():
+            return False
+        return _can_fuse_epilogue(
+            cast(CUDATemplateBuffer, self.get_cuda_scheduler_node().node),
+            [n.node for n in self.snodes[1:]],
+            other_node.node,
+        )
 
     def fuse_epilogue(self, other_node: SchedulerNode) -> FusedSchedulerNode:
         """
@@ -111,20 +186,9 @@ class FusedCUDASchedulerNode(FusedSchedulerNode):
         and returns a new FusedCUDASchedulerNode
         """
         assert self.can_fuse_epilogue(other_node)
-        # Non-mutating, the fused nodes are new instances
-        tnode: CUDATemplateBuffer = self.get_cuda_scheduler_node().node
-        fused_template_buffer = tnode.create_fused_buffer(
-            other_node.node, self.scheduler
+        return FusedCUDASchedulerNode(
+            self.template_node, self.scheduler, self.snodes + [other_node]
         )
-        template_node = CUDASchedulerNode(
-            self.scheduler,
-            fused_template_buffer,
-            self.get_cuda_scheduler_node().group_fn,
-        )
-        fused_node = FusedCUDASchedulerNode(
-            template_node, self.scheduler, self.get_epilogue_nodes() + [other_node]
-        )
-        return fused_node
 
 
 class CUDAScheduling(TritonScheduling):
@@ -162,7 +226,9 @@ class CUDAScheduling(TritonScheduling):
             )
         return kernel_name
 
-    def codegen_template(self, template_node, epilogue_nodes):
+    def codegen_template(
+        self, template_node: CUDASchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+    ):
         """
         Codegen a CUDA template, possibly with fused epilogues
         """
@@ -172,13 +238,11 @@ class CUDAScheduling(TritonScheduling):
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = template_node.node
-        assert {n.node.get_name() for n in epilogue_nodes} == {
-            n.get_name() for n in ctb.epilogue_nodes
-        }, "Epilogue node set not identical. This should never happen."
-
-        kernel, render = ctb.make_kernel_render(
-            template_node.node, epilogue_nodes=ctb.epilogue_nodes
-        )
+        epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
+        assert all(
+            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
+        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
@@ -188,6 +252,6 @@ class CUDAScheduling(TritonScheduling):
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, ctb)
+        kernel.call_kernel(kernel_name, ctb, epilogue_ir_nodes)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()

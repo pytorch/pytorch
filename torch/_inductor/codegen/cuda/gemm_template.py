@@ -288,7 +288,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         }:
             return False
         if op.epilogue_schedule not in (
-            # cutlass_lib.EpilogueScheduleType.ScheduleAuto,
             cutlass_lib.EpilogueScheduleType.TmaWarpSpecialized,
             cutlass_lib.EpilogueScheduleType.TmaWarpSpecializedCooperative,
         ):
@@ -301,7 +300,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         template_output_node_name: str,
         evt_type_name: str,
         epilogue_nodes: List[IRNode],
-    ):
+    ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
         return CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
             template_output_node_name, evt_type_name, epilogue_nodes
@@ -463,7 +462,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 op.C.element = cutlass_lib.DataType.void
             else:
                 op.C.layout = op.D.layout
-
+        supports_evt: bool = self.supports_evt(op)
+        if (self.can_fuse_epilogue is not None) and (
+            self.can_fuse_epilogue != supports_evt
+        ):
+            return None
+        if inductor_cuda_config.cutlass_only_evt_capable_ops and not supports_evt:
+            return None
         return op
 
     def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
@@ -479,16 +484,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             for op_list in ops[sm_level].values():
                 for op in op_list:
                     assert isinstance(op, cutlass_gemm_op.GemmOperation)
-                    supports_evt = self.supports_evt(op)
-                    if (self.can_fuse_epilogue is not None) and (
-                        self.can_fuse_epilogue != supports_evt
-                    ):
-                        continue
-                    if (
-                        inductor_cuda_config.cutlass_only_evt_capable_ops
-                        and not supports_evt
-                    ):
-                        continue
                     filter_res = self.filter_op(op)
                     if (
                         filter_res is not None
@@ -587,7 +582,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
-        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]
         template_node: Optional[Buffer] = None,
         epilogue_nodes: Optional[List[IRNode]] = None,
     ) -> str:
@@ -611,8 +606,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 op
             ), "op does not support EVT epilogue fusion"
         assert cutlass_utils.try_import_cutlass()
+        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
+        assert isinstance(
+            op, cutlass_gemm_op.GemmOperation
+        ), "op argument is required and has to be an instance of GemmOperation"
         if template_node is not None:
             self.output_node = template_node
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
@@ -666,6 +665,5 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             input_reorder=self.input_reorder,
             evt_epilogue_args=evt_epilogue_args,
         )
-
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         return res

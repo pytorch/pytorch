@@ -1,8 +1,9 @@
 import logging
-from typing import Callable, cast, Dict, List, Optional, Set, Union
+from typing import cast, Dict, List, Optional, Set
 
+from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Buffer, ComputedBuffer, IRNode, Pointwise, TemplateBuffer, TensorBox
+from ...ir import Buffer, IRNode, TensorBox
 from ...scheduler import Scheduler
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
@@ -133,7 +134,51 @@ class CUDATemplateKernel(CUDAKernel):
         arg_defs, *_ = self.args.cpp_argdefs()
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
-    def call_kernel(self, name: str, node: "CUDATemplateBuffer") -> None:
+    @staticmethod
+    def merge_ir_inputs(
+        scheduler: Scheduler, epilogue_nodes: List[ir.ComputedBuffer], template: "CUDATemplate"  # type: ignore[name-defined]
+    ) -> List[IRNode]:
+        """
+        Merge all inputs, including extra inputs from epilogue_nodes.
+
+        Args:
+            scheduler (Scheduler): The scheduler object, used to look up nodes by name.
+            epilogue_nodes (List[ComputedBuffer]): The list of additional epilogue nodes.
+            template (CUDATemplate): The CUDATemplate object.
+
+        Returns:
+        - List[IRNode]: The list of merged input nodes.
+        """
+        # Merge all inputs, including extra inputs from epilogue_nodes
+        # input nodes are not hashable, so we cannot directly place them in sets
+
+        template_input_id_set: Set[str] = {
+            cast(Buffer, irnode).get_name() for irnode in template.input_nodes
+        }
+        intermediate_id_set: Set[str] = {template.name} | {
+            cast(Buffer, n).get_name() for n in epilogue_nodes
+        }
+        covered_input_id_set = set(template_input_id_set) | intermediate_id_set
+        extra_inputs = []
+        for epilogue_node in epilogue_nodes:
+            # IRNodes store no references to their inputs in general
+            # we need to retrieve them indirectly from the current
+            # V.graph.scheduler
+            for node_name in epilogue_node.get_read_names():
+                node = scheduler.name_to_node[node_name]
+                assert hasattr(
+                    node, "node"
+                ), f"Scheduler node {node} does not have a node attribute"
+                irnode = node.node
+                if irnode.get_name() not in covered_input_id_set:
+                    extra_inputs.append(irnode)
+                    covered_input_id_set.add(irnode.get_name())
+        input_nodes = list(template.input_nodes) + extra_inputs
+        return input_nodes
+
+    def call_kernel(
+        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+    ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
         used from within torch._inductor.wrapper.WrapperCodeGen
@@ -273,256 +318,6 @@ class CUDATemplateKernel(CUDAKernel):
             )
 
 
-class CUDATemplateBuffer(TemplateBuffer):
-    def __init__(
-        self,
-        template: "CUDATemplate",  # type: ignore[name-defined]
-        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
-        epilogue_nodes: Optional[
-            List[IRNode]
-        ] = None,  # We need a new instance of this op every time we fuse
-        workspace_size: Optional[
-            Union[int, Callable[[], int]]
-        ] = None,  # May be an int or a callback returning an int
-        merged_input_nodes: Optional[
-            List[IRNode]
-        ] = None,  # input nodes of the template + epilogue nodes
-        name: Optional[
-            str
-        ] = None,  # Name of the buffer, must be registered with the graph if passed.
-        **render_kwargs,  # passed through to template_node.render
-    ):
-        """
-        Initializes a new instance of the CUDATemplateBuffer class.
-
-        Args:
-            template (CUDATemplate): The CUDATemplate object that this buffer uses to generate the Kernel source code
-            op (cutlass_gemm_op.GemmOperation): The GemmOperation object that represents the Cutlass GEMM operation
-                                                as well as it's compile-time arguments such as tile-sizes
-            epilogue_nodes (Optional[List[IRNode]]): A list of IRNodes representing the epilogue nodes for this
-                                                    buffer. Default is None.
-            workspace_size (Optional[Union[int, Callable[[], int]]]): The size of the workspace needed for this buffer.
-                         It can be an integer or a callable function that returns an integer. Default is None.
-            merged_input_nodes (Optional[List[IRNode]]): A list of IRNodes representing the merged input
-                                                        nodes for this buffer. Default is None.
-            name (Optional[str]): The name of the buffer. It must be already registered with the graph if passed.
-                                                        Default is None. If None, a new name will be generated and
-                                                        the name will be registered with the Graph
-            **render_kwargs: Additional keyword arguments passed through to template_node.render.
-
-        """
-        if epilogue_nodes is None:
-            epilogue_nodes = []
-        if merged_input_nodes is None:
-            assert (
-                epilogue_nodes is None or len(epilogue_nodes) == 0
-            ), "If epilogue nodes are passed, merged_input_nodes must be passed as well"
-            input_nodes = template.input_nodes
-        else:
-            input_nodes = merged_input_nodes
-        super().__init__(
-            template.layout, input_nodes, self._make_kernel_render, name=name
-        )
-        self.template = template
-        self.op = op
-        self._epilogue_nodes = epilogue_nodes
-        # TODO: Once we support non-pointwise fusions, layout might be modified by epilogues
-        self.layout = template.layout
-        self._render_kwargs = render_kwargs
-        # Global memory (in bytes) needed for this template.
-        self._workspace_size = workspace_size
-
-    @property
-    def epilogue_nodes(self):
-        """
-        Return the epilogue nodes for the CUDATemplateBuffer.
-        This is a read-only property to signal it should not be mutated
-        """
-        return self._epilogue_nodes
-
-    @property
-    def workspace_size(self):
-        """
-        Read-only property that returns the workspace size for the CUDATemplateBuffer, possibly retrieved
-        lazily via a callback.
-        """
-        return self.get_workspace_size()
-
-    def get_workspace_size(self):
-        """
-        See self.workspace_size property
-        """
-        if callable(self._workspace_size):
-            return self._workspace_size()
-        return self._workspace_size if self._workspace_size is not None else 0
-
-    def _make_kernel_render(
-        self, output_node, epilogue_nodes: Optional[List[IRNode]] = None
-    ):
-        """
-        Private method that may be passed as a callback bound to this instance,
-        which returns the parameterless kernel render function and a CUDATemplateKernel.
-
-        This callback is required for the parent class (TemplateBuffer) and is used by
-        CUDAScheduling.codegen_template(...) to render the Kernel source.
-        """
-        assert output_node is self
-        assert self.workspace_size >= 0
-        kernel = CUDATemplateKernel(
-            kernel_name="KERNEL_NAME",
-        )
-
-        def render():
-            return self.template.render(
-                kernel=kernel,
-                template_node=self,
-                op=self.op,
-                epilogue_nodes=epilogue_nodes,
-                **self._render_kwargs,
-            )
-
-        return kernel, render
-
-    def can_fuse_epilogue(self, node) -> bool:
-        """
-
-        Check if the given node can be fused with the epilogue. At the moment, Kernels
-        support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
-
-        Args:
-            node: The IRNode to be check if it can be fused with the epilogue.
-
-        Returns:
-        - bool: True if the given node can be fused with the epilogue, False otherwise.
-
-        """
-        if not self.template.can_fuse_epilogue:
-            # The used GEMM op does not support fusing epilogues
-            return False
-
-        if not isinstance(node, ComputedBuffer):
-            return False
-        if not isinstance(node.data, Pointwise):
-            return False
-
-        # We can fuse a Pointwise op that depends on the last fused epilogue node
-        # if any. If there is no epilogue node yet, it needs to depend on the template
-        # node
-        node_name = node.name if node.name is not None else node.data.name  # type: ignore[attr-defined]
-        if node_name is None:
-            return False
-
-        if len(self._epilogue_nodes) == 0:
-            if self.name not in node.get_read_names():
-                return False
-        else:
-            last_epilogue_node = cast(ComputedBuffer, self._epilogue_nodes[-1])
-            last_epilogue_name = (
-                last_epilogue_node.name
-                if last_epilogue_node.name is not None
-                else last_epilogue_node.data.name  # type: ignore[attr-defined]
-            )
-            if last_epilogue_name not in node.get_read_names():
-                return False
-        if node.layout != self.layout:
-            return False
-        try:
-            from torch._inductor.codegen.cuda.cutlass_epilogue_gen import (
-                CutlassEVTEpilogueArgumentFormatter,
-                CutlassEVTEpilogueTypeFormatter,
-            )
-
-            CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-                cast(str, self.name), "anything", [node]
-            )
-            CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                cast(str, self.name), [node]
-            )
-        except NotImplementedError as e:
-            not_implemented_op = str(e)
-            if not_implemented_op.startswith("_op_"):
-                not_implemented_op = not_implemented_op[4:]
-                log.warning(
-                    f"Cannot fuse epilogue node {node} into {self.name}, likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
-                )
-                return False
-            else:
-                # Likely due to unsupported dtype.
-                log.warning(
-                    f"Cannot fuse epilogue node {node} into {self.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
-                )
-                return False
-        return True
-
-    def create_fused_buffer(self, node, scheduler: Scheduler) -> "CUDATemplateBuffer":
-        """
-        Creates a new CUDATemplateBuffer that fuses the given node into the current one.
-        This is non-mutating, it returns a new instance of CUDATemplateBuffer,
-        self remains unchanged. The returned CUDATemplateBuffer gets the same name as self.
-
-        It requires the current Scheduler in order to map epilogue inputs to IRNodes by their name
-        """
-        assert self.can_fuse_epilogue(node)
-        epilogue_nodes = (
-            self._epilogue_nodes if self._epilogue_nodes is not None else []
-        )
-        new_epilogue_nodes = list(epilogue_nodes) + [node]
-        merged_input_nodes = CUDATemplateBuffer.merge_inputs(
-            scheduler, new_epilogue_nodes, self.template
-        )
-        return CUDATemplateBuffer(
-            self.template,
-            self.op,
-            new_epilogue_nodes,
-            self._workspace_size,
-            merged_input_nodes=merged_input_nodes,
-            name=self.name,
-            **self._render_kwargs,
-        )
-
-    @staticmethod
-    def merge_inputs(
-        scheduler: Scheduler, epilogue_nodes: List[IRNode], template: "CUDATemplate"  # type: ignore[name-defined]
-    ) -> List[IRNode]:
-        """
-        Merge all inputs, including extra inputs from epilogue_nodes.
-
-        Args:
-            scheduler (Scheduler): The scheduler object, used to look up nodes by name.
-            epilogue_nodes (List[IRNode]): The list of additional epilogue nodes.
-            template (CUDATemplate): The CUDATemplate object.
-
-        Returns:
-        - List[IRNode]: The list of merged input nodes.
-        """
-        # Merge all inputs, including extra inputs from epilogue_nodes
-        # input nodes are not hashable, so we cannot directly place them in sets
-
-        template_input_id_set: Set[str] = {
-            cast(Buffer, irnode).get_name() for irnode in template.input_nodes
-        }
-        intermediate_id_set: Set[str] = {template.name} | {
-            cast(Buffer, n).get_name() for n in epilogue_nodes
-        }
-        covered_input_id_set = set(template_input_id_set) | intermediate_id_set
-        extra_inputs = []
-        for epilogue_node in epilogue_nodes:
-            # IRNodes store no references to their inputs in general
-            # we need to retrieve them indirectly from the current
-            # V.graph.scheduler
-            for node_name in epilogue_node.get_read_names():
-                node = scheduler.name_to_node[node_name]
-                assert hasattr(
-                    node, "node"
-                ), f"Scheduler node {node} does not have a node attribute"
-                irnode = node.node
-                if irnode.get_name() not in covered_input_id_set:
-                    extra_inputs.append(irnode)
-                    covered_input_id_set.add(irnode.get_name())
-        input_nodes = list(template.input_nodes) + extra_inputs
-        return input_nodes
-
-
 class CUDATemplateCaller(ChoiceCaller):
     """
     CUDATemplateCaller
@@ -540,7 +335,7 @@ class CUDATemplateCaller(ChoiceCaller):
         name: str,
         category: str,
         bmreq: CUDABenchmarkRequest,
-        template_buffer: CUDATemplateBuffer,
+        template_buffer: "CUDATemplateBuffer",  # type: ignore[name-defined]
     ):
         super().__init__(
             name, template_buffer.template.input_nodes, template_buffer.layout
