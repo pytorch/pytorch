@@ -1353,7 +1353,6 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
-    import torch._export.constraints
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tx, InstructionTranslatorBase)
@@ -1380,6 +1379,7 @@ def wrap_fx_proxy_cls(
             if not (
                 isinstance(value, FakeTensor)
                 or _is_functional_tensor_fakified_by_dynamo(value)
+                or value.is_nested
             ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
@@ -1525,7 +1525,8 @@ def wrap_fx_proxy_cls(
         getattr(torch.distributed, "get_world_size", _missing),
         # This always wants to be in the graph, even if the constraint
         # results in a constant int
-        torch._export.constraints.constrain_as_value,
+        torch._constrain_as_value,
+        torch._constrain_as_size,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
@@ -1712,9 +1713,12 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        dynamic_dims, constraint_dims = _automatic_dynamic(
-            e, tx, source.name(), static_shapes
-        )
+        dynamic_dims, constraint_dims = None, None
+        if not e.is_nested:
+            # TODO: We should probably support this for nested tensors too
+            dynamic_dims, constraint_dims = _automatic_dynamic(
+                e, tx, source.name(), static_shapes
+            )
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
