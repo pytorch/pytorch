@@ -6,6 +6,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/MPSFunctions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
@@ -41,7 +42,7 @@
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
-#include <ATen/ops/sign.h>
+#include <ATen/ops/sign_mps_dispatch.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
@@ -459,9 +460,7 @@ TORCH_IMPL_FUNC(cumprod_out_mps)
 
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   if (!self.is_complex()) {
-    Tensor output_copy = output.alias();
-    at::sign_out(output_copy, self);
-    output.copy_(output_copy);
+    at::mps::sign_outf(self, const_cast<Tensor&>(output));
     return;
   }
 

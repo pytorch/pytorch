@@ -18,12 +18,14 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     skipIfRocm,
 )
+from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
 import warnings
 import itertools
+from contextlib import nullcontext
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
@@ -40,7 +42,7 @@ from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
     nop, default_partition, default_decompositions,
-    memory_efficient_fusion, get_aot_compilation_context
+    memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
 from torch._decomp import decomposition_table
 
@@ -262,6 +264,9 @@ class TestAOTAutograd(AOTTestCase):
         test_mutation: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
+        # Only active when inp_ is Callable.
+        # TODO: probably consolidate all tests to make inp a Callable.
+        make_inputs_subclasses: bool = False,
     ):
         for keep_input_mutations in [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
@@ -271,8 +276,9 @@ class TestAOTAutograd(AOTTestCase):
                 # The callable should return a tuple of f_inputs, f_graph_inputs
                 # (The idea is that we might want to compile a function with the graph inputs,
                 # but test autograd backprop all the way through the actual inputs)
-                inp_copy, graph_inps_copy = inp_callable()
-                inp, graph_inps = inp_callable()
+                with TwoTensorMode() if make_inputs_subclasses else nullcontext():
+                    inp_copy, graph_inps_copy = inp_callable()
+                    inp, graph_inps = inp_callable()
             else:
                 inp_copy = []
                 inp = []
@@ -308,7 +314,7 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(f, nn.Module):
                 compiled_f = aot_module(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -317,7 +323,7 @@ class TestAOTAutograd(AOTTestCase):
             else:
                 compiled_f = aot_function(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -1010,6 +1016,9 @@ def forward(self, primals_1):
             return [(x,), (x,)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(AssertionError, "which is currently unsupported in the subclass use case"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
@@ -1116,6 +1125,10 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        with self.assertRaisesRegex(RuntimeError, "Encountered aliased inputs that are mutated in the graph, but"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(RuntimeError, "Encountered aliased inputs that are mutated in the graph, but"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # https://github.com/pytorch/pytorch/issues/106456
     def test_input_mutation_noncontiguous(self):
@@ -1132,6 +1145,9 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
@@ -1151,6 +1167,10 @@ def forward(self, primals_1, primals_2):
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        # Input mutations on subclasses with training graphs fail backward guards today.
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+            self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
         # Important characteristic: the graph takes in 2 inputs!
         # That shows that we didn't try to run our complicated synthetic base logic,
@@ -1275,6 +1295,8 @@ def forward(self, arg0_1, arg1_1):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
@@ -1423,6 +1445,10 @@ def forward(self, primals_1, primals_2):
             return [base, c_arg], [x.view(-1), x.view(-1), c_arg]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
@@ -1454,6 +1480,10 @@ def forward(self, primals_1, primals_2):
             return [base1, base2], [x1.view(-1), x2.view(-1), x1.view(-1), x2.view(-1)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # 3 graph inputs: (b_d_base, a, c)
         # 2 returns: (b_updated, a+c+d)
@@ -2030,6 +2060,155 @@ def forward(self, tangents_1):
         out_test.sum().backward()
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_copied_in_graph(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w1 = torch.nn.Parameter(torch.zeros(1))
+                self.w2 = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w1*x*self.w2).sum() + self.buf.sum()
+
+        model = MyModel()
+
+        fw_graph_cell = [None]
+        compiled_f = aot_module(
+            MyModel(),
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(1, requires_grad=True)
+        inp_test = torch.ones(1, requires_grad=True)
+
+        out_ref = model(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, primals_4):
+    add = torch.ops.aten.add.Tensor(primals_3, 1)
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_4)
+    mul_1 = torch.ops.aten.mul.Tensor(mul, primals_2)
+    sum_1 = torch.ops.aten.sum.default(mul_1);  mul_1 = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = None
+    return [add, add_1, primals_1, primals_2, primals_4, mul]"""
+        )
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_copied_in_graph_with_different_shapes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 4))
+                self.w = torch.nn.Parameter(torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]]))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w@x).sum() + self.buf.sum()
+
+        model = MyModel()
+
+        fw_graph_cell = [None]
+        compiled_f = aot_module(
+            MyModel(),
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(2, 4, requires_grad=True)
+        inp_test = torch.ones(2, 4, requires_grad=True)
+
+        out_ref = model(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3):
+    add = torch.ops.aten.add.Tensor(primals_2, 1)
+    mm = torch.ops.aten.mm.default(primals_1, primals_3)
+    sum_1 = torch.ops.aten.sum.default(mm);  mm = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = None
+    return [add, add_1, primals_1, primals_3]"""
+        )
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_batch_norm(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.BatchNorm1d(100)
+
+            def forward(self, x):
+                return self.m(x)
+
+        model = MyModel()
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_f = aot_module(
+            MyModel(),
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(20, 100, requires_grad=True)
+        inp_test = torch.ones(20, 100, requires_grad=True)
+
+        out_ref = model(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
+    add = torch.ops.aten.add.Tensor(primals_5, 1)
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(primals_6, primals_1, primals_2, primals_3, primals_4, True, 0.1, 1e-05);  primals_2 = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_1 = _native_batch_norm_legit_functional[1]
+    getitem_2 = _native_batch_norm_legit_functional[2]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
+    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
+    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = None
+    return [getitem_3, getitem_4, add, getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]"""
+        )
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4, tangents_1):
+    native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(tangents_1, primals_6, primals_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  tangents_1 = primals_6 = primals_1 = getitem_3 = getitem_4 = getitem_1 = getitem_2 = None
+    getitem_5 = native_batch_norm_backward[0]
+    getitem_6 = native_batch_norm_backward[1]
+    getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
+    return [getitem_6, getitem_7, None, None, None, getitem_5]"""
+                )
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+
+
 
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
@@ -2720,6 +2899,378 @@ class TestPartitioning(AOTTestCase):
             res = aot_mod(x)
         res.sum().backward()
 
+
+class TestAOTDispatch(AOTTestCase):
+
+    # Tests to add cases for (non-exhaustive list, mostly for my notes):
+    # - subclass / mode introduced in the middle of the compiled fn
+    # - various input mutation / intermediate base tests
+    # - input mutation that changes a tensor into a subclass
+    # - metadata mutation? (TBD)
+    # - guard tests (fw guards *and* bw guards)
+    # - subclass test involving _indices_of_inps_to_detach
+    def test_aot_dispatch_simple(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 6)
+            bb = torch.div(b, 2)
+            return aa + bb
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = TwoTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+
+        # Output is a TwoTensor (check both inner tensors)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref.grad.a, a_test.grad.a)
+        self.assertEqual(a_ref.grad.b, a_test.grad.b)
+        self.assertEqual(b_ref.grad.a, b_test.grad.a)
+        self.assertEqual(b_ref.grad.b, b_test.grad.b)
+
+        # Important pieces of the graph:
+        # - mul() and div() show up twice, because we called them on a TwoTensor
+        # - add() shows up once, because we called it on a plain Tensor
+        # - The user forward() fn returns 1 output (the result of add),
+        #   while the graph itself returns two outputs (add, add_1)
+        # - add, add_1 correspond to the two inner dense tensors that will be wrapped
+        # - into a single TwoTensor output.
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 6);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 6);  primals_2 = None
+    div = torch.ops.aten.div.Tensor(primals_3, 2);  primals_3 = None
+    add = torch.ops.aten.add.Tensor(mul, div);  mul = None
+    add_1 = torch.ops.aten.add.Tensor(mul_1, div);  mul_1 = div = None
+    return [add, add_1]""")
+
+        # Important pieces of the graph:
+        # - 4 total dense outputs.
+        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   will get a gradient that is a TwoTensor subclass,
+        #   so (mul_2, mul_3) will be wrapped into a.grad
+        #   and (div_1, div_2) will be wrapped into b.grad
+        # - 4 total dense outputs,
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, tangents_1, tangents_2):
+    div_1 = torch.ops.aten.div.Tensor(tangents_1, 2)
+    div_2 = torch.ops.aten.div.Tensor(tangents_2, 2)
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, 6);  tangents_1 = None
+    mul_3 = torch.ops.aten.mul.Tensor(tangents_2, 6);  tangents_2 = None
+    return [mul_2, mul_3, div_1, div_2]""")
+
+    def test_aot_dispatch_inference(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 6)
+            bb = torch.div(b, 2)
+            return aa + bb
+
+        a1_ref = torch.ones(3, 3)
+        a2_ref = torch.ones(3, 3)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3)
+
+        a1_test = a1_ref.clone()
+        a2_test = a2_ref.clone()
+        a_test = TwoTensor(a1_test, a2_test)
+        b_test = b_ref.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+
+        # Output is a TwoTensor (check both inner tensors)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+    def test_aot_dispatch_incorrect_backward(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 2)
+            bb = torch.add(b, 3)
+            out_subclass = torch.div(aa, bb)
+            out_reg = torch.add(b, b)
+            # When creating the joint, we assume that the second grad_out
+            # is not a subclass.
+            # In the below test case though, we end up being wrong.
+            # This would require re-tracing and recompiling the backward.
+            return out_subclass, out_reg
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = TwoTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        # First out is a TwoTensor, second is an ordinary tensor
+        self.assertEqual(out_ref[0].a, out_test[0].a)
+        self.assertEqual(out_ref[0].b, out_test[0].b)
+        self.assertEqual(out_ref[1], out_test[1])
+
+        # We compiled our graph assuming type(grad_out[1]) == torch.Tensor,
+        # but we were wrong: in the below tests, it is a subclass.
+        # This will eventually require a repartition + recompile
+        with self.assertRaisesRegex(
+            AssertionError,
+            "incorrectly attempted to compile the backward with incorrect subclass metadata"
+        ):
+            (out_test[0] + out_test[1]).sum().backward()
+
+    def test_aot_dispatch_output_alias(self):
+        # a is a tensor, b is a TwoTensor
+        def f(a, b):
+            return b.view(b.shape), a * b
+
+        b1_ref = torch.ones(3, 3, requires_grad=True)
+        b2_ref = torch.ones(3, 3, requires_grad=True)
+        b_ref = TwoTensor(b1_ref, b2_ref)
+        a_ref = torch.ones(3, 3, requires_grad=True)
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test = TwoTensor(b1_test, b2_test)
+        a_test = a_ref.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref1, out_ref2 = f(a_ref, b_ref)
+        out_test1, out_test2 = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref1, out_test1)
+        self.assertEqual(out_ref2.a, out_test2.a)
+        self.assertEqual(out_ref2.b, out_test2.b)
+
+        (out_ref1 + out_ref2).sum().backward()
+        (out_test1 + out_test2).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref.grad.a, a_test.grad.a)
+        self.assertEqual(a_ref.grad.b, a_test.grad.b)
+        self.assertEqual(b_ref.grad.a, b_test.grad.a)
+        self.assertEqual(b_ref.grad.b, b_test.grad.b)
+
+    def test_aot_dispatch_input_mutation(self):
+        def f(a, b):
+            a.mul_(2)
+            b.mul_(3)
+            return a + b
+
+        b1_ref = torch.ones(3, 3, requires_grad=True)
+        b2_ref = torch.ones(3, 3, requires_grad=True)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.ones(3, 3, requires_grad=True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile teh backward.
+        (b_ref * out_ref).sum().backward()
+        (b_test * out_test).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+        self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
+        self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
+
+    def test_aot_dispatch_input_metadata_mutation(self):
+        def f(a, b):
+            a.t_()
+            b.t_()
+            return a + b
+
+        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.arange(9, dtype=torch.float32).reshape(3, 3).detach().requires_grad_(True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
+        (b_ref * out_ref).sum().backward()
+        (b_test * out_test).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+        self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
+        self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
+
+    def test_aot_dispatch_input_data_and_metadata_mutation(self):
+        def f(a, b):
+            a.t_()
+            b.t_()
+            a.mul_(2)
+            b.mul_(3)
+            return a + b
+
+        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.arange(9, dtype=torch.float32).reshape(3, 3).detach().requires_grad_(True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
+        (b_ref * out_ref).sum().backward()
+        (b_test * out_test).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+        self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
+        self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
+
+    def test_aot_dispatch_input_mutation_and_output_alias(self):
+        def f(a, b):
+            a.mul_(2)
+            b.mul_(3)
+            return b.view(b.shape), a + b
+
+        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.arange(9, dtype=torch.float32).reshape(3, 3).detach().requires_grad_(True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref1, out_ref2 = f(a_ref, b_ref)
+        out_test1, out_test2 = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref1.a, out_test1.a)
+        self.assertEqual(out_ref1.b, out_test1.b)
+        self.assertEqual(out_ref2.a, out_test2.a)
+        self.assertEqual(out_ref2.b, out_test2.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        (out_ref1 * out_ref2).sum().backward()
+        (out_test1 * out_test2).sum().backward()
+        # Both grad_inputs are TwoTensors
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):

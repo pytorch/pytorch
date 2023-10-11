@@ -2005,6 +2005,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: diagonal
+  tags: core
 
 - func: linalg_diagonal(Tensor(a) A, *, int offset=0, int dim1=-2, int dim2=-1) -> Tensor(a)
   python_module: linalg
@@ -2376,7 +2377,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags: [core, inplace_view]
   dispatch:
     Meta: resize__symint
     CPU: resize_
@@ -2523,7 +2524,7 @@
   dispatch:
     SparseCPU, SparseCUDA: expm1_sparse
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3358,7 +3359,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log10.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3382,7 +3383,7 @@
   dispatch:
     SparseCPU, SparseCUDA: log1p_sparse
     SparseCsrCPU, SparseCsrCUDA: log1p_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3408,7 +3409,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log2.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4407,7 +4408,7 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    CUDA: is_pinned_cuda
+    NestedTensorCUDA, CUDA: is_pinned_cuda
     MPS: is_pinned_mps
     CompositeExplicitAutograd: is_pinned_default
 
@@ -4421,6 +4422,7 @@
   dispatch:
     CUDA: _pin_memory_cuda
     MPS: _pin_memory_mps
+    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
@@ -9346,7 +9348,7 @@
   dispatch:
     CPU, CUDA: atan2_out
     MPS: atan2_out_mps
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9358,7 +9360,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: atan2.out
   variants: method, function
-  tags: pointwise
+  tags: [core, pointwise]
 # arctan2, alias of atan2
 
 - func: arctan2(Tensor self, Tensor other) -> Tensor
@@ -9894,7 +9896,7 @@
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: pow.Scalar_out
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -11651,6 +11653,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_out
+    MPS: softshrink_out_mps
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: softshrink.out
@@ -11663,6 +11666,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_backward_out
+    MPS: softshrink_backward_out_mps
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: softshrink_backward.grad_input
@@ -14365,6 +14369,7 @@
   dispatch:
     CPU: _scaled_dot_product_flash_attention_backward_cpu
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
+    NestedTensorCUDA: _scaled_dot_product_flash_attention_backward_nested
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
