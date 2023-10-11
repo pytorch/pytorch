@@ -1447,22 +1447,17 @@ class TestCommon(TestCase):
 
         self.fail(msg)
 
+    # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
     @skipMeta
     @onlyNativeDeviceTypes
     @ops((op for op in op_db if op.promotes_int_to_float), allowed_dtypes=integral_types_and(torch.bool))
     def test_promotes_int_to_float(self, device, dtype, op):
-        output_dtypes = set()
         for sample in op.sample_inputs(device, dtype):
             output = op(sample.input, *sample.args, **sample.kwargs)
             if not output.dtype.is_floating_point:
-                output_dtypes.add(output.dtype)
-
-        if output_dtypes:
-            input_dtype_str = str(dtype).replace("torch.", "")
-            output_dtypes_str = ", ".join(sorted(str(dtype).replace("torch.", "") for dtype in output_dtypes))
-            raise AssertionError(
-                f"The OpInfo sets `promotes_int_to_float=True`, "
-                f"but {input_dtype_str} was promoted to {output_dtypes_str}.")
+                self.fail(
+                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
+                )
 
 
 class TestCompositeCompliance(TestCase):
