@@ -2546,9 +2546,8 @@ def var_mean(
     correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    correction = utils.set_correction(unbiased, correction)
-    v = torch.var(a, dim, correction=correction, keepdim=keepdim)
-    m = torch.mean(a, dim, keepdim)
+    v = var(a, dim, unbiased, keepdim, correction=correction)
+    m = mean(a, dim, keepdim)
     return v, m
 
 
