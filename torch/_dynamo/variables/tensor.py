@@ -772,6 +772,113 @@ class SymNodeVariable(VariableTracker):
         )
 
 
+class TensorWithTFOverrideVariable(VariableTracker):
+    """
+    Represents a tensor subclass instance with a __torch_function__ override.
+    """
+
+    @staticmethod
+    def create(
+        tx,
+        tensor_variable,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        var = TensorWithTFOverrideVariable(
+            tensor_variable,
+            torch_function_fn,
+            subclass_type,
+            **kwargs,
+        )
+        # stash the subclass type to rewrap an output tensor if needed
+        if var.global_class_name() not in tx.output.global_scope:
+            tx.output.install_global(var.global_class_name(), subclass_type)
+
+        return var
+
+    def __init__(
+        self,
+        tensor_variable,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.tensor_variable = tensor_variable
+        self.torch_function_fn = torch_function_fn
+        self.subclass_type = subclass_type
+
+    def as_proxy(self):
+        return self.tensor_variable.as_proxy()
+
+    def python_type(self):
+        return self.subclass_type
+
+    def torch_function_var(self, tx):
+        from .builder import VariableBuilder
+
+        source = AttrSource(
+            AttrSource(self.source, "__torch_function__"),
+            "__func__",
+        )
+        return VariableBuilder(tx, source)(self.torch_function_fn)
+
+    def subclass_type_var(self):
+        from .user_defined import UserDefinedClassVariable
+
+        return UserDefinedClassVariable(self.subclass_type)
+
+    def global_class_name(self):
+        return f"__subclass_{self.subclass_type.__name__}"
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        from .torch_function import build_torch_function_var, call_torch_function
+
+        return call_torch_function(
+            tx,
+            self.subclass_type_var(),
+            build_torch_function_var(tx, self.torch_function_fn, self.source),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This code block implements inlining the __torch_function__ override
+        # of `call_method`.
+        if tx.output.torch_function_enabled:
+            import torch
+            from torch.utils._pytree import tree_flatten
+            from .builder import SourcelessBuilder
+            from .lists import TupleVariable
+
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            args = [self] + list(args)
+            # [Note: __torch_function__] Currently we only support methods that are defined on tensor
+            # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
+            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
+            all_args = args + tree_flatten(kwargs)[0]
+            types = TupleVariable(
+                [
+                    a.subclass_type_var()
+                    for a in all_args
+                    if isinstance(a, TensorWithTFOverrideVariable)
+                ]
+            )
+
+            return self.call_torch_function(tx, func_var, types, args, kwargs)
+        else:
+            return self.tensor_variable.call_method(tx, name, args, kwargs)
+
+
 class NumpyNdarrayVariable(TensorVariable):
     """
     Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
@@ -930,8 +1037,6 @@ class TensorSubclassVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
-            from .torch_function import TensorWithTFOverrideVariable
-
             return TensorWithTFOverrideVariable.create(
                 tx,
                 args[0],

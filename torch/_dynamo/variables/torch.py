@@ -40,11 +40,8 @@ from .ctx_manager import (
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
-from .torch_function import (
-    can_dispatch_torch_function,
-    dispatch_torch_function,
-    TensorWithTFOverrideVariable,
-)
+from .tensor import TensorWithTFOverrideVariable
+from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
 
