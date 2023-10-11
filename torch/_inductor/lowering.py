@@ -2554,63 +2554,112 @@ def check_and_broadcast_indices(indices, device):
         if x.get_device() != device:
             raise NotImplementedError("Fallback when indices is on a different device")
         new_indices[i] = x
-        output_dim = len(x.get_size())
-    start_offset = 0
-    # only support None at start or end for now
-    tmp = list(new_indices)
-    while tmp and tmp[-1] is None:
-        tmp.pop()
-    while tmp and tmp[0] is None:
-        tmp.pop(0)
-        start_offset += 1
-    if any((i is None) for i in tmp):
-        raise NotImplementedError("Fallback when None is in the middle of indices")
+    return new_indices, valid_idxs
 
-    end_offset = output_dim + start_offset
-    return new_indices, start_offset, end_offset
+
+def index_output_size_and_inner_fn(
+    x_size,
+    indices,
+    tensor_indices,
+    tensor_size,
+    indices_loaders,
+    indexed_size,
+    x_loader,
+):
+    # Note that behavior of indexing differs when there are non consecutive
+    # tensors. In this case, the tensor index is pulled to the beginning.
+    #
+    # Suppose a = torch.arange(3 * 4 * 5 * 6 * 7).view(3, 4, 5, 6, 7)
+    #         x = torch.tensor[1,2]
+    # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
+    # be pulled to the front.
+    non_consecutive_tensors = False
+    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+        if current - previous != 1:
+            non_consecutive_tensors = True
+
+    output_size = [x_size[i] for i, val in enumerate(indices) if val is None]
+    output_size = [*output_size, *x_size[len(output_size) + len(tensor_indices) :]]
+
+    first_tensor_index = tensor_indices[0]
+    if non_consecutive_tensors:
+        output_size = tensor_size + output_size
+    else:
+        output_size = (
+            output_size[:first_tensor_index]
+            + tensor_size
+            + output_size[first_tensor_index:]
+        )
+
+    def fn(idx):
+        assert len(idx) == len(output_size)
+        assert len(indices_loaders) == len(indexed_size)
+
+        rank = len(tensor_size)
+        new_index = []
+        first_tensor_index = tensor_indices[0]
+        start_offset = 0 if non_consecutive_tensors else first_tensor_index
+        next_idx = 0
+        for i in range(tensor_indices[-1] + 1):
+            if i == start_offset:
+                next_idx += rank
+            if indices[i] is None:
+                assert next_idx < len(idx)
+                new_index.append(idx[next_idx])
+                next_idx += 1
+            else:
+                loader = indices_loaders[i]
+                assert loader is not None
+                size = indexed_size[i]
+                new_index.append(
+                    ops.indirect_indexing(
+                        loader(idx[start_offset : start_offset + rank]),
+                        size,
+                        check=check,
+                    )
+                )
+        new_index = [
+            *new_index,
+            *idx[next_idx:],
+        ]
+        return new_index if x_loader is None else x_loader(new_index)
+
+    return output_size, fn
 
 
 def index_impl(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices, start_offset, end_offset = check_and_broadcast_indices(
-        indices, x.get_device()
-    )
+    indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
+    assert len(tensor_indices) > 0, "Must have at least one valid idx"
 
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
     # no guards on output size, all the guards are set in broadcast_tensors
 
-    output_size = list(indices_sizes[0])
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
 
     x_size = x.get_size()
 
     indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
-    if 0 in indexed_size and 0 not in output_size:
+    if 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
-    output_size = [
-        *x_size[:start_offset],
-        *output_size,
-        *x_size[start_offset + len(indices_loaders) :],
-    ]
-
-    def fn(idx):
-        assert len(idx) == len(output_size)
-        assert len(indices_loaders) == len(indexed_size)
-        new_index = [
-            ops.indirect_indexing(
-                loader(idx[start_offset:end_offset]), size, check=check
-            )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
-        new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
-        return x_loader(new_index)
+    indexed_size = [x_size[i] for i in range(len(indices))]
+    output_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        x_loader,
+    )
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        inner_fn=fn,
+        inner_fn=inner_fn,
         ranges=output_size,
     )
 
@@ -2705,14 +2754,16 @@ def index_put_impl_(self, indices, values, accumulate, check):
         return self
 
     values = to_dtype(values, self.get_dtype())
+
     try:
-        indices, start_offset, end_offset = check_and_broadcast_indices(
+        # Note that code will only get here when dtype is uint32
+        indices, tensor_indices = check_and_broadcast_indices(
             indices, self.get_device()
         )
     except NotImplementedError:
         return index_put_fallback(self, indices, values, accumulate)
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
 
     assert isinstance(self, TensorBox)
     self.realize()
@@ -2721,34 +2772,29 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if x_ndim == 0:
         self = view(self, [1])
 
-    output_size = list(indices_sizes[0])
-    expected_vals_size = [
-        *x_size[:start_offset],
-        *output_size,
-        *x_size[start_offset + len(indices_sizes) :],
-    ]
-    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
+    indexed_size = [x_size[i] for i in range(len(indices))]
+
+    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        None,
+    )
 
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
-
-    def output_indexer(index):
-        assert len(index) == len(expected_vals_size)
-        new_index = [
-            ops.indirect_indexing(
-                loader(index[start_offset:end_offset]), size, check=check
-            )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
-        new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
-        return new_index
 
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
-        output_indexer=output_indexer,
+        output_indexer=inner_fn,
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
