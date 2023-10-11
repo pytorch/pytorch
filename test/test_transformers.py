@@ -1552,6 +1552,21 @@ class TestSDPAFailureModes(NNTestCase):
                     out = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
+    def test_flash_attention_fail_with_non_square_causal_attention(self, device):
+        dtype = torch.bfloat16
+        q_shape = (1, 1, 8, 16)
+        kv_shape = (1, 1, 12, 16)
+        make_q = partial(rand_sdpa_tensor, shape=q_shape, type=type, device=device, dtype=dtype)
+        make_kv = partial(rand_sdpa_tensor, shape=kv_shape, type=type, device=device, dtype=dtype)
+        q, k, v = make_q(), make_kv(), make_kv()
+        warning_str = "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k."
+        with sdp_kernel(**backend_map[SDPBackend.FLASH_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, warning_str):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, is_causal=True))
+
 def _get_block_size(device, head_dim, is_causal):
     # This should match the block sizes in the CUDA kernel
     # Mask is only interesting when we are setting dropout
