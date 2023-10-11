@@ -399,7 +399,7 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    return any(filename.startswith(_module_dir(mod)) for mod in SUBMODULE_INLINELIST)
+    return any(filename.startswith(d) for d in get_submodule_inlinelist())
 
 
 @functools.lru_cache(None)
