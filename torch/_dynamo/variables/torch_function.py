@@ -2,6 +2,7 @@ from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
 from ..source import AttrSource
+from ..utils import is_tensor_base_attr_getter
 from .constant import ConstantVariable
 from .lists import TupleVariable
 
@@ -27,7 +28,11 @@ from .lists import TupleVariable
 # To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
 
-banned_attrs = [fn.__name__ for fn in get_default_nowrap_functions()]
+banned_attrs = [
+    fn.__self__.__name__
+    for fn in get_default_nowrap_functions()
+    if is_tensor_base_attr_getter(fn)
+]
 
 
 def is_torch_function_user_object(obj):

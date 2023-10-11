@@ -14,7 +14,12 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    identity,
+    is_tensor_base_attr_getter,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 from .functions import (
@@ -678,11 +683,8 @@ class MethodWrapperVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if (
-            self.method_wrapper.__name__ == "__get__"
-            and isinstance(self.method_wrapper.__self__, types.GetSetDescriptorType)
-            and self.method_wrapper.__self__.__objclass__ is torch._C._TensorBase
-            and isinstance(args[0], variables.TensorVariable)
+        if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
+            args[0], variables.TensorVariable
         ):
             assert len(args) == 1 and len(kwargs) == 0
 
