@@ -104,7 +104,8 @@ class ConstantVariable(VariableTracker):
     def is_literal(obj):
         if type(obj) in (int, float, bool, type(None), str, Ellipsis.__class__):
             return True
-        if type(obj) in (list, tuple, set, frozenset):
+        # The structure within is_literal get routed to variables.BaseListVariable
+        if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
 
@@ -123,6 +124,7 @@ class ConstantVariable(VariableTracker):
                 UserErrorType.ANTI_PATTERN,
                 "Can't access members of type(obj) for a generated custom object. "
                 "Please use __class__ instead",
+                case_name="type_reflection_method",
             )
         member = getattr(self.value, name)
         if callable(member):

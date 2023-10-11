@@ -352,6 +352,12 @@ public:
       map(std::atan)
     );
   }
+  Vectorized<float> atanh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_atanhf4_u10(values.val[0]), Sleef_atanhf4_u10(values.val[1])),
+      map(std::atanh)
+    );
+  }
   Vectorized<float> atan2(const Vectorized<float> &exp) const {
     USE_SLEEF(
       {
@@ -457,6 +463,9 @@ public:
   }
   Vectorized<float> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];

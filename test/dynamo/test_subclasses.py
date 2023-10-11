@@ -13,6 +13,7 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.nested._internal.nested_tensor import jagged_from_list
 
 
 class MockSubclass(torch.Tensor):
@@ -312,19 +313,20 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
-            return add_
+            return (add_,)
 """
-        check_count_and_graph(1, 1, 1, expected_graph)
+        check_count_and_graph(1, 2, 1, expected_graph)
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 2, 2, expected_graph)
+        check_count_and_graph(2, 4, 2, expected_graph)
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -335,7 +337,40 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 3, 3, expected_graph)
+        check_count_and_graph(3, 6, 3, expected_graph)
+
+    def test_has_torch_function(self):
+        class MyTensor:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.max:
+                    return torch.tensor(123)
+                return func(*args, **kwargs)
+
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return torch.overrides.has_torch_function_unary(
+                x
+            ), torch.overrides.has_torch_function_variadic(x)
+
+        for test_class in [MyTensor, LocalSubclass]:
+            x = test_class()
+            ref0 = fn(x)
+            ref1 = fn(4)
+            opt_fn = torch._dynamo.optimize("eager")(fn)
+            res0 = opt_fn(x)
+            res1 = opt_fn(4)
+            self.assertEqual(ref0, res0)
+            self.assertEqual(ref1, res1)
 
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
@@ -539,6 +574,64 @@ class GraphModule(torch.nn.Module):
                 ],
             ],
         )
+
+
+class TestNestedTensor(torch._dynamo.test_case.TestCase):
+    def _get_jagged_tensor(self, nested_size, offsets):
+        # Makes a jagged tensor with 3 constituent tensors with size
+        # as specified ((S0, S1, S2), D)
+        S0, S1, S2 = nested_size[0]
+        D = nested_size[1]
+        a = torch.randn(S0, D, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(S1, D, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(S2, D, requires_grad=True, dtype=torch.float64)
+        return jagged_from_list([a, b, c], offsets)
+
+    def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
+        compile_count = [0]
+
+        def counter(gm, example_inputs):
+            compile_count[0] += 1
+            return gm
+
+        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
+        out = compiled_f(*inputs1)
+        self.assertEqual(compile_count[0], 1)
+        out = compiled_f(*inputs2)
+        self.assertEqual(compile_count[0], 2 if recompiles else 1)
+
+    def test_unary_does_not_recompile(self):
+        nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((3, 4, 5), 4), None)
+        self._check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
+
+    def test_binary_does_not_recompile(self):
+        def binary(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
+        # Basic binary
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        nt3, offsets = self._get_jagged_tensor(((3, 4, 5), 4), None)
+        nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
+        self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
+
+    def test_binary_recompiles(self):
+        # Binary recompiles because singleton ints no longer match
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+
+    def test_binary_recompiles_due_to_duck_sizing(self):
+        # Even though the input is unused, we still guard due to duck sizing
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
 
 
 if __name__ == "__main__":

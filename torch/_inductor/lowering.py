@@ -749,7 +749,13 @@ def expand(x, sizes):
         return x
 
     x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    if x_size_product > 0:
+    # TODO: It would be better to realize the input if any of its sizes
+    # are unbacked, because typically the size will be non-zero.  However,
+    # this cannot be done directly as below as we'll choke on the size_hint
+    # here
+    if x_size_product > 0 and not any(
+        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
+    ):
         # maybe realize input before broadcasting it
         x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -1553,7 +1559,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
         if torch._dynamo.config.suppress_errors:
             torch._dynamo.config.suppress_errors = False
             log.warning(
-                "A make_fallback error occured in suppress_errors config,"
+                "A make_fallback error occurred in suppress_errors config,"
                 " and suppress_errors is being disabled to surface it."
             )
         raise AssertionError(
@@ -1584,7 +1590,7 @@ def philox_rand_offset(shape):
 @register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
 def philox_rand(size, seed, offset, stride, device, dtype):
     # stride arg is optional and will be used in future for distributed random
-    # ops. Currently, its ununsed.
+    # ops. Currently, its unused.
     random_pos = ir.FixedLayout(
         device,
         dtype,
@@ -2015,6 +2021,8 @@ make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
+# these are data-dependent, highly unlikely you can write a lowering
+make_fallback(aten.nonzero.default)
 
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
@@ -2260,7 +2268,20 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    return ir.DynamicScalar()
+    # This is interesting!  Most lowerings return tensors, so you can just
+    # return the buffer you allocated and it will get used (or not used, if
+    # it's dead.)  But _local_scalar_dense (aka item) returns an int,
+    # not a Tensor, so you would have a type mismatch if you return a buffer;
+    # we are obligated to return a sympy expression instead.  However,
+    # we need to actually codegen the .item() call somehow.  We do this
+    # by registering a faux buffer for the DynamicScalar IR node, which is
+    # solely responsible for generating this .item().  The buffer is
+    # not used for anything (notice we discard it); at codegen time,
+    # the "buffer" just gets assigned None.
+    sym = V.graph.current_node.meta["val"].node.expr
+    buffer = ir.DynamicScalar(sym, data)
+    buffer.name = V.graph.register_buffer(buffer)
+    return sym
 
 
 def _full(fill_value, device, dtype, size):
@@ -4451,7 +4472,7 @@ def mul(a, b):
 #   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
 def div_prim(a, b):
-    is_integral = is_boolean_type(a) or is_integer_type(a)
+    is_integral = all(is_boolean_type(x) or is_integer_type(x) for x in [a, b])
 
     if is_integral:
         return truncdiv(a, b)
@@ -4587,7 +4608,7 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
-register_pointwise(aten.abs)
+abs = register_pointwise(aten.abs)
 bitwise_and = register_pointwise(aten.bitwise_and)
 bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
 bitwise_not = register_pointwise(
@@ -4641,6 +4662,8 @@ sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
+register_lowering(aten._neg_view)(neg)
+
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
@@ -4671,6 +4694,7 @@ register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
+register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
@@ -4678,6 +4702,12 @@ register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_minimum.List, minimum)
+register_foreach_pointwise(aten._foreach_minimum.Scalar, minimum)
+register_foreach_pointwise(aten._foreach_clamp_min.List, maximum)
+register_foreach_pointwise(aten._foreach_clamp_min.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_clamp_max.List, minimum)
+register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)
@@ -4779,7 +4809,9 @@ try:
     @register_lowering(c10d_functional.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
-            ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
+            ir.AllGatherIntoTensor.create(
+                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
+            )
         )
 
     @register_lowering(c10d_functional.reduce_scatter_tensor)
@@ -4803,6 +4835,16 @@ try:
             self, reduceOp, tag, ranks, group_size
         )
         return list(map(TensorBox.create, result))
+
+    @register_lowering(c10d_functional.all_to_all_single)
+    def all_to_all_single(
+        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+    ):
+        return TensorBox.create(
+            ir.AllToAllSingle.create(
+                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+            )
+        )
 
 except ImportError:
     log.info(

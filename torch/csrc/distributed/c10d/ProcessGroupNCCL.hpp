@@ -46,6 +46,9 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+constexpr auto kProcessGroupNCCLDefaultTimeout =
+    std::chrono::milliseconds(10 * 60 * 1000);
+
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
 // CleanUpOnly: just clean up collectives and abort communicators without
@@ -165,6 +168,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     float getDuration() const override;
+
+    uint64_t getSequencenumber() const override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
