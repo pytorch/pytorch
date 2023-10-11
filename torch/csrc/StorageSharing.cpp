@@ -464,13 +464,8 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   ptrdiff_t storage_offset_bytes =
       (ptrdiff_t)THPUtils_unpackLong(_offset_bytes);
 
-  auto unpacked_device = THPUtils_unpackInt(_device);
-  THPUtils_assert(
-      unpacked_device >= std::numeric_limits<c10::DeviceIndex>::min() &&
-          unpacked_device <= std::numeric_limits<c10::DeviceIndex>::max(),
-      "invalid device index",
-      unpacked_device);
-  c10::DeviceIndex device = static_cast<c10::DeviceIndex>(unpacked_device);
+  const auto device = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(_device), "c10::DeviceIndex");
   at::cuda::CUDAGuard device_guard(device);
 
   if (PyObject_IsTrue(_event_sync_required)) {
