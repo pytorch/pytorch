@@ -1186,11 +1186,15 @@ void LayerNormBackwardKernelImplInternal(
 #else
     const dim3 blocks(M);
     int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
+
+    bool bVectorSizeMultiple = (N % vec_size == 0);
+    bool bTargetDataTypes = (std::is_same<T, float>::value || std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value);
     const unsigned int alignment = sizeof(T) * vec_size;
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
 
-    if ((N % (num_threads() * vec_size) == 0) && bAlignedBuffers) {
+    if (bAlignedBuffers && bTargetDataTypes && bVectorSizeMultiple) {
       layer_norm_grad_input_kernel_vectorized<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
           X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
