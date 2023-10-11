@@ -4430,6 +4430,50 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(same(arg1, arg2))
 
+    def test_tensor_index_slice(self):
+        def fn(a):
+            x = torch.tensor([1, 2], device=self.device)
+            y = torch.tensor([2, 3], device=self.device)
+            return [
+                a[x, y],
+                a[:, x, y],
+                a[:, x, y, :],
+                a[x, :, y],
+                a[:, x, :, y, :],
+            ]
+
+        a = torch.arange(3 * 4 * 5 * 6 * 7, device=self.device).view(3, 4, 5, 6, 7)
+        refs = fn(a)
+        tests = torch.compile(fn)(a)
+        for ref, test in zip(refs, tests):
+            torch.testing.assert_close(ref, test)
+
+    def test_tensor_index_put_slice(self):
+        def fn(a, version):
+            x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)
+            y = torch.tensor([2, 3], device=self.device, dtype=torch.int32)
+
+            if version == 0:
+                a[x, y] = torch.zeros_like(a[x, y])
+            elif version == 1:
+                a[:, x, y] = torch.zeros_like(a[:, x, y])
+            elif version == 2:
+                a[:, x, y, :] = torch.zeros_like(a[:, x, y, :])
+            elif version == 3:
+                a[x, :, y] = torch.zeros_like(a[x, :, y])
+            elif version == 4:
+                a[:, x, :, y, :] = torch.zeros_like(a[:, x, :, y, :])
+
+            return a
+
+        a = torch.arange(3 * 4 * 5 * 6 * 7, device=self.device, dtype=torch.int32).view(
+            3, 4, 5, 6, 7
+        )
+        for i in range(5):
+            ref = fn(torch.clone(a), i)
+            test = torch.compile(fn)(torch.clone(a), i)
+            torch.testing.assert_close(ref, test)
+
     def test_indirect_load_broadcast(self):
         def fn(in_ptr0, in_ptr1, in_ptr2):
             return torch.gather(in_ptr1, 0, in_ptr2) + in_ptr0
