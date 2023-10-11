@@ -363,15 +363,56 @@ From the ``torch.nn.utils`` module
     :nosignatures:
 
     clip_grad_norm_
+    clip_grad_norm
     clip_grad_value_
-    parameters_to_vector
-    vector_to_parameters
-    prune.BasePruningMethod
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
+    parameters_to_vector
+    vector_to_parameters
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fuse_conv_bn_eval
+    fuse_conv_bn_weights
+    fuse_linear_bn_eval
+    fuse_linear_bn_weights
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    convert_conv2d_weight_memory_format
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    weight_norm
+    remove_weight_norm
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    spectral_norm
+    remove_spectral_norm
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    skip_init
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    prune.BasePruningMethod
     prune.PruningContainer
     prune.Identity
     prune.RandomUnstructured
@@ -388,11 +429,6 @@ From the ``torch.nn.utils`` module
     prune.custom_from_mask
     prune.remove
     prune.is_pruned
-    weight_norm
-    remove_weight_norm
-    spectral_norm
-    remove_spectral_norm
-    skip_init
 
 Parametrizations implemented using the new parametrization functionality
 in :func:`torch.nn.utils.parameterize.register_parametrization`.
