@@ -3696,6 +3696,9 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
+            if isinstance(self.var_to_val[k], SingletonInt):
+                # Don't try to refine ranges for singleton ints
+                continue
             vr = self.var_to_range[k]
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
@@ -4220,6 +4223,10 @@ class ShapeEnv:
 
         for symbol in expr.free_symbols:
             assert isinstance(symbol, sympy.Symbol)
+
+            if isinstance(self.var_to_val[symbol], SingletonInt):
+                # Don't try to refine ranges for singleton ints
+                continue
 
             r = try_solve(expr, symbol)
 
