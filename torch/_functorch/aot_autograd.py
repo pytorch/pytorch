@@ -39,6 +39,8 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
+from torch.nested._internal.nested_tensor import NestedTensor
+
 
 original_zip = zip
 
@@ -1204,13 +1206,10 @@ def run_functionalized_fw_and_collect_metadata(
             [x for x in input_info if x.mutates_data or x.mutates_metadata]
         )
 
-        from torch.nested._internal.nested_tensor import NestedTensor
-
         def clone(x):
             if isinstance(x, NestedTensor):
                 should_prop = any(any(is_symbolic(s) for s in _inner.shape) for _inner in (x._values, x._offsets))
                 ragged_size = x._size[x._ragged_idx] if should_prop else None
-                print(x._values.shape, ragged_size)
                 return NestedTensor(x._values, x._offsets.clone(), ragged_size=ragged_size)
             else:
                 return x
@@ -1232,10 +1231,8 @@ def run_functionalized_fw_and_collect_metadata(
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
-
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(clone, traced_tangents)
-
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
         f_mutated_inputs = [

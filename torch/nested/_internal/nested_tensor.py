@@ -108,9 +108,6 @@ class NestedTensor(torch.Tensor):
     def offsets(self):
         return self._offsets
 
-    def clone_offsets(self):
-        self._offsets = self._offsets.clone()
-
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
@@ -118,8 +115,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return "NestedTensor"
-        # return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
+        return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
         ctx = {
@@ -134,7 +130,8 @@ class NestedTensor(torch.Tensor):
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
 
-        if not any(is_symbolic(x.shape[0]) for x in (values, offsets)):
+        should_prop = any(any(is_symbolic(s) for s in x.shape) for x in (values, offsets))
+        if not should_prop:
             # If no inner tensors are symbolic we are going from fake to
             # non-fake. Make sure we don't leak any SymInts.
             meta["ragged_size"] = None
