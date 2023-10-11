@@ -2574,7 +2574,9 @@ def check_and_broadcast_indices(indices, device):
     return new_indices, valid_idxs
 
 
-def output_size_for_index(x_size, indices, valid_idxs, tensor_size):
+def index_output_size_and_inner_fn(
+    x_size, indices, valid_idxs, tensor_size, indices_loaders, indexed_size, x_loader
+):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
     non_consecutive_tensors = False
@@ -2594,23 +2596,12 @@ def output_size_for_index(x_size, indices, valid_idxs, tensor_size):
             + tensor_size
             + output_size[first_tensor_index:]
         )
-    return output_size, non_consecutive_tensors
 
-
-def index_inner_fn(
-    output_size,
-    indices_loaders,
-    indexed_size,
-    valid_idxs,
-    non_consecutive_tensors,
-    rank,
-    indices,
-    x_loader,
-):
     def fn(idx):
         assert len(idx) == len(output_size)
         assert len(indices_loaders) == len(indexed_size)
 
+        rank = len(tensor_size)
         new_index = []
         first_tensor_index = valid_idxs[0]
         start_offset = 0 if non_consecutive_tensors else first_tensor_index
@@ -2639,7 +2630,7 @@ def index_inner_fn(
         ]
         return new_index if x_loader is None else x_loader(new_index)
 
-    return fn
+    return output_size, fn
 
 
 def index_impl(x, indices, check):
@@ -2653,7 +2644,6 @@ def index_impl(x, indices, check):
 
     # We can use the first one since they are all required to be the same size
     tensor_size = list(indices[valid_idxs[0]].get_size())
-    rank = len(tensor_size)
 
     x_size = x.get_size()
 
@@ -2661,17 +2651,13 @@ def index_impl(x, indices, check):
     if 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
-    output_size, non_consecutive_tensors = output_size_for_index(
-        x_size, indices, valid_idxs, tensor_size
-    )
-    inner_fn = index_inner_fn(
-        output_size,
+    output_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        valid_idxs,
+        tensor_size,
         indices_loaders,
         indexed_size,
-        valid_idxs,
-        non_consecutive_tensors,
-        rank,
-        indices,
         x_loader,
     )
 
@@ -2791,27 +2777,14 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     # We can use the first one since they are all required to be the same size
     tensor_size = list(indices[valid_idxs[0]].get_size())
-    rank = len(tensor_size)
-
     indexed_size = [x_size[i] for i in range(len(indices))]
 
-    expected_vals_size, non_consecutive_tensors = output_size_for_index(
-        x_size, indices, valid_idxs, tensor_size
+    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+        x_size, indices, valid_idxs, tensor_size, indices_loaders, indexed_size, None
     )
 
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
-
-    inner_fn = index_inner_fn(
-        expected_vals_size,
-        indices_loaders,
-        indexed_size,
-        valid_idxs,
-        non_consecutive_tensors,
-        rank,
-        indices,
-        None,
-    )
 
     scatter = ir.Scatter(
         device=self.get_device(),
