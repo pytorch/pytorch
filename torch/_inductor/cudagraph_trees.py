@@ -51,18 +51,7 @@ import weakref
 from collections import defaultdict
 
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch.fx
 from torch import Tensor
@@ -127,7 +116,7 @@ class WrappedFunction:
     """
 
     model: Callable[..., Any]
-    static_input_idxs: Sequence[int]
+    static_input_idxs: List[int]
     id: FunctionID
 
 
@@ -776,14 +765,22 @@ class CUDAGraphNode:
         self.static_input_idxs: List[int] = list(
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
+        self.non_static_input_idx: List[int] = [
+            i for i in range(len(inputs)) if i not in self.static_input_idxs
+        ]
 
-        self.static_input_data_ptrs: InputList[int] = [
+        self.static_input_data_ptrs: InputList[Optional[int]] = [
             (
                 inputs[i].data_ptr()
                 if isinstance(inputs[i], torch.Tensor) and i in self.static_input_idxs
                 else None
             )
             for i in range(len(inputs))
+        ]
+        self.non_managed_static_input_idxs: List[int] = [
+            i
+            for i in wrapped_function.static_input_idxs
+            if i not in self.cudagraph_managed_idxs
         ]
 
         # When we checkpoint, and free generations, we will be manually freeing the outputs
@@ -925,27 +922,45 @@ class CUDAGraphNode:
         self.recording_outputs = None
         return outputs
 
-    def run(self, new_inputs):
-        if config.triton.fast_path_cudagraph_asserts:
-            self.debug_check_invariants_before_invocation()
+    def check_static_inputs_are_stable(self, new_inputs):
+        # avoid checking managed tensor static points since we already checked those in check_invariants
+        static_tensors = [new_inputs[i] for i in self.non_managed_static_input_idxs]
+        data_ptrs = [
+            self.static_input_data_ptrs[i] for i in self.non_managed_static_input_idxs
+        ]
+        if not torch._C._tensors_data_ptrs_equal(static_tensors, data_ptrs):
+            # this should error
+            for t, data_ptr in zip(static_tensors, data_ptrs):
+                torch._check(
+                    t.data_ptr() == data_ptr,
+                    lambda: f"static input data pointer changed from {data_ptr} to {t.data_ptr()}",
+                )
 
-        assert len(self.static_input_data_ptrs) == len(new_inputs)
-        # NB: this ranges over non-static inputs too
-        for idx, data_ptr in enumerate(self.static_input_data_ptrs):
-            if idx in self.cudagraph_managed_idxs:
-                continue
+    def run(self, new_inputs):
+        self.check_static_inputs_are_stable(new_inputs)
+
+        tensors_to_copy_from = []
+        tensors_to_copy_to = []
+
+        for idx in self.non_static_input_idx:
             if not isinstance(new_inputs[idx], torch.Tensor):
-                pass
-            elif data_ptr is not None:
-                # static input, e.g., parameter
-                assert data_ptr == new_inputs[idx].data_ptr()
-            else:
-                # non-static input, need to copy it into CUDA graph
-                dst = self.reconstructed_inputs[idx]
-                src = new_inputs[idx]
-                self._copy_input(idx, dst, src)
+                continue
+
+            expanded_dims = self.expanded_dims[idx]
+            tensors_to_copy_from.append(
+                index_expanded_dims(new_inputs[idx], expanded_dims)
+            )
+            tensors_to_copy_to.append(
+                index_expanded_dims(self.reconstructed_inputs[idx], expanded_dims)
+            )
+
+        if tensors_to_copy_to:
+            torch._foreach_copy_(tensors_to_copy_to, tensors_to_copy_from)
 
         new_inputs.clear()
+        del tensors_to_copy_from
+        del tensors_to_copy_to
+
         self.run_graph()
 
         outputs = self.reconstruct_outputs()
@@ -1495,9 +1510,16 @@ class CUDAGraphNode:
         """
 
         # previously managed data pointers remain stable
-        for idx in self.cudagraph_managed_idxs:
-            if inputs[idx].data_ptr() != self.static_input_data_ptrs[idx]:
-                return False
+        tensors = [inputs[idx] for idx in self.cudagraph_managed_idxs]
+        data_ptrs = [
+            self.static_input_data_ptrs[idx] for idx in self.cudagraph_managed_idxs
+        ]
+        # this is on the hot path so moved to C++. equivalent to:
+        # return all(t.data_ptr() == data_ptr for (t, data_ptr) in zip(tensors, data_ptrs))
+        if not torch._C._tensors_data_ptrs_equal(tensors, data_ptrs):
+            return False
+
+        del tensors
 
         if not self._check_liveness(
             self.expected_dead_indices_before_graph, self.path_weakrefs
@@ -1912,7 +1934,7 @@ class CUDAGraphTreeManager:
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
-        self.ids_to_funcs[id] = WrappedFunction(model, static_input_idxs, id)
+        self.ids_to_funcs[id] = WrappedFunction(model, list(static_input_idxs), id)
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
 
