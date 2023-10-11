@@ -534,7 +534,7 @@ def _multi_tensor_adamw(
         # wrapped it now and passed it to the API as a tensor already. So we wrap it now.
         step_device = device_state_steps[0].device
         one = torch.tensor(1.0, device=step_device) if str(step_device) == "cpu" else 1
-        torch._foreach_add_(device_state_steps, one)
+        torch._foreach_add_(device_state_steps, one, 1.0)
 
         # Perform stepweight decay
         if weight_decay != 0:
