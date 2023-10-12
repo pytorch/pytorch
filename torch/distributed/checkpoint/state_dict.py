@@ -78,6 +78,14 @@ class StateDictOptions:
     # Whether to ignore the frozen parameters when getting the state_dict.
     # The default is False.
     ignore_frozen_params: bool = False
+    # When asking to return only the submodule state_dict (submodules != None),
+    # whether to remove the submodule prefixes from the state_dict keys.
+    # For example, if the submodule is ``module.pretrain`` and the full FQN of
+    # the parameter is ``pretrain.layer1.weight`` of the param, setting
+    # this option to True will return ``layer.weight``, otherwise the full FQN
+    # will be returned.
+    # The default is True.
+    remove_submodule_prefixes: bool = True
     # The `strict` option for model.load_state_dict() call.
     strict: bool = True
 
@@ -88,6 +96,7 @@ class _StateDictInfo(StateDictOptions):
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
     all_fqns: Set[str] = field(default_factory=set)
+    submodule_prefixes: Set[str] = field(default_factory=set)
     handle_model: bool = True
     handle_optim: bool = True
     fsdp_context: Callable = contextlib.nullcontext
@@ -144,6 +153,8 @@ def _verify_options(
     optims: Tuple[torch.optim.Optimizer, ...],
     model_only: bool,
     optim_only: bool,
+    *,
+    submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> _StateDictInfo:
     """
@@ -174,6 +185,17 @@ def _verify_options(
         for fqn in fqns:
             fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
+
+    submodule_prefixes = set()
+    if submodules:
+        submodules = set(submodules)
+        for name, module in model.named_modules():
+            if module not in submodules:
+                continue
+            fqns = _get_fqns(model, name)
+            assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
+            for fqn in fqns:
+                submodule_prefixes.add(f"{fqn}.")
 
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
@@ -210,6 +232,7 @@ def _verify_options(
         **asdict(options),
         fqn_param_mapping=fqn_param_mapping,
         all_fqns=all_fqns,
+        submodule_prefixes=submodule_prefixes,
         fsdp_context=fsdp_context,
         fsdp_modules=cast(List[nn.Module], fsdp_modules),
         handle_model=model_only or not optim_only,
@@ -235,7 +258,13 @@ def _verify_state_dict(
 
     # Verify if the model_state_dict and optim_state_dict are valid. This API
     # should give the users an explicit error message to debug or report.
-    if info.handle_model and not model_state_dict:
+    if (
+        info.handle_model
+        and not model_state_dict
+        and not info.submodule_prefixes
+        and not info.ignore_frozen_params
+        and info.strict
+    ):
         raise RuntimeError(
             "The option indicates that model state_dict is required to save "
             "or load, but model state_dict is empty."
@@ -300,6 +329,20 @@ def _get_model_state_dict(
                 raise RuntimeError(f"An unexpected key, {key}, exists. FQN is {fqn}")
             state_dict[fqn] = state_dict.pop(key)
 
+    if info.submodule_prefixes:
+        new_state_dict: Dict[str, ValueType] = {}
+        # TODO: make this faster.
+        for fqn in state_dict.keys():
+            for prefix in info.submodule_prefixes:
+                if not fqn.startswith(prefix):
+                    continue
+                if info.remove_submodule_prefixes:
+                    new_fqn = fqn[len(prefix) :]
+                    new_state_dict[new_fqn] = state_dict[fqn]
+                else:
+                    new_state_dict[fqn] = state_dict[fqn]
+        state_dict = new_state_dict
+
     if info.ignore_frozen_params:
         for key, param in model.named_parameters():
             if param.requires_grad:
@@ -312,10 +355,10 @@ def _get_model_state_dict(
 
 def _load_model_state_dict(
     model: nn.Module,
-    state_dict: Dict[str, ValueType],
+    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
     info: _StateDictInfo,
 ) -> None:
-    if not info.handle_model:
+    if not info.handle_model or not state_dict:
         return
 
     for key, _ in model.named_parameters():
@@ -482,6 +525,7 @@ def state_dict(
     *,
     model_only: bool = False,
     optim_only: bool = False,
+    submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> Tuple[Dict[str, ValueType], OptimizerStateType]:
     """
@@ -563,7 +607,14 @@ def state_dict(
                 else tuple(optimizers)
             )
         )
-        info = _verify_options(model, optimizers, model_only, optim_only, options)
+        info = _verify_options(
+            model,
+            optimizers,
+            model_only,
+            optim_only,
+            submodules=submodules,
+            options=options,
+        )
         model_state_dict = _get_model_state_dict(model, info)
         optim_state_dict = _get_optim_state_dict(model, optimizers, info)
         _verify_state_dict(model_state_dict, optim_state_dict, info)
@@ -576,7 +627,9 @@ def load_state_dict(
         None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
     ] = None,
     *,
-    model_state_dict: Optional[Dict[str, ValueType]] = None,
+    model_state_dict: Union[
+        None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
+    ] = None,
     optim_state_dict: Optional[OptimizerStateType] = None,
     model_only: bool = False,
     optim_only: bool = False,
@@ -621,7 +674,28 @@ def load_state_dict(
                 else tuple(optimizers)
             )
         )
-        info = _verify_options(model, optimizers, model_only, optim_only, options)
+        info = _verify_options(
+            model, optimizers, model_only, optim_only, options=options
+        )
+
+        if model_state_dict and isinstance(next(iter(model_state_dict.keys())), nn.Module):
+            new_state_dict: Dict[str, ValueType] = {}
+            for submodule, sub_state_dict in model_state_dict.items():
+                for m, name in model.named_modules():
+                    if m == submodule:
+                        fqns = _get_fqns(model, name)
+                        assert (
+                            len(fqns) == 1
+                        ), "FQNs for a submodule should only have 1 element"
+                        prefix = f"{next(iter(fqns))}."
+                        new_state_dict.update(
+                            {
+                                prefix + subfqn: value
+                                for subfqn, value in sub_state_dict.items()
+                            }
+                        )
+            model_state_dict = new_state_dict
+
         _verify_state_dict(model_state_dict, optim_state_dict, info)
         _load_model_state_dict(model, model_state_dict, info)
         _load_optim_state_dict(model, optimizers, optim_state_dict, info)
