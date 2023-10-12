@@ -415,14 +415,17 @@ def convert_frame_assert(
 
 
 def patch_config_if_changed():
-    patch = {}
+    patch: Dict[str, Any] = {}
 
     eval_frame = torch._dynamo.eval_frame
 
     saved_config_hash = eval_frame.config_cache.saved_config_hash
+
+    if saved_config_hash is None:
+        return patch
+
     current_config_hash = eval_frame.get_cached_recompile_hash()
 
-    assert saved_config_hash is not None
     assert current_config_hash is not None
 
     if saved_config_hash != current_config_hash:
@@ -440,7 +443,7 @@ def patch_config_if_changed():
             for key in patch:
                 if patch[key] != config_dict_ref[key]:
                     recompiles_log.debug(
-                        "%s=%s (prev: %s)",
+                        "* %s=%s (prev: %s)",
                         key,
                         patch[key],
                         config_dict_ref[key],
