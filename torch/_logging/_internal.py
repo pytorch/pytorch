@@ -638,7 +638,7 @@ class TorchLogsFormatter(logging.Formatter):
         record.message = record.getMessage()
         record.asctime = self.formatTime(record, self.datefmt)
 
-        # copied from https://github.com/python/cpython/blob/main/Lib/logging/__init__.py#L707-L711
+        # exception handling - copied from logging.Formatter.format
         if record.exc_info:
             # Cache the traceback text to avoid converting it multiple times
             # (it's constant anyway)
