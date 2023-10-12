@@ -44,7 +44,7 @@ def from_fun_old(t):
     return t
 
 def _fake_map(f, x, *args):
-    from functorch.experimental._map import _stack_pytree, _unstack_pytree
+    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
     zs = []
     for xp in x_pytrees:
