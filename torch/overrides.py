@@ -1845,7 +1845,7 @@ def is_tensor_like(inp):
     >>> is_tensor_like(TensorLike())
     True
     """
-    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")
 
 class TorchFunctionMode:
     """
