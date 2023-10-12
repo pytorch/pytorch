@@ -303,8 +303,10 @@ config_cache = threading.local()
 
 
 def _maybe_init_guarded_config_cache():
-    for c in ["saved_config", "saved_config_hash", "cached_recompile_hash"]:
-        if not hasattr(config_cache, c):
+    if hasattr(config_cache, "saved_config"):
+        return
+    else:
+        for c in ["saved_config", "saved_config_hash", "cached_recompile_hash"]:
             setattr(config_cache, c, None)
 
 
@@ -366,7 +368,7 @@ def get_config_and_hash(dynamic=None):
 # Used to test if the config needs to be restored by checking the current hash.
 # We cache this, only to recompute it when config is possibly out of sync (i.e. is dirty).
 def get_cached_recompile_hash():
-    global config_cache
+    _maybe_init_guarded_config_cache()
     if config._is_dirty or config_cache.cached_recompile_hash is None:
         _, config_cache.cached_recompile_hash = get_config_and_hash(dynamic=None)
         config._is_dirty = False
