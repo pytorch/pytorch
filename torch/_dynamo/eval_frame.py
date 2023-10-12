@@ -327,7 +327,7 @@ def restore_compiled_dynamo_config(
                 "Set top-level compile config hash: %s", config_cache.saved_config_hash
             )
         # else:
-            # log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
+        # log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
         yield
     finally:
         if is_top_level:
@@ -485,7 +485,6 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            from .decorators import disable
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()
@@ -627,14 +626,17 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
+        is_skipfile = skipfiles.check(frame.f_code.co_filename)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or skipfiles.check(frame.f_code.co_filename)
+            or is_skipfile
             or config.disable
-        ):  
-            if config.verbose or not skipfiles.check(frame.f_code.co_filename):  # dont log verbose skipfile skips
-                log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
+        ):
+            if not is_skipfile or config.verbose:  # don't log verbose skipfile skips
+                log.debug(
+                    "skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename
+                )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
