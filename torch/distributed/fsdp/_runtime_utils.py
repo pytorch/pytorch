@@ -1451,7 +1451,9 @@ def _register_post_backward_reshard_only_hook(
     inp_tensors: Optional[List[torch.Tensor]] = None
     if not handle:
         return
-    if handle.flat_param.requires_grad:
+    flat_param = handle.flat_param
+    already_registered = hasattr(flat_param, "_post_backward_hook_state")
+    if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
         args_list, _ = tree_flatten(args)
@@ -1465,7 +1467,7 @@ def _register_post_backward_reshard_only_hook(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check

@@ -5079,6 +5079,7 @@ def meta__scaled_dot_product_efficient_backward(
     num_heads = query.size(1)
     max_q = query.size(2)
     head_dim = query.size(3)
+    head_dim_v = value.size(3)
 
     max_k = key.size(2)
 
@@ -5095,7 +5096,7 @@ def meta__scaled_dot_product_efficient_backward(
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads, max_k, head_dim_v),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,

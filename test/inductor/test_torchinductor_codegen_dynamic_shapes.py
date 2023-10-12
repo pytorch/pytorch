@@ -159,7 +159,6 @@ test_failures = {
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_bucketize_dynamic_shapes": TestFailure("cpu"),
     "test_bucketize_default_kwargs_dynamic_shapes": TestFailure("cpu"),
     "test_bucketize_int_dynamic_shapes": TestFailure("cpu"),
