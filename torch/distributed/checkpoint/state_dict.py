@@ -79,13 +79,14 @@ class StateDictOptions:
     # The default is False.
     ignore_frozen_params: bool = False
     # When asking to return only the submodule state_dict (submodules != None),
-    # whether to remove the submodule prefixes from the state_dict keys.
+    # whether to keep the submodule prefixes from the state_dict keys.
     # For example, if the submodule is ``module.pretrain`` and the full FQN of
     # the parameter is ``pretrain.layer1.weight`` of the param, setting
-    # this option to True will return ``layer.weight``, otherwise the full FQN
+    # this option to False will return ``layer.weight``, otherwise the full FQN
     # will be returned.
-    # The default is True.
-    remove_submodule_prefixes: bool = True
+    # Note that if ``keep_submodule_prefixes`` is False, there may be conflict
+    # FQNs, hence there shouldbe only one submodule in ``submodules``.
+    keep_submodule_prefixes: bool = True
     # The `strict` option for model.load_state_dict() call.
     strict: bool = True
 
@@ -336,11 +337,11 @@ def _get_model_state_dict(
             for prefix in info.submodule_prefixes:
                 if not fqn.startswith(prefix):
                     continue
-                if info.remove_submodule_prefixes:
+                if info.keep_submodule_prefixes:
+                    new_state_dict[fqn] = state_dict[fqn]
+                else:
                     new_fqn = fqn[len(prefix) :]
                     new_state_dict[new_fqn] = state_dict[fqn]
-                else:
-                    new_state_dict[fqn] = state_dict[fqn]
         state_dict = new_state_dict
 
     if info.ignore_frozen_params:
@@ -587,6 +588,9 @@ def state_dict(
 
         optim_only (bool): if optim_only is True, the returned model state_dict
             will be empty (default: False)
+        submodules: Optional[Set[nn.Module]]: only return the model parameters
+            that belong to the submodules.
+
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -650,6 +654,14 @@ def load_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
+        model_state_dict: (Union[
+            None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+           the model state_dict to load. If the key of the ``model_state_dict``
+           is nn.Module, the key is a submodule of ``model`` and the value should
+           be the state_dict of the submodule. When loading the state_dict,
+           the prefix of the submodule will be append to the state_dict.
+        optim_state_dict: Optional[OptimizerStateType]:
+            the optimizer state_dict to load.
         model_only (bool): if model_only is True, only the model state_dict will
             be loaded (default: False)
         optim_only (bool): if optim_only is True, only the optimizer state_dict
@@ -676,10 +688,12 @@ def load_state_dict(
             model, optimizers, model_only, optim_only, options=options
         )
 
-        if model_state_dict and isinstance(next(iter(model_state_dict.keys())), nn.Module):
+        if model_state_dict and isinstance(
+            next(iter(model_state_dict.keys())), nn.Module
+        ):
             new_state_dict: Dict[str, ValueType] = {}
             for submodule, sub_state_dict in model_state_dict.items():
-                for m, name in model.named_modules():
+                for name, m in model.named_modules():
                     if m == submodule:
                         fqns = _get_fqns(model, name)
                         assert (
