@@ -396,8 +396,8 @@ class AllocationPool:
     can_expand: bool = True
     restrict_live_range: Optional[LiveRange] = None
     name: Optional[str] = None
-    names_to_del: Optional[List[str]] = None
-    creation_cache: Optional[Dict[str, str]] = None
+    names_to_del: List[str] = dataclasses.field(default_factory=list)
+    creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
 
     def allocate(self, block: "Allocation", is_last: bool):
         if self.restrict_live_range and not self.restrict_live_range.contains(
@@ -422,12 +422,10 @@ class AllocationPool:
     def finalize(self, name):
         assert not self.name
         self.name = name
-        self.names_to_del = [name]
-        self.creation_cache = {}
+        self.names_to_del.append(name)
         self.root.finalize(self, 0)
 
     def codegen_create(self, wrapper, code: IndentedBuffer):
-        assert self.creation_cache is not None
         assert self.name
         nbytes = self.root.get_symbolic_size()
         for block in self.root.allocations:
@@ -457,8 +455,7 @@ class AllocationPool:
             )
 
     def codegen_destroy(self, wrapper, code: IndentedBuffer):
-        assert self.names_to_del
-        code.writeline(wrapper.make_destroy_allocation(self.names_to_del))
+        code.writeline(wrapper.make_free_by_names(self.names_to_del))
 
     def __eq__(self, other):
         return self is other
@@ -602,7 +599,6 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
         if self.is_first_pool_usage:
             pool.codegen_create(self.wrapper, code)
 
-        assert pool.names_to_del and (pool.creation_cache is not None)
         pool.names_to_del.extend(self.group.names)
         alloc_from_pool = allocation.codegen_alloc_from_pool(self.wrapper)
         if alloc_from_pool in pool.creation_cache:

@@ -887,9 +887,6 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device.type}', dtype={dtype})"
             )
 
-    def make_destroy_allocation(self, names_to_del: List[str]):
-        return f"del {', '.join(names_to_del)}"
-
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
@@ -900,6 +897,11 @@ class WrapperCodeGen(CodeGen):
         else:
             self.freed.add(name)
             return f"del {buffer.get_name()}"
+
+    def make_free_by_names(self, names_to_del: List[str]):
+        return (
+            f"del {', '.join(name for name in names_to_del if name not in self.freed)}"
+        )
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
@@ -1656,7 +1658,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f".dtype({self.codegen_dtype(dtype)})){self.ending}"
         )
 
-    def make_destroy_allocation(self, names_to_del: List[str]):
+    def make_free_by_names(self, names_to_del: List[str]):
         # TODO will RAIIAtenTensorHandle handle this for us?
         return ""
 
