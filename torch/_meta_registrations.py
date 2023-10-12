@@ -3230,7 +3230,7 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     )
     n = w.size(0)
     k = w.size(1)
-    return torch.empty(
+    return w.new_empty(
         (
             n // 8,
             k // (inner_k_tiles * 16),
@@ -3253,7 +3253,7 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    return torch.empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
 
 
 @register_meta(aten._cdist_forward.default)
