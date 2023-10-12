@@ -2266,7 +2266,7 @@ def any(
     return result
 
 
-@register_decomposition(aten.sum)
+@register_decomposition([aten.sum.dim_IntList, aten.sum.IntList_out])
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -2546,8 +2546,9 @@ def var_mean(
     correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    v = var(a, dim, unbiased, keepdim, correction=correction)
-    m = mean(a, dim, keepdim)
+    correction = utils.set_correction(unbiased, correction)
+    v = torch.var(a, dim, correction=correction, keepdim=keepdim)
+    m = torch.mean(a, dim, keepdim)
     return v, m
 
 
@@ -3987,7 +3988,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     return x[idx]
 
 
-@register_decomposition(aten.squeeze)
+@register_decomposition(aten.squeeze.dims)
 def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     if dim is None:
         dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)

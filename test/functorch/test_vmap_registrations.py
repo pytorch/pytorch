@@ -51,7 +51,6 @@ xfail_functorch_batched_decomposition = {
 }
 
 xfail_not_implemented = {
-    "aten::absolute_",
     "aten::affine_grid_generator_backward",
     "aten::align_as",
     "aten::align_tensors",
@@ -59,13 +58,7 @@ xfail_not_implemented = {
     "aten::align_to.ellipsis_idx",
     "aten::alpha_dropout",
     "aten::alpha_dropout_",
-    "aten::arccos_",
-    "aten::arccosh_",
-    "aten::arcsin_",
-    "aten::arcsinh_",
     "aten::arctan2_",
-    "aten::arctan_",
-    "aten::arctanh_",
     "aten::argwhere",
     "aten::bilinear",
     "aten::can_cast",
@@ -134,7 +127,6 @@ xfail_not_implemented = {
     "aten::less_equal_.Scalar",
     "aten::less_equal_.Tensor",
     "aten::linalg_cond.p_str",
-    "aten::linalg_eigh",
     "aten::linalg_eigh.eigvals",
     "aten::linalg_lu_factor",
     "aten::linalg_matrix_rank",
