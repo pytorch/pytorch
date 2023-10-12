@@ -571,8 +571,6 @@ API Reference
 .. autoclass:: ModuleCallEntry
 
 
-.. automodule:: torch.export.exported_program
-.. autoclass:: InputKind
-.. autoclass:: InputSpec
-.. autoclass:: OutputKind
-.. autoclass:: OutputSpec
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.export.exported_program

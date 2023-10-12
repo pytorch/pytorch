@@ -4,9 +4,9 @@ import io
 import pathlib
 import re
 import sys
+import warnings
 
 import types
-import warnings
 import weakref
 import zipfile
 from collections import OrderedDict
@@ -33,20 +33,12 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
 from torch.export.exported_program import (
+    ExportBackwardSignature,
     ExportedProgram,
     ExportGraphSignature,
-    _sig_to_specs,
-    ArgumentSpec,
-    ConstantArgument,
-    InputKind,
-    OutputKind,
-    OutputSpec,
-    SymIntArgument,
-    TensorArgument,
-    InputSpec
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
@@ -69,11 +61,11 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
 from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
 from .wrappers import _wrap_submodules
 
 
@@ -403,10 +395,18 @@ def _safe_to_skip_dynamo(gm: torch.fx.GraphModule):
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
-    for spec in sig.input_specs:
-        spec.target = param_buffer_table.get(spec.target, spec.target)
-    for spec in sig.output_specs:
-        spec.target = param_buffer_table.get(spec.target, spec.target)
+    def replace(x):
+        return param_buffer_table.get(x, x)
+
+    sig.parameters = pytree.tree_map(replace, sig.parameters)
+    sig.buffers = pytree.tree_map(replace, sig.buffers)
+    sig.inputs_to_parameters = pytree.tree_map(replace, sig.inputs_to_parameters)
+    sig.inputs_to_buffers = pytree.tree_map(replace, sig.inputs_to_buffers)
+    sig.buffers_to_mutate = pytree.tree_map(replace, sig.buffers_to_mutate)
+    if sig.backward_signature is not None:
+        sig.backward_signature.gradients_to_parameters = pytree.tree_map(
+            replace, sig.backward_signature.gradients_to_parameters
+        )
 
 
 def _normalize_nn_module_stack(gm_torch_level, root_cls):
@@ -651,11 +651,28 @@ def _export(
         trace_joint=False
     )
 
+    export_backward_signature = ExportBackwardSignature(
+        gradients_to_parameters=graph_signature.backward_signature.gradients_to_parameters,
+        gradients_to_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs,
+        loss_output=graph_signature.backward_signature.loss_output
+    ) if graph_signature.backward_signature is not None else None
+
     def to_str_list(sig_component: List[Any]):
         return [str(v) for v in sig_component]
 
     def to_str_dict(sig_component: Dict[Any, Any]):
         return {str(k): str(v) for k, v in sig_component.items()}
+
+    export_graph_signature = ExportGraphSignature(
+        parameters=to_str_list(graph_signature.parameters),
+        buffers=to_str_list(graph_signature.buffers),
+        user_inputs=to_str_list(graph_signature.user_inputs),
+        user_outputs=to_str_list(graph_signature.user_outputs),
+        inputs_to_parameters=to_str_dict(graph_signature.inputs_to_parameters),
+        inputs_to_buffers=to_str_dict(graph_signature.inputs_to_buffers),
+        buffers_to_mutate=to_str_dict(graph_signature.buffers_to_mutate),
+        backward_signature=export_backward_signature
+    )
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
@@ -689,42 +706,18 @@ def _export(
     # without relying on this metadata
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if node.target in graph_signature.inputs_to_parameters:
-                param_name = graph_signature.inputs_to_parameters[node.target]
+            if node.target in export_graph_signature.inputs_to_parameters:
+                param_name = export_graph_signature.inputs_to_parameters[node.target]
                 if param_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[param_name].items():
                         node.meta[k] = v
-            if node.target in graph_signature.inputs_to_buffers:
-                buffer_name = graph_signature.inputs_to_buffers[node.target]
+            if node.target in export_graph_signature.inputs_to_buffers:
+                buffer_name = export_graph_signature.inputs_to_buffers[node.target]
                 if buffer_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
 
         node.meta["is_torch_exported"] = True
-
-    is_joint = graph_signature.backward_signature is not None
-
-    def make_argument_spec(node) -> ArgumentSpec:
-        val = node.meta["val"]
-        if isinstance(val, FakeTensor):
-            return TensorArgument(name=node.name)
-        elif isinstance(val, torch.SymInt):
-            return SymIntArgument(name=node.name)
-        else:
-            return ConstantArgument(value=val)
-    input_specs, output_specs = _sig_to_specs(
-        user_inputs=set(graph_signature.user_inputs),
-        inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]
-        inputs_to_buffers=graph_signature.inputs_to_buffers,  # type: ignore[arg-type]
-        user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
-        buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
-        grad_params=graph_signature.backward_signature.gradients_to_parameters if is_joint else {},  # type: ignore[arg-type, union-attr]
-        grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
-        loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
-        inputs=[make_argument_spec(node) for node in gm.graph.nodes if node.op == "placeholder"],
-        outputs=[make_argument_spec(node) for node in pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]],
-    )
-    export_graph_signature = ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)
 
     range_constraints, equality_constraints = _process_constraints(
         gm,
@@ -924,20 +917,14 @@ def aot_compile(
         unlifted_module,
         unlifted_module.graph,
         ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=InputKind.USER_INPUT,
-                    arg=TensorArgument(name=i),
-                    target=None,
-                ) for i in user_inputs
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=OutputKind.USER_OUTPUT,
-                    arg=TensorArgument(name=o),
-                    target=None,
-                ) for o in user_outputs
-            ]
+            parameters=[],
+            buffers=[],
+            user_inputs=user_inputs,
+            user_outputs=user_outputs,
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
         ),
         call_spec=copy.deepcopy(ep.call_spec),
         state_dict={},
