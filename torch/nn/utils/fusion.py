@@ -5,6 +5,8 @@ from typing import Optional, Tuple, TypeVar
 
 import torch
 
+__all__ = ['fuse_conv_bn_eval', 'fuse_conv_bn_weights', 'fuse_linear_bn_eval', 'fuse_linear_bn_weights']
+
 ConvT = TypeVar("ConvT", bound="torch.nn.modules.conv._ConvNd")
 LinearT = TypeVar("LinearT", bound="torch.nn.Linear")
 
