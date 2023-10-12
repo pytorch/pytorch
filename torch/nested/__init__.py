@@ -145,6 +145,8 @@ Example::
     >>> nt.is_leaf
     True
     """
+    if layout is None:
+        layout = torch.strided
     if layout == torch.strided:
         return _nested.nested_tensor(
             tensor_list,
@@ -155,9 +157,11 @@ Example::
     elif layout == torch.jagged:
         from torch.nested._internal.nested_tensor import jagged_from_list
 
-        nt = jagged_from_list(tensor_list).requires_grad_(requires_grad)
+        nt, _ = jagged_from_list(tensor_list, offsets=None, device=device, dtype=dtype)
+
+        nt.requires_grad_(requires_grad)
         if pin_memory:
-            nt = nt.pin_memory()
+            nt = nt.pin_memory()  # type: ignore[assignment]
 
         return nt
     else:
