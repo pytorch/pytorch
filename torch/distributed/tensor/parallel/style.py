@@ -48,7 +48,7 @@ class ParallelStyle(ABC):
 
     @abstractmethod
     def __init__(
-        self, input_layouts, output_layouts, use_local, _prepare_input, _prepare_output
+        self, _prepare_input, _prepare_output, *, input_layouts, output_layouts, use_local
     ) -> None:
         self.input_layouts = input_layouts
         self.output_layouts = output_layouts
@@ -74,11 +74,12 @@ class PairwiseParallel(ParallelStyle):
     @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=None,
         output_layouts=None,
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
         _prepare_input = (
             make_input_replicate_1d if _prepare_input is None else _prepare_input
@@ -87,7 +88,7 @@ class PairwiseParallel(ParallelStyle):
             make_output_tensor if _prepare_output is None else _prepare_output
         )
         super().__init__(
-            input_layouts, output_layouts, use_local, _prepare_input, _prepare_output
+            _prepare_input, _prepare_output, input_layouts=input_layouts, output_layouts=output_layouts, use_local=use_local,
         )
 
 
@@ -109,18 +110,15 @@ class SequenceParallel(PairwiseParallel):
     @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=None,
         output_layouts=None,
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
         super().__init__(  # type: ignore[misc]
-            input_layouts,
-            output_layouts,
-            use_local,
-            make_input_reshard_replicate,
-            make_output_reshard_tensor,
+            _prepare_input, _prepare_output, input_layouts=input_layouts, output_layouts=output_layouts, use_local=use_local,
         )
 
 
@@ -515,12 +513,16 @@ class RowwiseParallel(ParallelStyle):
 
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=Shard(-1),
         output_layouts=Replicate(),
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
+        if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
+            raise NotImplementedError("RowwiseParallel only supports single input/output.")
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
@@ -529,9 +531,7 @@ class RowwiseParallel(ParallelStyle):
             if _prepare_input is not None
             else _get_prepare_input(
                 input_layouts,
-                [Shard(-1)] * len(input_layouts)  # type: ignore[arg-type]
-                if isinstance(input_layouts, tuple)
-                else Shard(-1),
+                Shard(-1),
             ),
             _prepare_output=_prepare_output
             if _prepare_output is not None
@@ -547,12 +547,16 @@ class ColwiseParallel(ParallelStyle):
 
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=Replicate(),
         output_layouts=Shard(-1),
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
+        if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
+            raise NotImplementedError("ColwiseParallel only supports single input/output.")
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
@@ -573,12 +577,46 @@ class ColwiseParallel(ParallelStyle):
 
 class PrepareModuleInput(ParallelStyle):
     """
-    Only used to specify the input distribute spec for a module.
+    :class:`PrepareModuleInput` enables users to annotate :class:`torch.Tensor` or :class:`DTensor`
+    inputs with ``input_layouts`` and ``output_layouts`` so that each input can be converted to
+    :class:`DTensor` based on the annotation. Specifically, a DTensor will be created
+    from the input Tensor based on ``input_layouts`` and then redistributed to another
+    DTensor based on ``output_layouts``.
+
+    When the input is not a :class:`torch.Tensor` or :class:`DTensor`, if no layout is
+    specified, it will be a no-op. Otherwise, it will throw an error.
     """
 
     def __init__(
-        self, input_layouts=Shard(0), output_layouts=Replicate(), use_local=False
-    ):
+        self, input_layouts:LayoutsType=Shard(0), output_layouts:LayoutsType=Replicate(), use_local:bool=False
+    ) -> None:
+        """
+        Args:
+            input_layouts (Union[Placement, Tuple[Placement, ...]]):
+                The layout of input tensor(s) which DTensor will be created upon.
+            output_layouts (Union[Placement, Tuple[Placement, ...]]):
+                The layout of input tensor(s) which created DTensor will be redistributed to.
+            use_local (bool):
+                Whether to convert the DTensor to local tensor.
+
+        Returns:
+            None.
+
+        Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+        >>> ...
+        >>> parallelize_plan = {
+        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor.
+        >>>     ...
+        >>> }
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan=parallelize_plan,
+        >>> )
+        >>> ...
+        """
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
@@ -593,12 +631,34 @@ class PrepareModuleInput(ParallelStyle):
 
 class PrepareModuleOutput(ParallelStyle):
     """
-    Only used to specify the output distribute spec for a module.
+    :class:`PrepareModuleOutput` enables users to annotate :class:`DTensor` outputs
+    with ``output_layouts`` and ``use_local`` so that each output can be converted to
+    :class:`DTensor` or :class:`torch.Tensor` based on the annotation. Specifically, a DTensor
+    will be redistributed to another DTensor based on ``output_layouts`` and the flag ``use_local``
+    to decide whether to convert the DTensor to local tensor.
+
+    When the output is not a :class:`DTensor`, if no layout is specified, it will be
+    a no-op. Otherwise, it will throw an error.
+
+    Example::
+    >>> # xdoctest: +SKIP(failing)
+    >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
+    >>> ...
+    >>> parallelize_plan = {
+    >>>     "submodule": PrepareModuleOutput(),   # The input of attn will be converted to Sharded tensor.
+    >>>     ...
+    >>> }
+    >>> parallelize_module(
+    >>>     module=block, # this can be a submodule or module
+    >>>     ...,
+    >>>     parallelize_plan=parallelize_plan,
+    >>> )
+    >>> ...
     """
 
     def __init__(
-        self, input_layouts=Replicate(), output_layouts=Shard(0), use_local=True
-    ):
+        self, input_layouts:LayoutsType=Replicate(), output_layouts:LayoutsType=Shard(0), use_local:bool=True
+    ) -> None:
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
