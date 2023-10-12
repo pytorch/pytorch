@@ -38,8 +38,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraphExec_t graph_exec_ = NULL;
 #endif
 
-  // mutex used for pending event query inc/dec functions
-  static std::mutex mutex_;
   static std::atomic<int> pending_event_queries;
 
   // internal states so reset() can do its best cleaning up
