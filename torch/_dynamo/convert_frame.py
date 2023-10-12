@@ -260,15 +260,20 @@ def convert_frame_assert(
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():
-                message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
-                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                failures = str(guard_failures[code][-1])
+                if config.report_all_guard_failures:
+                    failures = failures.strip().split("\n")  # type: ignore[assignment]
+                guard_failure_details = (
+                    f"triggered by the following guard failure(s): {failures}"
                 )
             else:
-                message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
-                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                guard_failure_details = (
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further"
                 )
+            message = (
+                f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
+                guard_failure_details,
+            )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message, stack_info=True)
