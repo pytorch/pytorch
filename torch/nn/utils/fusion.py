@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import copy
 from typing import Optional, Tuple, TypeVar
 
 import torch
 
-ConvT = TypeVar("ConvT", bound=torch.nn.modules.conv._ConvNd)
-LinearT = TypeVar("LinearT", bound=torch.nn.Linear)
+ConvT = TypeVar("ConvT", bound="torch.nn.modules.conv._ConvNd")
+LinearT = TypeVar("LinearT", bound="torch.nn.Linear")
 
 def fuse_conv_bn_eval(conv: ConvT, bn: torch.nn.modules.batchnorm._BatchNorm, transpose: bool = False) -> ConvT:
     r"""Fuse a convolutional module and a BatchNorm module into a single, new convolutional module.
