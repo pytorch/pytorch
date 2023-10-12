@@ -318,15 +318,16 @@ def restore_compiled_dynamo_config(
     # Set exactly once from top-level compile
     is_top_level = False
     try:
-        if config_cache.saved_config is None and config_cache.saved_config_hash is None:
+        if config_cache.saved_config is None:
+            assert config_cache.saved_config_hash is None
             is_top_level = True
             config_cache.saved_config = saved_config
             config_cache.saved_config_hash = saved_config_hash
             log.debug(
                 "Set top-level compile config hash: %s", config_cache.saved_config_hash
             )
-        else:
-            log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
+        # else:
+            # log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
         yield
     finally:
         if is_top_level:
@@ -401,10 +402,11 @@ class _TorchDynamoContext:
     def save_and_hash_config(self):
         # save current value of dynamo configs
         self.saved_config, self.saved_config_hash = get_config_and_hash(self.dynamic)
-        log.debug(
-            "Saved dynamo config and hash for new compiled object. Hash: %s",
-            self.saved_config_hash,
-        )
+        if self.first_ctx:
+            log.debug(
+                "Saving dynamo config and hash for new compiled object(s). Hash: %s",
+                self.saved_config_hash,
+            )
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
