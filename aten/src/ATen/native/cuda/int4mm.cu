@@ -780,7 +780,7 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 torch::Tensor _weight_int4pack_mm_cuda(
     const torch::Tensor& A,
     const torch::Tensor& B,
-    long qGroupSize,
+    int64_t qGroupSize,
     const torch::Tensor& qScaleAndZeros) {
   c10::cuda::CUDAGuard g(A.device());
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -960,7 +960,7 @@ torch::Tensor _weight_int4pack_mm_cuda(
 // output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2]
 torch::Tensor _convert_weight_to_int4pack_cuda(
     const torch::Tensor& in,
-    long innerKTiles) {
+    int64_t innerKTiles) {
   c10::cuda::CUDAGuard g(in.device());
   auto stream = at::cuda::getCurrentCUDAStream();
 
