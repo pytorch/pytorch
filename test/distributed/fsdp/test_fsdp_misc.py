@@ -192,59 +192,59 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         fsdp_opt = torch.optim.SGD(fsdp_model.parameters(), lr=1e-4)
         ddp_opt = torch.optim.SGD(ddp_model.parameters(), lr=1e-4)
 
-        x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
-        y = torch.randint(low=0, high=9, size=(8,), device="cuda")
-        x1 = x.clone().detach().requires_grad_()
-        y1 = y.clone().detach()
-
         seed = self.rank + 20231010
-
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
-        for _ in range(5):
-            fsdp_loss = fsdp_model(x, y)
-            fsdp_loss = fsdp_loss.sum()
-            fsdp_loss.backward()
-            fsdp_opt.step()
 
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        for _ in range(5):
-            ddp_loss = ddp_model(x1, y1)
-            ddp_loss = ddp_loss.sum()
-            ddp_loss.backward()
-            ddp_opt.step()
-
-        assert torch.allclose(fsdp_loss, ddp_loss)
-        assert torch.allclose(x.grad, x1.grad)
+        losses = []
+        grads = []
+        for i in range(5):
+            x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
+            y = torch.randint(low=0, high=9, size=(8,), device="cuda")
+            for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
+                seed = self.rank + i
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
+                loss = model(x, y).sum()
+                losses.append(loss)
+                loss.backward()
+                opt.step()
+                grads.append(x.grad)
+                opt.zero_grad()
+            assert torch.allclose(losses[0], losses[1])
+            assert torch.allclose(grads[0], grads[1])
+            losses.clear()
+            grads.clear()
 
         with torch.no_grad():
             fsdp_model.eval()
             ddp_model.eval()
             for _ in range(5):
+                x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
+                y = torch.randint(low=0, high=9, size=(8,), device="cuda")
                 fsdp_loss = fsdp_model(x, y)
-                ddp_loss = ddp_model(x1, y1)
+                ddp_loss = ddp_model(x, y)
                 assert torch.allclose(fsdp_loss, ddp_loss)
 
         fsdp_model.train()
         ddp_model.train()
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        for _ in range(5):
-            fsdp_loss = fsdp_model(x, y)
-            fsdp_loss = fsdp_loss.sum()
-            fsdp_loss.backward()
-            fsdp_opt.step()
-
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        for _ in range(5):
-            ddp_loss = ddp_model(x1, y1)
-            ddp_loss = ddp_loss.sum()
-            ddp_loss.backward()
-
-        assert torch.allclose(fsdp_loss, ddp_loss)
-        assert torch.allclose(x.grad, x1.grad)
+        for i in range(5):
+            x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
+            y = torch.randint(low=0, high=9, size=(8,), device="cuda")
+            for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
+                seed = self.rank + i
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
+                loss = model(x, y).sum()
+                losses.append(loss)
+                loss.backward()
+                opt.step()
+                grads.append(x.grad)
+                opt.zero_grad()
+            assert torch.allclose(losses[0], losses[1])
+            assert torch.allclose(grads[0], grads[1])
+            losses.clear()
+            grads.clear()
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
