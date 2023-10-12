@@ -272,7 +272,7 @@ class ConvertIntSource(ChainedSource):
         # is essentially an if-else statement based on input: if the guard check succeed, dynamo uses the
         # cahced optimized code. if the guard check fails, dynamo re-compiles and install necessary guards in SHAPE_ENV
         # and propagate the guards to outer shape_env.
-        return f"create_symint_from_symbool_guardless({self.base.name()})"
+        return f"ITE({self.base.name()}, 1, 0)"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -383,36 +383,6 @@ class TypeSource(ChainedSource):
 
     def name(self):
         return f"type({self.base.name()})"
-
-
-# NB - SuperSource is a weird one.
-# it is our only source with 2 bases, so we use the objec
-# as the base, rather than the type, since an invocation
-# like super(Foo, foo) is represented here, the source object base is more spiritually
-# aligned with the instance, rather than the type.
-# This whole construction is questionable tho, and we should probably find a way to
-# avoid this exception to our otherwise nice source parentage invariant.
-@dataclasses.dataclass(frozen=True)
-class SuperSource(ChainedSource):
-    type: Source
-
-    def __post_init__(self):
-        assert self.type is not None
-        assert self.base is not None
-
-    def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "super")
-        return (
-            self.type.reconstruct(codegen)
-            + self.base.reconstruct(codegen)
-            + create_call_function(2, True)
-        )
-
-    def guard_source(self):
-        return self.base.guard_source()
-
-    def name(self):
-        return f"super({self.type.name()}, {self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)

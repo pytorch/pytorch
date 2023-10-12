@@ -13,6 +13,7 @@ import operator
 import os
 import random
 import sys
+import tempfile
 import threading
 import traceback
 import typing
@@ -44,7 +45,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
+from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -73,7 +74,6 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
-    instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     set_default_dtype,
@@ -632,6 +632,38 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             expected_ops=1,
             expected_ops_dynamic=ifdynstaticdefault(1, 17),
         )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(y >= 0)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_is_size(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            # unsound 0/1 specialization!
+            if y == 0:
+                assert False
+            else:
+                return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_config_obj(self):
         class Cfg:
@@ -1783,7 +1815,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
-        from torch._dynamo.utils import counters
 
         counters.clear()
 
@@ -2007,6 +2038,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             pass
 
         class MyClass1(metaclass=ExampleMeta):
+            coeff = 4  # Force the constant guard to test source in guards
+
             @classmethod
             def add(cls, x):
                 return x + 1
@@ -2015,7 +2048,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             @classmethod
             def add(cls, x):
                 torch._dynamo.graph_break()
-                return x + super().add(x)
+                return x + super().add(x) + super().coeff
 
         def fn(x, obj):
             return x + obj.add(x)
@@ -4465,8 +4498,7 @@ def fn():
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
 
-    @parametrize("x", [torch.ones(2, 3), torch.ones(3, 4)])
-    def test_make_fx_compiled_fn_symbolic_mode(self, x):
+    def test_make_fx_compiled_fn_symbolic_mode(self):
         tracing_mode = "symbolic"
 
         def fn(pred, x):
@@ -4492,38 +4524,35 @@ def fn():
         # We'll check normal function once and compiled function twice.
         fns = [symbool_fn_not_compiled, symbool_fn_compiled, symbool_fn_compiled]
 
-        gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in fns]
+        for x in [torch.ones(2, 3), torch.ones(3, 4)]:
+            gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in fns]
 
-        if compare_shape(x):
-            for gm in gms:
-                self.assertExpectedInline(
-                    gm.code.strip(),
-                    """\
+            if compare_shape(x):
+                for gm in gms:
+                    self.assertExpectedInline(
+                        gm.code.strip(),
+                        """\
 def forward(self, x_1):
     sin = torch.ops.aten.sin.default(x_1);  x_1 = None
     return sin""",
-                )
-            self.assertExpectedInline(_get_guard_exprs(gms[0]), """Eq(s0, 3)""")
-            for gm in gms[1:]:
-                self.assertExpectedInline(
-                    _get_guard_exprs(gm),
-                    """Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""",
-                )
-        else:
-            for gm in gms:
-                self.assertExpectedInline(
-                    gm.code.strip(),
-                    """\
+                    )
+                    self.assertExpectedInline(
+                        _get_guard_exprs(gm),
+                        """Eq(s0, 3)""",
+                    )
+            else:
+                for gm in gms:
+                    self.assertExpectedInline(
+                        gm.code.strip(),
+                        """\
 def forward(self, x_1):
     cos = torch.ops.aten.cos.default(x_1);  x_1 = None
     return cos""",
-                )
-            self.assertExpectedInline(_get_guard_exprs(gms[0]), """Ne(s0, 3)""")
-            for gm in gms[1:]:
-                self.assertExpectedInline(
-                    _get_guard_exprs(gm),
-                    """Ne(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""",
-                )
+                    )
+                    self.assertExpectedInline(
+                        _get_guard_exprs(gm),
+                        """Ne(s0, 3)""",
+                    )
 
     def test_not_dynamic_scope(self):
         def f(y):
@@ -5045,6 +5074,8 @@ def forward(self, x_1):
 
     def test_call_parent_non_class_methods_from_child(self):
         class A:
+            a = 4
+
             def add(self, x):
                 return x + 10
 
@@ -5052,24 +5083,44 @@ def forward(self, x_1):
                 return x * 0.1
 
         class B(A):
+            coeff = 4
+
             def add(self, x):
                 return x + 20
 
+            @classmethod
+            def cube(cls, x):
+                return cls.coeff * x * x * x
+
             def mul(self, x):
-                return x * 0.2
+                return super().mul(x) * x * 0.2
 
         class C(B):
             def add(self, x):
-                y = A.add(self, x)
-                z = B.mul(self, y)
-                return z + 30
+                b = super().cube(x)
+                c = A.add(self, x)
+                d = B.mul(self, x)
+                e = super(B, self).add(x)
+                f = super().a * x
+                return b + c + d + e + f
 
         x = torch.rand(4)
         fn = C().add
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Check recompilation
+        A.a = 5
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        # Ensure that super guard checks are working as expected
+        res = opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_builder_for_class_with_metaclass(self):
         class ExampleMeta(type):
@@ -6745,6 +6796,32 @@ def ___make_guard_fn():
         compiled_out = compiled_fn(x)
         self.assertTrue(same(fn_out, compiled_out))
 
+    def test_list_hasattr1(self):
+        def fn(x):
+            if hasattr(x, "foo"):
+                return x[0] + 1
+            return x[0] - 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = [torch.randn(3)]
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
+
+    def test_list_hasattr2(self):
+        def fn():
+            x = [torch.zeros(3)]
+            if hasattr(x, "__len__"):
+                return x[0] + 1
+            return x[0] - 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertTrue(same(fn_out, compiled_out))
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
@@ -6877,13 +6954,11 @@ def ___make_guard_fn():
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     def test_unbacked_symint(self):
-        from torch._export.constraints import constrain_as_size
-
         @torch.compile(backend="eager")
         def f(lengths, values):
             sizes = lengths.tolist()
             for s in sizes:
-                constrain_as_size(s, min=2, max=100)
+                torch._constrain_as_size(s, min=2, max=100)
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
@@ -7304,43 +7379,107 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    def test_itertools_repeat(self):
+        counters.clear()
+
+        def fn(x):
+            r = itertools.repeat(100.0, 5)
+            for i in r:
+                x += i
+            return x
+
+        x = torch.randn([2, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_accumulate_symint_default_sum(self):
+        # https://github.com/pytorch/pytorch/issues/110287
+        counters.clear()
+
+        def fn(x):
+            r = itertools.accumulate([x.size(0), x.size(1)])
+            for i in r:
+                x *= i
+            return x
+
+        x = torch.randn(2, 3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_accumulate_tensors_default_sum(self):
+        counters.clear()
+
         def fn(a, b, c, d, x):
             l = [a, b, c, d, x]
             for i, t in enumerate(l):
                 l[i] = t * x
             return itertools.accumulate(l)
 
-        t_list = [torch.tensor([i]) for i in range(4)]
-        x = torch.randn([2, 2])
+        t_list = [torch.tensor([i + 1]) for i in range(4)]
+        x = torch.tensor([[1, 2], [3, 4]])
         eager = fn(*t_list, x)
 
-        counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(*t_list, x)
 
         self.assertEqual(list(eager), list(compiled))
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_accumulate_tensors_builtins(self):
         for builtin_op in [operator.mul, operator.sub, operator.pow]:
+            counters.clear()
 
             def fn(a, b, c, d, x):
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return itertools.accumulate(l, func=builtin_op)
+                return itertools.accumulate(l, builtin_op)
 
-            t_list = [torch.tensor([i]) for i in range(4)]
-            x = torch.randn([2, 2])
+            t_list = [torch.tensor([i + 1]) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
-            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_accumulate_tensors_kwargs(self):
+        from torch._dynamo.utils import counters
+
+        for kwargs in [
+            {"func": operator.mul},
+            {"initial": 100},
+            {"func": operator.sub, "initial": -1},
+        ]:
+            counters.clear()
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, **kwargs)
+
+            t_list = [torch.tensor([i + 1]) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]])
+
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+            compiled = compiled_fn(*t_list, x)
+            eager = fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
@@ -7359,24 +7498,24 @@ def ___make_guard_fn():
             return a * len(seen)
 
         for udo_fn in [udo_fn_0, udo_fn_1, udo_fn_2]:
+            counters.clear()
             torch._dynamo.reset()
 
             def fn(a, b, c, d, x):
                 l = [a, b, c, d, x]
                 for i, t in enumerate(l):
                     l[i] = t * x
-                return itertools.accumulate(l, func=udo_fn)
+                return itertools.accumulate(l, udo_fn)
 
             t_list = [torch.tensor([i]) for i in range(4)]
-            x = torch.randn([2, 2])
+            x = torch.tensor([[1, 2], [3, 4]])
             eager = fn(*t_list, x)
 
-            counter = CompileCounter()
-            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
             compiled = compiled_fn(*t_list, x)
 
             self.assertEqual(list(eager), list(compiled))
-            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_pure_python_accumulate(self):
         def accumulate(iterable, func=lambda x, y: x + y):
@@ -7719,8 +7858,69 @@ ShapeEnv not equal: field values don't match:
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 
+    def test_funcname_cache(self):
+        src = """\
+import torch
+if True:
+    test = 3
 
-instantiate_parametrized_tests(MiscTests)
+class AAA:
+    class DUMMY:
+        class DUMMY2:
+            pass
+
+    def dummy(self):
+        def dummy2():
+            pass
+    class BBB:
+        @staticmethod
+        def CCC():
+            class DDD:
+                if True:
+                    @staticmethod
+                    def EEE():
+                        x = [torch.ones(3, 3) for _ in range(5)]
+                        return x
+            return DDD
+def fn():
+    return 3
+"""
+        with tempfile.NamedTemporaryFile(mode="w") as f:
+            f.write(src)
+            f.flush()
+            from torch._dynamo.funcname_cache import get_funcname
+
+            names = [get_funcname(f.name, i + 1) for i in range(src.count("\n") + 1)]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+
+
+
+
+AAA
+AAA.DUMMY
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.DUMMY.DUMMY2
+AAA.dummy
+AAA.dummy.dummy2
+AAA.dummy.dummy2
+AAA.BBB
+AAA.BBB
+AAA.BBB.CCC
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC.DDD.EEE
+AAA.BBB.CCC
+fn
+fn
+""",
+        )
 
 
 class TestTracer(JitTestCase):
