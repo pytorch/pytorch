@@ -1250,6 +1250,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
             context_fn = kwargs.pop("context_fn")
             self.value.context_fn = context_fn.fn
+        else:
+            self.value.context_fn = None
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
