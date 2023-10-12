@@ -193,9 +193,8 @@ def map_wrapper(f, xs, *args):
         out_spec = tmp_out_spec
         return flat_out
 
-    assert out_spec is not None
     return pytree.tree_unflatten(
-        map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec
+        map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec  # type: ignore[arg-type]
     )
 
 
