@@ -22,7 +22,6 @@ from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
 from torch._export import dynamic_dim
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -2491,7 +2490,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            constrain_as_size(b)
+            torch._constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2518,7 +2517,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_tensor(self):
         def f(x):
             b = x.nonzero()
-            constrain_as_value(b.shape[0], min=2, max=5)
+            torch._constrain_as_value(b.shape[0], min=2, max=5)
             return b
 
         y = torch.tensor([8, 8, 6])
@@ -2540,7 +2539,7 @@ def forward(self, x):
 
         def f(x, y):
             b = x.item()
-            constrain_as_size(b)
+            torch._constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -3287,29 +3286,14 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["create_symint_from_symbool_guardless(L['pred']) == 1"]
-        false_guard_code = [
-            "Ne(create_symint_from_symbool_guardless(L['pred']), 1)",
-            "-9223372036854775808 <= create_symint_from_symbool_guardless(L['pred'])",
-        ]
+        true_guard_code = ["ITE(L['pred'], 1, 0) == 1"]
+        false_guard_code = ["Ne(ITE(L['pred'], 1, 0), 1)"]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            [
-                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
-                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
-                [
-                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
-                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
-                ],
-                [
-                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
-                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
-                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
-                ],
-            ],
+            [["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"]],
         )
 
     def test_invalid_input_global(self) -> None:
