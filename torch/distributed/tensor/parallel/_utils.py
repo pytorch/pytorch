@@ -3,6 +3,7 @@ from typing import Callable, Optional, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor.device_mesh import mesh_resources
 
 _PrepareInputType = Callable[
     [Union[torch.Tensor, DTensor], Optional[DeviceMesh], Optional[int]], DTensor
@@ -153,3 +154,34 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
 
     res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[tp_mesh_dim]]
     return res_sub_mesh
+
+
+def _validate_tp_mesh_dim(
+    device_mesh: DeviceMesh,
+) -> None:
+    """
+    Check whether TP mesh dimension is valid or not.
+
+    Args:
+        device_mesh (:class:`DeviceMesh`):
+            The `device_mesh` where we perform
+            Tensor Parallelism on.
+
+    Return:
+        `True` if the mesh dimension
+        is valid, `False` otherwise.
+    """
+    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    if parent_mesh:
+        if parent_mesh.ndim != 2:
+            raise RuntimeError(
+                f"Found TP device_mesh has a parent mesh with dims {parent_mesh.ndim}",
+                "Currently we only support 2D TP composition with DP.",
+            )
+
+        tp_mesh_dim = mesh_resources.get_parent_mesh_dim(device_mesh)
+        if tp_mesh_dim != 1:
+            raise RuntimeError(
+                f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",
+                "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
+            )

@@ -116,7 +116,7 @@ class RedistributeTest(DTensorTestBase):
         # replicate to partial internally, and also partial to replicate
         # backward should work as expected
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        partial_local = torch.randn(12, 3, device=self.device_type, requires_grad=True)
+        partial_local = torch.ones(12, 3, device=self.device_type, requires_grad=True)
         partial_spec = [_Partial()]
         replica_spec = [Replicate()]
         # test partial -> replicate, which trigger all_reduce
@@ -131,8 +131,9 @@ class RedistributeTest(DTensorTestBase):
         # test backward to have replicate grad on partial
         global_partial_tensor.backward(torch.ones_like(global_partial_tensor))
         self.assertIsNotNone(partial_local.grad)
-        if device_mesh.get_rank() == 0:
-            self.assertEqual(partial_local.grad, torch.ones_like(partial_local))
+        self.assertEqual(
+            partial_local.grad, torch.ones_like(partial_local) / self.world_size
+        )
 
     @with_comms
     def test_replicate_to_partial(self):
@@ -150,10 +151,9 @@ class RedistributeTest(DTensorTestBase):
         partial_tensor = Redistribute.apply(replica_tensor, device_mesh, [partial_spec])
         self.assertEqual(partial_tensor.size(), local_tensor.size())
         # test it successfully zero out the contents on other ranks
-        if self.rank == 0:
-            self.assertEqual(replica_tensor.to_local(), partial_tensor.to_local())
-        else:
-            self.assertEqual(partial_tensor.to_local(), torch.zeros_like(local_tensor))
+        self.assertEqual(
+            replica_tensor.to_local() / self.world_size, partial_tensor.to_local()
+        )
 
         # replicate to partial on sub groups
         local_tensor = torch.randn(12, 3, device=self.device_type)
@@ -170,12 +170,10 @@ class RedistributeTest(DTensorTestBase):
         )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
 
-        if self.rank != 3:
-            # replicate to partial should only zero out rank 3, and leave
-            # rank 0/2 (rank0 on mesh dim 1) and 0, 1 (rank0 on mesh dim 1) un-touched
-            self.assertEqual(replica_tensor.to_local(), partial_tensor.to_local())
-        else:
-            self.assertEqual(replica_tensor.to_local(), torch.zeros_like(local_tensor))
+        self.assertEqual(
+            replica_tensor.to_local() / self.world_size,
+            partial_tensor.to_local(),
+        )
 
     @with_comms
     def test_partial_to_shard(self):

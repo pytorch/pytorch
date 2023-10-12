@@ -333,7 +333,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 
 def extract_read_writes(
-    fn: Callable[[sympy.Expr], Any],
+    fn: Callable[..., Any],
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",
