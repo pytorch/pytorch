@@ -2295,7 +2295,7 @@ class TestCase(expecttest.TestCase):
     # Always use difflib to print diffs on multi line equality.
     # Undocumented feature in unittest
     _diffThreshold = sys.maxsize
-    maxDiff = sys.maxsize
+    maxDiff = None
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
@@ -2515,7 +2515,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
         elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager")(super_run)
+            super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)

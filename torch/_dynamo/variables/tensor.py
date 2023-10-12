@@ -1,3 +1,4 @@
+import functools
 import inspect
 import operator
 import types
@@ -15,10 +16,12 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
+from torch._dynamo import compiled_autograd
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
+from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -665,6 +668,19 @@ class TensorVariable(VariableTracker):
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
+            if not isinstance(
+                fn_var,
+                (
+                    variables.functions.FunctoolsPartialVariable,
+                    variables.UserFunctionVariable,
+                    variables.TorchVariable,
+                    variables.NNModuleVariable,
+                ),
+            ):
+                unimplemented("Unexpected callable type passed to register_hook")
+
+            # Guards from the fn_var
+            options.update(VariableTracker.propagate(fn_var))
 
             if isinstance(fn_var, variables.NestedUserFunctionVariable):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
@@ -681,13 +697,61 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
+
             if not self.source:
                 # Intermediary
-                unimplemented("Intermediary tensors with registered hooks - NYI")
-            else:
-                assert (
-                    fn_var.source
-                ), "Unreachable - See unimplemented for lambdas above"
+                src = fn_var.source
+                if (
+                    not src
+                    and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
+                    and fn_var.func.source
+                ):
+                    src = fn_var.func.source
+
+                if not src:
+                    unimplemented("No source for register_hook target fn")
+
+                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+
+                if not compiled_autograd.compiled_autograd_enabled:
+                    # TODO(voz):
+                    # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
+                    # python state.
+                    # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
+                    # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
+                    #
+                    # Discussion point 1 - Should we bypass this if nopython/fullgraph = True?
+                    #   No. Because this was going to be a graph break anyway - this check does not
+                    # introduce new graph breaks where there were none.
+                    #
+                    # Discussion point 2 - Should we defer this check to backwards?
+                    #   No. Because compiled autograd is not yet ready for prime time. As such, if we defer, a user
+                    # would have no recourse - their forward traces just fine, but will fail at backwards unless
+                    # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
+                    # then they have nothing they can do except disable compile.
+                    unimplemented(
+                        "Compilation of intermediate hooks requires compiled autograd"
+                    )
+
+                # This wraps our user provided fn with a function that intercedes and
+                # uses our `invoke` higher order op to record a hook invocation in bwd graph.
+                fn = functools.partial(trace_wrapped, fn=fn)
+
+                def _register_hook_trampoline(tensor):
+                    tensor.register_hook(fn)
+                    return tensor
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        _register_hook_trampoline,
+                        (self.as_proxy(),),
+                        {},
+                    ),
+                    **options,
+                )
+
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
