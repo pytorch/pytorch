@@ -20,21 +20,21 @@ understanding of how you can use ``torch.compile`` in your own programs.
 .. code:: python
 
    import torch
-   def fn(x, y):
-       a = torch.cos(x)
-       b = torch.sin(y)
-       return a + b
+   def fn(x):
+      a = torch.cos(x) 
+      b = torch.sin(a)
+      return b
    new_fn = torch.compile(fn, backend="inductor")
    input_tensor = torch.randn(10000).to(device="cuda:0")
-   a = new_fn(input_tensor, input_tensor)
+   a = new_fn(input_tensor)
 
 A more famous pointwise operator you might want to use would
 be something like ``torch.relu()``. Pointwise ops in eager mode are
 suboptimal because each one would need to read a tensor from the
 memory, make some changes, and then write back those changes. The single
 most important optimization that inductor performs is fusion. In the
-example above we can turn 4 reads (``x``, ``y``, ``a``, ``b``) and
-3 writes (``a``, ``b``, ``a+b``) into 1 read and 1 write which
+example above we can turn 3 reads (``x``, ``a``, ``b``) and
+2 writes (``a``, ``b``) into 1 read (``x``) and 1 write (``b``), which
 is crucial especially for newer GPUs where the bottleneck is memory
 bandwidth (how quickly you can send data to a GPU) rather than compute
 (how quickly your GPU can crunch floating point operations).
