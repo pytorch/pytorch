@@ -146,7 +146,7 @@ class TestFineTuning(FSDPTest):
                     optimizers=optim,
                     model_state_dict=model_state_dict,
                     optim_state_dict=optim_state_dict,
-                    options=StateDictOptions(strict=False, ignore_frozen_params=False),
+                    options=StateDictOptions(strict=False),
                 )
             except KeyError:
                 # If this is the first round of the fine tuning, then nothing is saved.
