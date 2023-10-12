@@ -462,7 +462,7 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         self.device = device
         self.set_stream = get_interface_for_device(self.device).set_stream
-        self.set_stream_id = get_interface_for_device(self.device).set_stream_by_id
+        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx):
         # stream generated inside of traced function

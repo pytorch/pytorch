@@ -534,7 +534,7 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def set_stream_by_id(stream_id, device_index, device_type):
+def _set_stream_by_id(stream_id, device_index, device_type):
     r"""set stream specified by the stream id, device index and
         device type
 
@@ -560,7 +560,7 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    set_stream_by_id(
+    _set_stream_by_id(
         stream_id=stream.stream_id,
         device_index=stream.device_index,
         device_type=stream.device_type,

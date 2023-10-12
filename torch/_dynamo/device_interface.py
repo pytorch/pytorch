@@ -2,7 +2,7 @@ import inspect
 from typing import Any, Dict, Union
 
 import torch
-from torch.streambase import EventBase, StreamBase
+from torch._streambase import EventBase, StreamBase
 
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -89,7 +89,7 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
         raise NotImplementedError()
 
     @staticmethod
-    def set_stream_by_id(stream_id: int, device_index: int, device_type: int):
+    def _set_stream_by_id(stream_id: int, device_index: int, device_type: int):
         raise NotImplementedError()
 
     @staticmethod
@@ -154,7 +154,7 @@ class CudaInterface(DeviceInterface):
     stream = staticmethod(torch.cuda.stream)
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)
-    set_stream_by_id = staticmethod(torch.cuda.set_stream_by_id)
+    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)
     get_raw_stream = staticmethod(get_cuda_stream)

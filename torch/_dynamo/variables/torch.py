@@ -7,7 +7,7 @@ import re
 import types
 from typing import Dict, List
 
-from torch.streambase import StreamBase
+from torch._streambase import StreamBase
 
 try:
     import numpy as np

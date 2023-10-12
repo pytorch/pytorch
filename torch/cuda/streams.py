@@ -1,7 +1,7 @@
 import ctypes
 
 import torch
-from torch.streambase import EventBase, StreamBase
+from torch._streambase import EventBase, StreamBase
 from ._utils import _dummy_type
 
 
