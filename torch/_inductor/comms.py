@@ -6,7 +6,6 @@ from typing import List
 import torch.fx as fx
 
 from . import ir, scheduler, config
-from .analysis import get_snode_runtime
 from .dependencies import WeakDep
 
 
@@ -115,11 +114,15 @@ def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
     assert not any(isinstance(snode.node, ir.CollectiveKernel) for snode in snodes)
 
 
-def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> int:
+def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
+    """
+    Returns estimated op runtime in nanoseconds (ns)
+    """
     if config.estimate_op_runtime == "default":
-        return get_snode_runtime(snode)
+        runtime = snode.get_estimated_runtime()
     else:
-        return config.estimate_op_runtime(snode)
+        runtime = config.estimate_op_runtime(snode)
+    return runtime
 
 
 def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:

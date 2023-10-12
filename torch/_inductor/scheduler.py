@@ -29,6 +29,7 @@ from .utils import (
     sympy_product,
 )
 from .virtualized import V
+from .comm_analysis import estimate_nccl_collective_runtime
 
 
 log = logging.getLogger(__name__)
@@ -507,6 +508,9 @@ class BaseSchedulerNode:
         return node_bytes
 
     def get_estimated_runtime(self) -> float:
+        """
+        Returns estimated op runtime in nanoseconds (ns)
+        """
         layout = None
         dtype = None
         if not self.node:
@@ -562,7 +566,15 @@ class BaseSchedulerNode:
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
-        # TODO(xmfan): add support for CollectiveKernel
+        # Collective kernels
+        if isinstance(self.node, ir.CollectiveKernel):
+            return estimate_nccl_collective_runtime(self)
+        elif isinstance(self.node, ir.Wait):
+            # ir.Wait is only used for collective ops.
+            # The time needed for the collective op is already estimated and considered
+            # when we are processing the collective op IR node, so ir.Wait takes 0 time
+            # since it doesn't take extra time to get the result after the collective is completed.
+            return 0
 
         return 0
 
