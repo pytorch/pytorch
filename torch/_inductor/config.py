@@ -105,9 +105,9 @@ reorder_for_compute_comm_overlap = False
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 reorder_for_compute_comm_overlap_passes = [
+    "reorder_compute_for_overlap",
     "sink_waits",
     "raise_comms",
-    "reorder_compute_for_overlap",
 ]
 
 # runtime estimation function for ops
