@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
+from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -224,7 +225,7 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.item()
-                torch._constrain_as_value(b, min=2, max=5)
+                constrain_as_value(b, min=2, max=5)
                 return b
 
         x = torch.tensor([2])
@@ -244,7 +245,7 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.nonzero()
-                torch._constrain_as_value(b.shape[0], min=3, max=5)
+                torch.export.constrain_as_value(b.shape[0], min=3, max=5)
                 return b
 
         x = torch.tensor([2, 1, 2, 3, 5, 0])
@@ -283,12 +284,12 @@ class TestPasses(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._constrain_as_value(b, min=2, max=5)
+                    constrain_as_value(b, min=2, max=5)
                     return x - b
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._constrain_as_value(c, min=2, max=5)
+                    constrain_as_value(c, min=2, max=5)
                     return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
@@ -334,7 +335,7 @@ class TestPasses(TestCase):
     def test_functionalize_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
-            torch._constrain_as_value(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         ep = torch._export.export(f, (torch.tensor([7]),))
