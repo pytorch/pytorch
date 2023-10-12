@@ -1456,8 +1456,7 @@ class TestCommon(TestCase):
             output = op(sample.input, *sample.args, **sample.kwargs)
             if not output.dtype.is_floating_point:
                 self.fail(
-                    f"The OpInfo for {op.name} sets `promotes_int_to_float=True`, "
-                    f"but {dtype} was promoted to {output.dtype}."
+                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
                 )
 
 

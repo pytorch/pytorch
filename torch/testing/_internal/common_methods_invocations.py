@@ -10825,6 +10825,10 @@ op_db: List[OpInfo] = [
                     supports_two_python_scalars=True,
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    decorators=(
+                        # See https://github.com/pytorch/pytorch/issues/111126
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                    ),
                     skips=(
                         # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
                         DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_working'),
@@ -10841,6 +10845,10 @@ op_db: List[OpInfo] = [
                     supports_two_python_scalars=True,
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    decorators=(
+                        # See https://github.com/pytorch/pytorch/issues/111126
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                    ),
                     skips=(
                         # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
                         DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_working'),
