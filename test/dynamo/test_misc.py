@@ -4041,7 +4041,8 @@ def fn():
 
         mod = Module()
         with self.assertRaisesRegex(
-            Unsupported, "Can't inplace modify module params/buffers"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Map doesn't work unless it is captured completely with torch.compile",
         ):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
