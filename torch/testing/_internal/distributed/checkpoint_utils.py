@@ -1,10 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import os
 import shutil
 import tempfile
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import torch
 import torch.distributed as dist
 
 
@@ -29,6 +31,8 @@ def with_temp_dir(
         # Broadcast temp_dir to all the other ranks
         dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
+        os.sync()
+        assert os.path.exists(self.temp_dir)
 
         try:
             func(self, *args, **kwargs)
