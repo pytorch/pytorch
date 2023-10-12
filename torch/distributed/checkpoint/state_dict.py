@@ -474,10 +474,10 @@ def _load_optim_state_dict(
 
 def state_dict(
     model: nn.Module,
+    *,
     optimizers: Union[
         None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
     ] = None,
-    *,
     model_only: bool = False,
     optim_only: bool = False,
     options: Optional[StateDictOptions] = None,
@@ -535,8 +535,7 @@ def state_dict(
     Args:
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
-            The optimizers that are used to optimize ``model``. Note that
-            optimizers accept multiple optimizers so the typing can be Iterable.
+            The optimizers that are used to optimize ``model``.
         model_only (bool): if model_only is True, the returned optimizer
             state_dict will be empty (default: False)
 
@@ -570,10 +569,10 @@ def state_dict(
 
 def load_state_dict(
     model: nn.Module,
+    *,
     optimizers: Union[
         None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
     ] = None,
-    *,
     model_state_dict: Optional[Dict[str, ValueType]] = None,
     optim_state_dict: Optional[OptimizerStateType] = None,
     model_only: bool = False,
@@ -595,8 +594,7 @@ def load_state_dict(
     Args:
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
-            The optimizers that are used to optimize ``model``. Note that
-            optimizers accept multiple optimizers so the typing can be Iterable.
+            The optimizers that are used to optimize ``model``.
         model_only (bool): if model_only is True, only the model state_dict will
             be loaded (default: False)
         optim_only (bool): if optim_only is True, only the optimizer state_dict
@@ -670,7 +668,7 @@ def _patch_model_state_dict(
     _load_state_dict_call = functools.partial(
         load_state_dict,
         model=model,
-        optimizers=tuple(),
+        optimizers=None,
         model_only=True,
         options=options,
     )
@@ -689,8 +687,8 @@ def _patch_model_state_dict(
 @no_type_check
 def _patch_optimizer_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
     *,
+    optimizers: Tuple[torch.optim.Optimizer, ...],
     options: Optional[StateDictOptions] = None,
 ) -> None:
     """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optimizers``.
