@@ -413,6 +413,18 @@ class DTensorTest(DTensorTestBase):
         reloaded_st = torch.load(buffer)
         self.assertEqual(sharded_tensor, reloaded_st)
 
+    @with_comms
+    def test_dtensor_dtype_conversion(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+        fc = torch.nn.Linear(5, 8, bias=False)
+        fc.weight = torch.nn.Parameter(
+            DTensor.from_local(fc.weight, device_mesh, shard_spec), requires_grad=False
+        )
+        fc.to(self.device_type, dtype=torch.bfloat16)
+        self.assertEqual(fc.weight.dtype, torch.bfloat16)
+        self.assertEqual(fc.weight._local_tensor, torch.bfloat16)
+
 
 class DTensorMeshTest(DTensorTestBase):
     @property

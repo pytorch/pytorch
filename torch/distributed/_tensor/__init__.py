@@ -360,3 +360,11 @@ def zeros(
 
 if not torch._running_with_deploy():
     import torch.distributed._tensor._dynamo_utils
+
+
+# disable param.data set when registering nn.Parameters, and use
+# the future/new behavior (overwrite module parameters) when using
+# the DTensor package
+# NOTE: wrapper tensor subclass storage is different from the original
+# tensor of nn.Parameters, so we should avoid using the `.data` path
+torch.__future__.set_overwrite_module_params_on_conversion(True)

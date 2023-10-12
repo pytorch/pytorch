@@ -34,17 +34,6 @@ from torch.distributed._tensor.placement_types import (
 aten = torch.ops.aten
 
 
-@register_op_strategy(
-    [
-        aten._to_copy.default,
-        aten.clone.default,
-        aten.contiguous.default,
-        aten.copy_.default,
-        aten.detach.default,
-        aten.equal.default,
-        aten.is_same_size.default,
-    ]
-)
 def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Default strategy by default just propagate the first input strategy
     select_strategy = op_schema.args_schema[0]
@@ -55,6 +44,23 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             for arg_strategy in select_strategy.strategies
         ]
     )
+
+
+# to_copy need to correctly propagate dtype
+register_op_strategy(
+    aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
+)(default_strategy)
+
+register_op_strategy(
+    [
+        aten.clone.default,
+        aten.contiguous.default,
+        aten.copy_.default,
+        aten.detach.default,
+        aten.equal.default,
+        aten.is_same_size.default,
+    ]
+)(default_strategy)
 
 
 @register_op_strategy(
