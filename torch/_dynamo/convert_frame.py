@@ -214,13 +214,14 @@ def has_tensor_in_frame(frame):
         if has_tensor(value):
             return True
 
-    log.debug(
-        "skipping because no torch.* %s \
-            %s %s",
-        frame.f_code.co_name,
-        frame.f_code.co_filename,
-        frame.f_code.co_firstlineno,
-    )
+    if config.verbose:
+        log.debug(
+            "skipping because no torch.* %s \
+                %s %s",
+            frame.f_code.co_name,
+            frame.f_code.co_filename,
+            frame.f_code.co_firstlineno,
+        )
 
     return False
 
