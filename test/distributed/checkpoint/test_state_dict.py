@@ -172,8 +172,6 @@ class TestStateDict(FSDPTest):
         # Get the state_dict, and compare the result
         msd = model.state_dict()
         osd = optim.state_dict()
-        if not isinstance(dist_optim, list):
-            dist_optim = [dist_optim]
         dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
         self._verify_msd(model, msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
