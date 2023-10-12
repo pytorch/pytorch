@@ -266,15 +266,25 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             with torch._dynamo.config.patch(
                 {"cache_size_limit": 1, "accumulated_cache_size_limit": 10}
             ):
-                for i in range(24):
-                    with torch._dynamo.config.patch({key: i % 12}):
 
-                        @torch._dynamo.optimize(cnt)
-                        def g(x):
-                            return x + 1
+                def g(x):
+                    return x + 1
 
-                        g(torch.randn(1))
-            self.assertEqual(cnt.frame_count, 10)
+                for i in range(12):
+                    with torch._dynamo.config.patch(
+                        {key: i % 6}
+                    ):  # same config doesn't recompile
+                        opt_g = torch._dynamo.optimize(cnt)(g)
+                        opt_g(torch.randn(1))
+                self.assertEqual(cnt.frame_count, 6)
+
+                for i in range(6, 12):
+                    with torch._dynamo.config.patch({key: i}):
+                        opt_g = torch._dynamo.optimize(cnt)(g)
+                        opt_g(torch.randn(1))
+                self.assertEqual(
+                    cnt.frame_count, 10
+                )  # only recompile up to cache size limit
         finally:
             if key in torch._dynamo.config._allowed_keys:
                 torch._dynamo.config._allowed_keys.remove(key)
