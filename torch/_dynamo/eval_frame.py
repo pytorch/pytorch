@@ -326,8 +326,8 @@ def restore_compiled_dynamo_config(
             log.debug(
                 "Set top-level compile config hash: %s", config_cache.saved_config_hash
             )
-        # else:
-        # log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
+        elif config.verbose:
+            log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
         yield
     finally:
         if is_top_level:
@@ -356,7 +356,7 @@ def get_config_and_hash(dynamic=None):
     for key in dynamo_config_guard_string_serialization_list:
         serialized_config.update({key: str(dynamo_config[key])})
 
-    # Try to make serialization more deterministic
+    # Try to make serialization more deterministic by sorting
     dynamo_config_bytes = pickle.dumps(dict(sorted(serialized_config.items())))
 
     sha256_hash = hashlib.sha256(dynamo_config_bytes).hexdigest()
