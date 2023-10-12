@@ -131,6 +131,9 @@ class BaseSchedulerNode:
     def add_mutation_dep(self, dep):
         self.set_read_writes(self.read_writes.with_read(dep))
 
+    def add_fake_dep(self, dep):
+        self.set_read_writes(self.read_writes.with_read(dep))
+
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
         result: Dict[int, NodeUser] = {}
@@ -1274,12 +1277,10 @@ class Scheduler:
 
             # if a kernel takes unbacked symints, register dependencies
             for s in node.node.get_unbacked_symbol_uses():
-                # NB: This is not actually a mutation dep, but we do need to
-                # record this ordering dependency
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                node.add_mutation_dep(
+                node.add_fake_dep(
                     StarDep(unbacked_symbol_to_origin_node[s].get_name())
                 )
 
