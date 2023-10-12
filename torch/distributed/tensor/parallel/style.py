@@ -46,7 +46,7 @@ class ParallelStyle(ABC):
 
     @abstractmethod
     def __init__(
-        self, input_layouts, output_layouts, use_local, _prepare_input, _prepare_output
+        self, _prepare_input, _prepare_output, *, input_layouts, output_layouts, use_local
     ) -> None:
         self.input_layouts = input_layouts
         self.output_layouts = output_layouts
@@ -71,11 +71,12 @@ class PairwiseParallel(ParallelStyle):
     @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=None,
         output_layouts=None,
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
         _prepare_input = (
             make_input_replicate_1d if _prepare_input is None else _prepare_input
@@ -84,7 +85,7 @@ class PairwiseParallel(ParallelStyle):
             make_output_tensor if _prepare_output is None else _prepare_output
         )
         super().__init__(
-            input_layouts, output_layouts, use_local, _prepare_input, _prepare_output
+            _prepare_input, _prepare_output, input_layouts=input_layouts, output_layouts=output_layouts, use_local=use_local,
         )
 
 
@@ -105,18 +106,15 @@ class SequenceParallel(PairwiseParallel):
     @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=None,
         output_layouts=None,
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
         super().__init__(  # type: ignore[misc]
-            input_layouts,
-            output_layouts,
-            use_local,
-            make_input_reshard_replicate,
-            make_output_reshard_tensor,
+            _prepare_input, _prepare_output, input_layouts=input_layouts, output_layouts=output_layouts, use_local=use_local,
         )
 
 
@@ -511,12 +509,16 @@ class RowwiseParallel(ParallelStyle):
 
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=Shard(-1),
         output_layouts=Replicate(),
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
+        if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
+            raise NotImplementedError("RowwiseParallel only supports single input/output.")
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
@@ -525,9 +527,7 @@ class RowwiseParallel(ParallelStyle):
             if _prepare_input is not None
             else _get_prepare_input(
                 input_layouts,
-                [Shard(-1)] * len(input_layouts)  # type: ignore[arg-type]
-                if isinstance(input_layouts, tuple)
-                else Shard(-1),
+                Shard(-1),
             ),
             _prepare_output=_prepare_output
             if _prepare_output is not None
@@ -543,12 +543,16 @@ class ColwiseParallel(ParallelStyle):
 
     def __init__(
         self,
+        _prepare_input=None,
+        _prepare_output=None,
+        *,
         input_layouts=Replicate(),
         output_layouts=Shard(-1),
         use_local=True,
-        _prepare_input=None,
-        _prepare_output=None,
     ) -> None:
+        if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
+            raise NotImplementedError("ColwiseParallel only supports single input/output.")
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
