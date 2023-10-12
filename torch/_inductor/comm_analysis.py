@@ -26,7 +26,7 @@ hwLat = [
     # NVLINK
     [
         .6,  # Tree (LL)
-        .6, # Ring (LL)
+        .6,  # Ring (LL)
     ],
     # PCI
     [
@@ -61,6 +61,10 @@ llMaxBws = [
         19.0,
     ],
 ]
+
+bwNVLINK = 300  # unit: GB/s, uni-directional P2P bandwidth per card
+bwInfiniBand = 25  # unit: GB/s, uni-directional P2P bandwidth per node
+
 
 def get_collective_type(snode: "scheduler.BaseSchedulerNode") -> str:
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
@@ -100,9 +104,6 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
     _, _, group_size = snode.node.constant_args
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
-
-    bwNVLINK = 300  # unit: GB/s, uni-directional P2P bandwidth per card
-    bwInfiniBand = 25  # unit: GB/s, uni-directional P2P bandwidth per node
 
     # Assume intra-node is NVLink
     bwIntra = bwNVLINK
@@ -175,6 +176,4 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
 
     # =============== final result ===============
     transport_ns = tensor_storage_size_GB / bandwidth_GB_per_ns
-    print(f"transport_ns: {transport_ns}")
-    print(f"latency_ns: {latency_ns}")
     return transport_ns + latency_ns
