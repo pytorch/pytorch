@@ -342,6 +342,22 @@ def pad_listlike(x, size):
         return x
 
 
+# Used to ensure that iterating over a set is deterministic
+def tuple_sorted(x):
+    if len(x) == 0:
+        return []
+
+    def sort_func(elem):
+        if isinstance(elem, str):
+            return elem
+        else:
+            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
+            # but we are not able to do isinstance assert because of circular dependency
+            return elem.get_name()
+
+    return sorted(x, key=sort_func)
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 

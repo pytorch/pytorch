@@ -7,22 +7,7 @@ import torch.fx as fx
 
 from . import ir, scheduler, config
 from .dependencies import WeakDep
-
-
-# Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x):
-    if len(x) == 0:
-        return []
-
-    def sort_func(elem):
-        if isinstance(elem, str):
-            return elem
-        else:
-            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
-            # but we are not able to do isinstance assert because of circular dependency
-            return elem.get_name()
-
-    return sorted(x, key=sort_func)
+from .utils import tuple_sorted
 
 
 def sink_waits(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
@@ -50,6 +35,11 @@ def raise_comms(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
     Optimal in terms of communication overlap.
+
+    TODO: We might want to adjust this in the future to account for memory limitations.
+    e.g. when we are compiling FSDP, this heuristics will cause the all-gathers to be prefetched as soon as possible,
+    which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
+    or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
     new_result: List["scheduler.BaseSchedulerNode"] = []
     cur_comms: List["scheduler.BaseSchedulerNode"] = []
