@@ -1,5 +1,3 @@
-#include <ATen/LegacyBatchedTensorImpl.h>
-#include <ATen/core/ATen_fwd.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
@@ -290,7 +288,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 } // namespace
 
 namespace {
-std::string write_pickle(const c10::IValue& v) {
+std::string pickle_str(const c10::IValue& v) {
   std::vector<char> result;
   {
     auto writer = [&](const char* data, size_t size) {
@@ -327,20 +325,31 @@ struct NCCLTraceBuffer {
   }
   using EventList = std::vector<at::cuda::CUDAEvent>;
   struct Entry {
-    size_t id_;
+    size_t id_; // incremented id in the trace buffer
+                // used to figure out where in the circular entries
+                // buffer this entry will be located to
+                // update state information
     size_t pg_id_;
-    size_t seq_id_;
+    size_t seq_id_; // as tracked by the process group
     const char* profiling_name_;
-    c10::SmallVector<int64_t, 4> sizes_;
+
     std::shared_ptr<torch::CapturedTraceback> traceback_;
+    // we borrow pointser to start_ and end_ so we can query the state
+    // on reporting. However, once the event is completed, the call
+    // to `complete` will clear these.
     EventList *start_, *end_;
     const char* state_ = "scheduled";
+
+    // size information for input/output tensors
+    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
   };
 
   bool enabled_ = false;
   std::mutex mutex_;
   std::vector<Entry> entries_;
-  size_t max_entries_ = 1024 * 16;
+  size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
 
@@ -348,7 +357,8 @@ struct NCCLTraceBuffer {
       size_t pg_id,
       size_t seq_id,
       const char* profiling_name,
-      const c10::optional<std::vector<at::Tensor>>& inputs,
+      const std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& outputs,
       EventList* start,
       EventList* end) {
     if (!enabled_) {
@@ -356,19 +366,28 @@ struct NCCLTraceBuffer {
     }
     auto traceback = torch::CapturedTraceback::gather(true, true, true);
     std::lock_guard<std::mutex> guard(mutex_);
-    at::IntArrayRef sizes;
-    if (inputs && inputs->size() > 0) {
-      sizes = inputs->at(0).sizes();
-    }
+
     auto te = Entry{
         id_,
         pg_id,
         seq_id,
         profiling_name,
-        c10::SmallVector<int64_t, 4>(sizes.begin(), sizes.end()),
         std::move(traceback),
         std::move(start),
         std::move(end)};
+
+    for (const auto& input : inputs) {
+      c10::IntArrayRef sizes = input.sizes();
+      te.input_dims_.push_back(sizes.size());
+      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
+    }
+
+    for (const auto& output : outputs) {
+      c10::IntArrayRef sizes = output.sizes();
+      te.output_dims_.push_back(sizes.size());
+      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
+    }
+
     if (entries_.size() < max_entries_) {
       entries_.emplace_back(std::move(te));
     } else {
@@ -380,7 +399,7 @@ struct NCCLTraceBuffer {
     return id_++;
   }
 
-  std::vector<Entry> report() {
+  std::vector<Entry> dump_entries() {
     std::lock_guard<std::mutex> guard(mutex_);
     std::vector<Entry> result;
     result.reserve(entries_.size());
@@ -431,12 +450,14 @@ struct NCCLTraceBuffer {
   }
 
   std::string dump() {
-    auto result = report();
+    auto result = dump_entries();
     auto entries = new_list();
     c10::IValue pg_id_s = "pg_id";
     c10::IValue seq_id_s = "seq_id";
     c10::IValue profiling_name_s = "profiling_name";
-    c10::IValue sizes_s = "sizes";
+    c10::IValue input_sizes_s = "input_sizes";
+    c10::IValue output_sizes_s = "output_sizes";
+
     c10::IValue frames_s = "frames";
     c10::IValue state_s = "state";
     c10::IValue line_s = "line";
@@ -461,10 +482,26 @@ struct NCCLTraceBuffer {
       auto& e = result.at(i);
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
-      dict.insert(pg_id_s, int64_t(e.seq_id_));
+      dict.insert(pg_id_s, int64_t(e.pg_id_));
       dict.insert(seq_id_s, int64_t(e.seq_id_));
       dict.insert(profiling_name_s, e.profiling_name_);
-      dict.insert(sizes_s, at::IntArrayRef(e.sizes_.begin(), e.sizes_.end()));
+
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = new_list();
+        for (auto dim : dims) {
+          auto arg_sizes = new_list();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+
+      dict.insert(input_sizes_s, read_sizes(e.input_dims_));
+      dict.insert(output_sizes_s, read_sizes(e.output_dims_));
       dict.insert(state_s, e.state_);
       auto frames = new_list();
       for (int64_t frame : tb) {
@@ -473,7 +510,7 @@ struct NCCLTraceBuffer {
       dict.insert(frames_s, frames);
       entries.push_back(dict);
     }
-    return write_pickle(entries);
+    return pickle_str(entries);
   }
 };
 
@@ -506,7 +543,6 @@ std::ostream& operator<<(
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(
-    uint64_t process_group_id,
     const std::vector<at::Device>& devices,
     int rank,
     OpType opType,
@@ -537,13 +573,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
         enableTiming ? cudaEventDefault : cudaEventDisableTiming));
   }
   ncclComms_.resize(devices.size());
-  trace_id_ = NCCLTraceBuffer::get()->record(
-      process_group_id,
-      seq_,
-      profilingTitle,
-      inputs,
-      ncclStartEvents_.get(),
-      ncclEndEvents_.get());
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
@@ -857,7 +886,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ || parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
+  enableTiming_.store(
+      parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
+      parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
@@ -1770,17 +1801,27 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     int rank,
     OpType opType,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs) {
-  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
-      uid_,
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& outputs) {
+  auto r = c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
       devices,
       rank,
       opType,
       seq_,
       profilingTitle,
-      inputs,
+      profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
+                                : c10::nullopt,
       desyncDebug_,
       enableTiming_.load());
+  r->trace_id_ = NCCLTraceBuffer::get()->record(
+      uid_,
+      seq_,
+      profilingTitle,
+      inputs,
+      outputs,
+      r->ncclStartEvents_.get(),
+      r->ncclEndEvents_.get());
+  return r;
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1855,8 +1896,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   auto devices = coalescedDevices_[0];
 
   // Create Work object
-  auto work = initWork(
-      devices, rank_, OpType::COALESCED, "nccl:coalesced", c10::nullopt);
+  auto work = initWork(devices, rank_, OpType::COALESCED, "nccl:coalesced");
 
   // Record stream event
   // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
@@ -1945,8 +1985,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       rank_,
       opType,
       can_profile ? profilingTitle : nullptr,
-      can_profile ? c10::optional<std::vector<at::Tensor>>(inputs)
-                  : c10::nullopt);
+      inputs,
+      outputs);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2130,8 +2170,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       rank_,
       opType,
       can_profile ? profilingTitle : nullptr,
-      can_profile ? c10::optional<std::vector<at::Tensor>>(tensors)
-                  : c10::nullopt);
+      tensors,
+      {});
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   // Note that these outputs are only valid for recv(), as send() does not
