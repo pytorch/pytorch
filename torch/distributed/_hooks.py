@@ -6,13 +6,15 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 import torch.distributed as dist
-import torch.distributed.distributed_c10d as c10d
 
-from torch._C._distributed_c10d import (
-    _dequeue_c10d_event,
-    _enable_event_collection,
-    EventKind,
-)
+if dist.is_available():
+    import torch.distributed.distributed_c10d as c10d
+
+    from torch._C._distributed_c10d import (
+        _dequeue_c10d_event,
+        _enable_event_collection,
+        EventKind,
+    )
 
 __all__ = [
     "CollectiveStatus",
@@ -139,12 +141,20 @@ def _lazy_init():
     logger.info("c10d::hooks thread enabled")
 
 
+def _check_distributed_available():
+    if not dist.is_available():
+        raise RuntimeError(
+            "torch.distributed is not available, so hooks are not available."
+        )
+
+
 def register_collective_start_hook(hook: COLLECTIVE_HOOK_TYPE) -> None:
     r"""Register a hook that is called every time a collective starts.
 
     The hook is invoked on a background thread.
     Exceptions raised by the callback are ignored and non-fatal.
     """
+    _check_distributed_available()
     _start_callbacks.append(hook)
     _lazy_init()
 
@@ -156,6 +166,7 @@ def register_collective_end_hook(hook: COLLECTIVE_HOOK_TYPE) -> None:
     The hook is invoked on a background thread.
     Exceptions raised by the callback are ignored and non-fatal.
     """
+    _check_distributed_available()
     _end_callbacks.append(hook)
     _lazy_init()
 
@@ -169,4 +180,5 @@ def register_process_group_hook(hook: PG_HOOK_TYPE) -> None:
     The hook is invoked on a background thread.
     Exceptions raised by the callback are ignored and non-fatal.
     """
+    _check_distributed_available()
     c10d._register_creation_hook(hook)
