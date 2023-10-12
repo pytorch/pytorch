@@ -474,8 +474,10 @@ def _load_optim_state_dict(
 
 def state_dict(
     model: nn.Module,
-    optimizers: Iterable[torch.optim.Optimizer] = tuple(),
     *,
+    optimizers: Union[
+        None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
+    ] = None,
     model_only: bool = False,
     optim_only: bool = False,
     options: Optional[DistributedStateDictOptions] = None,
@@ -532,10 +534,8 @@ def state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        optimizers (Iterable[Optimizer]): The optimizers that are used to optimize
-            ``model``. Note that optimizers accept multiple optimizers so the type
-            is Iterable. If optimizers is empty, the returned optimizer state_dict
-            will also be empty.
+        optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
+            The optimizers that are used to optimize ``model``.
         model_only (bool): if model_only is True, the returned optimizer
             state_dict will be empty (default: False)
 
@@ -551,7 +551,15 @@ def state_dict(
         `model_only` is True or `optimizers` is empty.
     """
     with gc_context():
-        optimizers = tuple(optimizers)
+        optimizers = (
+            tuple()
+            if optimizers is None
+            else (
+                (optimizers,)
+                if isinstance(optimizers, torch.optim.Optimizer)
+                else tuple(optimizers)
+            )
+        )
         info = _verify_options(model, optimizers, model_only, optim_only, options)
         model_state_dict = _get_model_state_dict(model, info)
         optim_state_dict = _get_optim_state_dict(model, optimizers, info)
@@ -561,8 +569,10 @@ def state_dict(
 
 def load_state_dict(
     model: nn.Module,
-    optimizers: Iterable[torch.optim.Optimizer] = tuple(),
     *,
+    optimizers: Union[
+        None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
+    ] = None,
     model_state_dict: Optional[Dict[str, ValueType]] = None,
     optim_state_dict: Optional[OptimizerStateType] = None,
     model_only: bool = False,
@@ -583,9 +593,8 @@ def load_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        optimizers (Iterable[Optimizer]): The optimizers that are used to optimize
-            ``model``. Note that optimizers accept multiple optimizers so the typing
-            is Iterable. ``optimizers`` can be an empty Iterable.
+        optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
+            The optimizers that are used to optimize ``model``.
         model_only (bool): if model_only is True, only the model state_dict will
             be loaded (default: False)
         optim_only (bool): if optim_only is True, only the optimizer state_dict
@@ -599,7 +608,15 @@ def load_state_dict(
     model_state_dict = model_state_dict if model_state_dict else {}
     optim_state_dict = optim_state_dict if optim_state_dict else {}
     with gc_context():
-        optimizers = tuple(optimizers)
+        optimizers = (
+            tuple()
+            if optimizers is None
+            else (
+                (optimizers,)
+                if isinstance(optimizers, torch.optim.Optimizer)
+                else tuple(optimizers)
+            )
+        )
         info = _verify_options(model, optimizers, model_only, optim_only, options)
         _verify_state_dict(model_state_dict, optim_state_dict, info)
         _load_model_state_dict(model, model_state_dict, info)
@@ -651,7 +668,7 @@ def _patch_model_state_dict(
     _load_state_dict_call = functools.partial(
         load_state_dict,
         model=model,
-        optimizers=tuple(),
+        optimizers=None,
         model_only=True,
         options=options,
     )
@@ -670,8 +687,8 @@ def _patch_model_state_dict(
 @no_type_check
 def _patch_optimizer_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
     *,
+    optimizers: Tuple[torch.optim.Optimizer, ...],
     options: Optional[DistributedStateDictOptions] = None,
 ) -> None:
     """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optimizers``.
