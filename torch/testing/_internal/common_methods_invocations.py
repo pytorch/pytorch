@@ -10594,6 +10594,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                # RuntimeError: "eq_cpu" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
+               # RuntimeError: view size is not compatible with input tensor's size and stride
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
            )),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types_and(torch.half),
@@ -15627,6 +15629,8 @@ op_db: List[OpInfo] = [
            error_inputs_func=partial(error_inputs_view_reshape, tensor_arg=True),
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+               # RuntimeError: view size is not compatible with input tensor's size and stride
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides")
            )),
     OpInfo('atleast_1d',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -16380,6 +16384,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
+               # memory location.
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides")
            )),
     OpInfo('empty_strided',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.empty_strided, inp, *args, **kwargs),
@@ -16980,7 +16987,11 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_take_along_dim,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           decorators=(
+               # RuntimeError: view size is not compatible with input tensor's size and stride
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+           )),
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -17182,7 +17193,11 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_kron),
+           sample_inputs_func=sample_inputs_kron,
+           decorators=(
+               # RuntimeError: view size is not compatible with input tensor's size and stride
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+           )),
     OpInfo('inner',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -20348,6 +20363,10 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=True,
         supports_one_python_scalar=True,
+        decorators=(
+            # See https://github.com/pytorch/pytorch/issues/111126
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.div",
@@ -20356,6 +20375,10 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=True,
         supports_one_python_scalar=True,
+        decorators=(
+            # See https://github.com/pytorch/pytorch/issues/111126
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",
