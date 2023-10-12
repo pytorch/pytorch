@@ -114,7 +114,7 @@ class TestFineTuning(FSDPTest):
 
         # Simulate that the fine tuning restart after 5 iterations
         for i in range(2):
-            # Load pretrain modeul checkpoint
+            # Load pretrain submodules checkpoint
             pretrain_state_dict, _ = get_state_dict(
                 model,
                 submodules={model.pretrain},
