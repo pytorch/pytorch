@@ -155,8 +155,6 @@ class BaseListVariable(VariableTracker):
         elif name == "index":
             from .builder import SourcelessBuilder
 
-            assert len(kwargs) == 0
-            assert len(args) > 0 and len(args) <= 3
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
             )
@@ -653,7 +651,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                unimplemented(f"NamedTupleVariable.{name}")
+                super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)].add_options(self)
 
