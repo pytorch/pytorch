@@ -5921,6 +5921,22 @@ for shape in [(1,), ()]:
             out = checkpoint(fn, a, use_reentrant=False, debug=True)
             out.backward()
 
+        fn = get_non_det_fn(orig_fn=save_2_tensors, recompute_fn=save_2_tensors_alt)
+
+        with self.assertRaisesRegex(RuntimeError, "You are seeing this error because you passed `debug=True` to checkpoint"):
+            with torch.utils.checkpoint.set_checkpoint_debug_enabled(True):
+                out = checkpoint(fn, a, use_reentrant=False, debug=False)
+                out.backward()
+
+        fn = get_non_det_fn(orig_fn=save_2_tensors, recompute_fn=save_2_tensors_alt)
+
+        with self.assertRaisesRegex(RuntimeError, "Recomputed values for the following tensors have different"):
+            with torch.utils.checkpoint.set_checkpoint_debug_enabled(False):
+                out = checkpoint(fn, a, use_reentrant=False, debug=True)
+                out.backward()
+
+
+
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
 
