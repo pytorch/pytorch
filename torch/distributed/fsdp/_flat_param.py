@@ -1755,6 +1755,8 @@ class FlatParamHandle:
     def _get_unflat_views_aligned(
         self,
         tensor: Optional[Tensor] = None,
+        *,
+        disable_ext: bool = False,
     ) -> List[Tensor]:
         """
         This has the same contract as :meth:`_get_unflat_views_unaligned`
@@ -1772,12 +1774,15 @@ class FlatParamHandle:
         for split, is_padding in zip(splits, flat_param._is_padding_mask):
             if is_padding:
                 continue
-            views.append(
-                _ext_post_unflatten_transform(
-                    split.view(flat_param._shapes[idx]),
-                    flat_param._param_extensions[idx],
+            if not disable_ext:
+                views.append(
+                    _ext_post_unflatten_transform(
+                        split.view(flat_param._shapes[idx]),
+                        flat_param._param_extensions[idx],
+                    )
                 )
-            )
+            else:
+                views.append(split.view(flat_param._shapes[idx]))
             idx += 1
         return views
 

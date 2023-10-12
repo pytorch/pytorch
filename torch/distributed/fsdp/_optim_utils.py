@@ -1601,7 +1601,7 @@ def _allgather_orig_param_states(
 
         unpadded_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         flat_param_handle = fsdp_param_info.handle
-        orig_states = flat_param_handle._get_unflat_views_aligned(unpadded_tensor)
+        orig_states = flat_param_handle._get_unflat_views_aligned(unpadded_tensor, disable_ext=True)
         assert len(orig_states) == len(fsdp_param_info.param_indices), (
             "The number of parameters from FlatParameter is not consistent to "
             "the number of states used by optimizer state dict reconstruction "
