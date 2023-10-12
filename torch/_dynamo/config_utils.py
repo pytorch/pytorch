@@ -170,6 +170,7 @@ class ConfigModule(ModuleType):
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 config._config.update(prior)
+                config._is_dirty = True
                 prior.clear()
 
         return ConfigPatch()

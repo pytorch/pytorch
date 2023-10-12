@@ -377,6 +377,14 @@ def get_cached_recompile_hash():
     return config_cache.cached_recompile_hash
 
 
+def get_saved_else_current_config_hash():
+    _maybe_init_guarded_config_cache()
+    if config_cache.saved_config is not None:
+        return config_cache.saved_config_hash
+    else:
+        return get_cached_recompile_hash()
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
