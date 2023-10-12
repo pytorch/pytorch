@@ -414,7 +414,7 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor, reloaded_st)
 
     @with_comms
-    def test_dtensor_dtype_conversion(self):
+    def test_dtensor_device_dtype_conversion(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
         fc = torch.nn.Linear(5, 8, bias=False)
@@ -423,7 +423,20 @@ class DTensorTest(DTensorTestBase):
         )
         fc.to(self.device_type, dtype=torch.bfloat16)
         self.assertEqual(fc.weight.dtype, torch.bfloat16)
-        self.assertEqual(fc.weight._local_tensor, torch.bfloat16)
+        self.assertEqual(fc.weight._local_tensor.dtype, torch.bfloat16)
+
+        if self.device_type == "cuda":
+            # test gpu to cpu conversion
+            other_device = "cpu"
+            fc.to(other_device)
+            self.assertEqual(fc.weight.device.type, other_device)
+            self.assertEqual(fc.weight._local_tensor.device.type, other_device)
+
+            # test cpu to gpu conversion
+            fc.to(self.device_type)
+            self.assertEqual(fc.weight.device.type, self.device_type)
+            self.assertEqual(fc.weight._local_tensor.device.type, self.device_type)
+
 
 
 class DTensorMeshTest(DTensorTestBase):
