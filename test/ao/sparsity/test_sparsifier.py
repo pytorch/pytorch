@@ -19,6 +19,24 @@ from torch.ao.pruning.sparsifier.wanda_sparsifier import WandaSparsifier
 
 class TestWandaSparsifier(TestCase):
 
+    def test_2x4_debug(self):
+        model = nn.Sequential(nn.Linear(128,128))
+
+        X = torch.ones(128,128)
+        expected = model(X).detach()
+
+        sparsifier = WandaSparsifier(sparsity_level=0.5)
+        sparsifier.prepare(model, config=None)
+
+        prepared = model(X)
+
+        assert torch.allclose(prepared, expected)
+
+        sparsifier.step()
+        sparsifier.squash_mask()
+
+        squashed = model(X)
+
     def test_prepare(self):
         model = nn.Sequential(nn.Linear(128,128))
 
@@ -44,7 +62,7 @@ class TestWandaSparsifier(TestCase):
         model[0].weight.data.copy_(weights.data)
         X = torch.ones(1,8)
 
-        sparsifier = WandaSparsifier(sparsity_level=0.5)
+        sparsifier = WandaSparsifier(sparsity_level=0.5, semi_structured_block_shape=(2, 4))
         sparsifier.prepare(model, config=None)
 
         model(X)
@@ -54,7 +72,7 @@ class TestWandaSparsifier(TestCase):
 
         sparsity = (model[0].weight == 0).float().mean()
         assert sparsity == 0.5, "sparsity should be 0.5"
-        expected_fc = torch.tensor([[0,0,3,4, 0, 0, 3, 4]], dtype=torch.float32)
+        expected_fc = torch.tensor([[0,0,3,4, 0, 0, 7, 8]], dtype=torch.float32)
         assert torch.isclose(model[0].weight.data, expected_fc, rtol=1e-05, atol=1e-07).all()
 
     def test_one_layer_mlp_1(self):

@@ -24,26 +24,11 @@ class WandaSparsifier(BaseSparsifier):
     """
     def __init__(self,
                  sparsity_level: float = 0.5,
-                 sparse_block_shape: Tuple[int, int] = (1, 4),
-                 zeros_per_block: Optional[int] = None,
-                 norm: Optional[Union[Callable, int]] = None):
-        if zeros_per_block is None:
-            zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+                 semi_structured_block_shape: Tuple[int, int] = None):
         defaults = {
             "sparsity_level": sparsity_level,
-            "sparse_block_shape": sparse_block_shape,
-            "zeros_per_block": zeros_per_block,
+            "semi_structured_block_shape": semi_structured_block_shape,
         }
-        if norm is None:
-            norm = 2
-        if callable(norm):
-            self.norm_fn = norm
-        elif norm == 1:
-            self.norm_fn = lambda T: T.abs()
-        elif norm == 2:
-            self.norm_fn = lambda T: T * T
-        else:
-            raise NotImplementedError(f"L-{norm} is not yet implemented.")
         super().__init__(defaults=defaults)
 
 
@@ -64,22 +49,24 @@ class WandaSparsifier(BaseSparsifier):
         mask = getattr(module.parametrizations, tensor_name)[0].mask
         tensor = getattr(module.parametrizations, tensor_name).original
 
-        act_per_input = getattr(module, "activation_post_process").norm.sqrt()    ## get out the cumulated activation norm per channel
+        act_norm_per_channel= getattr(module, "activation_post_process").norm.sqrt()    ## get out the cumulated activation norm per channel
         # Step 2: implement the mask update logic
         ## compute the pruning metric
-        pruning_metric = torch.abs(tensor) * act_per_input.reshape((1,-1))
-        pruning_metric = torch.flatten(pruning_metric)
-        ## Step 2b: Rank the elements in the tensor
-        _, sorted_idx = torch.sort(pruning_metric)
-        threshold_idx = int(round(sparsity_level * len(sorted_idx)))
-        sorted_idx = sorted_idx[:threshold_idx]
-        ## Step 2c: Create a mask with the known zero elements
-        new_mask = torch.ones_like(mask)
-        new_mask = new_mask.flatten()
-        new_mask[sorted_idx] = 0
-        new_mask = new_mask.reshape(mask.shape)
-        # Step 3: Reassign back to the mask
-        mask.data = new_mask
+        print(act_norm_per_channel.shape)
+        print(tensor.shape)
+        pruning_metric = torch.abs(tensor) * act_norm_per_channel
+        print(pruning_metric.shape)
+
+        # set defaults
+        block_shape = pruning_metric.numel()
+        num_specified = int(block_shape * sparsity_level)
+        if kwargs.get("semi_structured_block_shape", None) is not None:
+            num_specified, block_shape = kwargs["semi_structured_block_shape"]
+        # update mask
+        pruning_inds = pruning_metric.view(-1, block_shape).argsort(dim=1)[:, :num_specified]
+        mask.data.view(-1, block_shape).scatter_(1, pruning_inds, torch.zeros_like(pruning_inds, dtype=mask.dtype))
+
+
 
     def squash_mask(self, params_to_keep=None, params_to_keep_per_layer=None):
         # remove quantization config
