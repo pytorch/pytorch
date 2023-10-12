@@ -4,7 +4,14 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only, TreeSpec
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+except ImportError:
+    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_map_only,
+        TreeSpec,
+    )
 
 
 # Common type aliases
@@ -193,6 +200,15 @@ class OpSchema:
             f" args_schema={self.args_schema},"
             f" kwargs_schema={self.kwargs_schema})"
         )
+
+    def __post_init__(self) -> None:
+        has_symints = False
+        for a in self.args_schema:
+            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
+                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
+                    has_symints = True
+                    break
+        self.has_symints = has_symints
 
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
