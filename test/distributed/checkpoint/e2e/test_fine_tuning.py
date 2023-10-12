@@ -99,7 +99,7 @@ class TestFineTuning(FSDPTest):
             optim.zero_grad()
 
         # Save state_dict
-        model_state_dict, optim_state_dict = state_dict(model, (optim,))
+        model_state_dict, optim_state_dict = state_dict(model, optimizers=optim)
         saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
         dist_cp.save_state_dict(
             state_dict=saved_state_dict,
@@ -132,7 +132,7 @@ class TestFineTuning(FSDPTest):
                 # Load training submodules checkpoint
                 model_state_dict, optim_state_dict = state_dict(
                     model,
-                    (optim,),
+                    optimizers=optim,
                     options=StateDictOptions(ignore_frozen_params=True),
                 )
                 dist_cp.load_state_dict(
@@ -141,7 +141,7 @@ class TestFineTuning(FSDPTest):
                 )
                 load_state_dict(
                     model,
-                    (optim,),
+                    optimizers=optim,
                     model_state_dict=model_state_dict,
                     optim_state_dict=optim_state_dict,
                     options=StateDictOptions(strict=False, ignore_frozen_params=False),
@@ -162,7 +162,7 @@ class TestFineTuning(FSDPTest):
             # Save state_dict
             model_state_dict, optim_state_dict = state_dict(
                 model,
-                (optim,),
+                optimizers=optim,
                 options=StateDictOptions(ignore_frozen_params=True),
             )
             saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
