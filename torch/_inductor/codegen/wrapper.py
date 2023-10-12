@@ -851,7 +851,6 @@ class WrapperCodeGen(CodeGen):
         if old_name not in V.graph.get_output_names():
             del_line = f"; {self.make_buffer_free(old)}"
 
-
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
             if old_name in self.cached_thread_locals:
                 self.cached_thread_locals.add(new_name)
@@ -1510,13 +1509,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def can_cache_buffer_in_thread_local(self, buffer):
         # We are gated off on CUDA because this is intended to reduce overhead in
         # overhead-bound CPU use case.
-        return (not self.cuda and config.allow_buffer_reuse and
-                self.can_prove_buffer_has_static_shape(buffer))
+        return (
+            not self.cuda
+            and config.allow_buffer_reuse
+            and self.can_prove_buffer_has_static_shape(buffer)
+        )
 
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout) or self.can_cache_buffer_in_thread_local(buffer)
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            or self.can_cache_buffer_in_thread_local(buffer)
             else f"{buffer.get_name()}.reset();"
         )
 
@@ -1592,14 +1595,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 "this->device_idx_" if V.graph.aot_mode else device_id,
                 f"&{name}_handle",
             ]
+
             def gen_alloc(wrapper_call, name, args):
                 wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
                 wrapper_call.writeline(
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
                 )
+
             if self.can_cache_buffer_in_thread_local(buffer):
                 self.cached_thread_locals.add(buffer.get_name())
-                self.wrapper_call.writeline(f"thread_local RAIIAtenTensorHandle {name}_handle = ([&] {{")
+                self.wrapper_call.writeline(
+                    f"thread_local RAIIAtenTensorHandle {name}_handle = ([&] {{"
+                )
                 with self.wrapper_call.indent():
                     gen_alloc(self.wrapper_call, name, args)
                     self.wrapper_call.writeline(f"return {name}_handle;")
@@ -1618,7 +1625,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype}));"
             )
 
-    def codegen_reinterpret_view(self, data, size_list, stride_list, offset, writer) -> str:
+    def codegen_reinterpret_view(
+        self, data, size_list, stride_list, offset, writer
+    ) -> str:
         dim = str(len(size_list))
         size = self.codegen_shape_tuple(size_list)
         stride = self.codegen_shape_tuple(stride_list)
@@ -1646,11 +1655,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
                 )
 
-            if (self.can_cache_buffer_in_thread_local(data) and
-                self.is_statically_known_list_of_ints(size_list) and
-                self.is_statically_known_list_of_ints(stride_list)):
+            if (
+                self.can_cache_buffer_in_thread_local(data)
+                and self.is_statically_known_list_of_ints(size_list)
+                and self.is_statically_known_list_of_ints(stride_list)
+            ):
                 self.cached_thread_locals.add(tmp_name)
-                writer.writeline(f"thread_local RAIIAtenTensorHandle {tmp_name}_handle = ([&] {{")
+                writer.writeline(
+                    f"thread_local RAIIAtenTensorHandle {tmp_name}_handle = ([&] {{"
+                )
                 if hasattr(writer, "indent"):
                     indent = writer.indent()
                 else:
@@ -1659,7 +1672,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     gen_reinterpret_call(writer, args)
                     writer.writeline(f"return {tmp_name};")
                 writer.writeline("})();")
-                writer.writeline(f"AtenTensorHandle {tmp_name}({tmp_name}_handle.get());")
+                writer.writeline(
+                    f"AtenTensorHandle {tmp_name}({tmp_name}_handle.get());"
+                )
                 return tmp_name
 
             gen_reinterpret_call(writer, args)
