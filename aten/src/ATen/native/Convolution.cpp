@@ -1436,7 +1436,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
       break;
     case ConvBackend::Overrideable:
       if (xpu_conv_use_channels_last(input, weight)) {
-        backend_memory_format = at::MemoryFormat::ChannelsLast;
+        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
     default:
