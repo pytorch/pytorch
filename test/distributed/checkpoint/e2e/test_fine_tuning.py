@@ -112,7 +112,7 @@ class TestFineTuning(FSDPTest):
         model = FSDP(model, use_orig_params=True)
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-        # Simulate that the fine tuning restart after 5 iterations
+        # Simulate that the fine tuning restart after 3 iterations
         for i in range(2):
             # Load pretrain submodules checkpoint
             pretrain_state_dict, _ = get_state_dict(
