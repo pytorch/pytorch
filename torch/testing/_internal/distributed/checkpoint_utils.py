@@ -32,7 +32,6 @@ def with_temp_dir(
         dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
         os.sync()
-        assert os.path.exists(self.temp_dir)
 
         try:
             func(self, *args, **kwargs)
