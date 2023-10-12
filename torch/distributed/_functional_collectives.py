@@ -496,6 +496,11 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
+    # If functionalization is turned on, we are almost definitely compiling/tracing.
+    # (In particular, AOTAutograd traces a model once with functionalization on
+    #  but proxy tracing turned of, so this is how we detect it).
+    if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None:
+        return True
     mode = get_innermost_proxy_mode()
     if mode is None:
         return False
