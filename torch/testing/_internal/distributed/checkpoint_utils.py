@@ -6,7 +6,6 @@ import tempfile
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Tuple
 
-import torch
 import torch.distributed as dist
 
 
