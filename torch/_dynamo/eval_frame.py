@@ -485,6 +485,7 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            from .decorators import disable
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()
@@ -631,8 +632,9 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
-        ):
-            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
+        ):  
+            if config.verbose or not skipfiles.check(frame.f_code.co_filename):  # dont log verbose skipfile skips
+                log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
