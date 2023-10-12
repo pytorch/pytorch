@@ -444,7 +444,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 
   // Tail Loop
-  l += (n_vec_to_read * blockDim.x * vec_size);
+  l = (n_vec_to_read * blockDim.x * vec_size) + threadIdx.x;
   for (; l < N; l += blockDim.x) {
     T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
     const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
@@ -492,7 +492,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 
   // Tail Loop
-  l += (n_vec_to_read * blockDim.x * vec_size);
+  l = (n_vec_to_read * blockDim.x * vec_size) + threadIdx.x;
   for (; l < N; l += blockDim.x){
     const T_ACC x = X_i[l];
     const T_ACC dy = dY_i[l];
