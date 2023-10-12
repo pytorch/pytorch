@@ -7,6 +7,7 @@
 #include <ATen/ops/is_pinned_native.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
+
 #include <iostream>
 
 namespace at {
@@ -20,6 +21,8 @@ uint64_t BufferBlock::buffer_counter = 0;
 uint64_t HeapBlock::heap_counter = 0;
 
 void MPSHeapAllocatorImpl::init_allocator() {
+  init_buffer_pools();
+
   // debug verbosity flags (see DebugVerbosity enum)
   static const char* verbosity_str = getenv("PYTORCH_DEBUG_MPS_ALLOCATOR");
   m_debug_verbosity = verbosity_str ? strtol(verbosity_str, nullptr, 0) : DebugVerbosity::SILENT;
@@ -35,6 +38,47 @@ void MPSHeapAllocatorImpl::init_allocator() {
   const double low_watermark_ratio =
       low_watermark_ratio_str ? strtod(low_watermark_ratio_str, nullptr) : default_low_watermark_ratio;
   setLowWatermarkRatio(low_watermark_ratio);
+}
+
+void MPSHeapAllocatorImpl::init_buffer_pools() {
+  // using a container for pools to simplify iterating over them
+  // Pool of large buffers with private storage mode
+  m_pools.emplace(BufferPool::Kind::PRIVATE_LARGE,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::PRIVATE | UsageFlags::HAZARD));
+  // Pool of large buffers with shared storage mode
+  m_pools.emplace(BufferPool::Kind::SHARED_LARGE,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SHARED | UsageFlags::HAZARD));
+  // Pool of small buffers with private storage mode
+  m_pools.emplace(BufferPool::Kind::PRIVATE_SMALL,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::PRIVATE | UsageFlags::HAZARD));
+  // Pool of small buffers with shared storage mode
+  m_pools.emplace(BufferPool::Kind::SHARED_SMALL,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::HAZARD));
+  // Pool of small buffers with shared storage mode used to allocate and copy Scalars
+  // from CPU to Metal buffers (see allocScalarBufferWithValue()).
+  // no Hazard Tracking required for the Scalar pool (synchronized manually).
+  m_pools.emplace(BufferPool::Kind::SCALAR,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::SCALAR));
+}
+
+BufferPool& MPSHeapAllocatorImpl::get_pool(size_t requested_size, size_t aligned_size, uint32_t usage) {
+  BufferPool::Kind poolKind;
+
+  if (usage & UsageFlags::SCALAR) {
+    poolKind = BufferPool::Kind::SCALAR;
+  } else if (requested_size <= kMaxScalarAlloc && m_device.hasUnifiedMemory) {
+    poolKind = BufferPool::Kind::SHARED_SMALL;
+  } else if (aligned_size <= kMaxSmallAlloc) {
+    poolKind = (usage & UsageFlags::SHARED) ? BufferPool::Kind::SHARED_SMALL : BufferPool::Kind::PRIVATE_SMALL;
+  } else {
+    poolKind = (usage & UsageFlags::SHARED) ? BufferPool::Kind::SHARED_LARGE : BufferPool::Kind::PRIVATE_LARGE;
+  }
+  return *m_pools[poolKind];
+}
+
+size_t MPSHeapAllocatorImpl::get_allocation_size(size_t size, uint32_t usage) const {
+  MTLSizeAndAlign sizeAlign = [m_device heapBufferSizeAndAlignWithLength:size options:HeapBlock::getOptions(usage)];
+  return BufferBlock::alignUp(sizeAlign.size, sizeAlign.align);
 }
 
 void MPSHeapAllocatorImpl::setHighWatermarkRatio(double ratio) {
@@ -72,6 +116,7 @@ HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& params) {
   if (it == pool.heaps.end()) {
     heap_block = HeapBlock::createHeapBlock(params, pool.device, pool.usage);
     if (heap_block) {
+      m_total_allocated_memory += heap_block->size.total;
       if (m_debug_verbosity & DebugVerbosity::ALLOCATIONS) {
         std::cerr << "\nAllocated " << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private") << " heap #"
                   << heap_block->heap_id << " of size " << format_size(heap_block->size.total)
@@ -106,7 +151,6 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
   m_allocated_buffers[params.buffer_block->buffer] = params.buffer_block;
-  m_total_allocated_memory += params.size();
   pool.allocated_size += params.size();
   pool.n_buffers++;
 
@@ -131,12 +175,12 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   BufferPool& pool = *params.pool;
   // track buffer reuse intervals only on large pool when low watermark limit is enabled.
   if (m_low_watermark_ratio > 0.0 && !(pool.usage & UsageFlags::SMALL)) {
-    for (auto& b : pool.buffers) {
+    for (auto& b : pool.available_buffers) {
       ++b->gc_count;
     }
   }
-  auto it = pool.buffers.lower_bound(&params.search_key);
-  if (it != pool.buffers.end()) {
+  auto it = pool.available_buffers.lower_bound(&params.search_key);
+  if (it != pool.available_buffers.end()) {
     BufferBlock* buffer_block = *it;
 
     // the logic in here is simple: keep reusing existing heaps capacity as long as possible (by splitting
@@ -170,7 +214,8 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   if (!params.buffer_block) {
     return false; // this will make allocator to allocate a new buffer
   }
-  pool.buffers.erase(params.buffer_block);
+  pool.available_buffers.erase(params.buffer_block);
+  params.buffer_block->requested_size = params.requested_size;
   params.buffer_block->gc_count = 0;
   pool.available_size -= params.buffer_block->size;
 
@@ -190,7 +235,7 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   TORCH_CHECK(size < m_max_buffer_size, "Invalid buffer size: ", format_size(size));
 
   size_t alloc_size = get_allocation_size(size, usage);
-  auto& pool = get_pool(alloc_size, usage);
+  auto& pool = get_pool(size, alloc_size, usage);
   AllocParams params(alloc_size, size, &pool);
   // we care about memory pressure if only we're allocating large buffers when the
   // low watermark limit has been reached
@@ -264,12 +309,16 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
 
   BufferPool& pool = *buffer_block->heap->pool;
   // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
-  TORCH_INTERNAL_ASSERT(pool.buffers.insert(buffer_block).second);
+  TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
   pool.available_size += buffer_block->size;
   buffer_block->shape.clear(); // reset shape
-  buffer_block->in_use = false;
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory >= buffer_block->size);
   m_current_allocated_memory -= buffer_block->size;
+  if (buffer_block->event) {
+    // returns the MPSEvent back to MPSEventPool
+    buffer_block->event.reset(nullptr);
+  }
+  buffer_block->in_use = false;
 }
 
 BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(const void* ptr) {
@@ -283,11 +332,10 @@ BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(const void* ptr) {
 bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove_empty_heap) {
   HeapBlock* heap_block = buffer_block->heap;
   BufferPool& pool = *heap_block->pool;
-  m_total_allocated_memory -= buffer_block->size;
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
   m_allocated_buffers.erase(buffer_block->buffer);
-  pool.buffers.erase(buffer_block);
+  pool.available_buffers.erase(buffer_block);
   pool.n_buffers--;
   // will re-insert later to keep the heaps list sorted based on heap's new available size (if heap not empty)
   pool.heaps.erase(heap_block);
@@ -304,6 +352,7 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
 
   if (remove_empty_heap && heap_block->n_buffers == 0) {
     pool.heaps_pending_update.erase(heap_block);
+    m_total_allocated_memory -= heap_block->size.total;
     retainCount = heap_block->releaseMTLHeap();
     if (m_debug_verbosity & DebugVerbosity::RELEASES) {
       std::cerr << "Released heap #" << heap_block->heap_id << " of size " << format_size(heap_block->size.total)
@@ -336,18 +385,18 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
 }
 
 void MPSHeapAllocatorImpl::release_buffers(BufferPool& pool) {
-  if (pool.buffers.empty()) {
+  if (pool.available_buffers.empty()) {
     return;
   }
   if ((m_debug_verbosity & DebugVerbosity::RELEASES)) {
-    std::cerr << "Releasing " << pool.buffers.size() << " buffers from "
+    std::cerr << "Releasing " << pool.available_buffers.size() << " buffers from "
               << ((pool.usage & UsageFlags::SMALL) ? "small " : "large ")
               << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private")
               << ((pool.usage & UsageFlags::SCALAR) ? " scalar" : "")
               << " pool (total size: " << format_size(pool.allocated_size) << ", #buffers: " << pool.n_buffers << ")\n";
   }
-  auto it = pool.buffers.begin();
-  while (it != pool.buffers.end()) {
+  auto it = pool.available_buffers.begin();
+  while (it != pool.available_buffers.end()) {
     BufferBlock* buffer_block = *it;
     ++it;
     release_buffer(buffer_block);
@@ -357,17 +406,17 @@ void MPSHeapAllocatorImpl::release_buffers(BufferPool& pool) {
 bool MPSHeapAllocatorImpl::release_available_cached_buffers(AllocParams& params) {
   BufferPool& pool = *params.pool;
 
-  if (pool.buffers.empty()) {
+  if (pool.available_buffers.empty()) {
     return false;
   }
-  auto it = pool.buffers.lower_bound(&params.search_key);
-  if (it == pool.buffers.end()) {
+  auto it = pool.available_buffers.lower_bound(&params.search_key);
+  if (it == pool.available_buffers.end()) {
     size_t totalReleased = 0;
     --it;
     while (totalReleased < params.search_key.size) {
       auto cur = it;
       totalReleased += (*it)->size;
-      if (it != pool.buffers.begin()) {
+      if (it != pool.available_buffers.begin()) {
         --it;
         release_buffer(*cur);
       } else {
@@ -392,16 +441,16 @@ bool MPSHeapAllocatorImpl::release_cached_buffers() {
   // before releasing the buffers make sure the command buffer has finished.
   // we need to release the lock temporarily as synchronizing may cause deadlock with completion handlers.
   m_mutex.unlock();
-  dispatch_sync(m_stream->queue(), ^() {
-    m_stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  auto stream = getDefaultMPSStream();
+  dispatch_sync(stream->queue(), ^() {
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   m_mutex.lock();
   // Free all cached blocks to system allocator
-  release_buffers(m_large_pool_private);
-  release_buffers(m_large_pool_shared);
-  release_buffers(m_small_pool_private);
-  release_buffers(m_small_pool_shared);
-  release_buffers(m_scalar_pool);
+  for (const auto& poolIt : m_pools) {
+    BufferPool& pool = *poolIt.second;
+    release_buffers(pool);
+  }
   return true;
 }
 
@@ -418,7 +467,7 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
   unsigned int freeable_block_count = 0, freed_count = 0;
   size_t gc_reclaimed = 0;
 
-  for (auto& b : pool.buffers) {
+  for (auto& b : pool.available_buffers) {
     if (b->retainCount() <= 1) {
       total_age += b->gc_count;
       ++freeable_block_count;
@@ -436,8 +485,8 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
     block_freed = false;
     // free blocks of > avg age. Stop garbage collection if we reach below the
     // low watermark limit since re-allocation or fragmentation could be costly.
-    auto it = pool.buffers.begin();
-    while (it != pool.buffers.end() && gc_reclaimed < target_size) {
+    auto it = pool.available_buffers.begin();
+    while (it != pool.available_buffers.end() && gc_reclaimed < target_size) {
       BufferBlock* buffer_block = *it++;
       if (buffer_block->gc_count >= age_threshold && buffer_block->retainCount() <= 1) {
         block_freed = true;
@@ -452,8 +501,8 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
   if (m_debug_verbosity & DebugVerbosity::RELEASES) {
     std::cerr << "Garbage collected " << freed_count << " buffers from large "
               << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private")
-              << " pool (total reclaimed: " << format_size(gc_reclaimed) << ", #buffers: " << pool.buffers.size()
-              << ")\n";
+              << " pool (total reclaimed: " << format_size(gc_reclaimed)
+              << ", #buffers: " << pool.available_buffers.size() << ")\n";
   }
 }
 
@@ -482,10 +531,81 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
     if (!buffer_block) {
       return nullptr;
     }
+    if (!buffer_block->cpu_ptr) {
+      buffer_block->cpu_ptr = [buffer_block->buffer contents];
+    }
   }
   // buffer is out of the pool, so no mutex lock is needed
-  memcpy([buffer_block->buffer contents], value, size);
+  memcpy(buffer_block->cpu_ptr, value, size);
   return buffer_block->buffer;
+}
+
+std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
+  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+    return {nullptr, 0};
+  }
+  if (!buffer_block->cpu_ptr) {
+    buffer_block->cpu_ptr = [buffer_block->buffer contents];
+  }
+  return {buffer_block->cpu_ptr, buffer_block->retainCount()};
+}
+
+bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
+  bool recordedEvent = false;
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  for (const auto& buffer : buffers) {
+    BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
+    // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
+    if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+      if (!buffer_block->event) {
+        buffer_block->event = m_event_pool->acquireEvent(false, nullptr);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
+      }
+      buffer_block->event->record(/*needsLock*/ false);
+      recordedEvent = true;
+    }
+  }
+  return recordedEvent;
+}
+
+bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
+  std::vector<BufferBlock*> buffer_blocks;
+  {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    for (const auto& buffer : buffers) {
+      BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
+      // wait on event if "shared" buffer was allocated on MPSAllocator and
+      // or actually needs waiting (based on retainCount)
+      if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
+          buffer_block->event) {
+        buffer_blocks.push_back(buffer_block);
+      }
+    }
+  }
+  bool waitedForEvent = false;
+
+  for (const auto& buffer_block : buffer_blocks) {
+    // check for retain count again as the previous wait might have released the buffer
+    if (buffer_block->retainCount() > 1) {
+      bool waitedOnCPU = buffer_block->event->synchronize();
+      if (waitedOnCPU) {
+        // after waiting, it's a good time to free some pending inactive buffers
+        freeInactiveBuffers();
+        waitedForEvent |= buffer_block->retainCount() <= 1;
+      } else {
+        // even if one of the buffers weren't recorded beforehand, we return
+        // without continuing with other buffers since retainCount > 1
+        waitedForEvent = false;
+        break;
+      }
+    }
+  }
+  return waitedForEvent;
 }
 
 id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
@@ -546,6 +666,25 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     free_buffer(buffer_block);
   });
+}
+
+void MPSHeapAllocatorImpl::freeInactiveBuffers() {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  for (const auto& poolIt : m_pools) {
+    BufferPool& pool = *poolIt.second;
+    if (!pool.buffers_pending_free.empty()) {
+      for (auto it = pool.buffers_pending_free.begin(), last = pool.buffers_pending_free.end(); it != last;) {
+        BufferBlock* buffer_block = *it;
+        if (buffer_block->retainCount() <= 1) {
+          it = pool.buffers_pending_free.erase(it);
+          free_buffer(buffer_block);
+        } else {
+          ++it;
+        }
+      }
+    }
+  }
 }
 
 void MPSHeapAllocatorImpl::emptyCache() {
@@ -620,6 +759,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
     return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
+  std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
+    return _getAllocImpl().getSharedBufferPtr(ptr);
+  }
   bool isSharedBuffer(const void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
   }
@@ -628,6 +770,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   void emptyCache() const override {
     _getAllocImpl().emptyCache();
+  }
+  void freeInactiveBuffers() const override {
+    _getAllocImpl().freeInactiveBuffers();
   }
   ssize_t getUnalignedBufferSize(const void* ptr) const override {
     return _getAllocImpl().getUnalignedBufferSize(ptr);
@@ -665,9 +810,15 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   void setHighWatermarkRatio(double ratio) const override {
     _getAllocImpl().setHighWatermarkRatio(ratio);
   }
+  bool recordEvents(c10::ArrayRef<const void*> buffers) const override {
+    return _getAllocImpl().recordEvents(buffers);
+  }
+  bool waitForEvents(c10::ArrayRef<const void*> buffers) const override {
+    return _getAllocImpl().waitForEvents(buffers);
+  }
   std::string formatSize(size_t size) const override {
     return _getAllocImpl().format_size(size);
-  };
+  }
 
  private:
   bool m_has_unified_memory;
@@ -723,7 +874,7 @@ Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device) {
   TORCH_CHECK(shared_allocator, "unable to pin memory on a non-unified memory device");
 
   const size_t storage_size = at::detail::computeStorageNbytes(self.sizes(), self.strides(), self.dtype().itemsize());
-  std::cout << "Pinning memory of size " << storage_size / 1024UL << " KB\n";
+  std::cerr << "Pinning memory of size " << storage_size / 1024UL << " KB\n";
   auto storage = Storage(Storage::use_byte_size_t(), storage_size, shared_allocator, false);
   auto tensor = at::cpu::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
   tensor.copy_(self);
