@@ -59,26 +59,22 @@ CaptureId_t capture_sequence_id() {
  * describes memory management for captures.
  */
 
-int CUDAGraph::pending_event_queries = 0;
-std::mutex CUDAGraph::mutex_;
+std::atomic<int> CUDAGraph::pending_event_queries = 0;
 
 // Track any outstanding event queries that could happen e.g., in a NCCL watchdog so that they
 // can be resolved before the capture begins. Note that event queries are not allowed during a
 // graph capture in the default capture mode.
 void CUDAGraph::inc_pending_event_queries() {
-  std::lock_guard<std::mutex> lock(mutex_);
   pending_event_queries++;
 }
 
 void CUDAGraph::dec_pending_event_queries() {
-  std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(pending_event_queries > 0,
     "Attempted to decrement the number of outstanding events to be queried, but it was <= 0.");
   pending_event_queries--;
 }
 
 int CUDAGraph::num_pending_event_queries() {
-  std::lock_guard<std::mutex> lock(mutex_);
   return pending_event_queries;
 }
 

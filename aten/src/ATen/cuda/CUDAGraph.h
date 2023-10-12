@@ -40,7 +40,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   // mutex used for pending event query inc/dec functions
   static std::mutex mutex_;
-  static int pending_event_queries;
+  static std::atomic<int> pending_event_queries;
 
   // internal states so reset() can do its best cleaning up
   // Set to true in capture_end if cudaStreamEndCapture succeeded

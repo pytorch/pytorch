@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
+    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     skip_but_pass_in_sandcastle,
@@ -459,6 +460,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    @skipIfRocm()
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query
         store = c10d.FileStore(self.file_name, self.world_size)
