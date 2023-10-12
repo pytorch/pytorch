@@ -1725,6 +1725,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(r, False)
             self.assertEqual(cnts.frame_count, 0)  # graph break
 
+    def test_numpy_iter(self):
+        # test that iteration over an ndarray produces ndarrays not bare tensors
+        def fn(x):
+            return [bm for bm in x]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        proba_map = np.arange(3)[:, None]
+        res = opt_fn(proba_map)
+
+        self.assertEqual([type(r) for r in res], [np.ndarray, np.ndarray, np.ndarray])
+        self.assertEqual(res, [np.array([0]), np.array([1]), np.array([2])])
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_dtypes_no_graphbreaks(self):
         # cache size limit needs to be larger than the `dtypes` list size
         torch._dynamo.config.cache_size_limit = 12
