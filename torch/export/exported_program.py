@@ -1,6 +1,19 @@
 import copy
 import dataclasses
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from enum import auto, Enum
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 
@@ -23,10 +36,132 @@ __all__ = [
     "ExportGraphSignature",
     "ModuleCallEntry",
     "ModuleCallSignature",
+    "InputKind",
+    "InputSpec",
+    "OutputKind",
+    "OutputSpec",
 ]
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+
+
+@dataclasses.dataclass
+class TensorArgument:
+    name: str
+
+
+@dataclasses.dataclass
+class SymIntArgument:
+    name: str
+
+
+@dataclasses.dataclass
+class ConstantArgument:
+    value: Union[int, float, bool, None]
+
+
+ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
+
+
+class InputKind(Enum):
+    USER_INPUT = auto()
+    PARAMETER = auto()
+    BUFFER = auto()
+
+
+@dataclasses.dataclass
+class InputSpec:
+    kind: InputKind
+    arg: ArgumentSpec
+    target: Optional[str]
+
+    def __post_init__(self):
+        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+
+
+class OutputKind(Enum):
+    USER_OUTPUT = auto()
+    LOSS_OUTPUT = auto()
+    BUFFER_MUTATION = auto()
+    GRADIENT_TO_PARAMETER = auto()
+    GRADIENT_TO_USER_INPUT = auto()
+
+
+@dataclasses.dataclass
+class OutputSpec:
+    kind: OutputKind
+    arg: ArgumentSpec
+    target: Optional[str]
+
+    def __post_init__(self):
+        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+
+
+def _sig_to_specs(
+    *,
+    user_inputs: Set[str],
+    inputs_to_parameters: Mapping[str, str],
+    inputs_to_buffers: Mapping[str, str],
+    user_outputs: Set[str],
+    buffer_mutations: Mapping[str, str],
+    grad_params: Mapping[str, str],
+    grad_user_inputs: Mapping[str, str],
+    loss_output: Optional[str],
+    inputs: List[ArgumentSpec],
+    outputs: List[ArgumentSpec],
+) -> Tuple[List[InputSpec], List[OutputSpec]]:
+    def to_input_spec(i: ArgumentSpec) -> InputSpec:
+        if not isinstance(i, TensorArgument):
+            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
+        name = i.name
+        if name in user_inputs:
+            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
+        elif name in inputs_to_parameters:
+            return InputSpec(
+                kind=InputKind.PARAMETER,
+                arg=i,
+                target=inputs_to_parameters[name],
+            )
+        elif name in inputs_to_buffers:
+            return InputSpec(
+                kind=InputKind.BUFFER, arg=i, target=inputs_to_buffers[name]
+            )
+        else:
+            raise AssertionError(f"Unknown tensor input kind: {name}")
+
+    def to_output_spec(o: ArgumentSpec) -> OutputSpec:
+        if not isinstance(o, TensorArgument):
+            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
+        name = o.name
+        if name in user_outputs:
+            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
+        elif name in buffer_mutations:
+            return OutputSpec(
+                kind=OutputKind.BUFFER_MUTATION,
+                arg=o,
+                target=buffer_mutations[name],
+            )
+        elif name in grad_params:
+            return OutputSpec(
+                kind=OutputKind.GRADIENT_TO_PARAMETER,
+                arg=o,
+                target=grad_params[name],
+            )
+        elif name in grad_user_inputs:
+            return OutputSpec(
+                kind=OutputKind.GRADIENT_TO_USER_INPUT,
+                arg=o,
+                target=grad_user_inputs[name],
+            )
+        elif name == loss_output:
+            return OutputSpec(kind=OutputKind.LOSS_OUTPUT, arg=o, target=None)
+        else:
+            raise AssertionError(f"Unknown tensor output kind: {name}")
+
+    input_specs = [to_input_spec(i) for i in inputs]
+    output_specs = [to_output_spec(o) for o in outputs]
+    return input_specs, output_specs
 
 
 @dataclasses.dataclass
@@ -129,36 +264,119 @@ class ExportGraphSignature:
         )
     """
 
+    input_specs: List[InputSpec]
+    output_specs: List[OutputSpec]
+
     # A list of parameters uniquely identified by mangled fully qualified name
-    parameters: List[str]
+    @property
+    def parameters(self) -> Collection[str]:
+        # TODO Make this tuple.
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.PARAMETER
+            if isinstance(s.target, str)
+        ]
 
     # A list of buffers uniquely identified by mangled fully qualified name
-    buffers: List[str]
+    @property
+    def buffers(self) -> Collection[str]:
+        # TODO Make this tuple.
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.BUFFER
+            if isinstance(s.target, str)
+        ]
 
     # Graph node names of pytree-flattened inputs of original program
-    user_inputs: List[str]
+    @property
+    def user_inputs(self) -> Collection[str]:
+        return tuple(
+            s.arg.name
+            for s in self.input_specs
+            if s.kind == InputKind.USER_INPUT and isinstance(s.arg, TensorArgument)
+        )
 
     # Graph node names of pytree-flattened outputs of original program
-    user_outputs: List[str]
+    @property
+    def user_outputs(self) -> Collection[str]:
+        return tuple(
+            s.arg.name
+            for s in self.output_specs
+            if s.kind == OutputKind.USER_OUTPUT and isinstance(s.arg, TensorArgument)
+        )
 
     # A dictionary mapping graph input node names to parameters. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted parameter.
-    inputs_to_parameters: Dict[str, str]
+    @property
+    def inputs_to_parameters(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.input_specs
+            if s.kind == InputKind.PARAMETER
+            and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        }
 
     # A dictionary mapping graph input node names to buffers. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted buffer.
-    inputs_to_buffers: Dict[str, str]
+    @property
+    def inputs_to_buffers(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.input_specs
+            if s.kind == InputKind.BUFFER
+            and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        }
 
     # A dictionary mapping graph output node names to buffers that are mutated in the
     # original program. Buffers that are not mutated will not be found in this dictionary.
-    buffers_to_mutate: Dict[str, str]
+    @property
+    def buffers_to_mutate(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.output_specs
+            if s.kind == OutputKind.BUFFER_MUTATION
+            and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        }
 
-    backward_signature: Optional[ExportBackwardSignature]
+    @property
+    def backward_signature(self) -> Optional[ExportBackwardSignature]:
+        loss_output = None
+        gradients_to_parameters: Dict[str, str] = {}
+        gradients_to_user_inputs: Dict[str, str] = {}
+        for spec in self.output_specs:
+            if spec.kind == OutputKind.LOSS_OUTPUT:
+                assert loss_output is None
+                assert isinstance(spec.arg, TensorArgument)
+                loss_output = spec.arg.name
+            elif spec.kind == OutputKind.GRADIENT_TO_PARAMETER:
+                assert isinstance(spec.target, str)
+                assert isinstance(spec.arg, TensorArgument)
+                gradients_to_parameters[spec.arg.name] = spec.target
+            elif spec.kind == OutputKind.GRADIENT_TO_USER_INPUT:
+                assert isinstance(spec.target, str)
+                assert isinstance(spec.arg, TensorArgument)
+                gradients_to_user_inputs[spec.arg.name] = spec.target
+
+        if loss_output is None:
+            return None
+
+        return ExportBackwardSignature(
+            loss_output=loss_output,
+            gradients_to_parameters=gradients_to_parameters,
+            gradients_to_user_inputs=gradients_to_user_inputs,
+        )
 
     # Map from assertion dependency token index to assertion dep token output
     # name in output. The shape of output after aot_autograd will be like:
     # (updated_inputs, user_outputs, dep_token).
-    assertion_dep_token: Optional[Dict[int, str]] = None
+    @property
+    def assertion_dep_token(self) -> Optional[Mapping[int, str]]:
+        return None
 
     def __post_init__(self) -> None:
         assertion_dep_token = self.assertion_dep_token
@@ -170,24 +388,6 @@ class ExportGraphSignature:
             len(self.user_outputs) + len(self.buffers_to_mutate)
             == assertion_dep_token_index
         )
-
-
-@dataclasses.dataclass
-class TensorArgument:
-    name: str
-
-
-@dataclasses.dataclass
-class SymIntArgument:
-    name: str
-
-
-@dataclasses.dataclass
-class ConstantArgument:
-    value: Union[int, float, bool, None]
-
-
-ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
 
 
 @dataclasses.dataclass
@@ -458,6 +658,9 @@ class ExportedProgram:
         old_placeholders = _get_placeholders(self.graph_module)
         fake_args = [node.meta["val"] for node in old_placeholders]
 
+        for name, _ in self.graph_module.named_buffers():
+            delattr(self.graph_module, name)
+        # TODO(zhxhchen17) Return the new graph_signature directly.
         gm, graph_signature = aot_export_module(
             self.graph_module, fake_args, decompositions=decomp_table, trace_joint=False
         )
@@ -478,39 +681,53 @@ class ExportedProgram:
             for old_node, new_node in zip(old_outputs, new_outputs)
         }
 
-        new_backward_signature = (
-            ExportBackwardSignature(
-                copy.deepcopy(
-                    self.graph_signature.backward_signature.gradients_to_parameters
-                ),
-                {
-                    old_new_placeholder_map[inp]: param
-                    for inp, param in self.graph_signature.backward_signature.gradients_to_parameters
-                },
-                copy.deepcopy(self.graph_signature.backward_signature.loss_output),
-            )
-            if self.graph_signature.backward_signature is not None
-            else None
-        )
+        def make_argument_spec(node) -> ArgumentSpec:
+            val = node.meta["val"]
+            if isinstance(val, torch.Tensor):
+                return TensorArgument(name=node.name)
+            elif isinstance(val, torch.SymInt):
+                return SymIntArgument(name=node.name)
+            else:
+                return ConstantArgument(value=val)
 
-        new_graph_signature = ExportGraphSignature(
-            copy.deepcopy(self.graph_signature.parameters),
-            copy.deepcopy(self.graph_signature.buffers),
-            [old_new_placeholder_map[inp] for inp in self.graph_signature.user_inputs],
-            [old_new_output_map[out] for out in self.graph_signature.user_outputs],
-            {
+        input_specs, output_specs = _sig_to_specs(
+            user_inputs={
+                old_new_placeholder_map[inp] for inp in self.graph_signature.user_inputs
+            },
+            inputs_to_parameters={
                 old_new_placeholder_map[inp]: param
                 for inp, param in self.graph_signature.inputs_to_parameters.items()
             },
-            {
+            inputs_to_buffers={
                 old_new_placeholder_map[inp]: buffer
                 for inp, buffer in self.graph_signature.inputs_to_buffers.items()
             },
-            copy.deepcopy(self.graph_signature.buffers_to_mutate),
-            new_backward_signature,
-            copy.deepcopy(self.graph_signature.assertion_dep_token),
+            user_outputs={
+                old_new_output_map[out] for out in self.graph_signature.user_outputs
+            },
+            buffer_mutations={
+                old_new_output_map[out]: buffer
+                for out, buffer in self.graph_signature.buffers_to_mutate.items()
+            },
+            grad_params={},
+            grad_user_inputs={},
+            loss_output=None,
+            inputs=[
+                make_argument_spec(node)
+                for node in gm.graph.nodes
+                if node.op == "placeholder"
+            ],
+            outputs=[
+                make_argument_spec(node)
+                for node in pytree.tree_flatten(
+                    next(iter(reversed(gm.graph.nodes))).args
+                )[0]
+            ],
         )
 
+        new_graph_signature = ExportGraphSignature(
+            input_specs=input_specs, output_specs=output_specs
+        )
         # NOTE: aot_export adds symint metadata for placeholders with int
         # values; since these become specialized, we replace such metadata with
         # the original values.
@@ -570,6 +787,10 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
+        if transformed_gm is self.graph_module and not res.modified:
+            return self
+
+        # TODO(zhxchen17) Remove this.
         def _get_updated_graph_signature(
             old_signature: ExportGraphSignature,
             new_gm: torch.fx.GraphModule,
@@ -583,7 +804,13 @@ class ExportedProgram:
             num_inputs = (
                 len(old_signature.parameters)
                 + len(old_signature.buffers)
-                + len(old_signature.user_inputs)
+                + len(
+                    [
+                        s
+                        for s in old_signature.input_specs
+                        if s.kind == InputKind.USER_INPUT
+                    ]
+                )
             )
 
             assert len(new_graph_inputs) == num_inputs, (
@@ -591,13 +818,9 @@ class ExportedProgram:
                 f"to {num_inputs} after transformation. This transformation "
                 "is currently not supported."
             )
-            new_parameter_inputs = new_graph_inputs[: len(old_signature.parameters)]
             num_param_buffers = len(old_signature.buffers) + len(
                 old_signature.parameters
             )
-            new_buffer_inputs = new_graph_inputs[
-                len(old_signature.parameters) : num_param_buffers
-            ]
             new_user_inputs = new_graph_inputs[num_param_buffers:]
 
             output_node = list(new_gm.graph.nodes)[-1]
@@ -605,7 +828,11 @@ class ExportedProgram:
             new_graph_outputs = [arg.name for arg in output_node.args[0]]
 
             assert len(new_graph_outputs) == len(old_signature.buffers_to_mutate) + len(
-                old_signature.user_outputs
+                [
+                    s
+                    for s in old_signature.output_specs
+                    if s.kind == OutputKind.USER_OUTPUT
+                ]
             ), (
                 f"Number of output nodes changed from {len(new_graph_outputs)} "
                 f"to {len(old_signature.buffers_to_mutate) + len(old_signature.user_outputs)} "
@@ -613,16 +840,38 @@ class ExportedProgram:
             )
             new_user_outputs = new_graph_outputs[len(old_signature.buffers_to_mutate) :]
 
+            def make_argument_spec(node) -> ArgumentSpec:
+                val = node.meta["val"]
+                if isinstance(val, torch.Tensor):
+                    return TensorArgument(name=node.name)
+                elif isinstance(val, torch.SymInt):
+                    return SymIntArgument(name=node.name)
+                else:
+                    return ConstantArgument(value=val)
+
+            input_specs, output_specs = _sig_to_specs(
+                user_inputs=set(new_user_inputs),
+                inputs_to_parameters=old_signature.inputs_to_parameters,
+                inputs_to_buffers=old_signature.inputs_to_buffers,
+                user_outputs=set(new_user_outputs),
+                buffer_mutations=old_signature.buffers_to_mutate,
+                grad_params={},
+                grad_user_inputs={},
+                loss_output=None,
+                inputs=[
+                    make_argument_spec(node)
+                    for node in transformed_gm.graph.nodes
+                    if node.op == "placeholder"
+                ],
+                outputs=[
+                    make_argument_spec(node)
+                    for node in pytree.tree_flatten(
+                        next(iter(reversed(transformed_gm.graph.nodes))).args
+                    )[0]
+                ],
+            )
             new_signature = ExportGraphSignature(
-                copy.deepcopy(old_signature.parameters),
-                copy.deepcopy(old_signature.buffers),
-                new_user_inputs,
-                new_user_outputs,
-                copy.deepcopy(old_signature.inputs_to_parameters),
-                copy.deepcopy(old_signature.inputs_to_buffers),
-                copy.deepcopy(old_signature.buffers_to_mutate),
-                copy.deepcopy(old_signature.backward_signature),
-                copy.deepcopy(old_signature.assertion_dep_token),
+                input_specs=input_specs, output_specs=output_specs
             )
             return new_signature
 
