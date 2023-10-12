@@ -2,54 +2,13 @@ import torch
 import os
 from torch import nn
 from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning.sparsifier.utils import PerChannelNormObserver
 import torch.ao.quantization as quantization
-from torch.ao.quantization.observer import PerChannelMinMaxObserver, UniformQuantizationObserverBase
-from torch.ao.quantization.utils import is_per_channel
 from torch.ao.quantization.qconfig import QConfig, default_placeholder_observer, default_weight_observer
 from torch.ao.quantization.quantize import _remove_qconfig
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
-class PerChannelNormObserver(UniformQuantizationObserverBase):
-    r"""
-    """
-    def __init__(
-        self,
-        **kwargs
-    ) -> None:
-        from pprint import pprint
-        pprint(kwargs)
-        super().__init__(
-            dtype=torch.quint8,
-            qscheme=torch.per_channel_affine,
-            reduce_range=False,
-            quant_min=None,
-            quant_max=None,
-            eps=torch.finfo(torch.float32).eps,
-            **kwargs
-        )
-        self.averaging_constant = 1.0
-        self.register_buffer("norm", torch.tensor([]))
-
-    def forward(self, x_orig):
-        if x_orig.numel() == 0:
-            return x_orig
-        x = x_orig.detach()  # avoid keeping autograd tape
-
-        new_axis_list = [i for i in range(x.dim())]  # noqa: C416
-        new_axis_list[0], new_axis_list[-1] = new_axis_list[-1], new_axis_list[0]
-        print(new_axis_list)
-        y = x.permute(new_axis_list)
-        y = torch.flatten(y, start_dim=1)
-        norm = torch.norm(y, dim=1) ** 2
-        if self.norm.numel() == 0:
-            self.norm.resize_(norm.shape)
-            self.norm.copy_(norm)
-        else:
-            self.norm += norm
-
-        return x_orig
-
-    def calculate_qparams(self):
-        pass
+from functools import reduce
 
 class WandaSparsifier(BaseSparsifier):
     r"""Wanda sparsifier
@@ -63,23 +22,36 @@ class WandaSparsifier(BaseSparsifier):
         sparsity_level: The target level of sparsity;
         model: The model to be sparsified;
     """
-    def __init__(self, sparsity_level, model):
-        r""" Initialization function for WandaSparsifier class
-        In this function, forward hooks (observer class from quantization API)
-        will be registered on the model. This hook will store average activation
-        statistics per input channels.
-        averaging_constant is hard set to 1.0 in order to register a forward_pre_hook
-        https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/quantize.py#L201.
-        """
+    def __init__(self,
+                 sparsity_level: float = 0.5,
+                 sparse_block_shape: Tuple[int, int] = (1, 4),
+                 zeros_per_block: Optional[int] = None,
+                 norm: Optional[Union[Callable, int]] = None):
+        if zeros_per_block is None:
+            zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
         defaults = {
-            'sparsity_level': sparsity_level
+            "sparsity_level": sparsity_level,
+            "sparse_block_shape": sparse_block_shape,
+            "zeros_per_block": zeros_per_block,
         }
+        if norm is None:
+            norm = 2
+        if callable(norm):
+            self.norm_fn = norm
+        elif norm == 1:
+            self.norm_fn = lambda T: T.abs()
+        elif norm == 2:
+            self.norm_fn = lambda T: T * T
+        else:
+            raise NotImplementedError(f"L-{norm} is not yet implemented.")
         super().__init__(defaults=defaults)
 
+
+    def prepare(self, model, config):
         ### custom initialization code to set up the observer
-        activation_observer = PerChannelNormObserver
-        model.qconfig = QConfig(activation=activation_observer, weight=default_placeholder_observer)
+        model.qconfig = QConfig(activation=PerChannelNormObserver, weight=default_placeholder_observer)
         quantization.prepare(model, inplace=True)
+        super().prepare(model, config)
 
     def update_mask(self, module, tensor_name, sparsity_level, **kwargs):
         r""" Pruning function for WandaSparsifier
@@ -93,7 +65,6 @@ class WandaSparsifier(BaseSparsifier):
         tensor = getattr(module.parametrizations, tensor_name).original
 
         act_per_input = getattr(module, "activation_post_process").norm.sqrt()    ## get out the cumulated activation norm per channel
-        print(act_per_input)
         # Step 2: implement the mask update logic
         ## compute the pruning metric
         pruning_metric = torch.abs(tensor) * act_per_input.reshape((1,-1))
@@ -111,9 +82,12 @@ class WandaSparsifier(BaseSparsifier):
         mask.data = new_mask
 
     def squash_mask(self, params_to_keep=None, params_to_keep_per_layer=None):
+        # remove quantization config
         for config in self.groups:
             module = config["module"]
             tensor_name = config["tensor_name"]
             _remove_qconfig(module)
 
-        super().squash_mask(params_to_keep=params_to_keep, params_to_keep_per_layer=params_to_keep_per_layer)
+        # remove parameterizations
+        super().squash_mask(params_to_keep=params_to_keep,
+                            params_to_keep_per_layer=params_to_keep_per_layer)
