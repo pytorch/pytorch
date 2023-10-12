@@ -222,11 +222,11 @@ def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
 class RegisterDispatchKey:
     backend_index: BackendIndex
 
-    target: Literal[
-        Target.ANONYMOUS_DEFINITION,
-        Target.NAMESPACED_DEFINITION,
-        Target.NAMESPACED_DECLARATION,
-        Target.REGISTRATION,
+    target: Union[
+        Literal[Target.ANONYMOUS_DEFINITION],
+        Literal[Target.NAMESPACED_DEFINITION],
+        Literal[Target.NAMESPACED_DECLARATION],
+        Literal[Target.REGISTRATION],
     ]
 
     # Selector object to determine which operators to generate

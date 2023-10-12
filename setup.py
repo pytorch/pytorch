@@ -964,8 +964,7 @@ def configure_extension_build():
             extra_compile_args += ["-g"]
             extra_link_args += ["-g"]
 
-    # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
-    # should be included in all wheels uploaded to pypi
+    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
     pytorch_extra_install_requirements = os.getenv(
         "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
     )

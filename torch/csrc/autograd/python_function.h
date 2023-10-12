@@ -135,7 +135,6 @@ struct THPFunction {
 bool THPFunction_initModule(PyObject* module);
 extern PyTypeObject THPFunctionType;
 extern PyObject* THPFunctionClass;
-extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

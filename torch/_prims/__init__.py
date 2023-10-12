@@ -1896,12 +1896,11 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
-            else:
-                torch._check(
-                    length == common_length,
-                    lambda: f"Sizes of tensors must match except in dimension {dim}. "
+            elif length != common_length:
+                raise RuntimeError(
+                    f"Sizes of tensors must match except in dimension {dim}. "
                     f"Expected {common_length} but got {length} for tensor number "
-                    f"{tensor_idx} in the list",
+                    f"{tensor_idx} in the list"
                 )
 
     new_shape = list(tensors[0].shape).copy()
