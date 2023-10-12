@@ -6978,6 +6978,21 @@ class CommonTemplate:
             rtol=1e-2,  # to pass lowp check on GPU
         )
 
+    def test_negative_index(self):
+        def fn(primals_1, primals_2):
+            full_default = torch.ops.aten.full.default(
+                [1],
+                0,
+                dtype=torch.int64,
+                layout=torch.strided,
+                device=torch.device(type="cpu"),
+                pin_memory=False,
+            )
+            index = torch.ops.aten.index.Tensor(primals_1, [full_default, primals_2])
+            return index
+
+        self.common(fn, (torch.randn((1, 4, 3)), torch.tensor([-1])))
+
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":

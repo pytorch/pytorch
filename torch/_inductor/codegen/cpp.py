@@ -1222,8 +1222,42 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
+    def index_to_str(self, index: sympy.Expr) -> str:
+        # TODO <Leslie>: Implementate it as refer to:
+        # https://github.com/pytorch/pytorch/blob/
+        # f0e7a910304c6af4fe59524ab29348d906cf1dd4/torch/_inductor/codegen/triton.py#L1088
+        return index
+
+    def indirect_indexing(self, index_var, size, check=True):
+        # Refer to triton implementation:
+        # https://github.com/pytorch/pytorch/blob/
+        # f0e7a910304c6af4fe59524ab29348d906cf1dd4/torch/_inductor/codegen/triton.py#L1252
+        if index_var.bounds.lower < 0:
+            new_bounds = ValueRanges.unknown()
+            if index_var.bounds != ValueRanges.unknown() and isinstance(
+                size, sympy.Number
+            ):
+                # Take the negative part of the bound and add size to it
+                # Then take union of that and the positive part
+                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                neg = index_var.bounds & ValueRanges(-sympy.oo, -1)
+                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                # We don't have a good way of representing the empty range
+                if index_var.bounds.upper >= 0:
+                    pos = index_var.bounds & ValueRanges(0, sympy.oo)
+                    new_bounds = new_bounds | pos
+
+            stm = f"{index_var} + {self.index_to_str(size)}"
+            if index_var.bounds.upper >= 0:
+                stm = f"{index_var} < 0 ? {stm} : {index_var}"
+            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+            new_var.update_on_args("index_wrap", (index_var,), {})
+            index_var = new_var
+
+        # TODO <Leslie>: add the generate of assert as
+        # https://github.com/pytorch/pytorch/blob/
+        # f0e7a910304c6af4fe59524ab29348d906cf1dd4/torch/_inductor/codegen/triton.py#L1319
+
         return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
