@@ -2815,7 +2815,6 @@ def meta_index_Tensor(self, indices):
         len(indices) <= self.ndim,
         lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})",
     )
-    # expand_outplace
 
     # Computes common shape
     common_shape = _broadcast_shapes(
@@ -3681,9 +3680,9 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
     if len(indices_without_scalars) != 0:
         expected_values_shape = expected_values_shape[indices_without_scalars]
 
-    # Computes common shape
+    # Test if values is broadcastable to the expected shape
     common_shape = _broadcast_shapes(
-        *(t.shape if isinstance(t, TensorLike) else None for t in indices)
+        *(t.shape if isinstance(t, TensorLike) else None for t in [expected_values_shape, values])
     )
 
 
