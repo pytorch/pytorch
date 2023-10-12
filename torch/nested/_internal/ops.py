@@ -179,6 +179,11 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return 0
 
 
+@register_jagged_func(torch.ops.prim.layout.default, "self: jt")
+def prim_layout_default(func, *args, **kwargs):
+    return torch.jagged
+
+
 @register_jagged_func(
     [
         torch.ops.aten.size.default,
@@ -245,6 +250,8 @@ def to_copy_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
+    # don't change layout
+    new_kwargs.pop("layout")
 
     new_values = func(inp._values, **new_kwargs)
     # NB: Purposefully keep offsets on the old device.
@@ -406,8 +413,8 @@ def where_self(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.pin_memory.default, "self: jt, device: any?")
-def pin_memory_default(func, *args, **kwargs):
+@register_jagged_func(torch.ops.aten._pin_memory.default, "self: jt, device: any?")
+def _pin_memory_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
