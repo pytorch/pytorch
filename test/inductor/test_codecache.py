@@ -16,11 +16,11 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._triton import has_triton
 
