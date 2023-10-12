@@ -1341,17 +1341,7 @@ def method_to_operator(method):
     return op
 
 
-def create_symint_from_symbool_guardless(maybe_symbool):
-    if isinstance(maybe_symbool, bool):
-        return int(maybe_symbool)
-
-    int_sym = sympy.ITE(maybe_symbool.node.expr, 1, 0)
-    return maybe_symbool.node.shape_env.create_symintnode(
-        int_sym, hint=int(maybe_symbool.node.require_hint())
-    )
-
-
-def if_then_else(bool_expr, then_expr, else_expr):
+def _if_then_else(bool_expr, then_expr, else_expr):
     if bool_expr:
         return then_expr
     else:
@@ -1373,7 +1363,7 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
-    'ITE': if_then_else,
+    'ITE': _if_then_else,
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
