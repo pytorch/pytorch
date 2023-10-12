@@ -189,13 +189,13 @@ jobs:
     with:
       test-matrix: |
         { include: [
-          { config: "default",
+          { config: 'default',
             shard: 1,
             num_shards: 1,
-            runner: "ubuntu-20.04-16x"
+            runner: 'ubuntu-20.04-16x',
             use_lite_interpreter: 1,
             # Just set x86 for testing here
-            support_abi: x86,
+            support_abi: 'x86',
           },
         ]}
 
