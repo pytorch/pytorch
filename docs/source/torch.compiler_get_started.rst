@@ -56,19 +56,18 @@ the following:
 
 .. code-block:: python
 
-   @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
+   @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
    @triton.jit
-   def kernel(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
-       xnumel = 10000
-       xoffset = tl.program_id(0) * XBLOCK
-       xindex = xoffset + tl.arange(0, XBLOCK)[:]
-       xmask = xindex < xnumel
-       x0 = xindex
-       tmp0 = tl.load(in_ptr0 + (x0), xmask)
-       tmp1 = tl.cos(tmp0)
-       tmp2 = tl.sin(tmp0)
-       tmp3 = tmp1 + tmp2
-       tl.store(out_ptr0 + (x0), tmp3, xmask)
+   def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+      xnumel = 10000
+      xoffset = tl.program_id(0) * XBLOCK
+      xindex = xoffset + tl.arange(0, XBLOCK)[:]
+      xmask = xindex < xnumel
+      x0 = xindex
+      tmp0 = tl.load(in_ptr0 + (x0), xmask)
+      tmp1 = tl.cos(tmp0)
+      tmp2 = tl.sin(tmp1)
+      tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)
 
 .. note:: The above code snippet is an example. Depending on your hardware,
    you might see different code generated.
