@@ -874,7 +874,6 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    @deviceCountAtLeast(1)
     @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, devices, dtype):
