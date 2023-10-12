@@ -1,3 +1,5 @@
+import sympy
+
 import torch
 
 from torch._C import DispatchKey
@@ -5,15 +7,24 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-from torch.fx.experimental.symbolic_shapes import create_symint_from_symbool_guardless
 
 cast_symbool_to_symint = HigherOrderOperator("cast_symbool_to_symint")
+
+
+def _create_symint_from_symbool_guardless(maybe_symbool):
+    if isinstance(maybe_symbool, bool):
+        return int(maybe_symbool)
+
+    int_sym = sympy.ITE(maybe_symbool.node.expr, 1, 0)
+    return maybe_symbool.node.shape_env.create_symintnode(
+        int_sym, hint=int(maybe_symbool.node.require_hint())
+    )
 
 
 @cast_symbool_to_symint.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cast_dense(maybe_symbool: bool):
     assert isinstance(maybe_symbool, (bool, torch.SymBool))
-    return create_symint_from_symbool_guardless(maybe_symbool)
+    return _create_symint_from_symbool_guardless(maybe_symbool)
 
 
 @cast_symbool_to_symint.py_impl(FakeTensorMode)
@@ -29,7 +40,7 @@ def cast_functionalize(ctx, symbool):
 
 @cast_symbool_to_symint.py_impl(ProxyTorchDispatchMode)
 def trace_cast(proxy_mode, maybe_symbool):
-    out = create_symint_from_symbool_guardless(maybe_symbool)
+    out = _create_symint_from_symbool_guardless(maybe_symbool)
 
     proxy_symbool = proxy_mode.tracer.unwrap_proxy(maybe_symbool)
 
