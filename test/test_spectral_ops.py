@@ -876,7 +876,7 @@ class TestFFT(TestCase):
 
     @deviceCountAtLeast(1)
     @onlyCUDA
-    @dtypes(torch.cfloat)
+    @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, devices, dtype):
         x = torch.randn(32, dtype=dtype, device=devices[0], requires_grad=True)
         dout = torch.zeros(32, dtype=dtype, device=devices[0])
