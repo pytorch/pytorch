@@ -1,8 +1,10 @@
 import functools
-from typing import Callable, Optional, Union
+import warnings
+from typing import Any, Callable, Tuple, Optional, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor.placement_types import Placement
 
 _PrepareInputType = Callable[
     [Union[torch.Tensor, DTensor], Optional[DeviceMesh], Optional[int]], DTensor
@@ -11,6 +13,27 @@ _PrepareInputType = Callable[
 _PrepareOutputType = Callable[
     [DTensor, Optional[DeviceMesh], Optional[int]], Union[torch.Tensor, DTensor]
 ]
+
+LayoutsType = Union[Placement, Tuple[Placement, ...]]
+
+def _deprecate_warnings(
+    extra_msg: str,
+) -> Callable[[Any], Optional[Any]]:
+    """
+    Inject common validation logics for `_prepare_input` funcs via this
+    decorator, including verifying that input needs to be either
+    a :class:`Tensor` or :class:`DTensor` and only 1D :class:`DeviceMesh`
+    is passed in.
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):  # pyre-ignore[2, 3]
+            func_name = func.__name__
+            warnings.warn(f"{func_name} is deprecated and will be removed soon. {extra_msg}")
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def _prepare_input_validate(

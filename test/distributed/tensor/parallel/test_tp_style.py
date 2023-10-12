@@ -9,7 +9,6 @@ from torch.distributed.tensor.parallel.style import (
     make_input_replicate_1d,
     make_input_reshard_replicate,
     make_input_shard_1d,
-    make_sharded_output_tensor,
     make_output_replicate_1d,
     make_output_reshard_tensor,
     make_output_shard_1d,
@@ -33,18 +32,9 @@ class TensorParallelStyleTest(DTensorTestBase):
         self, input_local_tensor, expected_local_tensor, func, tensor_input_only=False
     ) -> None:
         with self.assertRaisesRegex(
-            RuntimeError, "device_mesh is not passed nor can be inferred"
+            RuntimeError, "No device mesh is currently active!"
         ):
             dtensor = func(input_local_tensor)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(self.world_size).reshape(self.world_size // 2, 2),
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "device_mesh has dims [0-9]+ but expected to be 1 for input.",
-        ):
-            dtensor = func(input_local_tensor, device_mesh)
 
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         # test 1: replicate local tensor
@@ -72,8 +62,7 @@ class TensorParallelStyleTest(DTensorTestBase):
     def test_make_input_reshard_replicate(self):
         tensor = torch.rand(8, 16, device=self.device_type)
         gathered_tensor = [
-            torch.empty(8, 16, device=self.device_type)
-            for _ in range(self.world_size)
+            torch.empty(8, 16, device=self.device_type) for _ in range(self.world_size)
         ]
         dist.all_gather(gathered_tensor, tensor)
         gathered_tensor = torch.cat(gathered_tensor)
@@ -191,6 +180,18 @@ class TensorParallelStyleTest(DTensorTestBase):
         ):
             func(dtensor, device_mesh)
 
+    def _test_prepare_output_error_new(self, func):
+        tensor = torch.rand(8, 16, device=self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+        output = [dtensor]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Tensor parallel module expects DTensor or tensor when layout specified but received"
+            f" {type(output)}!",
+        ):
+            func(output, device_mesh)
+
     @with_comms
     def test_prepare_output_error(self):
         self._test_prepare_output_error(make_output_shard_1d)
@@ -206,20 +207,27 @@ class TensorParallelStyleTest(DTensorTestBase):
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_output, [Shard(0)]
         )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
+        self.assertEqual(
+            output, dtensor.redistribute(device_mesh, [Replicate()]).to_local()
+        )
         # test when input device_mesh is None.
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_output, [Shard(0)], None, True
         )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
-        self._test_prepare_output_error(rs._prepare_output)
+        self.assertEqual(
+            output, dtensor.redistribute(device_mesh, [Replicate()]).to_local()
+        )
+        self._test_prepare_output_error_new(rs._prepare_output)
 
     @with_comms
     def test_colwise_parallel_style(self):
         tensor = torch.rand(8, 16, device=self.device_type)
         cs = ColwiseParallel()
         self._1d_input_func_check(tensor, tensor, cs._prepare_input)
-        self.assertEqual(make_sharded_output_tensor, cs._prepare_output)
+        output, dtensor, device_mesh = self._test_prepare_output(
+            cs._prepare_output, [Shard(-1)]
+        )
+        self.assertEqual(output, dtensor.to_local())
 
 
 if __name__ == "__main__":
