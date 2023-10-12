@@ -1110,9 +1110,11 @@ class GraphModule(torch.nn.Module):
             return control_flow.map(lambda x: (x.sin(), x.sin()), x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result, (x.sin(), x.sin()))
-        self.assertEqual(cnt.frame_count, 0)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Map doesn't work unless it is captured completely with torch.compile",
+        ):
+            f(x)
 
     def test_map_symint_input(self):
         backend = EagerAndRecordGraphs()
@@ -1435,15 +1437,15 @@ def forward(self):
 
         mod = Module()
 
-        mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
-        mod_for_eager = Module()
+        inp = torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Map doesn't work unless it is captured completely with torch.compile",
+        ):
+            torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)(inp)
 
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        # There is graph break right when we enter body of map
-        self.assertEqual(len(backend.graphs), 0)
-        self.assertEqual(
-            res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        )
+        # Eager is OK for now. Will error out when dynamo is automatically turned on.
+        res = Module()(inp)
 
     def test_map_side_effect(self):
         backend = EagerAndRecordGraphs()
@@ -1467,17 +1469,16 @@ def forward(self):
 
         mod = Module()
 
-        mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        inp = torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Map doesn't work unless it is captured completely with torch.compile",
+        ):
+            torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)(inp)
+
+        # Eager is OK for now. Will error out when dynamo is automatically turned on.
         mod_for_eager = Module()
-
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-
-        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-
-        self.assertEqual(len(backend.graphs), 0)
-        self.assertEqual(res, eager)
+        eager = mod_for_eager(inp)
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()

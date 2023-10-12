@@ -1749,10 +1749,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mod = Module()
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "zero-sized tensor",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Map doesn't work unless it is captured completely with torch.compile",
         ):
-            out_graph, _ = torch._dynamo.export(mod)(xs)
+            torch._dynamo.export(mod)(xs)
 
     def test_export_meta_val(self):
         def f(x, y, z):
@@ -3840,8 +3840,9 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
 
         mod = Module()
         xs = torch.randn(0, 2)
-        with self.assertRaises(
-            torch._dynamo.exc.Unsupported,
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Map doesn't work unless it is captured completely with torch.compile",
         ):
             out_graph, _ = torch._dynamo.export(mod, xs)
 
