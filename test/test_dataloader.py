@@ -416,6 +416,80 @@ class TestStackDataset(TestCase):
             self.assertEqual(t[i], source[i]['a'])
             self.assertEqual(l[i], source[i]['b'])
 
+    def test_getitems(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i][0])
+            self.assertEqual(l[i], batch[i][1])
+
+        source = StackDataset(t=t, l=l)
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i]['t'])
+            self.assertEqual(l[i], batch[i]['l'])
+
+    def test_getitems_raises_index_error(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+
+        with self.assertRaises(IndexError):
+            source.__getitems__([0, 4])
+
+    def test_getitems_value_error(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items][:-1]  # return less
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "Nested dataset's output size mismatch. Expected 4, got 3"):
+            source.__getitems__([0, 1, 2, 3])
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2282,16 +2356,22 @@ class TestDataLoaderDeviceType(TestCase):
 
         dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(10)]
 
-        loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=1,
-            num_workers=4,
-            collate_fn=_clone_collate,
-            multiprocessing_context=context,
-        )
+        pin_memory_settings = [False]
+        if device == 'cpu' and torch.cuda.is_available():
+            pin_memory_settings.append(True)
 
-        for i, batch in enumerate(loader):
-            self.assertEqual(batch[0], dataset[i])
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_clone_collate,
+                pin_memory=pin_memory,
+                multiprocessing_context=context,
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
 
         # Error case: default collate_fn doesn't currently support batches of nested tensors.
         # Following the current semantics, we'd need to stack them, which isn't possible atm.

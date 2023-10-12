@@ -8,7 +8,6 @@ import zipfile
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import export, save, load
-from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -101,7 +100,7 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-        exported_module = export(MyModule(), (input,))
+        exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
@@ -145,7 +144,7 @@ class TestSerialize(TestCase):
         exported_module = export(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
-        )
+        ).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
@@ -170,7 +169,7 @@ class TestSerialize(TestCase):
             return torch.searchsorted(x, values, side="right", right=True)
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export(f, (x,))
+        exported_module = export(f, (x,)).run_decompositions()
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
@@ -412,7 +411,7 @@ class TestDeserialize(TestCase):
     def test_constraints(self):
         def f(x, y):
             n = x.item()
-            constrain_as_size(n, min=2)
+            torch._constrain_as_size(n, min=2)
             return y.sum() + torch.ones(n, 5).sum()
 
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))

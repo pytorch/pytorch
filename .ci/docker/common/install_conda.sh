@@ -54,23 +54,13 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
     conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS}
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   else
-    # Install `typing-extensions` for 3.7
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} typing-extensions
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   fi
 
-  # This is only supported in 3.8 upward
-  if [ "$MINOR_PYTHON_VERSION" -gt "7" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    # and libpython-static for torch deploy
-    conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
-  fi
+  # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+  # and libpython-static for torch deploy
+  conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
 
   # Use conda cmake in some cases. Conda cmake will be newer than our supported
   # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
@@ -89,13 +79,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
-  # Update scikit-learn to a python-3.8 compatible version
-  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
-    pip_install -U scikit-learn
-  else
-    # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
-    pip_install scikit-learn==0.20.3
-  fi
+  pip_install -U scikit-learn
 
   if [ -n "$DOCS" ]; then
     apt-get update
