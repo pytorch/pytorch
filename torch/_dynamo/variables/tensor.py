@@ -898,7 +898,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return UserDefinedClassVariable(self.subclass_type)
 
     def global_class_name(self):
-        return f"__subclass_{self.subclass_type.__name__}"
+        return f"__subclass_{self.subclass_type.__name__}_{id(self.subclass_type)}"
 
     def call_torch_function(self, tx, fn, types, args, kwargs):
         from .torch_function import build_torch_function_var, call_torch_function
