@@ -639,13 +639,6 @@ class GraphLowering(torch.fx.Interpreter):
                 e.__traceback__
             ) from None
 
-    @staticmethod
-    def can_inline_constant(t: torch.Tensor) -> bool:
-        """
-        True if this is a small constant attr that will be inlined.
-        """
-        return len(t.shape) == 1 and t.shape[0] <= 8
-
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
@@ -656,7 +649,7 @@ class GraphLowering(torch.fx.Interpreter):
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
-            if self.can_inline_constant(value):
+            if len(value.shape) == 1 and value.shape[0] <= 8:
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
@@ -974,12 +967,13 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = self.codegen()
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
-        mod = PyCodeCache.load_by_key_path(
-            key, path, linemap=linemap, attrs=self.constants
-        )
+        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap
+
+        for name, value in self.constants.items():
+            setattr(mod, name, value)
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
