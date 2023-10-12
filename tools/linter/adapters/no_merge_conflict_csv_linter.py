@@ -48,7 +48,7 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
         path=filename,
         line=None,
         char=None,
-        code="UFMT",
+        code="MERGE_CONFLICTLESS_CSV",
         severity=LintSeverity.ADVICE,
         name="command-failed",
         original=None,
