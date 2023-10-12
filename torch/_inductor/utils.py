@@ -256,6 +256,14 @@ def convert_shape_to_symint(
     ]
 
 
+def is_view(op: torch._ops.OpOverload):
+    """
+    Does this op overload have aliasing
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    return any(a.alias_info is not None for a in op._schema.arguments)
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
