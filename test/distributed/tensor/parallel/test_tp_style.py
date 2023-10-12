@@ -29,11 +29,14 @@ class TensorParallelStyleTest(DTensorTestBase):
         return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
 
     def _1d_input_func_check(
-        self, input_local_tensor, expected_local_tensor, func, tensor_input_only=False
+        self,
+        input_local_tensor,
+        expected_local_tensor,
+        func,
+        tensor_input_only=False,
+        error_msgs="device_mesh is not passed nor can be inferred",
     ) -> None:
-        with self.assertRaisesRegex(
-            RuntimeError, "No device mesh is currently active!"
-        ):
+        with self.assertRaisesRegex(RuntimeError, error_msgs):
             dtensor = func(input_local_tensor)
 
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -202,7 +205,12 @@ class TensorParallelStyleTest(DTensorTestBase):
     def test_rowwise_parallel_style(self):
         tensor = torch.rand(8, 16, device=self.device_type)
         rs = RowwiseParallel()
-        self._1d_input_func_check(tensor, tensor, rs._prepare_input)
+        self._1d_input_func_check(
+            tensor,
+            tensor,
+            rs._prepare_input,
+            error_msgs="No device mesh is currently active!",
+        )
         # TODO: change output test
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_output, [Shard(0)]
@@ -223,7 +231,12 @@ class TensorParallelStyleTest(DTensorTestBase):
     def test_colwise_parallel_style(self):
         tensor = torch.rand(8, 16, device=self.device_type)
         cs = ColwiseParallel()
-        self._1d_input_func_check(tensor, tensor, cs._prepare_input)
+        self._1d_input_func_check(
+            tensor,
+            tensor,
+            cs._prepare_input,
+            error_msgs="No device mesh is currently active!",
+        )
         output, dtensor, device_mesh = self._test_prepare_output(
             cs._prepare_output, [Shard(-1)]
         )
