@@ -17,21 +17,26 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     OutputSpecType,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
-from torch.utils._pytree import tree_flatten, tree_unflatten
 
+try:
+    from torch.utils._cxx_pytree import tree_flatten, tree_unflatten
+except ImportError:
+    from torch.utils._pytree import (  # type: ignore[assignment]
+        tree_flatten,
+        tree_unflatten,
+    )
 
-def _is_random_op(op):
-    aten = torch.ops.aten
-    random_ops = [
-        aten.native_dropout.default,
-        aten.normal_.default,
-        aten.uniform_.default,
-    ]
-    return op in random_ops
+aten = torch.ops.aten
+
+_random_ops = {
+    aten.native_dropout.default,
+    aten.normal_.default,
+    aten.uniform_.default,
+}
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
@@ -150,10 +155,23 @@ def _operator_dispatch(
             else:
                 mesh = arg.device_mesh
         elif isinstance(arg, torch.Tensor):
-            raise RuntimeError(
-                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                " torch.Tensor to DTensor before calling distributed operators!"
-            )
+            if arg.ndim == 0 and mesh is not None:
+                # scalar tensor can be safely treated as replicated
+                args_schema.append(
+                    DTensorSpec(
+                        mesh,
+                        (Replicate(),) * mesh.ndim,
+                        tensor_meta=TensorMeta(
+                            shape=arg.shape, stride=arg.stride(), dtype=arg.dtype
+                        ),
+                    )
+                )
+                local_args.append(arg)
+            else:
+                raise RuntimeError(
+                    f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                    " torch.Tensor to DTensor before calling distributed operators!"
+                )
         else:
             args_schema.append(arg)
             local_args.append(arg)
@@ -258,7 +276,7 @@ def _operator_dispatch(
 
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-        if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
+        if op_call in _random_ops and is_rng_supported_mesh(mesh):
             if not random._rng_tracker:
                 raise RuntimeError(
                     "A CudaRNGStateTracker instance must be instantiated "
@@ -276,7 +294,7 @@ def _operator_dispatch(
 
     # communicate the result to all ranks for some operators that return scalar value
     if output_sharding.output_spec is None:
-        if op_call == torch.ops.aten.equal.default:
+        if op_call == aten.equal.default:
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
             obj_list = list(filter(lambda x: x is not None, obj_list))

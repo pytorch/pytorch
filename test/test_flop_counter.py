@@ -155,6 +155,17 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
+        def count(*args, out):
+            return out.numel()
+        count._get_raw = True
+
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})
+        with mode:
+            a = T(4, 5)
+            a + a
+
+        self.assertExpectedInline(get_total_flops(mode), """20""")
+
     def test_noop(self):
         mode = FlopCounterMode()
         with mode:

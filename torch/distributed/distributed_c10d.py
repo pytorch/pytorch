@@ -965,6 +965,8 @@ def _get_default_store():
 
 def _update_default_pg(pg):
     _world.default_pg = pg
+    rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
+    torch._C._distributed_c10d._set_global_rank(rank)
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     if group is None:
@@ -3935,7 +3937,7 @@ def _new_group_with_tag(
         for rank in ranks:
             if rank < 0 or rank >= global_world_size:
                 raise ValueError(
-                    "The new group's rank should be within the "
+                    "The new group's rank should be within "
                     "the world_size set by init_process_group"
                 )
         if global_rank in ranks:

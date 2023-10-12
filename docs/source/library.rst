@@ -1,5 +1,6 @@
 torch.library
 ===================================
+.. py:module:: torch.library
 
 Python operator registration API provides capabilities for extending PyTorch's core library
 of operators with user defined operators. Currently, this can be done in two ways:
