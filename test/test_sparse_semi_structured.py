@@ -269,7 +269,8 @@ class TestSparseSemiStructured(TestCase):
         ):
             sparse_result = torch.mm(A, B_sparse)
 
-    def test_cslt_sparse_mm_int8_in_fp16_out(self, device):
+    @parametrize("dense_input_shape", [(128, 128)])
+    def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
         """
         Test sparse mam with int8 input with fp16 output for cuSPARSELt
         """
@@ -278,7 +279,7 @@ class TestSparseSemiStructured(TestCase):
             A = rand_sparse_semi_structured_mask(128, 256, dtype=torch.int8)
             A_sparse = to_sparse_semi_structured(A)
 
-            B = torch.rand((128, 256), device=A_sparse.device).to(torch.int8)
+            B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
 
             dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
             sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
@@ -293,7 +294,7 @@ class TestSparseSemiStructured(TestCase):
             A = rand_sparse_semi_structured_mask(128, 256, dtype=torch.int8)
             A_sparse = to_sparse_semi_structured(A)
 
-            B = torch.rand((128, 256), device=A_sparse.device).to(torch.int8)
+            B = torch.rand((128, 128), device=A_sparse.device).to(torch.int8)
 
             dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.int32)
             sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.int32)
