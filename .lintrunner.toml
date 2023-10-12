@@ -2663,3 +2663,16 @@ init_command = [
     'ruff==0.0.291',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'MERGE_CONFLICTLESS_CSV'
+include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
+command = [
+    'python3',
+    'tools/linter/adapters/no_merge_conflict_csv_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+is_formatter = true
+
+
