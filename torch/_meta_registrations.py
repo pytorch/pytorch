@@ -2816,9 +2816,12 @@ def meta_index_Tensor(self, indices):
         lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})",
     )
     # expand_outplace
-    import torch._refs as refs  # avoid import cycle in mypy
 
-    indices = list(refs._maybe_broadcast(*indices))
+    # Computes common shape
+    common_shape = _broadcast_shapes(
+        *(t.shape if isinstance(t, TensorLike) else None for t in indices)
+    )
+
     # add missing null tensors
     while len(indices) < self.ndim:
         indices.append(None)
@@ -2876,7 +2879,7 @@ def meta_index_Tensor(self, indices):
             else:
                 before_shape.append(self.shape[dim])
         else:
-            replacement_shape = list(index.shape)
+            replacement_shape = common_shape
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
@@ -3654,7 +3657,7 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
     # It is possible for index_put to contain scalars in the set of indices so these
     # are handled here since aten::index is the handler for advanced tensor indexing.
     # Basic indexing is handled elsewhere.
-    indices_without_scalars: List[Optional[Tensor]] = []
+    indices_without_scalars: List[Union[slice, Optional[Tensor]]] = []
     expected_values_shape = self
     for i, index in enumerate(indices):
         if index is not None:
@@ -3674,12 +3677,14 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
         else:
             indices_without_scalars.append(slice(None))
 
-    import torch._refs as refs  # avoid import cycle in mypy
 
     if len(indices_without_scalars) != 0:
         expected_values_shape = expected_values_shape[indices_without_scalars]
 
-    list(refs._maybe_broadcast(expected_values_shape, values))
+    # Computes common shape
+    common_shape = _broadcast_shapes(
+        *(t.shape if isinstance(t, TensorLike) else None for t in indices)
+    )
 
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
