@@ -179,6 +179,7 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose3d': [torch.float16],
         # Segfaults
         'all': [torch.float16, torch.float32],
+        'any': [torch.float16, torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
