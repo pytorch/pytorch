@@ -125,12 +125,15 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         Step 4: We schedule comm N + 1.
         Repeat this for subsequent comm nodes.
     """
-    result = []
+    final_order = []
 
     comm_nodes = []
     for snode in snodes:
         if isinstance(snode.node, ir.CollectiveKernel):
             comm_nodes.append(snode)
+    if len(comm_nodes) == 0:
+        # if there is no comm nodes, return the current order
+        return snodes
 
     comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
     comm_descendants = {node: get_descendants(node) for node in comm_nodes}
@@ -153,7 +156,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         assert snode in ready_to_schedule_nodes
         ready_to_schedule_nodes.remove(snode)
         unscheduled_nodes.remove(snode)
-        result.append(snode)
+        final_order.append(snode)
         for user in tuple_sorted(snode.node_users):
             if user in indeg:
                 indeg[user] -= 1
@@ -181,6 +184,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
 
     # First, schedule all compute nodes that are required by first comm node,
     # as well as the first comm node itself.
+    assert len(comm_nodes) > 0
     schedule_nodes(
         list(comm_ancestors[comm_nodes[0]]) + [comm_nodes[0]],
     )
@@ -259,7 +263,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
             rolled_over_compute_cost = rollable_compute_cost
 
     schedule_nodes(unscheduled_nodes)
-    return result
+    return final_order
 
 
 def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
