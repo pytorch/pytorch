@@ -14,10 +14,10 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
-    load_state_dict,
+    get_state_dict,
     PG,
+    set_state_dict,
     STATE,
-    state_dict,
     StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -99,7 +99,7 @@ class TestFineTuning(FSDPTest):
             optim.zero_grad()
 
         # Save state_dict
-        model_state_dict, optim_state_dict = state_dict(model, optimizers=optim)
+        model_state_dict, optim_state_dict = get_state_dict(model, optimizers=optim)
         saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
         dist_cp.save_state_dict(
             state_dict=saved_state_dict,
@@ -115,14 +115,12 @@ class TestFineTuning(FSDPTest):
         # Simulate that the fine tuning restart after 5 iterations
         for i in range(2):
             # Load pretrain modeul checkpoint
-            pretrain_state_dict, _ = state_dict(
-                model, model_only=True, submodules={model.pretrain}
-            )
+            pretrain_state_dict, _ = get_state_dict(model, submodules={model.pretrain})
             dist_cp.load_state_dict(
                 {"model": pretrain_state_dict},
                 storage_reader=dist_cp.FileSystemReader(pretrain_dir),
             )
-            load_state_dict(
+            set_state_dict(
                 model,
                 model_state_dict={model.pretrain: pretrain_state_dict},
                 options=StateDictOptions(strict=False),
@@ -130,7 +128,7 @@ class TestFineTuning(FSDPTest):
 
             try:
                 # Load training submodules checkpoint
-                model_state_dict, optim_state_dict = state_dict(
+                model_state_dict, optim_state_dict = get_state_dict(
                     model,
                     optimizers=optim,
                     options=StateDictOptions(ignore_frozen_params=True),
@@ -139,7 +137,7 @@ class TestFineTuning(FSDPTest):
                     {"model": model_state_dict, "optim": optim_state_dict},
                     storage_reader=dist_cp.FileSystemReader(pretrain_dir),
                 )
-                load_state_dict(
+                set_state_dict(
                     model,
                     optimizers=optim,
                     model_state_dict=model_state_dict,
@@ -160,7 +158,7 @@ class TestFineTuning(FSDPTest):
                 optim.zero_grad()
 
             # Save state_dict
-            model_state_dict, optim_state_dict = state_dict(
+            model_state_dict, optim_state_dict = get_state_dict(
                 model,
                 optimizers=optim,
                 options=StateDictOptions(ignore_frozen_params=True),
