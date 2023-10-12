@@ -114,8 +114,18 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     return None
 
 
+def extract_kwargs(arg):
+    kwargs = {
+        "offsets": arg.offsets(),
+        "ragged_size": arg._size[arg._ragged_idx],
+    }
+    return kwargs
+
+
 def jagged_unary_pointwise(func, *args, **kwargs):
-    return NestedTensor(func(args[0]._values, *args[1:], **kwargs), args[0]._offsets)
+    return NestedTensor(
+        func(args[0]._values, *args[1:], **kwargs), **extract_kwargs(args[0])
+    )
 
 
 def jagged_binary_pointwise(func, *args, **kwargs):
@@ -134,8 +144,8 @@ def jagged_binary_pointwise(func, *args, **kwargs):
             for a_comp, b_comp in zip(a.unbind(), b.unbind()):
                 outputs.append(func(a_comp, b_comp, **kwargs))
             new_values = torch.cat(outputs, dim=0)
-            return NestedTensor(new_values, a._offsets)
-    return NestedTensor(func(a._values, b, **kwargs), a._offsets)
+            return NestedTensor(new_values, **extract_kwargs(a))
+    return NestedTensor(func(a._values, b, **kwargs), **extract_kwargs(a))
 
 
 @register_jagged_func(
@@ -203,7 +213,7 @@ def linear_default(func, *args, **kwargs):
     new_values = torch.mm(inp._values, weight)
     if bias is not None:
         new_values += bias
-    return NestedTensor(new_values, inp._offsets)
+    return NestedTensor(new_values, **extract_kwargs(inp))
 
 
 @register_jagged_func(
@@ -220,7 +230,9 @@ def linear_backward_default(func, *args, **kwargs):
     weight = new_kwargs.pop("weight")
 
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
-    ds = NestedTensor(torch.mm(grad_output._values, weight.T), grad_output._offsets)
+    ds = NestedTensor(
+        torch.mm(grad_output._values, weight.T), **extract_kwargs(grad_output)
+    )
     dw = torch.mm(inp._values.T, grad_output._values)
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
@@ -235,9 +247,8 @@ def to_copy_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     new_values = func(inp._values, **new_kwargs)
-    # Purposefully keep offsets on their previous device. TODO: Figure out if this is correct!
-    new_offsets = inp._offsets  # .to(new_values.device)
-    return NestedTensor(new_values, new_offsets)
+    # NB: Purposefully keep offsets on the old device.
+    return NestedTensor(new_values, **extract_kwargs(inp))
 
 
 register_jagged_func(
@@ -266,7 +277,7 @@ def prod_dim_int(func, *args, **kwargs):
     if new_kwargs["dim"] == 0:
         raise RuntimeError("prod(): not supported for NestedTensor on dim=0")
 
-    return NestedTensor(func(inp._values, **new_kwargs), args[0]._offsets)
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
@@ -305,7 +316,7 @@ def unsqueeze_default(func, *args, **kwargs):
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
     new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape) + 1, dim, "unsqueeze")
-    return NestedTensor(func(values, **new_kwargs), inp._offsets)
+    return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
@@ -327,7 +338,7 @@ def cat_default(func, *args, **kwargs):
     new_kwargs["dim"] = _wrap_jagged_dim(len(first.shape), dim, "cat")
 
     return NestedTensor(
-        func([t._values for t in tensors], **new_kwargs), tensors[0]._offsets
+        func([t._values for t in tensors], **new_kwargs), **extract_kwargs(tensors[0])
     )
 
 
@@ -343,7 +354,7 @@ def matmul_default(func, *args, **kwargs):
         raise RuntimeError(
             "matmul(): only supported input pattern is (nested, non-nested)"
         )
-    return NestedTensor(func(inp._values, other, **new_kwargs), inp._offsets)
+    return NestedTensor(func(inp._values, other, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(
@@ -362,7 +373,7 @@ def expand_default(func, *args, **kwargs):
         raise RuntimeError("expand(): cannot expand if ragged dims don't match")
 
     expand_arg = [-1, *size[2:]]
-    return NestedTensor(func(inp._values, expand_arg), inp._offsets)
+    return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
 
 @register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
@@ -374,7 +385,7 @@ def expand_as_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    return NestedTensor(func(inp, other._values), other._offsets)
+    return NestedTensor(func(inp, other._values), **extract_kwargs(other))
 
 
 @register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
@@ -391,7 +402,7 @@ def where_self(func, *args, **kwargs):
 
     return NestedTensor(
         func(condition._values, inp._values, other._values, **new_kwargs),
-        condition._offsets,
+        **extract_kwargs(condition),
     )
 
 
@@ -403,7 +414,7 @@ def pin_memory_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    return NestedTensor(func(inp._values, **new_kwargs), inp._offsets)
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(torch.ops.aten.is_pinned.default, "self: jt, device: any?")

@@ -1494,17 +1494,27 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    def _ensure_at_least(a, thresh):
-        # sym_max() isn't supported for SingletonSymNode
-        if hasattr(a, "node") and a.node.singleton_int() is not None:
-            return a
-        return sym_max(a, thresh)
+    # TODO: Move this somewhere central?
+    def _is_singleton(s):
+        # check for SingletonSymNode
+        if not isinstance(s, torch.SymInt):
+            return False
+        if s.node.singleton_int() is not None:
+            return True
+
+        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
+        return (
+            s.node.is_symbolic()
+            and s.node.hint is not None
+            and isinstance(s.node.hint, torch.SymInt)
+            and s.node.hint.node.singleton_int() is not None
+        )
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= _ensure_at_least(l, 1)
+        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
