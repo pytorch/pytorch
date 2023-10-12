@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 from unittest.mock import patch
 
 import sympy
@@ -10,7 +10,7 @@ from torch._inductor.utils import IndentedBuffer, sympy_str
 
 def _arg_str(a):
     if isinstance(a, sympy.Expr):
-        return "sympy_expr('" + sympy_str(a) + "')"
+        return "@sympy_expr('" + sympy_str(a) + "')"
     return str(a)
 
 
@@ -86,7 +86,11 @@ class CutlassEVTEpilogueTypeFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 formatter.aliases[node.name] = result
-            return formatter.getvalue(result)
+            res = formatter.getvalue(result)
+            if "@sympy_expr" in res:
+                raise NotImplementedError("sympy / indexing expressions not yet supported in EVT fusion")
+            else:
+                return res
 
     def __getattr__(self, name):
         """
@@ -103,7 +107,8 @@ class CutlassEVTEpilogueTypeFormatter:
             # replace line with a new variable name
             self.output.writeline(f"using {varname} = {line};")
             return varname
-
+        if name.startswith("_"):
+            raise NotImplementedError(name)
         if hasattr(self, f"_op_{name}"):
             return inner
         else:
@@ -137,11 +142,16 @@ class CutlassEVTEpilogueTypeFormatter:
 
     def _op_to_dtype(self, a, *args, **kwargs):
         # no-op in our case, since we convert to the output dtype at the end and convert everything to the accumulator
-        # dtype
+        # dtype.
+        # Is is asserted ( and ascertained during can_fuse decision ) that the dtype remains compatible
+        # throughout the fusion chain.
         return a  # noqa: B950
 
     def _op_mul(self, a, b):
         return self._cutlass_binary_functional_op("multiplies", a, b)
+
+    def _op_div(self, a, b):
+        return self._cutlass_binary_functional_op("divides", a, b)
 
     def _op_ge(self, a, b):
         return self._cutlass_binary_functional_op("greater_equal", a, b)
@@ -166,12 +176,11 @@ class CutlassEVTEpilogueTypeFormatter:
         raise NotImplementedError()
 
     # Add more ops here...
-    def getvalue(self, result):
+    def getvalue(self, result) -> str:
         # Return final result
         dtype_converted_expr = self._convert_to_output_dtype(
             f"EVT_expr_{self.var_counter}"
         )
-
         self.output.writeline(f"using {self.evt_type_name} = {dtype_converted_expr};")
         return self.output.getvalue()
 
@@ -194,17 +203,26 @@ class CutlassEVTEpilogueArgumentFormatter:
 
     """
 
-    def __init__(self, accumulator_node_name):
-        self.accumulator_node_name = accumulator_node_name
-        self.output = IndentedBuffer(0)
-        self.var_counter = 0
-        self.aliases = dict()
+    def __init__(self, accumulator_node_name : str):
+        """
+
+        Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
+        Use the CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string static method.
+
+        Args:
+            accumulator_node_name (str): The name of the accumulator node which should contain
+                                          the Matmul result before fusion according to the IR graph.
+        """
+        self.accumulator_node_name : str = accumulator_node_name #
+        self.output : IndentedBuffer = IndentedBuffer(0) # The output buffer for codegen
+        self.var_counter : int = 0 # used to generate variable names, incremented for each new variable
+        self.aliases : Dict[str,str] = dict() # Aliases for subexpression functors
 
     @staticmethod
     def ir_to_evt_argument_string(
         template_output_node_name: str,
         epilogue_nodes: List[IRNode],
-    ):
+    ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
             template_output_node_name,
         )
@@ -213,18 +231,18 @@ class CutlassEVTEpilogueArgumentFormatter:
             FlexibleLayout, "allow_indexing", True
         ):
             for node in epilogue_nodes:
-                if isinstance(node, ComputedBuffer):
-                    pnode = node.data
-                else:
-                    raise RuntimeError(
-                        "Epilogue nodes must be Pointwise nodes, wrapped in a named ComputedBuffer"
-                    )
+                assert isinstance(node, ComputedBuffer)
+                pnode = node.data
                 assert isinstance(pnode, Pointwise)
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 formatter.aliases[node.name] = result
-            return formatter.getvalue(result)
+            res : str = formatter.getvalue(result)
+            if "@sympy_expr" in res:
+                raise NotImplementedError("sympy / indexing expressions not yet supported in EVT fusion")
+            else:
+                return res
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -257,10 +275,13 @@ class CutlassEVTEpilogueArgumentFormatter:
             raise NotImplementedError(f"Unsupported dtype for constant: {dtype}")
 
     def _cutlass_binary_functional_op(self, op, a, b):
-        return "{" + str(a) + ", " + str(b) + "}"
+        return f"{{ /*{op}: */ {a}, {b} }}"
 
     def _op_mul(self, a, b):
         return self._cutlass_binary_functional_op("multiplies", a, b)
+
+    def _op_div(self, a, b):
+        return self._cutlass_binary_functional_op("divides", a, b)
 
     def _op_ge(self, a, b):
         return self._cutlass_binary_functional_op("greater_equal", a, b)
@@ -281,10 +302,9 @@ class CutlassEVTEpilogueArgumentFormatter:
         const_zero = self._op_constant(0.0, "torch.float32")
         return "{" + str(a) + ", " + const_zero + "}"
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise NotImplementedError()
-
     def _op_to_dtype(self, a, dtype, src_dtype=None):
+        # Is is asserted ( and ascertained during can_fuse decision ) that the dtype remains compatible
+        # throughout the fusion chain.
         assert dtype in (
             "torch.float32",
             "torch.float16",
@@ -296,5 +316,8 @@ class CutlassEVTEpilogueArgumentFormatter:
         ), f"Unsupported source dtype: {src_dtype}"
         return a
 
-    def getvalue(self, result):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        raise NotImplementedError()
+
+    def getvalue(self, result) -> str:
         return "{" + str(result) + "}"

@@ -1,5 +1,5 @@
 import logging
-from typing import cast, List
+from typing import cast, List, Callable
 
 from ... import config, ir
 from ...codecache import code_hash, get_path
@@ -96,15 +96,14 @@ class CUDASchedulerNode(SchedulerNode):
     which may alllow epilogue fusions.
     """
 
-    def __init__(self, scheduler: Scheduler, node: CUDATemplateBuffer, group_fn):
+    def __init__(self, scheduler: Scheduler, node: CUDATemplateBuffer, group_fn : Callable):
         """
-
         Initializes a new instance of the CUDASchedulerNode class.
-
-        :param scheduler: The Scheduler object that this node belongs to.
-        :param node: The CUDATemplateBuffer object representing the CUDA kernel, fused IRNode epilogues
+        Args:
+            scheduler: The Scheduler object that this node belongs to.
+            node: The CUDATemplateBuffer object representing the CUDA kernel, fused IRNode epilogues
                     and its inputs and outputs.
-        :param group_fn: A function that returns a group key which determines whether two nodes may be considered
+            group_fn: A function that returns a group key which determines whether two nodes may be considered
                          for fusion
         """
         assert isinstance(node, CUDATemplateBuffer)
@@ -129,8 +128,10 @@ class CUDASchedulerNode(SchedulerNode):
         assert self.can_fuse_epilogue(other_node)
         return FusedCUDASchedulerNode(self, self.scheduler, [other_node])  # type: ignore[arg-type]
 
+_cuda_epilogue_fusion_counter : int = 0 # Used by unit tests to verify fusions are happening / not happening
 
 class FusedCUDASchedulerNode(FusedSchedulerNode):
+
     def __init__(
         self,
         cuda_scheduler_node: CUDASchedulerNode,
@@ -148,6 +149,8 @@ class FusedCUDASchedulerNode(FusedSchedulerNode):
             scheduler (Scheduler): The overall scheduler object.
             epilogue_scheduler_nodes (List[SchedulerNode]): A list of scheduler nodes that are fused as epilogue.
         """
+        global _cuda_epilogue_fusion_counter
+        _cuda_epilogue_fusion_counter += 1
         assert isinstance(cuda_scheduler_node, CUDASchedulerNode)
         assert (
             cuda_scheduler_node not in epilogue_scheduler_nodes
@@ -155,6 +158,7 @@ class FusedCUDASchedulerNode(FusedSchedulerNode):
         assert cuda_scheduler_node.is_template()
         super().__init__(scheduler, [cuda_scheduler_node] + epilogue_scheduler_nodes)
         self.template_node = cuda_scheduler_node
+
 
     def get_cuda_scheduler_node(self) -> CUDASchedulerNode:
         """

@@ -29,7 +29,7 @@ class CUDATemplate(KernelTemplate):
     ):
         """
 
-        Baseclass for CUDA/CUTLASS templates, derived from KernelTemplate. Not to be instantiated directly.
+        Baseclass for CUDA C++ Templates, derived from KernelTemplate. Not to be instantiated directly.
 
         Args:
             name (str): The name of the CUDATemplate object.
@@ -46,7 +46,6 @@ class CUDATemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
-        op: Any = None,  # type: ignore[name-defined]
         **kwargs,
     ) -> CUDATemplateCaller:
         """
@@ -66,7 +65,7 @@ class CUDATemplate(KernelTemplate):
         ), CUDATemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
-            code = self.render(kernel=kernel, op=op, **kwargs)
+            code = self.render(kernel=kernel, **kwargs)
             _, call_args, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
@@ -104,8 +103,8 @@ class CUDATemplate(KernelTemplate):
         )
         cuda_template_buffer = CUDATemplateBuffer(
             template=self,
-            op=op,
             workspace_size=lambda: bmreq.workspace_size,  # Not known yet, determined via CUDABenchmarkRequest
+            **kwargs,
         )
         return CUDATemplateCaller(
             kernel_hash_name,

@@ -601,7 +601,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             template_output_node_name = template_node.name
         else:
             template_output_node_name = None
-        if epilogue_nodes is not None and len(epilogue_nodes) > 1:
+        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
             assert self.can_fuse_epilogue and CUTLASSGemmTemplate.supports_evt(
                 op
             ), "op does not support EVT epilogue fusion"
