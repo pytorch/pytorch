@@ -1178,14 +1178,6 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __copy__(self):
-        breakpoint()
-        pass
-
-    def __deepcopy__(self, memo):
-        breakpoint()
-        pass
-
     def __init__(
         self, output_graph, parent=None, export_root=False, source_target=None
     ):
@@ -1505,7 +1497,6 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        breakpoint()
         assert (
             self.parent is not None
         ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
