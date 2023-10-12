@@ -1,4 +1,4 @@
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -124,7 +124,9 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
+constexpr int32_t kWarpSize = 32;
+
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
 // f16 vector types
 struct __align__(2) f16x1 {
   __half vals[1];
@@ -188,8 +190,6 @@ template <typename T, int N>
 struct __align__(sizeof(T) * N) VectorType {
   T vals[N];
 };
-
-constexpr int32_t kWarpSize = 32;
 
 // from
 // https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h
@@ -834,7 +834,7 @@ torch::Tensor _weight_int4pack_mm_cuda(
       {m, n},
       torch::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE)          \
   do {                                                                        \
     using ACLayout = ALayout_RM<K_TILES_PER_WARP, REDUCE_TYPE>;               \
@@ -993,7 +993,7 @@ torch::Tensor _convert_weight_to_int4pack_cuda(
       {nTiles, kSuperTiles, 32, innerKTiles / 2},
       torch::TensorOptions().dtype(torch::kInt32).device(in.device()));
 
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
   dim3 grid(kSuperTiles, nTiles);
 
   if (innerKTiles == 2) {
