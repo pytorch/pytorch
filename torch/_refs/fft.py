@@ -34,7 +34,7 @@ __all__ = [
     "ifftshift",
 ]
 
-NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
+NormType = Union[None, Literal["forward", "backward", "ortho"]]
 _NORM_VALUES = {None, "forward", "backward", "ortho"}
 aten = torch._ops.ops.aten
 

@@ -382,7 +382,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 #     x_view = generate_x_view(base)
 #     x_updated = x.mul(2)
 #     x_view_updated = x_updated.view(-1)
-#     out = x_updated * x_view_udpated
+#     out = x_updated * x_view_updated
 #     return x_updated, out
 #
 # # The calling convention change from (aliases) -> (base) happens
@@ -664,7 +664,7 @@ class ViewAndMutationMeta:
         # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
         self.num_forward_returns = self.num_mutated_inputs + self.num_outputs + self.num_intermediate_bases
         # In case of functionalization of rng ops, the fw_module returns one
-        # additinal output for rng offset. This rng offset is used right
+        # additional output for rng offset. This rng offset is used right
         # away to advance the rng state, and is not passed on to the raw
         # outputs. However, we need to know the exact boundary to identify
         # which tensors to be saved for the bwd graph.  num_forward captures
@@ -1053,7 +1053,7 @@ def run_functionalized_fw_and_collect_metadata(
                 requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
             ))
 
-        # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediiate,
+        # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
         # We need to make sure our graph returns the _base as a graph output, and we manually recreate the view
         # to return to the user. Why? The backend compiler is free to (incorrectly) not set requires_grad
         # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
@@ -1173,7 +1173,7 @@ def run_functionalized_fw_and_collect_metadata(
                 and not o.requires_grad
             ):
                 assert len(outs_with_identical_metadata_that_require_grad) > 0
-                # In theory we could use any of these tensors to regenerat the aliased outputs from,
+                # In theory we could use any of these tensors to regenerate the aliased outputs from,
                 # since they all alias each other and have identical metatadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
@@ -2222,7 +2222,7 @@ def merge_view_inputs(
             # to have incorrect sizes.
             example_idx = aliased_input_indices[0]
             example_alias = fwd_inputs[example_idx]
-            # Note that this function is re-used at both trace time and rutnime.
+            # Note that this function is re-used at both trace time and runtime.
             # At trace time, we're under a FakeMode so synthetic_base becomes a FakeTensor.
             synthetic_base = torch.empty((0,), dtype=example_alias.dtype, device=example_alias.device)
             # We don't actually have a convenient way of going from storage -> tensor,
@@ -3188,7 +3188,7 @@ def wrap_tensor_subclasses(
 
     # Note: [Partitioner handling for Subclasses, Part 2]
     # At the beginning of AOTAutograd, we collect metadata on the inputs and outputs of the user fw,
-    # to figure out which inputs/outputs are subclasses, and how to recontruct the subclasses after flattening them.
+    # to figure out which inputs/outputs are subclasses, and how to reconstruct the subclasses after flattening them.
     #
     # When this function is called at runtime in the forward,
     # we have been passed a list of (flattened) dense-tensor fw-outs, and need to reconstruct any subclass fw outs.
@@ -3459,7 +3459,7 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
 
-    # Redudant with the check above, but worth having in case tracing introduced
+    # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
@@ -4288,7 +4288,7 @@ class PytreeThunk:
 
 
 def create_functional_call(mod, params_spec, params_len):
-    # Redudant with dynamo, but worth having in case this gets invoked elsewhere.
+    # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
@@ -4308,7 +4308,7 @@ def create_functional_call(mod, params_spec, params_len):
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "
-                "pytree processing of the ouputs. Please change the module to "
+                "pytree processing of the outputs. Please change the module to "
                 "have tuple outputs or use aot_module instead."
             )
         return out
@@ -4906,7 +4906,7 @@ def aot_export_joint_simple(
     This function makes a high-level "no calling convention changes" guarantee:
     - If no inputs require grad (so we export an inference graph),
       there are *no* calling convention change between the exported graph, and "func".
-    - If at least one input requires grad (so we trace out and expot a joint fw-bw graph),
+    - If at least one input requires grad (so we trace out and export a joint fw-bw graph),
       Then if you were partition the graph into a separate forward and backward graph,
       The forward graph will have no calling convention changes compared to "func".
 
