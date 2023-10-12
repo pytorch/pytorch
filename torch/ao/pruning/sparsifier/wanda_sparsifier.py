@@ -10,12 +10,13 @@ from torch.ao.quantization.quantize import _remove_qconfig
 
 class PerChannelNormObserver(UniformQuantizationObserverBase):
     r"""
-    PerChannelNormObserver
     """
     def __init__(
         self,
         **kwargs
     ) -> None:
+        from pprint import pprint
+        pprint(kwargs)
         super().__init__(
             dtype=torch.quint8,
             qscheme=torch.per_channel_affine,
@@ -35,7 +36,7 @@ class PerChannelNormObserver(UniformQuantizationObserverBase):
 
         new_axis_list = [i for i in range(x.dim())]  # noqa: C416
         new_axis_list[0], new_axis_list[-1] = new_axis_list[-1], new_axis_list[0]
-
+        print(new_axis_list)
         y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
         norm = torch.norm(y, dim=1) ** 2
