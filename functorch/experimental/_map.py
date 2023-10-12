@@ -42,7 +42,8 @@ dummy_aot_config = AOTConfig(
     bw_compiler=None,
     partition_fn=None,
     decompositions={},
-    num_params_buffers=0,
+    num_params=0,
+    num_buffers=0,
     aot_id=0,
     keep_inference_input_mutations=False,
 )
