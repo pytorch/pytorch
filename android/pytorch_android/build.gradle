@@ -41,6 +41,7 @@ android {
                 println 'Build pytorch_jni'
                 exclude 'org/pytorch/LiteModuleLoader.java'
                 exclude 'org/pytorch/LiteNativePeer.java'
+                exclude 'org/pytorch/LitePyTorchAndroid.java'
               } else {
                 println 'Build pytorch_jni_lite'
               }

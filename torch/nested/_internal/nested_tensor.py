@@ -20,12 +20,36 @@ def get_tensor_id(tensor, *, coeff=1):
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
-    _size: Tuple[int, int, int]
-
+    # NOTE [ Singleton ints for ragged sizes and strides ]
+    #
+    # Jagged layout tensors are tensors that represent a n-dim tensor with a
+    # ragged dimension, but are backed by an (n-1)-dim tensor underneath, e.g.,
+    # a jagged tensor with outer shape [B, x, D] is represented internally by a
+    # tensor with shape [sum(x), D] where we introduce what we call a singleton
+    # (or skolem) denoted as "x" here (but sometimes denoted with "*" to
+    # represent the ragged dimension, and sum(x) represents the dim of the inner
+    # tensor or equivalently the sum of all the sizes of the constituent
+    # tensors' varying lengths.
+    #
+    # We also use singleton ints to represent the strides of this tensor.
+    # For example, a jagged tensor with shape [B, x, D] can be strided in two
+    # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
+    #
+    _size: Tuple[int, torch.SymInt, int]
+    _stride: Tuple[torch.SymInt, int, int]
+    # Indicates that the nth dimension is ragged
+    _ragged_idx: int
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, values, offsets, **kwargs):
+    def __new__(
+        cls,
+        values,
+        offsets,
+        *,
+        ragged_size=None,
+        **kwargs,
+    ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -44,14 +68,9 @@ class NestedTensor(torch.Tensor):
             False,
             ks,
         )
-        # TODO: why is values requires grad?
-        # if r.requires_grad:
-        #     raise ValueError(
-        #         "buffer should not require grad when constructing NestedTensor")
-        r._values = values.detach() if values.requires_grad else values
         return r
 
-    def __init__(self, values, offsets, **kwargs):
+    def __init__(self, values, offsets, *, ragged_size=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
@@ -59,12 +78,26 @@ class NestedTensor(torch.Tensor):
         assert not isinstance(values, NestedTensor)
         assert values.ndim == 2
 
-        # In a later PR, we'll need to accept an additional size argument
-        # to handle dynamic shapes.
-        ragged_dim = get_tensor_id(offsets, coeff=1)
+        if ragged_size is None:
+            # ragged_size needs to be explicitly passed during tracing (1) when
+            # we initially fakify the nested tensor, and (2) when we rewrap as
+            # we perform operations on fake nested tensors.
+            # Calling get_tensor_id won't work in those cases because we want
+            # the existing symbolic ragged_size to be propagated.
+            ragged_size = get_tensor_id(offsets, coeff=1)
         D = values.shape[1]
         B = offsets.shape[0] - 1
-        self._size = (B, ragged_dim, D)
+        # TODO: generalize for generalized raggedness
+        self._size = (B, ragged_size, D)
+        self._strides = (ragged_size * D, D, 1)
+        self._ragged_idx = 1
+
+        if values.requires_grad:
+            raise ValueError(
+                "NestedTensor values cannot require grad, please "
+                "detach before passing to NestedTensor constructor"
+            )
+        self._values = values
         self._offsets = offsets
         return
 
@@ -83,6 +116,26 @@ class NestedTensor(torch.Tensor):
             grad_fn_str = f", grad_fn={self.grad_fn}"
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
+    def __tensor_flatten__(self):
+        ctx = {
+            "requires_grad": self.requires_grad,
+            "ragged_size": self._size[self._ragged_idx],
+        }
+        return ["_values", "_offsets"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors: Dict, meta):
+        assert len(inner_tensors) == 2
+        values = inner_tensors["_values"]
+        offsets = inner_tensors["_offsets"]
+
+        return NestedTensor(
+            values,
+            offsets=offsets,
+            ragged_size=meta["ragged_size"],
+            requires_grad=meta["requires_grad"],
+        )
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -94,7 +147,7 @@ class NestedTensor(torch.Tensor):
         if fn is not None:
             return fn(*args, **kwargs)
 
-        raise NotImplementedError
+        raise NotImplementedError(func)
 
 
 # Not actually a view!
@@ -114,7 +167,7 @@ class ViewBufferFromNested(torch.autograd.Function):
 class ViewNestedFromBuffer(torch.autograd.Function):
     @staticmethod
     def forward(ctx, values: torch.Tensor, offsets: torch.Tensor):  # type: ignore[override]
-        return NestedTensor(values, offsets=offsets)
+        return NestedTensor(values.detach(), offsets=offsets)
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
