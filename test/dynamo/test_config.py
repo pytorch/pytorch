@@ -257,6 +257,28 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         f(dynamic=False, compile_count=10)  # recompile
         f(dynamic=True, compile_count=0)  # reuse first compile product
 
+    def test_cache_size_limit(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        key = "_ConfigTests___test_cache_size_limit_key"
+        try:
+            torch._dynamo.config._allowed_keys.add(key)
+            torch._dynamo.config._ConfigTests___test_cache_size_limit_key = -1
+            with torch._dynamo.config.patch(
+                {"cache_size_limit": 1, "accumulated_cache_size_limit": 10}
+            ):
+                for i in range(24):
+                    with torch._dynamo.config.patch({key: i % 12}):
+
+                        @torch._dynamo.optimize(cnt)
+                        def g(x):
+                            return x + 1
+
+                        g(torch.randn(1))
+            self.assertEqual(cnt.frame_count, 10)
+        finally:
+            if key in torch._dynamo.config._allowed_keys:
+                torch._dynamo.config._allowed_keys.remove(key)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
