@@ -22,7 +22,8 @@ class NCCLTestBase {
  public:
   NCCLTestBase(
       const std::string& path,
-      const std::chrono::milliseconds pgTimeout = kBackendDefaultTimeout)
+      const std::chrono::milliseconds pgTimeout =
+          c10d::kProcessGroupNCCLDefaultTimeout)
       : path_(path), pgTimeout_(pgTimeout) {}
 
   NCCLTestBase(NCCLTestBase&& other) {
@@ -56,7 +57,8 @@ class NCCLTest : public NCCLTestBase {
   NCCLTest(
       const std::string& path,
       int worldSize,
-      std::chrono::milliseconds pgTimeout = kBackendDefaultTimeout,
+      std::chrono::milliseconds pgTimeout =
+          c10d::kProcessGroupNCCLDefaultTimeout,
       int inputDim = 3)
       : NCCLTestBase(path, pgTimeout),
         numDevices_(cudaNumDevices()),
@@ -222,7 +224,11 @@ class AllreduceNCCLTest : public NCCLTest {
 class SparseAllreduceNCCLTest : public NCCLTest {
  public:
   SparseAllreduceNCCLTest(const std::string& path, int worldSize, int inputDim)
-      : NCCLTest(path, worldSize, kBackendDefaultTimeout, inputDim) {}
+      : NCCLTest(
+            path,
+            worldSize,
+            c10d::kProcessGroupNCCLDefaultTimeout,
+            inputDim) {}
 
   c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams

@@ -324,9 +324,6 @@ class TestTryMerge(TestCase):
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
-    @skip(
-        "Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218"
-    )
     def test_internal_changes(self, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
         pr = GitHubPR("pytorch", "pytorch", 110140)
