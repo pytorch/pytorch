@@ -16,7 +16,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
-from torch.distributed.fsdp.flat_param import FlatParameter
+from torch.distributed.fsdp._flat_param import FlatParameter
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (

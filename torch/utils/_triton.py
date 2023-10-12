@@ -1,17 +1,25 @@
 import functools
 
-import torch
+from torch._dynamo.device_interface import get_interface_for_device
 
-from torch._inductor.cuda_properties import get_device_capability
+
+@functools.lru_cache(None)
+def has_triton_package() -> bool:
+    try:
+        import triton
+
+        return triton is not None
+    except ImportError:
+        return False
 
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
+    def is_cuda_compatible_with_triton():
+        device_interface = get_interface_for_device("cuda")
+        return (
+            device_interface.is_available()
+            and device_interface.Worker.get_device_properties().major >= 7
+        )
 
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
+    return is_cuda_compatible_with_triton() and has_triton_package()

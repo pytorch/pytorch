@@ -18,6 +18,8 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.placement_types import TensorMeta
 
+aten = torch.ops.aten
+
 
 class ShardingPropagator:
     def __init__(self) -> None:
@@ -28,7 +30,7 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self,
@@ -64,9 +66,9 @@ class ShardingPropagator:
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
-            torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default,
-            torch.ops.aten.is_same_size.default,
+            aten._local_scalar_dense.default,
+            aten.equal.default,
+            aten.is_same_size.default,
         ]
         if op_schema.op in skip_prop_list:
             return None
@@ -122,10 +124,17 @@ class ShardingPropagator:
                         spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
-        output_sharding = self.propagate_op_sharding(op_info.schema)
+        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
+        # because SymInts are not hashable.
+        # This is generally ok because this only happens during tracing in torch.compile,
+        # and tracing does not need to be as fast as eagermode DTensor usages.
+        if op_info.schema.has_symints:
+            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+        else:
+            output_sharding = self.propagate_op_sharding(op_info.schema)
         op_info.output_sharding = output_sharding
 
-    def propagate_op_sharding(self, op_schema: OpSchema) -> OutputSharding:
+    def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
@@ -181,8 +190,20 @@ class ShardingPropagator:
                 reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                 suggestion_schema = [reshard_schema]
 
+            if op_schema.return_type_tuple_tensors():
+                # for ops return multiple tensors, make output spec return same spec
+                # returned from the op strategy
+                output_spec: OutputSpecType = tuple(
+                    [
+                        output_strategy.output_spec
+                        for _ in range(len(op_schema.op._schema.returns))
+                    ]
+                )
+            else:
+                output_spec = output_strategy.output_spec
+
             output_sharding = OutputSharding(
-                output_strategy.output_spec,
+                output_spec,
                 suggestion_schema,
                 needs_redistribute=needs_redistribute,
             )

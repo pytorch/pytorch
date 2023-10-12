@@ -95,6 +95,10 @@ class TritonPrinter(PythonPrinter):
         b = self._print(sympy.Max(*expr.args[mid:]))
         return f"tl.math.max({a}, {b})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.abs({self._print(expr.args[0])})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -324,7 +328,13 @@ class TritonOverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, triton_constant(other))
+
+        # Take dtype from result to prevent accidental promotion
+        other = V.kernel.cse.generate(
+            V.kernel.compute,
+            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+        )
+        return ops.where(new_mask, result, other)
 
     @staticmethod
     def lgamma(x):
@@ -1262,7 +1272,7 @@ class TritonKernel(Kernel):
                     return None
                 elif assert_min and assert_max:
                     # The conditions need to be in parens because of Python's operator precedence.
-                    # It'd be less error-prone to use and/or/not, which is suported by triton
+                    # It'd be less error-prone to use and/or/not, which is supported by triton
                     cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
                     cond_print = f"0 <= {self.var} < {size_str}"
                 elif assert_min:
@@ -1336,6 +1346,30 @@ class TritonKernel(Kernel):
 
         return sympy_symbol(str(var))
 
+    def get_strides_of_load(self, index: sympy.Expr):
+        """
+        This gets the stride of the index for each of the tiling variables
+        (technically, it does it at index 0)
+
+        For example, if
+        xindex = x0 + 512*x1 + 1024*r0
+        x0 = (xindex//512)
+        x1 = (xindex % 512)
+        r0 = rindex // 1024
+
+        this function would return
+        {xindex: 512, rindex: 1024}
+        """
+        index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
+        strides = {}
+        for range_tree in self.range_trees:
+            s = sympy_symbol(range_tree.name)
+            strides[s] = sympy_subs(index_in_tile_vars, {s: 1}) - sympy_subs(
+                index_in_tile_vars, {s: 0}
+            )
+        return strides
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -1344,11 +1378,20 @@ class TritonKernel(Kernel):
 
         # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
         #  1) We are doing broadcasting
-        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
-        #   2.1) We are in a reduction loop
-        #   2.2) Its not its last use
-        #   2.3) This load will not be lifted to the body
+        #  2) It is a non-coalesced load. The intuition is that if it's
+        #  non-coalesced, we will likely load each element multiple times in
+        #  practice.
+        #  3) It will be used later and it won't be CSE'd. Equiv., if all the following hold
+        #   3.1) We are in a reduction loop
+        #   3.2) Its not its last use
+        #   3.3) This load will not be lifted to the body
+        #
+        is_coalesced = any(
+            i == 1 for i in self.get_strides_of_load(original_index).values()
+        )
         if self.is_broadcasted(original_index):
+            ep = ", eviction_policy='evict_last'"
+        elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
             if name in self.args.inplace_buffers:
@@ -1357,7 +1400,10 @@ class TritonKernel(Kernel):
                 names = {name}
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and ("rmask" in mask or indirect_indexing)
-            ep = ", eviction_policy='evict_last'" if evict_last else ""
+            if evict_last:
+                ep = ", eviction_policy='evict_last'"
+            else:
+                ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
@@ -1377,8 +1423,15 @@ class TritonKernel(Kernel):
                 append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+
+            dtype = V.graph.get_dtype(name)
+            if dtype in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
+            if dtype == torch.bool and torch.version.hip is None:
+                # Workaround for https://github.com/openai/triton/issues/2151
+                # tl.load returns int8 when loading from pointer to int1
+                # NOTE: Currently causes hangs on bool UTs for ROCm
+                line += ".to(tl.int1)"
 
         if "tmp" in mask:
             # Masked loads must come after the mask is computed
@@ -1867,7 +1920,7 @@ class TritonKernel(Kernel):
         for numel in self.numels:
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
-                # This default heuristic hint was picked carefuly: it is
+                # This default heuristic hint was picked carefully: it is
                 # large, to ensure that we don't shrink the block size (since
                 # if you don't have many elements, it'd be wasteful to pick a
                 # large block size).  Since we don't know how many elements we
@@ -2137,7 +2190,7 @@ class TritonKernel(Kernel):
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)
             if buf and len(buf.layout.size) == 4:
-                # ignore the tensor if only 1 dimention is non-zero
+                # ignore the tensor if only 1 dimension is non-zero
                 if len([x for x in buf.layout.size if x == 1]) == 3:
                     continue
                 stride_order = ir.get_stride_order(buf.layout.stride)
@@ -2287,9 +2340,7 @@ class TritonScheduling(BaseScheduling):
                     if (
                         node not in done
                         and fits_in_main_body(other_node)
-                        and not (
-                            current_loop_writes & other_node.recursive_predecessors
-                        )
+                        and not (current_loop_writes & other_node.ancestors)
                     ):
                         done.add(node)
                         current_loop_writes.add(node.get_name())
@@ -2313,7 +2364,7 @@ class TritonScheduling(BaseScheduling):
             def requires_closing_previous_reduction(node, node_schedule):
                 if rnumel == 1:
                     return False
-                if not current_loop_writes & node.recursive_predecessors:
+                if not current_loop_writes & node.ancestors:
                     return False
                 assert node_schedule and not isinstance(
                     node_schedule[-1], (EnableReduction, DisableReduction)
@@ -2484,7 +2535,7 @@ class TritonScheduling(BaseScheduling):
             if not any(
                 isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
             ):
-                # We probablly should look what are the nodes inside a foreach
+                # We probably should look what are the nodes inside a foreach
                 # schedule node
                 node_names = [
                     n.get_name()
@@ -2518,7 +2569,7 @@ class TritonScheduling(BaseScheduling):
                     node.mark_run()
 
         kernel_name = self.define_kernel(src_code, node_schedule)
-
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers

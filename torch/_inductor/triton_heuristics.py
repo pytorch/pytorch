@@ -17,9 +17,9 @@ from typing import Any, Callable, List, Optional, Set, Tuple
 import torch
 
 import torch.autograd.profiler as autograd_profiler
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
-from torch._inductor import cuda_properties
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -39,15 +39,19 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 
-if has_triton():
+if has_triton_package():
     import triton
     from triton import Config
-    from triton.runtime.jit import get_cuda_stream, KernelInterface
+    from triton.runtime.jit import KernelInterface
 else:
     Config = object
-    get_cuda_stream = None
-    KernelInterface = object
     triton = None
+    KernelInterface = object
+
+if has_triton():
+    from triton.runtime.jit import get_cuda_stream
+else:
+    get_cuda_stream = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -185,7 +189,10 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = cuda_properties.get_device_properties(self.meta["device"])
+            device_interface = get_interface_for_device("cuda")
+            device_prop = device_interface.Worker.get_device_properties(
+                self.meta["device"]
+            )
             if (
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
@@ -321,6 +328,7 @@ class CachingAutotuner(KernelInterface):
                     bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
                                 stream, bin.cu_function, None, None, None,
                                 {', '.join(call_args)})
+                return bin
             """.lstrip(),
             scope,
         )
@@ -418,7 +426,8 @@ class CachingAutotuner(KernelInterface):
         else:
             grid_x, grid_y, grid_z = grid
 
-        key = launcher.fn.fn.__qualname__  # unique kernel name
+        key = self.meta.get("kernel_name", None)  # unique kernel name
+        assert key is not None, "kernel_name can not be None"
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,
@@ -1059,7 +1068,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
                 # halve the XBLOCK/RBLOCK compared to outer_config
-                # TODO: this may only be beneficial when each iteration of the reduciton
+                # TODO: this may only be beneficial when each iteration of the reduction
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
                 triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],

@@ -396,6 +396,7 @@ aten::_masked_softmax
 aten::_masked_softmax.out
 aten::_masked_softmax_backward
 aten::_masked_softmax_backward.out
+aten::_mixed_dtypes_linear
 aten::_mkldnn_reshape
 aten::_mkldnn_reshape.out
 aten::_mkldnn_transpose
@@ -763,6 +764,8 @@ aten::frexp.Tensor
 aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
+aten::full.names
+aten::full.names_out
 aten::full_like
 aten::full_like.out
 aten::gather

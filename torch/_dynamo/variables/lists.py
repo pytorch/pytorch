@@ -8,12 +8,18 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import (
+    get_fake_value,
+    guard_if_dyn,
+    is_namedtuple,
+    namedtuple_fields,
+    odict_values,
+)
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -44,6 +50,12 @@ def _listlike_contains_helper(items, search, tx, options):
 
 class BaseListVariable(VariableTracker):
     @staticmethod
+    def cls_for_instance(obj):
+        if is_namedtuple(obj):
+            return functools.partial(NamedTupleVariable, tuple_cls=type(obj))
+        return BaseListVariable.cls_for(type(obj))
+
+    @staticmethod
     def cls_for(obj):
         return {
             iter: ListIteratorVariable,
@@ -52,6 +64,9 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+            odict_values: ListVariable,
+            torch.nn.ParameterList: ListVariable,
+            torch.nn.ModuleList: ListVariable,
             collections.deque: DequeVariable,
         }[obj]
 
@@ -65,7 +80,6 @@ class BaseListVariable(VariableTracker):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
-
         # Sometimes, we know that we have passed in the guards from the items in the list
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
@@ -74,6 +88,10 @@ class BaseListVariable(VariableTracker):
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
+
+    @property
+    def value(self):
+        return self.as_python_constant()
 
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
@@ -134,6 +152,12 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
             return _listlike_contains_helper(self.items, args[0], tx, options)
+        elif name == "index":
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -362,6 +386,12 @@ class ListVariable(CommonListMethodsVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not list:
+            return super().call_hasattr(tx, name)
+        options = VariableTracker.propagate(self)
+        return variables.ConstantVariable.create(hasattr([], name), **options)
+
 
 class DequeVariable(CommonListMethodsVariable):
     def python_type(self):
@@ -568,11 +598,16 @@ class SizeVariable(TupleVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
         if isinstance(index, slice):
             return SizeVariable(self.items[index]).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
 
@@ -616,7 +651,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                unimplemented(f"NamedTupleVariable.{name}")
+                super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)].add_options(self)
 
@@ -730,7 +765,6 @@ class SetVariable(VariableTracker):
 
     def __init__(
         self,
-        tx,
         items: List[VariableTracker],
         recursively_contains=None,
         regen_guards=True,
@@ -742,15 +776,11 @@ class SetVariable(VariableTracker):
         assert all(isinstance(x, VariableTracker) for x in items)
 
         self.items = []
-        self._add(tx, items)
+        self._add(items)
 
         # Sometimes, we know that we have passed in the guards from the items in the set
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
-
-        # Really annoying to store this here - but required because of how
-        # VariableTracker's clone works w/r/t attr setting from dict
-        self.tx = tx
 
     def as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -766,7 +796,7 @@ class SetVariable(VariableTracker):
         ] + create_call_function(1, True)
 
     # Note - this is only used for producing a set
-    def _as_set_element(self, tx, vt):
+    def _as_set_element(self, vt):
         from .base import VariableTracker
         from .tensor import TensorVariable
 
@@ -787,10 +817,10 @@ class SetVariable(VariableTracker):
             assert (
                 current_item not in underlying_items
             ), "Items modeling set invariant violated"
-            underlying_items.add(self._as_set_element(self.tx, current_item))
+            underlying_items.add(self._as_set_element(current_item))
         return underlying_items
 
-    def _add(self, tx, item):
+    def _add(self, item):
         underlying_items = self._underlying_items
 
         if isinstance(item, (list, set)):
@@ -799,7 +829,7 @@ class SetVariable(VariableTracker):
             items_to_add = [item]
 
         for item_to_add in items_to_add:
-            set_element = self._as_set_element(tx, item_to_add)
+            set_element = self._as_set_element(item_to_add)
             if set_element not in underlying_items:
                 underlying_items.add(set_element)
                 self.items.append(set_element.vt)
@@ -831,8 +861,7 @@ class SetVariable(VariableTracker):
             assert not kwargs
             item = args[0]
             result = SetVariable(
-                tx,
-                self._add(tx, item),
+                self._add(item),
                 mutable_local=self.mutable_local,
                 regen_guards=False,
                 **options,
@@ -846,7 +875,7 @@ class SetVariable(VariableTracker):
             result = items.pop()
             tx.replace_all(
                 self,
-                SetVariable(tx, items, regen_guards=False, **options),
+                SetVariable(items, regen_guards=False, **options),
             )
             return result
         elif name == "__len__":

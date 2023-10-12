@@ -20,6 +20,7 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -41,7 +42,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_symbolic,
+    SYMPY_INTERP,
+)
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -49,7 +54,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import LocalSource, TypeSource
+from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -148,7 +153,7 @@ def strip_function_call(name):
     "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
     "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
     """
-    # recursively find valid object name in fuction
+    # recursively find valid object name in function
     valid_name = re.compile("[A-Za-z_].*")
     curr = ""
     for char in name:
@@ -447,40 +452,22 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        # TODO(janimesh) - This id_match can be removed because nn_module_guard
-        # checks this in C. However, we need this redundant check to allow
-        # flexible cache size policy when we guard on self of nn module
-        # instances. See Note in torch/_dynamo/cache_size.py
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        # The module guard checks for modifications to the Module's type, __dict__,
-        # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
-        # This subsumes the check for Module.training.
-        if not hasattr(val, "training"):
-            unimplemented(f"Guard setup for uninitialized class {type(val)}")
-        if config.allow_rnn and isinstance(
-            val, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
-        ):
-            # TorchDynamo graph breaks on LSTMs, but this is a way if user wants
-            # to override it. LSTMs change the module state in every invocation,
-            # leading to recompilations.
-            log.warning("Skipping nn module guard on LSTMs")
-            return
-        try:
-            g = torch._C._dynamo.guards.nn_module_guard(val)
-        except AttributeError:
-            # We get an attribute error if the module is partially initialized. For example,
-            # we might be trying to install a guard before a super().__init__() call when
-            # the module is missing _parameters, _modules, and other attributes.
-            # For now, we skip installing the guard.
-            log.warning(
-                "Skipping nn module guard because the module could be partially initialized"
+        def setup_guard():
+            assert istype(val.training, bool)
+            # TODO: Why doesn't this use produce_guard_code?
+            self.code.append(
+                GuardCodeList([f"{ref}.training == {val.training}"], guard)
             )
-            return
-        name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        self._produce_guard_code(guard, [f"{name}({ref})"])
+
+        if hasattr(val, "training"):
+            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
+            setup_guard()
+        else:
+            unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -909,6 +896,20 @@ class PyExprCSEPass:
         return replacer.preface, _ast_unparse(new_node)
 
 
+def must_add_nn_module_guards(guard):
+    # For config.guard_nn_modules=False, we can skip all the guards that
+    # originate from inside of nn module except for a few categories.
+    return (
+        # Guard for defaults
+        isinstance(guard.originating_source, DefaultsSource)
+        # Guard using dict tags if the config flag is set
+        or (
+            config.guard_nn_modules_using_dict_tags
+            and guard.create_fn is GuardBuilder.NN_MODULE
+        )
+    )
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -928,9 +929,7 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
-        self._extra_closure_vars: Dict[str, object] = {}
         self.output_graph = output_graph
-        self.extra_closure_vars_count = 0
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -984,10 +983,10 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                # Force-enable NN_MODULE checks
-                and guard.create_fn is not GuardBuilder.NN_MODULE
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
             ):
                 continue
+
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
@@ -997,7 +996,7 @@ class CheckFunctionManager:
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         # TODO(janimesh) - Currently this information is stored as an attr on
-        # the check_fn itself to avoid changing CacehEntry datastrucutre in
+        # the check_fn itself to avoid changing CacehEntry datastructure in
         # eval_frame.c. In future, we should probably replace check_fn with a
         # queryable data structure such that this information is already present
         # in some form.
@@ -1017,18 +1016,14 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
-            if guards_log.isEnabledFor(logging.DEBUG):
-                extra = ""
-                if guard is not None:
-                    if guard.user_stack:
-                        for fs in reversed(guard.user_stack):
-                            if fs.filename not in uninteresting_files():
-                                break
-                        else:
-                            fs = guard.user_stack[-1]
-                        extra = f"  # {format_frame(fs, line=True)}"
-                    elif guard.stack:
-                        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+            if guard.user_stack:
+                for fs in reversed(guard.user_stack):
+                    if fs.filename not in uninteresting_files():
+                        break
+                else:
+                    extra = f"  # {format_frame(fs, line=True)}"
+            elif guard.stack:
+                extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
                 guards_log.debug("%s", f"{code:<60}{extra}")
 
@@ -1052,15 +1047,19 @@ class CheckFunctionManager:
             if not log_only:
                 code_parts.append(code)
 
-        # TODO: Maybe better not to repeatedly spam the same guard information
-        # for each individual piece?  Not sure.
+        seen = set()
         for gcl in local_builder.code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
+        seen = set()
         for gcl in global_builder.code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -1080,7 +1079,7 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if isinstance(dim, int):
+                    if not is_symbolic(dim):
                         converted.append(dim)
                     else:
                         assert isinstance(dim, torch.SymInt)
@@ -1176,7 +1175,6 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
-        closure_vars.update(self._extra_closure_vars)
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1231,12 +1229,6 @@ class CheckFunctionManager:
         if id(obj) in self._weakrefs:
             return self._weakrefs[id(obj)]
         return None
-
-    def add_extra_closure_var(self, name_hint, obj):
-        name = f"{name_hint}_{self.extra_closure_vars_count}"
-        self.extra_closure_vars_count += 1
-        self._extra_closure_vars[name] = obj
-        return name
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
@@ -1303,7 +1295,7 @@ def guard_fail_hook(
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reason = None
+    reason = ""
     for part in guard_fn.code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
@@ -1311,12 +1303,15 @@ def guard_fail_hook(
             fail_reason = eval(part, global_scope, scope)
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
+
+        if isinstance(fail_reason, bool) and not fail_reason:
+            fail_reason = part
         if isinstance(fail_reason, str):
-            reason = fail_reason
-            break
-        elif isinstance(fail_reason, bool) and not fail_reason:
-            reason = part
-            break
+            reason += fail_reason
+            if config.report_all_guard_failures:
+                reason += "\n"
+            else:
+                break
 
     if first:
         stashed_first_fail_reason = reason
@@ -1381,7 +1376,7 @@ def make_dupe_guard(obj_source, dupe_source):
     # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
     # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
     # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-    # In the the fn(x, x) example call above look like a graph with a single input.
+    # In the fn(x, x) example call above look like a graph with a single input.
     # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
 
     # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
@@ -1394,7 +1389,7 @@ def make_dupe_guard(obj_source, dupe_source):
         # so maybe we should do this refactor before we land this...
         # TODO(voz): Combine local and global guard builders.
         if ser_source_is_local == source_is_local:
-            # Note - this is a little agressive - these being duplicate input does not always matter.
+            # Note - this is a little aggressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None

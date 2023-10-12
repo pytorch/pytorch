@@ -4,7 +4,14 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only, TreeSpec
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+except ImportError:
+    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_map_only,
+        TreeSpec,
+    )
 
 
 # Common type aliases
@@ -145,8 +152,10 @@ class RuntimeSchemaInfo:
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
     static_kwargkey: Optional[List[str]] = None
-    # TODO: make use of this field
-    needs_pytree: bool = True
+    # each op can decide if it wants to use pytree flatten/unflatten during operator
+    # eager execution, by default we don't need to do flatten/unflatten, only if the
+    # op indicate it needs to, this is to accelate eager performance.
+    needs_pytree: bool = False
 
 
 @dataclass
@@ -192,6 +201,15 @@ class OpSchema:
             f" kwargs_schema={self.kwargs_schema})"
         )
 
+    def __post_init__(self) -> None:
+        has_symints = False
+        for a in self.args_schema:
+            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
+                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
+                    has_symints = True
+                    break
+        self.has_symints = has_symints
+
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
         is_tensor = isinstance(arg, DTensorSpec)
@@ -202,6 +220,13 @@ class OpSchema:
             return False
 
         return all(isinstance(e, DTensorSpec) or e is None for e in arg)
+
+    def return_type_tuple_tensors(self) -> bool:
+        return_types = self.op._schema.returns
+        # all dispatch ops only return Tensor or Tuple[Tensor], so this check if enough
+        return len(return_types) > 1 and isinstance(
+            return_types[0].type, torch.TensorType
+        )
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
@@ -323,11 +348,9 @@ class OpInfo:
     mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
-    flat_kwargs_schema: List[object]
-    flat_local_args: List[object]
-    flat_local_kwargs: List[object]
-    args_tree_spec: TreeSpec
-    kwargs_tree_spec: TreeSpec
+    local_args: Sequence[object]
+    local_kwargs: Dict[str, object]
+    args_tree_spec: Optional[TreeSpec] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None
