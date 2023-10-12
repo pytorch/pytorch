@@ -430,7 +430,8 @@ class ExportedProgram:
         """
         Run a set of decompositions on the exported program and returns a new
         exported program. By default we will run the Core ATen decompositions to
-        get the Core ATen IR.
+        get operators in the
+        `Core ATen Operator Set <https://pytorch.org/docs/stable/torch.compiler_ir.html>`_.
 
         For now, we do not decompose joint graphs.
         """
