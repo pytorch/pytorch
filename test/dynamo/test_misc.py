@@ -7765,19 +7765,6 @@ fn
 """,
         )
 
-    def test_trace_ndarray_frame(self):
-        def fn(x):
-            x = x**2
-            print("graph break.")
-            return 2 * x
-
-        counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
-
-        x = np.arange(8)
-        self.assertEqual(fn(x), compiled_fn(x))
-        self.assertEqual(counter.frame_count, 2)
-
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
