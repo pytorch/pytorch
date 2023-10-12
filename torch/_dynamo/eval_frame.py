@@ -264,7 +264,7 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
-dynamo_config_guard_ignorelist = {
+dynamo_guarded_config_ignorelist = {
     "log_file_name",
     "verbose",
     "verify_correctness",  # will not affect model, will raise RuntimeError
@@ -290,16 +290,16 @@ dynamo_config_guard_ignorelist = {
     "debug_dir_root",
 }
 
-dynamo_config_guard_string_serialization_list = {
+dynamo_guarded_config_string_serialization_list = {
     # "is_fbcode",  # function def (removed by ConfigModule visit)
     "skipfiles_inline_module_allowlist",  # cannot pickle module (unused)
     "constant_functions",  # PyCapsules (i.e. function ptrs)
     "traceable_tensor_subclasses",  # Cannot pickle local object
 }
 
-config_cache = threading.local()
 # The config to restore to should dynamo compile / recompile when
 # executing from the compiled function's _TorchDynamoContext
+config_cache = threading.local()
 
 
 def _maybe_init_guarded_config_cache():
@@ -340,7 +340,7 @@ def get_config_and_hash(dynamic=None):
     _maybe_init_guarded_config_cache()
     # get current value of dynamo configs
     dynamo_config = config.get_config_copy()
-    for k in dynamo_config_guard_ignorelist:
+    for k in dynamo_guarded_config_ignorelist:
         dynamo_config.pop(k)
 
     # Set appropriate dynamo config flags
@@ -354,11 +354,12 @@ def get_config_and_hash(dynamic=None):
         )
 
     serialized_config = dict(dynamo_config)
+
     # Only string-serialize for the hash
-    for key in dynamo_config_guard_string_serialization_list:
+    for key in dynamo_guarded_config_string_serialization_list:
         serialized_config.update({key: str(dynamo_config[key])})
 
-    # Try to make serialization more deterministic by sorting
+    # Make serialization more deterministic by sorting
     dynamo_config_bytes = pickle.dumps(dict(sorted(serialized_config.items())))
 
     sha256_hash = hashlib.sha256(dynamo_config_bytes).hexdigest()
@@ -366,7 +367,8 @@ def get_config_and_hash(dynamic=None):
 
 
 # Used to test if the config needs to be restored by checking the current hash.
-# We cache this, only to recompute it when config is possibly out of sync (i.e. is dirty).
+# We cache the latest requested, and only recompute it when config is possibly 
+# out of sync (i.e. is dirty).
 def get_cached_recompile_hash():
     _maybe_init_guarded_config_cache()
     if config._is_dirty or config_cache.cached_recompile_hash is None:
