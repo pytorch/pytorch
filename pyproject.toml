@@ -47,7 +47,6 @@ ignore = [
     # these ignores are from RUFF perf; please fix!
     "PERF203", "PERF4",
     "PYI001", # these ignores are from PYI; please fix!
-    "PYI018",
     "PYI019",
     "PYI024",
     "PYI034",
