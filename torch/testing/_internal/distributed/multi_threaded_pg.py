@@ -401,6 +401,11 @@ class WorldData:
 class ThreadLocalWorld:
     _world = threading.local()
 
+    def __init__(self):
+        self.enable_collectives_timing = False
+        self._hook_state = dist.distributed_c10d._HookState()
+
+
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
@@ -454,6 +459,9 @@ class ThreadLocalWorld:
     def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
         return self._get_world().pg_default_device
 
+    @property
+    def pg_hook_state(self) -> dist.distributed_c10d._HookState:
+        return self._hook_state
 
 _old_pg_world = None
 _ctx_manager = None
