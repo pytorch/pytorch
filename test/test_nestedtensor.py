@@ -1117,15 +1117,6 @@ class TestNestedTensorDeviceType(TestCase):
             RuntimeError, "split_with_sizes expects split_sizes to sum exactly to 20",
             lambda: torch.split_with_sizes(nt, bad_split_sizes, dim=-1))
 
-        # Failure when calling backward on a split_with_sizes
-        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        nt_grad = torch.nested.as_nested_tensor([a, b])
-        split_sizes = [2, 6, 4]
-        splits = torch.split_with_sizes(nt_grad, split_sizes, dim=-1)
-        self.assertRaisesRegex(RuntimeError, "the derivative for 'aten::split_with_sizes' is not implemented",
-                               lambda: splits[0].backward(splits[0].clone()))
-
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_nested_tensor_indexing_noncontiguous(self, device, dtype):
@@ -2695,6 +2686,22 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    def test_split_with_sizes_flow_through(self, device):
+        a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            splits = nt.split_with_sizes([2, 3], dim=-1)
+            unbound = splits[1].unbind()
+            d = unbound[0]
+            d = torch.pow(d, 2)
+            return d
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
     def test_indexing_backward(self, device):
         x0 = torch.randn((2, 5))
         x1 = torch.randn((3, 4))
@@ -2844,6 +2851,8 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
             torch.ops.aten.sym_numel.default,
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.sym_storage_offset.default,
         ):
             op(nt)
 
@@ -2858,10 +2867,8 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.numel(), 27)
 
         for op in (
-            torch.ops.aten.sym_stride.default,
             torch.ops.aten.is_contiguous.default,
             torch.ops.aten.is_contiguous.memory_format,
-            torch.ops.aten.sym_storage_offset.default,
         ):
             error_msg = "NestedTensors do not support directly querying strides"
             with self.assertRaisesRegex(RuntimeError, error_msg):
