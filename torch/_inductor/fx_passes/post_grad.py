@@ -835,20 +835,40 @@ def addmm(match, mat1, mat2, *, inp):
     with V.fake_mode:
         match.replace_by_example(repl, [inp, mat1, mat2])
 
+def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
+    return (
+        len(getattr(match.args[2].meta.get("val"), "shape", [])) == 2 and
+        getattr(match.args[2].meta.get("val"), "is_cuda", False) and
+        config.force_fuse_int_mm_with_mul
+    )
+
 @register_lowering_pattern(
     CallFunction(
-        aten.mul,
+        prims.convert_element_type.default,
         CallFunction(
             aten.mul,
             CallFunction(
                 aten._int_mm,
-                KeywordArg("mat1"),
-                KeywordArg("mat2"),
+                Arg(),
+                Arg(),
             ),
-            KeywordArg("mat3"),
+            Arg(),
         ),
-    KeywordArg("mat4"),
-    )
+        Arg()
+    ),
+    check_shape_cuda_and_fused_int_mm_mul_enabled
 )
-def int_mm_mul(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.int_mm_mul.tuned_int_mm_mul(mat1, mat2, mat3, mat4)
+@register_lowering_pattern(
+    CallFunction(
+        aten.mul,
+        CallFunction(
+            aten._int_mm,
+            Arg(),
+            Arg(),
+        ),
+        Arg(),
+    ),
+    check_shape_cuda_and_fused_int_mm_mul_enabled
+)
+def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
+    return inductor.kernel.fused_int_mm_mul.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)

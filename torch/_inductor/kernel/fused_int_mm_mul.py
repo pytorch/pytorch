@@ -6,11 +6,11 @@ from .mm_common import mm_args, int8_mm_configs, mm_grid, mm_options
 
 log = logging.getLogger(__name__)
 
-int_mm_mul_template = TritonTemplate(
-    name="int_mm_mul",
+fused_int_mm_mul_template = TritonTemplate(
+    name="fused_int_mm_mul",
     grid=mm_grid,
     source=r"""
-{{def_kernel("A", "B", "S1", "S2" )}}
+{{def_kernel("A", "B", "S1")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
@@ -18,9 +18,12 @@ int_mm_mul_template = TritonTemplate(
     stride_ak = {{stride("A", 1)}}
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
-    stride_s1m = {{stride("S1", 0)}}
-    stride_s2n = {{stride("S2", 1)}}
-
+    # this effectively does broadcasting for a size 1 dimension
+    # by setting the stride to 0, we don't move to a new memory location
+    # when we change the offset for that dimension and since the size
+    # of that dimension is 1, we never need to use the actual value
+    stride_s1m = {{stride("S1", 0) if size("S1", 0)!="1" else 0}}
+    stride_s1n = {{stride("S1", 1) if size("S1", 1)!="1" else 0}}
     # -----------------------------------------------------------
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
@@ -65,12 +68,9 @@ int_mm_mul_template = TritonTemplate(
 
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    s1_ptrs = S1 + offs_m[:, None] * stride_s1m
+    s1_ptrs = S1 + offs_m[:, None] * stride_s1m + offs_n[None, :] * stride_s1n
     s1 = tl.load(s1_ptrs)
-    acc = acc.to(tl.float32) * s1
-    s2_ptrs = S2 + offs_n[None, :] * stride_s2n
-    s2 = tl.load(s2_ptrs)
-    acc = acc * s2
+    acc = acc * s1
 
     idx_m = offs_m[:, None]
     idx_n = offs_n[None, :]
@@ -80,16 +80,28 @@ int_mm_mul_template = TritonTemplate(
 """,
 )
 
-
-def tuned_int_mm_mul(mat1, mat2, mat3, mat4, *, layout=None):
-    out_dtype = mat3.get_dtype()
+def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
+    out_dtype = mat3.get_dtype() if out_dtype is None else out_dtype
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None, out_dtype=out_dtype)
     choices: List[ChoiceCaller] = []
     for config in int8_mm_configs(m, n, k):
-        int_mm_mul_template.maybe_append_choice(
+        fused_int_mm_mul_template.maybe_append_choice(
             choices,
-            input_nodes=(mat1, mat2, mat3, mat4),
+            input_nodes=(mat1, mat2, mat3),
             layout=layout,
             **dict(mm_options(config, k, layout),**{"ACC_TYPE": "tl.int32"}),
         )
-    return autotune_select_algorithm("int_mm_mul", choices, [mat1, mat2, mat3, mat4], layout)
+    return autotune_select_algorithm("fused_int_mm_mul", choices, [mat1, mat2, mat3], layout)
+
+# def tuned_fused_int_mm_mul(mat1, mat2, mat3, *, layout=None, out_dtype=None):
+#     out_dtype = mat3.get_dtype() if out_dtype is None else out_dtype
+#     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None, out_dtype=out_dtype)
+#     choices: List[ChoiceCaller] = []
+#     for config in int8_mm_configs(m, n, k):
+#         fused_int_mm_mul_template.maybe_append_choice(
+#             choices,
+#             input_nodes=(mat1, mat2, mat3),
+#             layout=layout,
+#             **dict(mm_options(config, k, layout),**{"ACC_TYPE": "tl.int32"}),
+#         )
+#     return autotune_select_algorithm("fused_int_mm_mul", choices, [mat1, mat2, mat3], layout)

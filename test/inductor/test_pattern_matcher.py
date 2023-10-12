@@ -65,33 +65,70 @@ class TestPaternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
 
-    def _test_int_mm_mul_impl(self, fn, args, int_mm_mul_expected=True):
+    def _test_fused_int_mm_mul_impl(self, fn, args, fused_int_mm_mul_expected=True):
         torch._dynamo.reset()
         counters.clear()
         ref = fn(*args)
-        test, (code,) = run_and_get_code(torch.compile(fn), *args)
-        print(code)
-        print(ref)
-        print(test)
-        torch.testing.assert_close(ref, test)
-        self.assertEqual("int_mm_mul" in code, int_mm_mul_expected)
+        test, (code,) = run_and_get_code(torch.compile(fn, mode='max-autotune'), *args)
+        self.assertEqual("fused_int_mm_mul" in code, fused_int_mm_mul_expected)
+        if fused_int_mm_mul_expected:
+            torch.testing.assert_close(ref, test) #also checks that dtype is correct
+
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    def test_int_mm_mul(self):
-        def fn(a, b, c, d):
-            return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b)*c*d
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    def test_fused_int_mm_mul(self):
+        def fn1(a, b, c):
+            return (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b)*c)
+
+        def fn2(a, b, c):
+            return (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b)*c).to(torch.bfloat16)
 
         args_list = [
             (
                 torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
                 torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
-                torch.randn((32, 1), dtype=torch.bfloat16, device="cuda"),
+                torch.randn((32, 1), dtype=torch.float16, device="cuda"),
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
                 torch.randn((1, 8), dtype=torch.bfloat16, device="cuda"),
             ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+                torch.randn((1, 8), dtype=torch.float32, device="cuda"),
+            ),
+
         ]
 
         for args in args_list:
-            self._test_int_mm_mul_impl(fn, args, True)
+            self._test_fused_int_mm_mul_impl(fn1, args, True)
+            self._test_fused_int_mm_mul_impl(fn2, args, True)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    def test_fused_int_mm_mul_gating(self):
+        def fn1(a, b, c):
+            return (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b)*c)
+
+        args1 = (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+                torch.randn((8), dtype=torch.float32, device="cuda"),
+            )
+
+        args2 = (
+            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+            torch.randn((32,1), dtype=torch.float16, device="cuda"),
+        )
+        self._test_fused_int_mm_mul_impl(fn1, args1, False)
+        self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
+        inductor_config.force_fuse_int_mm_with_mul = False
+        self._test_fused_int_mm_mul_impl(fn1, args2, False)
+
 
 
     def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
