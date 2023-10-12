@@ -2,7 +2,7 @@ import logging
 from typing import List
 
 from ..select_algorithm import autotune_select_algorithm, ChoiceCaller, TritonTemplate
-from .mm_common import mm_args, int8_mm_configs, mm_grid, mm_options
+from .mm_common import int8_mm_configs, mm_args, mm_grid, mm_options
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ fused_int_mm_mul_template = TritonTemplate(
 """,
 )
 
+
 def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
     out_dtype = mat3.get_dtype() if out_dtype is None else out_dtype
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None, out_dtype=out_dtype)
@@ -89,19 +90,8 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             choices,
             input_nodes=(mat1, mat2, mat3),
             layout=layout,
-            **dict(mm_options(config, k, layout),**{"ACC_TYPE": "tl.int32"}),
+            **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
         )
-    return autotune_select_algorithm("fused_int_mm_mul", choices, [mat1, mat2, mat3], layout)
-
-# def tuned_fused_int_mm_mul(mat1, mat2, mat3, *, layout=None, out_dtype=None):
-#     out_dtype = mat3.get_dtype() if out_dtype is None else out_dtype
-#     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None, out_dtype=out_dtype)
-#     choices: List[ChoiceCaller] = []
-#     for config in int8_mm_configs(m, n, k):
-#         fused_int_mm_mul_template.maybe_append_choice(
-#             choices,
-#             input_nodes=(mat1, mat2, mat3),
-#             layout=layout,
-#             **dict(mm_options(config, k, layout),**{"ACC_TYPE": "tl.int32"}),
-#         )
-#     return autotune_select_algorithm("fused_int_mm_mul", choices, [mat1, mat2, mat3], layout)
+    return autotune_select_algorithm(
+        "fused_int_mm_mul", choices, [mat1, mat2, mat3], layout
+    )
