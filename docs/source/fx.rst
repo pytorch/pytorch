@@ -1192,6 +1192,7 @@ API Reference
 .. py:module:: torch.fx.passes.utils.common
 .. py:module:: torch.fx.passes.utils.fuser_utils
 .. py:module:: torch.fx.passes.utils.matcher_utils
+.. py:module:: torch.fx.passes.utils.matcher_with_name_node_map_utils
 .. py:module:: torch.fx.passes.utils.source_matcher_utils
 .. py:module:: torch.fx.proxy
 .. py:module:: torch.fx.subgraph_rewriter

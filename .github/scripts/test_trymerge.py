@@ -324,9 +324,6 @@ class TestTryMerge(TestCase):
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
-    @skip(
-        "Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218"
-    )
     def test_internal_changes(self, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
         pr = GitHubPR("pytorch", "pytorch", 110140)
@@ -750,6 +747,24 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["FLAKY"]) == 1)
+
+    def test_get_classifications_invalid_cancel(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 110367)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            pr.last_commit()["oid"],
+            pr.get_merge_base(),
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 0)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 3)
 
     def test_get_classifications_similar_failures(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 109750)

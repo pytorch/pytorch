@@ -643,7 +643,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 1 /*TearDown*/));
+      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -666,7 +666,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
                 << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
                 << "must both be enabled. "
                 << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
-      asyncErrorHandling_ = TearDown;
+      asyncErrorHandling_ = SkipCleanUp;
     }
   }
 
@@ -942,26 +942,33 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   }
 }
 
-void ProcessGroupNCCL::logWorkStart(WorkNCCL& work) {
-  if (work.startTraceUpdated_)
+void ProcessGroupNCCL::logWorkStart(WorkNCCL& work, bool emitDesyncInfo) {
+  if (terminateProcessGroup_.load() || work.startTraceUpdated_)
     return;
-
-  if (terminateProcessGroup_.load() || storeError_)
-    return;
-
   work.startTraceUpdated_ = true;
+
+  emitCollectiveStart(work);
+
+  if (!emitDesyncInfo || storeError_)
+    return;
+
   storeError_ = !c10d::traceUpdate(
       store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
 }
 
-void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
-  if (terminateProcessGroup_.load() || storeError_)
+void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work, bool emitDesyncInfo) {
+  if (terminateProcessGroup_.load())
     return;
 
   // In case the start of the work hasn't been logged
   if (!work.startTraceUpdated_) {
-    logWorkStart(work);
+    logWorkStart(work, emitDesyncInfo);
   }
+
+  emitCollectiveEnd(work);
+
+  if (!emitDesyncInfo || storeError_)
+    return;
 
   storeError_ = !c10d::traceUpdate(
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
@@ -1014,13 +1021,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
       }
 
       // Work status logging for desync debug
-      if (desyncDebug_) {
-        if (work.isStarted()) {
-          logWorkStart(work);
-        }
-        if (work.isCompleted()) {
-          logWorkEnd(work);
-        }
+      if (work.isStarted()) {
+        logWorkStart(work, desyncDebug_);
+      }
+      if (work.isCompleted()) {
+        logWorkEnd(work, desyncDebug_);
       }
 
       // Clean up completed work
@@ -1077,7 +1082,7 @@ void ProcessGroupNCCL::runHookLoop() {
             timeStarted, // timeStarted
             std::chrono::system_clock::now(), // timeFinished
             std::chrono::duration<float, std::milli>(
-                work.getDuration()) // activeDuration
+                work.getDuration().value()) // activeDuration
             ));
 
         lock.lock();
@@ -1580,19 +1585,19 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   return future_;
 }
 
-float ProcessGroupNCCL::WorkNCCL::getDuration() const {
-  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled")
+c10::optional<float> ProcessGroupNCCL::WorkNCCL::getDuration() const {
+  if (!timingEnabled_ || !((*ncclEndEvents_)[0].query())) {
+    return c10::optional<float>();
+  }
   TORCH_CHECK(
       ncclStartEvents_->size() == 1,
       "getDuration only works for single device per ProcessGroup.");
   TORCH_CHECK(
       ncclEndEvents_->size() == 1,
       "getDuration only works for single device per ProcessGroup.");
-  TORCH_CHECK(
-      (*ncclEndEvents_)[0].query(),
-      "getDuration can only be called after work is succeeded.")
   return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
 }
+
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
   return seq_;
 }
@@ -1610,7 +1615,7 @@ void ProcessGroupNCCL::workEnqueue(
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : Backend::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME, kProcessGroupNCCLDefaultTimeout),
       is_high_priority_stream(is_high_priority_stream) {}
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
