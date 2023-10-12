@@ -77,9 +77,7 @@ else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
 
-# The build with with-pypi-cudnn suffix is only applicabe to
-# pypi small wheel Linux x86 build
-if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]] && [[ "$(uname)" == 'Linux' && "$(uname -m)" == "x86_64" ]]; then
+if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
   export PYTORCH_BUILD_VERSION="${PYTORCH_BUILD_VERSION}-with-pypi-cudnn"
 fi
 

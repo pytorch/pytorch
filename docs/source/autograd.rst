@@ -317,11 +317,6 @@ Also see :ref:`saved-tensors-hooks-doc`.
 
 .. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
 
-.. autoclass:: torch.autograd.graph.GradientEdge
-
-.. autofunction:: torch.autograd.graph.get_gradient_edge
-
-
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes

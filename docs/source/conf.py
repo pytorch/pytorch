@@ -720,7 +720,6 @@ coverage_ignore_functions = [
     "tensordot",
     "unique",
     "unique_consecutive",
-    "unravel_index",
     # torch.fx.annotate
     "annotate",
     # torch.fx.experimental.accelerator_partitioner
