@@ -9,6 +9,18 @@ def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
     assert N % blocksize[1] == 0
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
     A = torch.bernoulli(torch.full(shape, 1 - sparsity, dtype=dtype, device=device))
+    expected_nnz = int((1 - sparsity) * M * N / (blocksize[0] * blocksize[1]))
+    nonzero_indices = A.flatten().nonzero()
+    actual_nnz = nonzero_indices.shape[0]
+    if actual_nnz > expected_nnz:
+        selected_nonzeros = torch.randperm(actual_nnz)[: actual_nnz - expected_nnz]
+        A.flatten()[nonzero_indices[selected_nonzeros]] = 0
+    elif actual_nnz < expected_nnz:
+        zero_indices = (A == 0).flatten().nonzero()
+        selected_zeros = torch.randperm(zero_indices.shape[0])[
+            : expected_nnz - actual_nnz
+        ]
+        A.flatten()[zero_indices[selected_zeros]] = 1
     A = torch.repeat_interleave(A, blocksize[0], dim=-2)
     A = torch.repeat_interleave(A, blocksize[1], dim=-1)
     return A
@@ -51,8 +63,9 @@ def test_bsr_dense_mm(x, y, **meta):
 def test_bsr_scatter_mm2(x, y, **meta):
     from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
 
-    indices_data = dict()
-    indices_data.update(tasks2=bsr_scatter_mm_indices_data(x, y)["tasks2"])
+    indices_data = bsr_scatter_mm_indices_data(
+        x, y, indices_format="scatter_mm", **meta
+    )
 
     def test_func(x=x, y=y):
         return bsr_scatter_mm(x, y, indices_data=indices_data)
@@ -89,6 +102,21 @@ if __name__ == "__main__":
     def float_list(a):
         return list(map(float, a.split(",")))
 
+    def integer_or_float_list(a):
+        lst = []
+        for n in a.split(","):
+            if n.count(":") == 1:
+                start, end = map(int, n.split(":"))
+                lst.extend(range(start, end))
+            elif n.count(":") == 2:
+                start, end, step = map(int, n.split(":"))
+                lst.extend(range(start, end, step))
+            elif "." in n:
+                lst.append(float(n))
+            else:
+                lst.append(int(n))
+        return lst
+
     parser = argparse.ArgumentParser(description="SpTritonOps")
 
     parser.add_argument(
@@ -109,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("--group_size", default=None, type=integer_list)
     parser.add_argument("--num_warps", default=None, type=integer_list)
     parser.add_argument("--num_stages", default=None, type=integer_list)
-    parser.add_argument("--sparsity", "--sparsity", default="0.5", type=float_list)
+    parser.add_argument("--sparsity", default="0.5", type=integer_or_float_list)
     parser.add_argument("--dtype", default="float16", type=str)
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--repeat", default="1", type=int)
@@ -142,6 +170,9 @@ if __name__ == "__main__":
 
     dtype = getattr(torch, args.dtype)
     device = args.device
+    dense_dense_mm_sizes = set()
+    target_performance = None
+    performance_rtol = 1e-2
 
     for m, k, n, bm, bk, sparsity in itertools.product(
         m_list, n_list, k_list, bm_list, bk_list, sparsity_list
@@ -155,15 +186,29 @@ if __name__ == "__main__":
 
         blocksize = (bm, bk)
 
+        if isinstance(sparsity, int):
+            # integer sparsity value corresponds to desired nnz value
+            sparsity = 1 - bk * bm * sparsity / (m * k)
+
+        if sparsity > 1 or sparsity < 0:
+            continue
+
         x = create_blocked_tensor(
             b, m, k, blocksize, sparsity, dtype, device
         ).to_sparse_bsr(blocksize)
+
+        # recompute sparsity
+        sparsity = 1 - bk * bm * x._nnz() / (m * k)
 
         y = make_tensor(k, n, dtype=dtype, device=device)
 
         bsr_size = f"{b}x{m}x{k}" if b > 0 else f"{k}x{n}"
 
         for op in ops:
+            if op == "dense_dense_mm":
+                if (m, k, n) in dense_dense_mm_sizes:
+                    continue
+                dense_dense_mm_sizes.add((m, k, n))
             best_tflops = 0
             for (
                 split_n,
@@ -201,7 +246,9 @@ if __name__ == "__main__":
                     else dict()
                 )
 
-                meta_str = ";".join(f"{k}={v}" for k, v in meta.items())
+                meta_str = ";".join(
+                    f"{k}={v}" for k, v in meta.items() if v is not None
+                )
                 time_ms_lst = []
                 performance_tflops_lst = []
                 for r in range(args.repeat):
@@ -224,13 +271,21 @@ if __name__ == "__main__":
                         continue
                     time_ms_lst.append(time_ms)
                     performance_tflops_lst.append(performance_tflops)
-
                     mark = ""
+                    if op == "dense_dense_mm":
+                        if target_performance is None:
+                            target_performance = performance_tflops
+                    elif target_performance is not None:
+                        if (
+                            abs(1 - performance_tflops / target_performance)
+                            < performance_rtol
+                        ):
+                            mark += " @@@"
                     if best_tflops < performance_tflops:
                         best_tflops = performance_tflops
-                        mark = " !!!"
+                        mark += " !!!"
                     print(
-                        f"op={op}[{meta_str}]({bsr_size},{k}x{n}) dtype={args.dtype} {sparsity=}(nnz={x._nnz()})"
+                        f"op={op}[{meta_str}]({bsr_size},{k}x{n}) dtype={args.dtype} {sparsity=:.4f}(nnz={x._nnz()})"
                         f" blocksize={bm}x{bk}"
                         f" time={time_ms:.3f} ms performance={performance_tflops:.3f} TFLOPS{mark}",
                         file=outfile,

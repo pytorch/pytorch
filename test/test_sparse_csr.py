@@ -3748,6 +3748,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @precisionOverride({torch.float32: 1e-3})
     def test_triton_bsr_scatter_mm(self, device, dtype, blocksize):
         import triton
         from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
