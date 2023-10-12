@@ -383,7 +383,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                 "Dynamic control flow is not supported at the moment. Please use "
                 "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
-                case_names=["cond_predicate", "cond_operands"],
+                case_name="cond_operands",
             )
 
     return inner
@@ -2247,7 +2247,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
+        result = skipfiles.check_verbose(func, extra_check=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,

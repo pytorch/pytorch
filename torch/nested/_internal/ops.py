@@ -102,6 +102,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
+        "ragged_size": arg._size[arg._ragged_idx],
     }
     return kwargs
 
@@ -123,6 +124,8 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         torch.ops.aten.sym_size.default,
         torch.ops.aten.dim.default,
         torch.ops.aten.sym_numel.default,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.sym_storage_offset.default,
     ],
     "self: jt",
 )
@@ -139,14 +142,18 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.sym_numel.default:
         return args[0].values().numel()
 
+    if func == torch.ops.aten.sym_stride.default:
+        return args[0]._strides
+
+    if func == torch.ops.aten.sym_storage_offset.default:
+        return 0
+
 
 @register_jagged_func(
     [
         torch.ops.aten.size.default,
-        torch.ops.aten.sym_stride.default,
         torch.ops.aten.is_contiguous.default,
         torch.ops.aten.is_contiguous.memory_format,
-        torch.ops.aten.sym_storage_offset.default,
     ],
     "self: jt, memory_format: any?",
 )
