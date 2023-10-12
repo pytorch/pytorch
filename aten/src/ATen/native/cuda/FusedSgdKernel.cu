@@ -15,6 +15,7 @@ C10_DEVICE __forceinline__ void sgd_math(
     scalar_t r_args[depth][kILP],
     const double weight_decay,
     const double momentum,
+    const float* lr_ptr,
     const double lr,
     const double dampening,
     const bool nesterov,
@@ -22,6 +23,7 @@ C10_DEVICE __forceinline__ void sgd_math(
     const bool is_first_step,
     const float* grad_scale_ptr) {
   using opmath_t = at::opmath_type<scalar_t>;
+  const double double_lr = lr_ptr != nullptr ? *lr_ptr : lr;
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     auto p = static_cast<opmath_t>(r_args[0][ii]);
@@ -47,9 +49,9 @@ C10_DEVICE __forceinline__ void sgd_math(
       }
     }
     if (maximize) {
-      p += lr * g;
+      p += double_lr * g;
     } else {
-      p -= lr * g;
+      p -= double_lr * g;
     }
     r_args[0][ii] = p;
   }
@@ -65,6 +67,7 @@ struct FusedSgdMathFunctor {
       TensorListMetadata<depth>& tl,
       const double weight_decay,
       const double momentum,
+      const float* lr_ptr,
       const double lr,
       const double dampening,
       const bool nesterov,
@@ -99,6 +102,7 @@ struct FusedSgdMathFunctor {
             r_args,
             weight_decay,
             momentum,
+            lr_ptr,
             lr,
             dampening,
             nesterov,
@@ -121,6 +125,7 @@ struct FusedSgdMathFunctor {
             r_args,
             weight_decay,
             momentum,
+            lr_ptr,
             lr,
             dampening,
             nesterov,
@@ -158,6 +163,7 @@ void _fused_sgd_kernel_cuda_(
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+  float* lr_ptr = nullptr;
 
   std::vector<std::vector<at::Tensor>> tensor_lists{params.vec(), grads.vec()};
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -171,7 +177,76 @@ void _fused_sgd_kernel_cuda_(
             FusedSgdMathFunctor<scalar_t, 2>(),
             weight_decay,
             momentum,
+            lr_ptr,
             lr,
+            dampening,
+            nesterov,
+            maximize,
+            /* is_first_step */ false,
+            grad_scale_ptr,
+            found_inf_ptr);
+      });
+}
+
+void _fused_sgd_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    const double weight_decay,
+    const double momentum,
+    const at::Tensor& lr,
+    const double dampening,
+    const bool nesterov,
+    const bool maximize,
+    const c10::optional<at::Tensor>& grad_scale,
+    const c10::optional<at::Tensor>& found_inf) {
+  if (lr.is_cpu()) {
+    _fused_sgd_kernel_cuda_(
+        params,
+        grads,
+        weight_decay,
+        momentum,
+        lr.item<double>(),
+        dampening,
+        nesterov,
+        maximize,
+        grad_scale,
+        found_inf);
+    return;
+  }
+  TORCH_CHECK_EQ(momentum, 0);
+  TORCH_CHECK(at::native::check_fast_path_restrictions({params, grads}));
+  if (grad_scale.has_value()) {
+    TORCH_CHECK(
+        grad_scale->device() == params[0].device(),
+        "grad_scale must be on the same GPU device as the params");
+  }
+  if (found_inf.has_value()) {
+    TORCH_CHECK(
+        found_inf->device() == params[0].device(),
+        "found_inf must be on the same GPU device as the params");
+  }
+  TORCH_CHECK(
+      lr.device() == params[0].device(),
+      "found_inf must be on the same GPU device as the params");
+  float* grad_scale_ptr =
+      grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
+  float* found_inf_ptr =
+      found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+
+  std::vector<std::vector<at::Tensor>> tensor_lists{params.vec(), grads.vec()};
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      params[0].scalar_type(),
+      "fused_sgd_kernel_cuda",
+      [&]() {
+        multi_tensor_apply<2>(
+            tensor_lists,
+            FusedSgdMathFunctor<scalar_t, 2>(),
+            weight_decay,
+            momentum,
+            lr.data_ptr<float>(),
+            1.0,
             dampening,
             nesterov,
             maximize,
@@ -201,6 +276,7 @@ void _fused_sgd_with_momentum_kernel_cuda_(
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+  float* lr_ptr = nullptr;
 
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(), grads.vec(), momentum_buffer_list.vec()};
@@ -215,7 +291,82 @@ void _fused_sgd_with_momentum_kernel_cuda_(
             FusedSgdMathFunctor<scalar_t, 3>(),
             weight_decay,
             momentum,
+            lr_ptr,
             lr,
+            dampening,
+            nesterov,
+            maximize,
+            is_first_step,
+            grad_scale_ptr,
+            found_inf_ptr);
+      });
+}
+
+void _fused_sgd_with_momentum_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList momentum_buffer_list,
+    const double weight_decay,
+    const double momentum,
+    const at::Tensor& lr,
+    const double dampening,
+    const bool nesterov,
+    const bool maximize,
+    const bool is_first_step,
+    const c10::optional<at::Tensor>& grad_scale,
+    const c10::optional<at::Tensor>& found_inf) {
+  if (lr.is_cpu()) {
+    _fused_sgd_with_momentum_kernel_cuda_(
+        params,
+        grads,
+        momentum_buffer_list,
+        weight_decay,
+        momentum,
+        lr.item<double>(),
+        dampening,
+        nesterov,
+        maximize,
+        is_first_step,
+        grad_scale,
+        found_inf);
+    return;
+  }
+  TORCH_CHECK_GT(momentum, 0);
+  TORCH_CHECK(at::native::check_fast_path_restrictions(
+      {params, grads, momentum_buffer_list}));
+  if (grad_scale != c10::nullopt) {
+    TORCH_CHECK(
+        grad_scale->device() == params[0].device(),
+        "grad_scale must be on the same GPU device as the params");
+  }
+  if (found_inf != c10::nullopt) {
+    TORCH_CHECK(
+        found_inf->device() == params[0].device(),
+        "found_inf must be on the same GPU device as the params");
+  }
+  TORCH_CHECK(
+      lr.device() == params[0].device(),
+      "found_inf must be on the same GPU device as the params");
+  float* grad_scale_ptr =
+      grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
+  float* found_inf_ptr =
+      found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+
+  std::vector<std::vector<at::Tensor>> tensor_lists{
+      params.vec(), grads.vec(), momentum_buffer_list.vec()};
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      params[0].scalar_type(),
+      "fused_sgd_with_momentum_kernel_cuda",
+      [&]() {
+        multi_tensor_apply<3>(
+            tensor_lists,
+            FusedSgdMathFunctor<scalar_t, 3>(),
+            weight_decay,
+            momentum,
+            lr.data_ptr<float>(),
+            1.0,
             dampening,
             nesterov,
             maximize,
