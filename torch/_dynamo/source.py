@@ -268,7 +268,7 @@ class ConvertIntSource(ChainedSource):
         # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression
         # generated for Dynamo's SymInt.
 
-        # Note: __int__() will install a guard on the outer shape_env. This is desirable because dynamo guard checking
+        # Note: ITE will install a guard on the outer shape_env. This is desirable because dynamo guard checking
         # is essentially an if-else statement based on input: if the guard check succeed, dynamo uses the
         # cahced optimized code. if the guard check fails, dynamo re-compiles and install necessary guards in SHAPE_ENV
         # and propagate the guards to outer shape_env.
