@@ -755,11 +755,14 @@ def repeat_interleave(
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
 def diagonal(g: jit_utils.GraphContext, self, offset, dim1, dim2):
+    rank = symbolic_helper._get_tensor_rank(self)
+    dim1_real = dim1 if dim1 >= 0 else dim1 + rank
+    dim2_real = dim2 if dim2 >= 0 else dim2 + rank
     dim1_size = opset9.size(
-        g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1]))
+        g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1_real]))
     )
     dim2_size = opset9.size(
-        g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2]))
+        g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2_real]))
     )
 
     # Create appropriate mask
@@ -768,12 +771,12 @@ def diagonal(g: jit_utils.GraphContext, self, offset, dim1, dim2):
     mask = g.op("EyeLike", mask, k_i=offset)
 
     # dim1 and dim2 appended as a dimension at the end of the shape
-    rank = symbolic_helper._get_tensor_rank(self)
     if rank is not None:
         axes = list(range(rank))
-        axes.remove(dim1)
-        axes.remove(dim2)
-        self = g.op("Transpose", self, perm_i=axes + [dim1, dim2])
+
+        axes.remove(dim1_real)
+        axes.remove(dim2_real)
+        self = g.op("Transpose", self, perm_i=axes + [dim1_real, dim2_real])
     else:
         return symbolic_helper._unimplemented("diagonal", "unknown input rank")
 
