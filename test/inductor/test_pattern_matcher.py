@@ -22,7 +22,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
+from torch._higher_order_ops.out_dtype import out_dtype
 
 class TestPaternMatcher(TestCase):
     def test_mm_plus_mm(self):
@@ -63,6 +63,36 @@ class TestPaternMatcher(TestCase):
             torch.testing.assert_close(actual, expected)
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
+
+
+    def _test_int_mm_mul_impl(self, fn, args, int_mm_mul_expected=True):
+        torch._dynamo.reset()
+        counters.clear()
+        ref = fn(*args)
+        test, (code,) = run_and_get_code(torch.compile(fn), *args)
+        print(code)
+        print(ref)
+        print(test)
+        torch.testing.assert_close(ref, test)
+        self.assertEqual("int_mm_mul" in code, int_mm_mul_expected)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    def test_int_mm_mul(self):
+        def fn(a, b, c, d):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b)*c*d
+
+        args_list = [
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+                torch.randn((32, 1), dtype=torch.bfloat16, device="cuda"),
+                torch.randn((1, 8), dtype=torch.bfloat16, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_int_mm_mul_impl(fn, args, True)
+
 
     def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
         torch._dynamo.reset()

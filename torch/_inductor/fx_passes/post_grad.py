@@ -834,3 +834,21 @@ def addmm(match, mat1, mat2, *, inp):
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, mat1, mat2])
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mul,
+        CallFunction(
+            aten.mul,
+            CallFunction(
+                aten._int_mm,
+                KeywordArg("mat1"),
+                KeywordArg("mat2"),
+            ),
+            KeywordArg("mat3"),
+        ),
+    KeywordArg("mat4"),
+    )
+)
+def int_mm_mul(match: Match, mat1, mat2, mat3, mat4):
+    return inductor.kernel.int_mm_mul.tuned_int_mm_mul(mat1, mat2, mat3, mat4)
