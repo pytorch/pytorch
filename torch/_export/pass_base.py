@@ -5,7 +5,6 @@ from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from functorch.experimental import control_flow
 from functorch.experimental.control_flow import _unstack_pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
