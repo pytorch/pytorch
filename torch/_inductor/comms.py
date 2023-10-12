@@ -48,8 +48,8 @@ def raise_comms(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.
             cur_comms.append(snode)
         else:
             for comm in cur_comms:
-                assert len(comm.args) > 0
-            while len(cur_comms) > 0 and any([snode in comm.args for comm in cur_comms]):
+                assert len(comm.inverse_users) > 0
+            while len(cur_comms) > 0 and any([snode in comm.inverse_users for comm in cur_comms]):
                 comm = cur_comms.pop(0)
                 new_result.append(comm)
             new_result.append(snode)
@@ -66,7 +66,7 @@ def get_ancestors(node):
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.args:
+            for inp in node.inverse_users:
                 if inp not in ancestors:
                     ancestors.add(inp)
                     new_nodes.append(inp)

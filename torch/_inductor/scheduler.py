@@ -141,10 +141,6 @@ class BaseSchedulerNode:
                 result[id(use.node)] = use
         self.users = list(result.values())
 
-    @property
-    def args(self):
-        return self.inverse_users
-
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
     ):
