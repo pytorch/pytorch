@@ -115,7 +115,11 @@ class TestFineTuning(FSDPTest):
         # Simulate that the fine tuning restart after 5 iterations
         for i in range(2):
             # Load pretrain modeul checkpoint
-            pretrain_state_dict, _ = get_state_dict(model, submodules={model.pretrain})
+            pretrain_state_dict, _ = get_state_dict(
+                model,
+                submodules={model.pretrain},
+                options=StateDictOptions(keep_submodule_prefixes=False)
+            )
             dist_cp.load_state_dict(
                 {"model": pretrain_state_dict},
                 storage_reader=dist_cp.FileSystemReader(pretrain_dir),
