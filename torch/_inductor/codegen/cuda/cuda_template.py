@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import Any, List, Optional
+from typing import List, Optional
 from unittest.mock import patch
 
 import sympy
@@ -53,7 +53,6 @@ class CUDATemplate(KernelTemplate):
         may be used to call and benchmark the generated CUDA kernel in a standalone manner to enable Autotuning.
 
         Args:
-            op: A cutlass_library object representing the operation to be generated.
             kwargs: Additional keyword arguments.
 
         Returns:
@@ -103,7 +102,7 @@ class CUDATemplate(KernelTemplate):
         )
         cuda_template_buffer = CUDATemplateBuffer(
             template=self,
-            workspace_size=lambda: bmreq.workspace_size,  # Not known yet, determined via CUDABenchmarkRequest
+            workspace_size=0,
             **kwargs,
         )
         return CUDATemplateCaller(

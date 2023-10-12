@@ -587,6 +587,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_nodes: Optional[List[IRNode]] = None,
     ) -> str:
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
+            assert self.can_fuse_epilogue and CUTLASSGemmTemplate.supports_evt(
+                op
+            ), "op does not support EVT epilogue fusion"
             assert (
                 template_node is not None
             ), "Output node is required for epilogue fusion"
@@ -600,11 +603,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             # it is not necessarily materialized in global memory if we have an epilogue
             template_output_node_name = template_node.name
         else:
-            template_output_node_name = None
-        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            assert self.can_fuse_epilogue and CUTLASSGemmTemplate.supports_evt(
-                op
-            ), "op does not support EVT epilogue fusion"
+            template_output_node_name = None  # template_node is actually optional
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library.library as cutlass_lib  # type: ignore[import]

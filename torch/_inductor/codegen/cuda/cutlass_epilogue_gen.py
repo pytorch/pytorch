@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import Dict, List
 from unittest.mock import patch
 
 import sympy
@@ -88,7 +88,9 @@ class CutlassEVTEpilogueTypeFormatter:
                 formatter.aliases[node.name] = result
             res = formatter.getvalue(result)
             if "@sympy_expr" in res:
-                raise NotImplementedError("sympy / indexing expressions not yet supported in EVT fusion")
+                raise NotImplementedError(
+                    "sympy / indexing expressions not yet supported in EVT fusion"
+                )
             else:
                 return res
 
@@ -107,6 +109,7 @@ class CutlassEVTEpilogueTypeFormatter:
             # replace line with a new variable name
             self.output.writeline(f"using {varname} = {line};")
             return varname
+
         if name.startswith("_"):
             raise NotImplementedError(name)
         if hasattr(self, f"_op_{name}"):
@@ -122,7 +125,10 @@ class CutlassEVTEpilogueTypeFormatter:
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            return f"cutlass::epilogue::fusion::Sm90SrcFetch /* :={name} */"
+            # return f"cutlass::epilogue::fusion::Sm90SrcFetch /* :={name} */"
+            raise NotImplementedError(
+                f"Operand {name} not found. Auxiliary inputs not supported yet."
+            )
 
     def _op_constant(self, value, dtype):
         # Load a constant
@@ -203,7 +209,7 @@ class CutlassEVTEpilogueArgumentFormatter:
 
     """
 
-    def __init__(self, accumulator_node_name : str):
+    def __init__(self, accumulator_node_name: str):
         """
 
         Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
@@ -213,10 +219,12 @@ class CutlassEVTEpilogueArgumentFormatter:
             accumulator_node_name (str): The name of the accumulator node which should contain
                                           the Matmul result before fusion according to the IR graph.
         """
-        self.accumulator_node_name : str = accumulator_node_name #
-        self.output : IndentedBuffer = IndentedBuffer(0) # The output buffer for codegen
-        self.var_counter : int = 0 # used to generate variable names, incremented for each new variable
-        self.aliases : Dict[str,str] = dict() # Aliases for subexpression functors
+        self.accumulator_node_name: str = accumulator_node_name  #
+        self.output: IndentedBuffer = IndentedBuffer(0)  # The output buffer for codegen
+        self.var_counter: int = (
+            0  # used to generate variable names, incremented for each new variable
+        )
+        self.aliases: Dict[str, str] = dict()  # Aliases for subexpression functors
 
     @staticmethod
     def ir_to_evt_argument_string(
@@ -237,10 +245,14 @@ class CutlassEVTEpilogueArgumentFormatter:
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                formatter.aliases[node.name] = result
-            res : str = formatter.getvalue(result)
+                if node.name is not None:
+                    formatter.aliases[node.name] = result
+
+            res: str = formatter.getvalue(result)
             if "@sympy_expr" in res:
-                raise NotImplementedError("sympy / indexing expressions not yet supported in EVT fusion")
+                raise NotImplementedError(
+                    "sympy / indexing expressions not yet supported in EVT fusion"
+                )
             else:
                 return res
 
@@ -266,7 +278,9 @@ class CutlassEVTEpilogueArgumentFormatter:
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            return f"{name}"
+            raise NotImplementedError(
+                f"Operand {name} not found. Auxiliary inputs not supported yet."
+            )
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):

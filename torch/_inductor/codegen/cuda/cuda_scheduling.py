@@ -1,5 +1,5 @@
 import logging
-from typing import cast, List, Callable
+from typing import Callable, cast, List
 
 from ... import config, ir
 from ...codecache import code_hash, get_path
@@ -43,7 +43,7 @@ def _can_fuse_epilogue(
     # We can fuse a Pointwise op that depends on the last fused epilogue node
     # if any. If there is no epilogue node yet, it needs to depend on the template
     # node
-    node_name = additional_node.name if additional_node.name is not None else additional_node.data.name  # type: ignore[attr-defined]
+    node_name = additional_node.name if additional_node.name is not None else additional_node.data.name  # type: ignore[attr-defined] # noqa: B950
     if node_name is None:
         return False
 
@@ -96,7 +96,7 @@ class CUDASchedulerNode(SchedulerNode):
     which may alllow epilogue fusions.
     """
 
-    def __init__(self, scheduler: Scheduler, node: CUDATemplateBuffer, group_fn : Callable):
+    def __init__(self, scheduler: Scheduler, node: CUDATemplateBuffer, group_fn: Callable):  # type: ignore[type-arg]
         """
         Initializes a new instance of the CUDASchedulerNode class.
         Args:
@@ -128,10 +128,13 @@ class CUDASchedulerNode(SchedulerNode):
         assert self.can_fuse_epilogue(other_node)
         return FusedCUDASchedulerNode(self, self.scheduler, [other_node])  # type: ignore[arg-type]
 
-_cuda_epilogue_fusion_counter : int = 0 # Used by unit tests to verify fusions are happening / not happening
+
+_cuda_epilogue_fusion_counter: int = (
+    0  # Used by unit tests to verify fusions are happening / not happening
+)
+
 
 class FusedCUDASchedulerNode(FusedSchedulerNode):
-
     def __init__(
         self,
         cuda_scheduler_node: CUDASchedulerNode,
@@ -158,7 +161,6 @@ class FusedCUDASchedulerNode(FusedSchedulerNode):
         assert cuda_scheduler_node.is_template()
         super().__init__(scheduler, [cuda_scheduler_node] + epilogue_scheduler_nodes)
         self.template_node = cuda_scheduler_node
-
 
     def get_cuda_scheduler_node(self) -> CUDASchedulerNode:
         """

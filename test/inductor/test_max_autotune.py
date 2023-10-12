@@ -2,7 +2,7 @@
 import os
 import unittest
 
-from typing import List, Optional, Callable
+from typing import Callable, List, Optional
 
 import torch
 from torch import multiprocessing as mp
@@ -255,7 +255,6 @@ class TestDoBench(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-
     def test_max_autotune_cutlass_backend_dtype_conflict_fusion(
         self,
         dynamic: bool = False,
@@ -309,8 +308,8 @@ class TestDoBench(TestCase):
         max_autotune_gemm_backends: str = "CUTLASS",
         mixed_precision=False,
         fp16=True,
-        expected_fuse_count = 1,
-        mm : Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        expected_fuse_count=1,
+        mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
     ):
         from torch._inductor.codegen.cuda import cuda_scheduling
 
@@ -343,9 +342,10 @@ class TestDoBench(TestCase):
             cuda_scheduling._cuda_epilogue_fusion_counter = 0
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
-            assert cuda_scheduling._cuda_epilogue_fusion_counter == expected_fuse_count, f"Expected fuse count of {expected_fuse_count} but got {cuda_scheduling._cuda_epilogue_fusion_counter}"
+            assert (
+                cuda_scheduling._cuda_epilogue_fusion_counter == expected_fuse_count
+            ), f"Expected fuse count of {expected_fuse_count} but got {cuda_scheduling._cuda_epilogue_fusion_counter}"
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
-
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
@@ -400,7 +400,6 @@ class TestDoBench(TestCase):
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16(self):
-
         def mm(a, b):
             return (a @ b) * 3.0
 
