@@ -156,7 +156,7 @@ def _allowed_function_ids():
         # Tensor.set_ with a Storage, and Storages cannot be traced with
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
-        disallowed_modules = (
+        disallowed_modules = [
             "torch.optim.",
             "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
             "torch.utils._pytree",
@@ -175,7 +175,10 @@ def _allowed_function_ids():
             # issues observed in
             # https://github.com/pytorch/pytorch/issues/108269
             "torch.distributed.algorithms.",
-        )
+        ]
+        if config.trace_distributed:
+            disallowed_modules.append("torch.distributed.")
+
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
         if module is None:
@@ -232,6 +235,17 @@ def _allowed_function_ids():
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
+
+    if config.trace_distributed:
+        for f in [
+            torch.distributed._functional_collectives_impl._all_gather_into_tensor,
+            torch.distributed._functional_collectives_impl._all_reduce,
+            torch.distributed._functional_collectives_impl._reduce_scatter_tensor,
+            torch.distributed._functional_collectives_impl._all_reduce_coalesced,
+            torch.distributed._functional_collectives_impl._all_gather_into_tensor_coalesced,
+            torch.distributed._functional_collectives_impl._reduce_scatter_tensor_coalesced,
+        ]:
+            torch_object_ids[id(f)] = repr(f)
 
     # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
