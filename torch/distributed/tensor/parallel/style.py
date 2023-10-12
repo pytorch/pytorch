@@ -19,6 +19,8 @@ __all__ = [
     "RowwiseParallel",
     "ColwiseParallel",
     "PairwiseParallel",
+    "PrepareModuleInput",
+    "PrepareModuleOutput",
     "SequenceParallel",
     "make_input_replicate_1d",
     "make_input_reshard_replicate",
@@ -68,6 +70,7 @@ class PairwiseParallel(ParallelStyle):
         transformer. We recommend to use ``PairwiseParallel`` only
         for even-number-layer MLP for now.
     """
+
     @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
@@ -102,6 +105,7 @@ class SequenceParallel(PairwiseParallel):
         transformer. We recommend to use ``SequenceParallel`` only
         for even-number-layer MLP for now.
     """
+
     @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
@@ -564,4 +568,41 @@ class ColwiseParallel(ParallelStyle):
             _prepare_output=_prepare_output
             if _prepare_output is not None
             else _get_prepare_output(output_layouts, use_local),
+        )
+
+
+class PrepareModuleInput(ParallelStyle):
+    """
+    Only used to specify the input distribute spec for a module.
+    """
+
+    def __init__(
+        self, input_layouts=Shard(0), output_layouts=Replicate(), use_local=False
+    ):
+        super().__init__(
+            input_layouts=input_layouts,
+            output_layouts=output_layouts,
+            use_local=use_local,
+            _prepare_input=_get_prepare_input(
+                input_layouts,
+                output_layouts,
+            ),
+            _prepare_output=None,
+        )
+
+
+class PrepareModuleOutput(ParallelStyle):
+    """
+    Only used to specify the output distribute spec for a module.
+    """
+
+    def __init__(
+        self, input_layouts=Replicate(), output_layouts=Shard(0), use_local=True
+    ):
+        super().__init__(
+            input_layouts=input_layouts,
+            output_layouts=output_layouts,
+            use_local=use_local,
+            _prepare_input=None,
+            _prepare_output=_get_prepare_output(output_layouts, use_local),
         )
