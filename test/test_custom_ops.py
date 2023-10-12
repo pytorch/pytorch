@@ -1717,6 +1717,12 @@ class MiniOpTest(CustomOpTestCaseBase):
         lib.impl(name, lambda x: x.clone(), "CPU")
         return self.get_op(qualname)
 
+    @optests.dontGenerateOpCheckTests("Testing this API")
+    def test_dont_generate(self):
+        op = op_with_incorrect_schema(self, "incorrect_schema")
+        x = torch.randn(3)
+        op(x)
+
     def test_mm(self):
         x = torch.randn(2, 3, requires_grad=True)
         y = torch.randn(3, 5)
@@ -1940,6 +1946,10 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 FailuresDict("", failures), mini_op_test_checks, MiniOpTest
             )
 
+    def test_dont_generate_decorator(self):
+        self.assertTrue(hasattr(MiniOpTest, "test_dont_generate"))
+        self.assertFalse(hasattr(MiniOpTest, "test_schema__test_dont_generate"))
+
     def test_opcheck(self):
         x = torch.randn(3, requires_grad=True)
         with self.assertRaisesRegex(ValueError, "OpOverload"):
@@ -1981,6 +1991,13 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_faketensor": "SUCCESS",
             },
         )
+
+    def test_is_inside_opcheck_mode(self):
+        self.assertFalse(optests.is_inside_opcheck_mode())
+        with optests.generate_tests.OpCheckMode(
+            ["foo"], "bar", lambda x: x, None, "baz", "brr"
+        ):
+            self.assertTrue(optests.is_inside_opcheck_mode())
 
     def test_opcheck_bad_op(self):
         op = op_with_incorrect_schema(self, "foo")

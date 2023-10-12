@@ -46,6 +46,17 @@ ignore = [
     "G101", "G201", "G202",
     # these ignores are from RUFF perf; please fix!
     "PERF203", "PERF4",
+    "PYI001", # these ignores are from PYI; please fix!
+    "PYI018",
+    "PYI019",
+    "PYI024",
+    "PYI030",
+    "PYI034",
+    "PYI036",
+    "PYI041",
+    "PYI042",
+    "PYI045",
+    "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108",
@@ -82,6 +93,7 @@ select = [
     "PT024",
     "PT025",
     "PT026",
+    "PYI",
     "RUF017",
     "TRY302",
 ]
@@ -89,6 +101,7 @@ select = [
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]
 "test/jit/**" = [
+    "PYI",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 "torch/onnx/**" = [
