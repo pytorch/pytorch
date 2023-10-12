@@ -310,6 +310,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   if (C10_UNLIKELY(!pctx)) {
     // workaround for corner case where a primary context exists but is not
     // the current context
+    TORCH_WARN_ONCE("Attempting to run cuFFT, but there was no current CUDA context! Attempting to set the primary context...");
     at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, 0);
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
   }
