@@ -877,6 +877,7 @@ class TestFFT(TestCase):
     @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/109448
         x = torch.randn(32, dtype=dtype, device=device, requires_grad=True)
         dout = torch.zeros(32, dtype=dtype, device=device)
 
