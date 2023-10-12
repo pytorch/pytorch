@@ -7,6 +7,7 @@ torch.cpu
     :toctree: generated
     :nosignatures:
 
+    current_device
     current_stream
     is_available
     synchronize
