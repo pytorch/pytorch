@@ -782,7 +782,7 @@ def use_cutlass_template(layout):
     # Do not use cutlass template on ROCm
     if torch.version.hip:
         return False
-        
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
