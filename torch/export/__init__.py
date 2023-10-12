@@ -1,6 +1,7 @@
 import builtins
 import copy
 import dataclasses
+import inspect
 import io
 import pathlib
 import sys
@@ -443,7 +444,19 @@ class _Dim(type):
     Metaclass for :func:`Dim` types.
     """
 
-    pass
+    @staticmethod
+    def readable(name, min_, max_):
+        if min_ == 2:
+            min_ = None
+        if max_ == sys.maxsize - 1:
+            max_ = None
+        if min_ is None and max_ is None:
+            return f"Dim('{name}')"
+        if min_ is None:
+            return f"Dim('{name}', max={max_})"
+        if max_ is None:
+            return f"Dim('{name}', min={min_})"
+        return f"Dim('{name}', min={min_}, max={max_})"
 
 
 def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
@@ -464,7 +477,9 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _min = 2 if min is None else builtins.max(min, 2)
     _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-    return _Dim(name, (int,), {"min": _min, "max": _max})
+    dim = _Dim(name, (int,), {"min": _min, "max": _max})
+    dim.__module__ = inspect.getmodule(inspect.stack()[1][0]).__name__  # type: ignore[union-attr]
+    return dim
 
 
 def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):

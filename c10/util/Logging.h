@@ -367,6 +367,9 @@ C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 // Initializes the c10 logger.
 C10_API void initLogging();
 
+// Sets the rank, which will be included in log messages
+C10_API void SetGlobalRank(int64_t rank);
+
 } // namespace c10
 
 #endif // C10_UTIL_LOGGING_H_

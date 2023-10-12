@@ -258,6 +258,9 @@ error_on_recompile = False
 # causing recompilations.
 report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
 
+# Whether to report all guard failures or just the first one that fails
+report_all_guard_failures = False
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
@@ -332,8 +335,6 @@ inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 # in the FX graph. This should incorrectly construct the divisible and replacement
 # lists, and incorrectly issue guards.
 inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
-
-add_runtime_assertions_for_inline_constraints = True
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",

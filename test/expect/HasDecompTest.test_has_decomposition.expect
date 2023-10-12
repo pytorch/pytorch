@@ -883,10 +883,6 @@ aten::masked_select
 aten::masked_select.out
 aten::matmul_backward
 aten::matmul_backward.out
-aten::max
-aten::max.dim
-aten::max.dim_max
-aten::max.unary_out
 aten::max_pool2d_backward
 aten::max_pool2d_backward.out
 aten::max_pool2d_with_indices
@@ -905,10 +901,6 @@ aten::median
 aten::median.dim
 aten::median.dim_values
 aten::median.out
-aten::min
-aten::min.dim
-aten::min.dim_min
-aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
 aten::miopen_batch_norm_backward
