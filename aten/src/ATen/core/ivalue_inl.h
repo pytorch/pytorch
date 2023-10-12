@@ -294,6 +294,7 @@ using Shared = c10::intrusive_ptr<T>;
 // string
 struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  private:
+   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string str_;
 
  public:
@@ -334,7 +335,7 @@ struct TORCH_API TupleElements {
     // Don't want to declare a std::array because the convenient
     // iteration and size members are a footgun in this case -- the
     // actual size of the array may be smaller than 3!
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    // NOLINTNEXTLINE(*c-arrays*)
     IValue elementsInline_[3];
   };
 
@@ -1142,7 +1143,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
-  TypePtr elementType() const {
+  const TypePtr& elementType() const {
     return type_;
   }
 
@@ -1373,6 +1374,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // An upcast pointer to a virtual class which allows us to manipulate events,
   // streams, ... in a generic way, without an explicit dependency on CUDA.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::impl::VirtualGuardImpl impl_;
 
   // The device that was current when markCompleted was called, which we'll
@@ -1396,6 +1398,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // current when invoking a callback, thus allowing the callback to use devices
   // that the parent future didn't use. This field is set to the value provided
   // in the constructor and will be "inherited" by all child futures.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::vector<c10::Device> devices_;
 };
 
@@ -1446,11 +1449,11 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Await& v);
 
-  TypePtr elementType() const {
+  const TypePtr& elementType() const {
     return elType_;
   }
 
-  TypePtr type() const {
+  const TypePtr& type() const {
     return type_;
   }
 
@@ -1474,11 +1477,11 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
-    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
+    const c10::List<c10::intrusive_ptr<ivalue::Future>>& srcs);
 // Input is a List of Futures with the same target type.
 // Output is a Future that will be updated with a seen value.
 TORCH_API intrusive_ptr<ivalue::Future> collectAny(
-    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
+    const c10::List<c10::intrusive_ptr<ivalue::Future>>& srcs);
 
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
@@ -1539,7 +1542,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   void unsafeRemoveSlot(size_t slot) {
     TORCH_CHECK(slot < slots_.size());
-    slots_.erase(slots_.begin() + slot);
+    slots_.erase(slots_.begin() + static_cast<std::ptrdiff_t>(slot));
   }
 
   /**
@@ -1642,9 +1645,9 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
       std::ostream& out,
       const ivalue::EnumHolder& v);
 
-  TORCH_API const std::string qualifiedClassName() const;
+  TORCH_API const std::string& qualifiedClassName() const;
 
-  const std::string unqualifiedClassName() const;
+  const std::string& unqualifiedClassName() const;
 
   const std::string& name() const {
     return name_;
