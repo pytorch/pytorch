@@ -428,8 +428,10 @@ def patch_config_if_changed():
         patch = eval_frame.config_cache.saved_config
         if recompiles_log.isEnabledFor(logging.DEBUG):
             recompiles_log.debug(
-                ("Current config does not match config saved when compiling\n"
-                "Saved hash: %s, Current hash: %s\nRestoring saved config."),
+                (
+                    "Current config does not match config saved when compiling\n"
+                    "Saved hash: %s, Current hash: %s\nRestoring saved config."
+                ),
                 saved_config_hash,
                 current_config_hash,
             )
