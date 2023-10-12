@@ -341,7 +341,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
-                from torch import empty_strided, device
+                from torch import device, empty, empty_strided
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
 
@@ -827,12 +827,26 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        return (
-            f"{buffer.get_name()} = empty_strided("
-            f"{self.codegen_shape_tuple(shape)}, "
-            f"{self.codegen_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
-        )
+        return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
+
+    def make_allocation(self, name, device, dtype, shape, stride):
+        try:
+            expected = tuple(ir.make_contiguous_strides_for(shape))
+        except Exception:  # cannot determine truth value of Relational
+            expected = None
+        if stride == expected:
+            return (
+                f"{name} = empty("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
+        else:
+            return (
+                f"{name} = empty_strided("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
 
     def make_buffer_free(self, buffer):
         return f"del {buffer.get_name()}"
@@ -1540,15 +1554,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return var
 
     def make_buffer_allocation(self, buffer):
-        name = buffer.get_name()
-        device = self.codegen_device(buffer.get_device())
-        dtype = self.codegen_dtype(buffer.get_dtype())
-        size = self.codegen_shape_tuple(tuple(buffer.get_size()))
-        stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
+        return self.make_allocation(
+            buffer.get_name(),
+            buffer.get_device(),
+            buffer.get_dtype(),
+            buffer.get_size(),
+            buffer.get_stride(),
+        )
+
+    def make_allocation(self, name, device, dtype, shape, stride):
+        device = self.codegen_device(device)
+        dtype = self.codegen_dtype(dtype)
+        size = self.codegen_shape_tuple(shape)
+        stride = self.codegen_shape_tuple(stride)
         if config.aot_inductor.abi_compatible:
             device_type, device_id = device.split(",")
             args = [
-                str(len(buffer.get_size())),
+                str(len(shape)),
                 self.codegen_int_array_var(size, self.wrapper_call),
                 self.codegen_int_array_var(stride, self.wrapper_call),
                 dtype,
@@ -1561,15 +1583,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
+
+        if V.graph.aot_mode and device.startswith("c10::Device("):
+            tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
         else:
-            if V.graph.aot_mode and device.startswith("c10::Device("):
-                tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
-            else:
-                tensor_device = device
-            return (
-                f"{self.declare}{name} = {self.namespace}empty_strided("
-                f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype}));"
-            )
+            tensor_device = device
+
+        return (
+            f"{self.declare}{name} = {self.namespace}empty_strided("
+            f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype})){self.ending}"
+        )
 
     def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
         dim = str(len(size))
