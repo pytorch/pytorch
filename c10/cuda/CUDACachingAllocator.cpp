@@ -190,6 +190,7 @@ struct BlockPool {
         owner_PrivatePool(private_pool) {}
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> unmapped;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
 };
@@ -451,6 +452,7 @@ struct ExpandableSegment {
   }
 
   char* ptr() const {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return (char*)ptr_;
   }
   size_t size() const {
@@ -503,7 +505,7 @@ struct ExpandableSegment {
       handles_.pop_back();
     }
   }
-  void forEachAllocatedRange(std::function<void(size_t, size_t)> fn) {
+  void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
     auto start = 0;
     for (auto i : c10::irange(handles_.size())) {
       if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
@@ -821,9 +823,9 @@ static std::string reportProcessMemoryInfo(int device) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
+  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   unsigned int self_pid = getpid();
   std::stringstream ss;
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
@@ -884,7 +886,7 @@ class DeviceCachingAllocator {
   bool set_fraction = false;
 
   bool record_history = false;
-  std::atomic<CreateContextFn> context_recorder_;
+  std::atomic<CreateContextFn> context_recorder_{};
   size_t alloc_trace_next = 0;
   RecordContext record_context_ = RecordContext::NEVER;
   size_t alloc_trace_max_entries_ = 1;
@@ -1140,7 +1142,7 @@ class DeviceCachingAllocator {
   }
 
   Block* alloc_found_block(
-      AllocParams params,
+      const AllocParams& params,
       size_t orig_size,
       std::shared_ptr<GatheredContext> context,
       bool split_remainder) {
@@ -1467,7 +1469,7 @@ class DeviceCachingAllocator {
   void setSegmentStateToCheckpoint(
       Block* block,
       SegmentState& segment,
-      std::shared_ptr<GatheredContext> context,
+      const std::shared_ptr<GatheredContext>& context,
       RestoreResult& rr) {
     Block* curr_block = block;
     Block* last_block = block;
@@ -3101,7 +3103,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void enablePeerAccess(int dev, int dev_to_access) override {
-    c10::cuda::CUDAGuard device_guard(dev);
+    c10::cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(dev));
     cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
       // ignore and clear the error if access was already enabled
@@ -3174,7 +3176,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto sp =
         std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
-          cuda::CUDAGuard device_guard(curr_device);
+          cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(curr_device));
           std::lock_guard<std::mutex> deleter_lock(IpcMutex);
           C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
           ipcMemHandle_to_devptr.erase(handle);
@@ -3212,13 +3214,13 @@ std::string format_size(uint64_t size) {
   if (size <= 1024) {
     os << size << " bytes";
   } else if (size <= 1048576) {
-    os << (size / 1024.0);
+    os << (static_cast<double>(size) / 1024.0);
     os << " KiB";
   } else if (size <= 1073741824ULL) {
-    os << size / 1048576.0;
+    os << static_cast<double>(size) / 1048576.0f;
     os << " MiB";
   } else {
-    os << size / 1073741824.0;
+    os << static_cast<double>(size) / 1073741824.0f;
     os << " GiB";
   }
   return os.str();

@@ -46,8 +46,8 @@ namespace CUDACachingAllocator {
 extern const size_t kLargeBuffer;
 
 struct Stat {
-  int64_t current = 0;
-  int64_t peak = 0;
+  uint64_t current = 0;
+  uint64_t peak = 0;
   int64_t allocated = 0;
   int64_t freed = 0;
 };
