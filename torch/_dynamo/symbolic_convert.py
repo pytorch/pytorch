@@ -51,6 +51,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
+from .funcname_cache import get_funcname
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -627,7 +628,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        return f"{self.f_code.co_filename}:{lineno} in {self.f_code.co_name}{inline_depth_str}"
+        funcname = get_funcname(self.f_code.co_filename, lineno)
+        funcname_str = "" if funcname is None else f" ({funcname})"
+        return f"{self.f_code.co_filename}:{lineno} in {self.f_code.co_name}{funcname_str}{inline_depth_str}"
 
     def get_log_starts_line_log_str(self):
         log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
@@ -2244,7 +2247,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
+        result = skipfiles.check_verbose(func, extra_check=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,

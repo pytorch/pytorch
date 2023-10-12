@@ -643,7 +643,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 1 /*TearDown*/));
+      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -666,7 +666,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
                 << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
                 << "must both be enabled. "
                 << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
-      asyncErrorHandling_ = TearDown;
+      asyncErrorHandling_ = SkipCleanUp;
     }
   }
 
@@ -1610,7 +1610,7 @@ void ProcessGroupNCCL::workEnqueue(
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : Backend::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME, kProcessGroupNCCLDefaultTimeout),
       is_high_priority_stream(is_high_priority_stream) {}
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
