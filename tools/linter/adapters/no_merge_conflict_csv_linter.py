@@ -5,12 +5,7 @@ import logging
 import os
 import sys
 from enum import Enum
-from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
-
-from ufmt.core import ufmt_string
-from ufmt.util import make_black_config
-from usort import Config as UsortConfig
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -58,16 +53,15 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
 
 
 def check_file(filename: str) -> List[LintMessage]:
-
     with open(filename, "rb") as f:
         original = f.read().decode("utf-8")
     replacement = ""
-    with open(filename, 'r') as f:
+    with open(filename) as f:
         lines = f.readlines()
         for line in lines:
             if len(line.strip()) > 0:
                 replacement += line
-                replacement += '\n' * 3
+                replacement += "\n" * 3
         replacement = replacement[:-3]
 
         if replacement == original:
