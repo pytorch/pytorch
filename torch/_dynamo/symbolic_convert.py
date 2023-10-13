@@ -67,6 +67,7 @@ from .utils import (
     get_fake_value,
     get_instruction_source_311,
     graph_break_dup_warning_checker,
+    HashableTracker,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -380,7 +381,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                 "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                case_name="cond_operands",
             )
 
     return inner
@@ -1175,7 +1177,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ):
             unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
 
-        self.call_function(fn, argsvars.items, kwargsvars.items)
+        # Map to a dictionary of str -> VariableTracker
+        kwargsvars = {k.vt.as_python_constant(): v for k, v in kwargsvars.items.items()}
+        self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_KW(self, inst):
@@ -1303,8 +1307,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
-        assert all(map(SetVariable.is_valid_key, items))
-        items = set(map(SetVariable.get_key, items))
+        items = set(map(HashableTracker, items))
         new_set = SetVariable(items, mutable_local=MutableLocal())
         self.push(new_set)
 
@@ -1327,14 +1330,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         options = VariableTracker.propagate(items)
-        result = dict()
-        for k, v in zip(items[::2], items[1::2]):
-            assert ConstDictVariable.is_valid_key(k)
-            result[ConstDictVariable.get_key(k)] = v
-        assert len(result) == len(items) / 2
-        self.push(
-            ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
-        )
+        d = dict(zip(map(HashableTracker, items[::2]), items[1::2]))
+        self.push(ConstDictVariable(d, dict, mutable_local=MutableLocal(), **options))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1361,9 +1358,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate([keys] + values)
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
-        keys = keys.as_python_constant()
-        assert istype(keys, tuple)
-        assert len(keys) == len(values)
+        keys = map(HashableTracker, keys.items)
         self.push(
             ConstDictVariable(
                 dict(zip(keys, values)),
@@ -1378,17 +1373,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
-        assert obj.mutable_local
-        items = dict(obj.items)
-        items[k.as_python_constant()] = v
-        self.replace_all(
-            obj,
-            ConstDictVariable(
-                items,
-                obj.user_cls,
-                **VariableTracker.propagate([obj, k, v]),
-            ),
-        )
+        obj.call_method(self, "__setitem__", (k, v), {})
 
     def SET_ADD(self, inst):
         v = self.pop()
@@ -2320,7 +2305,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
-        # Detect inline GraphModule calls in order to propgate node metadata,
+        # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)

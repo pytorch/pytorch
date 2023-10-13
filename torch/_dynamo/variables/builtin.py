@@ -10,7 +10,7 @@ from typing import Dict, List
 import torch
 from torch import sym_float, sym_int
 
-from .. import config, variables
+from .. import config, polyfill, variables
 from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
@@ -35,6 +35,7 @@ from ..utils import (
     check_unspec_python_args,
     get_fake_value,
     guard_if_dyn,
+    HashableTracker,
     is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
@@ -651,6 +652,7 @@ class BuiltinVariable(VariableTracker):
                     UserErrorType.STANDARD_LIBRARY,
                     "Calling round() on symbolic value is not supported. "
                     "You can use floor() to implement this functionality",
+                    case_name="dynamic_shape_round",
                 )
         return super().call_function(tx, args, kwargs)
 
@@ -874,12 +876,16 @@ class BuiltinVariable(VariableTracker):
                 items = user_cls()
                 for x in arg.unpack_var_sequence(tx):
                     k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
+                    k = HashableTracker(k)
                     items.update({k: v})
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
+            kwargs = {
+                HashableTracker(ConstantVariable.create(k)): v
+                for k, v in kwargs.items()
+            }
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
+                kwargs, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"dict(): {args} {kwargs}")
 
@@ -887,12 +893,10 @@ class BuiltinVariable(VariableTracker):
         # Can we merge this implementation and call_dict's one?
         assert not kwargs
         if not args:
-            args = (set(),)
+            return SetVariable({}, mutable_local=MutableLocal())
         assert len(args) == 1
         arg = args[0]
-        if isinstance(arg, set):
-            return SetVariable(arg, mutable_local=MutableLocal())
-        elif isinstance(arg, variables.SetVariable):
+        if isinstance(arg, variables.SetVariable):
             return arg.clone(mutable_local=MutableLocal())
         elif isinstance(
             arg,
@@ -902,7 +906,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            items = {SetVariable.get_key(x) for x in arg.unpack_var_sequence(tx)}
+            items = {HashableTracker(x) for x in arg.unpack_var_sequence(tx)}
             return SetVariable(items, mutable_local=MutableLocal())
         else:
             unimplemented(f"set(): {args} {kwargs}")
@@ -1247,6 +1251,7 @@ class BuiltinVariable(VariableTracker):
             UserErrorType.ANTI_PATTERN,
             f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
+            case_name="type_reflection_method",
         )
 
     def call_reversed(self, tx, obj: VariableTracker):
@@ -1390,7 +1395,7 @@ class BuiltinVariable(VariableTracker):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return ConstantVariable.create(
-                op(left.as_python_constant(), right.as_python_constant())
+                op(left.set_items, right._items)
             )
 
         if isinstance(left, TensorVariable):
@@ -1492,3 +1497,10 @@ class BuiltinVariable(VariableTracker):
     call_ne = _comparison
     call_is_ = _comparison
     call_is_not = _comparison
+
+    def call_all(self, tx, *args, **kwargs):
+        from .builder import SourcelessBuilder
+
+        return tx.inline_user_function_return(
+            SourcelessBuilder()(tx, polyfill.all), args, kwargs
+        )
