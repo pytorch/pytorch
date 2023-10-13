@@ -1378,8 +1378,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
-        kernel = "aoti_torch_" + kernel.split("::")[-1]
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
+        kernel_tokens = kernel.split("::")
+        kernel_suffix = kernel_tokens[-1]
+        if kernel_suffix == "call":
+            kernel_suffix = kernel_tokens[-2]
+        shim_fn = f"aoti_torch_{kernel_suffix}"
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
 
     def generate_c_shim_extern_kernel_alloc_call(self, extern_kernel, args):
         output_args = []
@@ -1389,9 +1393,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if isinstance(output, ir.MultiOutput):
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
-                assert (
-                    output.indices[0][1] == idx
-                ), f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
+                if output.indices:
+                    assert (
+                        output.indices[0][1] == idx
+                    ), f"expected {output.indices[0][1]=} == {idx=} for {output_name_base=}"
                 self.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
                 output_raii_handles.append(
@@ -1664,9 +1669,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if isinstance(arg_type, torch.TensorType):
                 assert isinstance(arg, inductor_tensor_buffers), f"got {type(arg)}"
                 new_tensor_args.append(f"{arg.codegen_reference()}")
-            elif isinstance(arg_type, (torch.IntType, torch.SymIntType)):
-                # int or SymInt
-                assert isinstance(arg, int)
+            elif isinstance(arg_type, torch.IntType):
+                # int
+                new_int_args.append(str(arg))
+            elif isinstance(arg_type, torch.SymIntType):
+                # SymInt
                 new_int_args.append(str(arg))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
@@ -2009,16 +2016,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             self.prefix.writeline("\n")
         return super().generate()
 
-    def generate_load_kernel(self, name, params):
-        mangled_name = params.get("mangled_name", None)
-        assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
-        assert os.path.exists(
-            cubin_path
-        ), f"cubin file should already exist at this moment: {cubin_path}"
-
-        shared_mem = params.get("shared_mem", 0)
-
+    @functools.lru_cache(None)
+    def generate_load_kernel_once(
+        self, name: str, mangled_name: str, cubin_path: str, shared_mem: int
+    ):
         if V.graph.aot_mode:
             self.writeline(f"if (kernels.{name} == nullptr) {{")
             self.writeline(
@@ -2092,6 +2093,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self, name, call_args, grid=None, device_index=None, cuda=True, triton=True
     ):
         if not cuda:
+            # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton
             )
@@ -2100,8 +2102,15 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         assert (
             params is not None
         ), f"cuda kernel parameters for {name} should already exist at this moment"
+        mangled_name = params.get("mangled_name", None)
+        assert mangled_name is not None, "missing mangled_name"
+        cubin_path = params.get("cubin_path", None)
+        assert cubin_path is not None and os.path.exists(
+            cubin_path
+        ), f"cubin file should already exist at this moment: {cubin_path}"
+        shared_mem = params.get("shared_mem", 0)
 
-        self.generate_load_kernel(name, params)
+        self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
