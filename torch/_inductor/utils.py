@@ -256,6 +256,14 @@ def convert_shape_to_symint(
     ]
 
 
+def is_view(op: torch._ops.OpOverload):
+    """
+    Does this op overload have aliasing
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    return any(a.alias_info is not None for a in op._schema.arguments)
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
@@ -770,6 +778,10 @@ def use_triton_template(layout, *, enable_int32=False):
 
 def use_cutlass_template(layout):
     from .codegen.cuda.cutlass_utils import try_import_cutlass
+
+    # Do not use cutlass template on ROCm
+    if torch.version.hip:
+        return False
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(

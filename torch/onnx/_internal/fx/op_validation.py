@@ -121,7 +121,7 @@ def validate_op_between_ort_torch(
                     function_eager_attributes
                 )
             )
-        # NOTE: Imcompatible kwargs or missing required args
+        # NOTE: Incompatible kwargs or missing required args
         except TypeError as type_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
             with diagnostic.log_section(logging.WARNING, "Op level debug is bypassed"):
