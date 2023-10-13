@@ -20,9 +20,9 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         Hence our strategy here is to convert only the weight of convolution to
         channels_last. This ensures that;
         1. Fast convolution kernels will be used, the benefit of which could
-           outweigh overhead of permutation (if input is not in the same format)
+        outweigh overhead of permutation (if input is not in the same format)
         2. No unnecessary permutations are applied on layers that do not benefit
-           from memory_format conversion.
+        from memory_format conversion.
 
         The optimal case is that, layers between convolution layers are channels
         last compatible. Input tensor would be permuted to channels last when it
