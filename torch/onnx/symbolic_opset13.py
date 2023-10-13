@@ -772,7 +772,7 @@ def diagonal(g: jit_utils.GraphContext, self, offset, dim1, dim2):
     mask = opset9.zeros(g, mask_shape, None, None, None)
     mask = g.op("EyeLike", mask, k_i=offset)
     # dim1 and dim2 appended as a dimension at the end of the shape
-    rank = symbolic_helper._get_tensor_rank(self)
+
     if rank is not None:
         axes = list(range(rank))
         axes.remove(dim1)
