@@ -67,6 +67,8 @@ def install_config_module(module):
     module._compile_ignored_keys = set(compile_ignored.keys())
 
     module.__class__ = ConfigModuleInstance
+    module._is_dirty = True
+    module._hash_digest = None
 
 
 # Gets all the keys (i.e. assignments) with a @compile_ignored comment
@@ -131,6 +133,7 @@ class ConfigModule(ModuleType):
         elif name in self._compile_ignored_keys:
             self._compile_ignored[name] = value
         elif name in self._allowed_keys:
+            self._is_dirty = True
             self._config[name] = value
         else:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
@@ -151,6 +154,7 @@ class ConfigModule(ModuleType):
         if name in self._compile_ignored_keys:
             del self._compile_ignored[name]
         else:
+            self._is_dirty = True
             del self._config[name]
 
     def save_config(self):
@@ -176,8 +180,15 @@ class ConfigModule(ModuleType):
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
+    def get_hash(self):
+        """Hashes the configs that are not compile_ignored"""
+        if self._is_dirty or self.hash_digest is None:
+            self._hash_digest = hashlib.md5(__repr__(self._config)).digest()
+        return self._hash_digest
+
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
+        self._is_dirty = True
         for k, v in pickle.loads(data).items():
             if k in self._compile_ignored_keys:
                 self._compile_ignored[k] = v
@@ -234,17 +245,22 @@ class ConfigModule(ModuleType):
         class ConfigPatch(ContextDecorator):
             def __enter__(self):
                 assert not prior
+                if prior != {}:
+                    self._is_dirty = True
                 for key in changes.keys():
                     # KeyError on invalid entry
                     if key in config._compile_ignored_keys:
                         prior_ignored[key] = config._compile_ignored[key]
                     else:
+                        self._is_dirty = True
                         prior[key] = config._config[key]
                 config._config.update(changes)
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 config._config.update(prior)
                 config._compile_ignored.update(prior_ignored)
+                if prior != {}:
+                    self._is_dirty = True
                 prior.clear()
                 prior_ignored.clear()
 
