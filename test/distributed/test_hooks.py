@@ -1,20 +1,26 @@
 # Owner(s): ["oncall: distributed"]
 
+import logging
 import os
 import sys
 import tempfile
 import threading
 import time
+import warnings
+
 from datetime import timedelta
 from functools import partial, wraps
 
 import torch
+
 import torch.distributed as dist
 import torch.distributed._hooks as dhooks
 import torch.distributed.distributed_c10d as c10d
 
+logger = logging.getLogger(__name__)
+
 if not dist.is_available():
-    print("torch.distributed not available, skipping tests", file=sys.stderr)
+    logger.warning("torch.distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -35,12 +41,12 @@ class PgHooks(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         try:
             os.remove(self.file_name)
-        except OSError:
-            pass
+        except OSError as e:
+            warnings.warn(f"Failed to delete {self.file_name}: {e}")
 
     def test_pg_hook(self):
         pgs = []
@@ -83,7 +89,18 @@ def with_comms(func=None, timeout=c10d.default_pg_timeout):
     return wrapper
 
 
-class CollectiveHooks:
+class CollectiveHooks(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError as e:
+            warnings.warn(f"Failed to delete {self.file_name}: {e}")
+
     @property
     def world_size(self) -> int:
         return 4
@@ -96,11 +113,11 @@ class CollectiveHooks:
 
         def coll_start(status):
             starts.append(status)
-            print(f"col_start {len(starts)} rank{self.rank}")
+            logger.debug("col_start %d rank%d", len(starts), self.rank)
 
         def coll_end(status):
             ends.append(status)
-            print(f"col_end {len(ends)} rank{self.rank}")
+            logger.debug("col_start %d rank%d", len(starts), self.rank)
             if len(ends) == 2:
                 with cv:
                     cv.notify()
@@ -150,11 +167,11 @@ class CollectiveHooks:
 
         def coll_start(status):
             starts.append(status)
-            print(f"col_start {len(starts)} rank{self.rank}")
+            logger.debug("col_start %d rank%d", len(starts), self.rank)
 
         def coll_end(status):
             ends.append(status)
-            print(f"col_end {len(ends)} rank{self.rank}")
+            logger.debug("col_start %d rank%d", len(starts), self.rank)
             if len(ends) == 2:
                 with cv:
                     cv.notify()
@@ -206,18 +223,7 @@ class CollectiveHooks:
         check_op(1, "ALLREDUCE", True)
 
 
-class GlooHooks(MultiProcessTestCase, CollectiveHooks):
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
+class GlooHooks(CollectiveHooks):
     def init_comms(self, timeout):
         dist.init_process_group(
             backend="gloo",
@@ -248,18 +254,10 @@ class GlooHooks(MultiProcessTestCase, CollectiveHooks):
         # self._test_failure()
 
 
-class NcclHooks(MultiProcessTestCase, CollectiveHooks):
+class NcclHooks(CollectiveHooks):
     def setUp(self) -> None:
-        super().setUp()
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "2"
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+        super().setUp()
 
     def init_comms(self, timeout):
         dist.init_process_group(
