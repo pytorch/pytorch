@@ -1315,7 +1315,8 @@ if has_triton():
             pq_ptr, pq_stride_T, pq_stride_1,
             dot_out_dtype: tl.constexpr,
             TILE_M: tl.constexpr,
-            TILE_N: tl.constexpr):
+            TILE_N: tl.constexpr,
+            allow_tf32: tl.constexpr):
 
         Ms = M // TILE_M
         Ns = N // TILE_N
@@ -1346,7 +1347,7 @@ if has_triton():
             q = tl.load(pq_ptr + i * pq_stride_T + pq_stride_1)
             A = tl.load(A_ptr + p * blocks_stride_P)
             B = tl.load(B_ptr + q * others_stride_Q)
-            acc_block += tl.dot(A, B, out_dtype=dot_out_dtype)
+            acc_block += tl.dot(A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
 
         C_ptr = accumulators_ptr + pid_t * accumulators_stride_R + (
             rm[:, None] * accumulators_stride_M + rn[None, :] * accumulators_stride_N)
@@ -1372,7 +1373,8 @@ if has_triton():
                          torch.bfloat16: tl.float32,
                          torch.float32: tl.float64,
                          torch.float64: tl.float64}[accumulators.dtype]
-
+        if 'allow_tf32' not in meta:
+            meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
             M, K, N,
             blocks, blocks.stride(0), blocks.stride(1), blocks.stride(2),
