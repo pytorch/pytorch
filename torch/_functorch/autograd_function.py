@@ -211,7 +211,7 @@ def wrap_outputs_maintaining_identity(
 # that will eventually be fixed by mode-only functorch.
 # The TL;DR is that there's no way to unwrap a dead GradTensorWrapper,
 # so we (the framework) need to do it manually. Regular PyTorch operators
-# automatically do so this is consisent.
+# automatically do so this is consistent.
 #
 # class MyExp(torch.autograd.Function):
 #     @staticmethod
