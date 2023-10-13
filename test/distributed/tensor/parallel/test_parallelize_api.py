@@ -235,7 +235,7 @@ class TensorParallelAPITests(DTensorTestBase):
                     make_output_replicate_1d,
                     input_layouts=None,
                     output_layouts=None,
-                    use_local=False,
+                    use_local_output=False,
                 )
 
         model_tp = MLPModule(self.device_type)
