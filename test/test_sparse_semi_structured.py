@@ -197,8 +197,7 @@ class TestSparseSemiStructured(TestCase):
             # test transpose
             # NOTE: CUTLASS and cuSPARSELt have slightly different int8 behavior.
             # CUTLASS will output to an int32 tensor while cuSPARSELt will output to a int8 tensor
-            dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64))
-            dense_result = dense_result.to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
+            dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
         else:
@@ -241,8 +240,7 @@ class TestSparseSemiStructured(TestCase):
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
-            dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64))
-            dense_result = dense_result.to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
+            dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
             sparse_result = torch.mm(A, B_sparse.t())
         else:
             dense_result = torch.mm(A, B.t())
@@ -272,7 +270,7 @@ class TestSparseSemiStructured(TestCase):
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
         """
-        Test sparse mam with int8 input with fp16 output for cuSPARSELt
+        This test is only needed for cuSPARSELt
         """
         if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             SparseSemiStructuredTensor._FORCE_CUTLASS = False
@@ -285,20 +283,23 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    def test_cslt_sparse_mm_int8_in_int32_out(self, device):
+    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_mm_sparse_second_NT(self, dtype, device, backend):
         """
-        Test sparse mam with int8 input with int32 output for cuSPARSELt
+        Ensure torch.mm(A, B_sparse) throws error
         """
-        if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
-            SparseSemiStructuredTensor._FORCE_CUTLASS = False
-            A = rand_sparse_semi_structured_mask(128, 256, dtype=torch.int8)
-            A_sparse = to_sparse_semi_structured(A)
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        B_sparse = to_sparse_semi_structured(B)
 
-            B = torch.rand((128, 128), device=A_sparse.device).to(torch.int8)
+        A = torch.rand((128, 128), device=B_sparse.device).to(dtype)
 
-            dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.int32)
-            sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.int32)
-            assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"arg1: SparseSemiStructuredTensor\(.*transposed=False",
+        ):
+            sparse_result = torch.mm(A, B_sparse)
 
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize("inference_mode", [subtest(True), subtest(False)])

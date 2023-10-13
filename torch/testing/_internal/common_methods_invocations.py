@@ -27,13 +27,14 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     SM53OrLater, SM60OrLater, SM80OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    _get_torch_cuda_version, _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW
+    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW,
+    TEST_WITH_TORCHINDUCTOR
 )
 
 import torch._refs as refs  # noqa: F401
@@ -6700,6 +6701,65 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S)))
     yield SampleInput(make_arg(()))
     yield SampleInput(make_arg((S, S, S), noncontiguous=True))
+
+def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device,
+                       low=None, high=None, requires_grad=requires_grad)
+    yield SampleInput(
+        torch.tensor(
+            [[3, 8, 13], [0, 5, 10]],
+            device=device,
+            dtype=dtype),
+        (4, 5))
+    yield SampleInput(
+        torch.tensor([[3, 8, 13], [0, 5, 10]], device=device, dtype=dtype),
+        (4, 2**30))
+    yield SampleInput(
+        torch.tensor([[3, 8, 13], [0, 5, 10]], device=device, dtype=dtype),
+        (2**30, 4))
+    yield SampleInput(
+        torch.tensor(2, device=device, dtype=dtype),
+        (2, 2))
+    max_val = 2**(8 * dtype.itemsize - (1 if dtype.is_signed else 0)) - 1
+    yield SampleInput(
+        torch.tensor(max_val - 1, device=device, dtype=dtype),
+        (1, max_val))
+    yield SampleInput(
+        torch.tensor([22, 41, 37], device=device, dtype=dtype),
+        (7, 6))
+    yield SampleInput(
+        torch.tensor(min(1621, max_val), device=device, dtype=dtype),
+        (6, 7, 8, 9))
+    yield SampleInput(
+        torch.tensor([], device=device, dtype=dtype),
+        (10, 3, 5))
+    yield SampleInput(
+        torch.tensor(
+            [[1, 0, 1, 2, 3, 4], [1, 6, 1, 3, 2, 0]],
+            device=device,
+            dtype=dtype),
+        (5, 8))
+    yield SampleInput(
+        torch.tensor(
+            [[1, 0, 1, 2, 3, 4], [1, 6, 1, 3, 2, 0], [1, 3, 1, 0, 9, 5]],
+            device=device,
+            dtype=dtype),
+        (5, 8, 10))
+    yield SampleInput(
+        torch.tensor(0, device=device, dtype=dtype),
+        ())
+
+    a = np.array([[2, 4, 5, 6], [7, 8, 1, 15]])
+    b = np.array([[3, 2, 7, 6], [10, 12, 8, 9]])
+    _, i1, i2 = np.intersect1d(a, b, assume_unique=True, return_indices=True)
+    yield SampleInput(torch.tensor(i1, device=device, dtype=dtype), a.shape)
+    yield SampleInput(torch.tensor(i2, device=device, dtype=dtype), b.shape)
+
+    a = np.array([[2, 4, 5, 6, 6], [4, 7, 8, 7, 2]])
+    b = np.array([[3, 2, 7, 7], [10, 12, 8, 7]])
+    _, i1, i2 = np.intersect1d(a, b, return_indices=True)
+    yield SampleInput(torch.tensor(i1, device=device, dtype=dtype), a.shape)
+    yield SampleInput(torch.tensor(i2, device=device, dtype=dtype), b.shape)
 
 
 def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
@@ -13646,11 +13706,6 @@ op_db: List[OpInfo] = [
                          device_type='cpu'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
             # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
@@ -15506,6 +15561,13 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ravel,
            ),
+    OpInfo('unravel_index',
+           ref=np.unravel_index,
+           dtypes=integral_types_and(),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_unravel_index,
+           ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_view_reshape,
@@ -15740,6 +15802,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_put,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               DecorateInfo(unittest.skip("Skipped"), 'TestBwdGradients', 'test_fn_grad', dtypes=[torch.float64],
+                            device_type='cuda', active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -16550,8 +16614,7 @@ op_db: List[OpInfo] = [
            inplace_variant=None,
            method_variant=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.Tensor.bernoulli, inp, *args, **kwargs),
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -17680,8 +17743,7 @@ op_db: List[OpInfo] = [
         "nn.functional.dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # Probably because we have used lambda for the op here
@@ -17720,8 +17782,7 @@ op_db: List[OpInfo] = [
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -17739,8 +17800,7 @@ op_db: List[OpInfo] = [
         "nn.functional.dropout3d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -17758,8 +17818,7 @@ op_db: List[OpInfo] = [
         "nn.functional.alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -17783,8 +17842,7 @@ op_db: List[OpInfo] = [
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="with_train",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
