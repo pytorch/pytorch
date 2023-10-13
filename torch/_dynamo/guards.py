@@ -247,6 +247,12 @@ class GuardBuilder(GuardBuilderBase):
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
+        # A function created by SHAPE_ENV guard. It propagates shape guards accumulated
+        # during dynamo tracing in dynamo's shape_env to outer shape_env. This is used
+        # to keep the behvaior between pass a SymBool inputs to a dynamo compiled function
+        # and its non-compiled version.
+        self._maybe_propagate_shape_env_guards = lambda: None
+
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
     # to actually durably save this value though (because it's specific
@@ -648,17 +654,17 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-        def _propagate_symbool_guard_to_outer_shape_env(guards):
-            out_shape_env_guard_exprs = [
-                guard_expr for guard_expr in guards if "ITE" in guard_expr
-            ]
-
+        def _propagate_symbool_guard_to_outer_shape_env():
             assert all(
                 eval(guard_expr, self.scope, SYMPY_INTERP)
-                for guard_expr in out_shape_env_guard_exprs
+                for guard_expr in guards
+                if "ITE" in guard_expr
             )
 
-        _propagate_symbool_guard_to_outer_shape_env(guards)
+        self._maybe_propagate_shape_env_guards = (
+            _propagate_symbool_guard_to_outer_shape_env
+        )
+        self._maybe_propagate_shape_env_guards()
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
@@ -1204,7 +1210,19 @@ class CheckFunctionManager:
 
         out: Dict[str, Any] = dict()
         exec(pycode, global_builder.scope, out)
+
+        def _wrap_with_shape_env_guard_propagation(fn):
+            def wrapped_guard_fn(*args, **kwargs):
+                if fn(*args, **kwargs):
+                    local_builder._maybe_propagate_shape_env_guards()
+                    global_builder._maybe_propagate_shape_env_guards()
+                    return True
+                return False
+
+            return wrapped_guard_fn
+
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        guard_fn = _wrap_with_shape_env_guard_propagation(guard_fn)
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
