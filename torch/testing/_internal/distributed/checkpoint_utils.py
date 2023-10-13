@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import os
 import shutil
 import tempfile
 from functools import wraps
@@ -27,8 +28,10 @@ def with_temp_dir(
         object_list = [temp_dir]
 
         # Broadcast temp_dir to all the other ranks
+        os.sync()
         dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
+        os.sync()
 
         try:
             func(self, *args, **kwargs)

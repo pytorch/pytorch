@@ -237,6 +237,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         assert (
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        assert isinstance(inner_tensors, dict) and len(inner_tensors) == 1
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
         return DTensor(
