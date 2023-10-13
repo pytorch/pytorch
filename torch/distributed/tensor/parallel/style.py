@@ -48,7 +48,13 @@ class ParallelStyle(ABC):
 
     @abstractmethod
     def __init__(
-        self, _prepare_input, _prepare_output, *, input_layouts, output_layouts, use_local
+        self,
+        _prepare_input,
+        _prepare_output,
+        *,
+        input_layouts,
+        output_layouts,
+        use_local,
     ) -> None:
         self.input_layouts = input_layouts
         self.output_layouts = output_layouts
@@ -88,7 +94,11 @@ class PairwiseParallel(ParallelStyle):
             make_output_tensor if _prepare_output is None else _prepare_output
         )
         super().__init__(
-            _prepare_input, _prepare_output, input_layouts=input_layouts, output_layouts=output_layouts, use_local=use_local,
+            _prepare_input,
+            _prepare_output,
+            input_layouts=input_layouts,
+            output_layouts=output_layouts,
+            use_local=use_local,
         )
 
 
@@ -118,7 +128,11 @@ class SequenceParallel(PairwiseParallel):
         use_local=True,
     ) -> None:
         super().__init__(  # type: ignore[misc]
-            _prepare_input, _prepare_output, input_layouts=input_layouts, output_layouts=output_layouts, use_local=use_local,
+            _prepare_input,
+            _prepare_output,
+            input_layouts=input_layouts,
+            output_layouts=output_layouts,
+            use_local=use_local,
         )
 
 
@@ -521,7 +535,9 @@ class RowwiseParallel(ParallelStyle):
         use_local=True,
     ) -> None:
         if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
-            raise NotImplementedError("RowwiseParallel only supports single input/output.")
+            raise NotImplementedError(
+                "RowwiseParallel only supports single input/output."
+            )
 
         super().__init__(
             input_layouts=input_layouts,
@@ -555,7 +571,9 @@ class ColwiseParallel(ParallelStyle):
         use_local=True,
     ) -> None:
         if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
-            raise NotImplementedError("ColwiseParallel only supports single input/output.")
+            raise NotImplementedError(
+                "ColwiseParallel only supports single input/output."
+            )
 
         super().__init__(
             input_layouts=input_layouts,
@@ -588,7 +606,10 @@ class PrepareModuleInput(ParallelStyle):
     """
 
     def __init__(
-        self, input_layouts:LayoutsType=Shard(0), output_layouts:LayoutsType=Replicate(), use_local:bool=False
+        self,
+        input_layouts: LayoutsType = Shard(0),
+        output_layouts: LayoutsType = Replicate(),
+        use_local: bool = False,
     ) -> None:
         """
         Args:
@@ -657,7 +678,10 @@ class PrepareModuleOutput(ParallelStyle):
     """
 
     def __init__(
-        self, input_layouts:LayoutsType=Replicate(), output_layouts:LayoutsType=Shard(0), use_local:bool=True
+        self,
+        input_layouts: LayoutsType = Replicate(),
+        output_layouts: LayoutsType = Shard(0),
+        use_local: bool = True,
     ) -> None:
         super().__init__(
             input_layouts=input_layouts,
