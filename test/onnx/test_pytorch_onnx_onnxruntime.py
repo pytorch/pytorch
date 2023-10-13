@@ -6457,7 +6457,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
-        
+
         class DiagonalModelWithNegativeDims(torch.nn.Module):
             def forward(self, x):
                 return torch.diagonal(x, offset=0, dim1=-2, dim2=-1)
