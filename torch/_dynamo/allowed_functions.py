@@ -238,6 +238,7 @@ def _allowed_function_ids():
 
     if config.trace_distributed:
         from torch.distributed import _functional_collectives_impl as fci
+
         for f in [
             fci._all_gather_into_tensor,
             fci._all_reduce,
