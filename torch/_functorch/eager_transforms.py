@@ -1360,7 +1360,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     Returns:
         Returns a new "functionalized" function. It takes the same inputs as
         ``func``, and has the same behavior, but any mutations
-        (and optionally aliasing) performed on intermeidate tensors
+        (and optionally aliasing) performed on intermediate tensors
         in the function will be removed.
 
     functionalize will also remove mutations (and views) that were performed on function inputs.
@@ -1470,7 +1470,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
 
     Finally, a helpful mental model for understanding functionalization is that
-    most user pytorch programs are writting with the public torch API.
+    most user pytorch programs are writing with the public torch API.
     When executed, torch operators are generally decomposed into
     our internal C++ "ATen" API.
     The logic for functionalization happens entirely at the level of ATen.
@@ -1550,7 +1550,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         ``func`` evaluated at ``primals``.
 
     linearize is useful if jvp is to be computed multiple times at ``primals``. However,
-    to achieve this, linearize saves intermediate computation and has higher memory requrements
+    to achieve this, linearize saves intermediate computation and has higher memory requirements
     than directly applying `jvp`. So, if all the ``tangents`` are known, it maybe more efficient
     to compute vmap(jvp) instead of using linearize.
 

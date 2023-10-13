@@ -1154,7 +1154,7 @@ class FlatParamHandle:
             )
             _free_storage(
                 flat_param._mp_shard,
-                compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+                skip_if_compiling=True,
             )
         if self.uses_sharded_strategy:
             # We maintain a padded unsharded tensor that serves as the
@@ -1173,7 +1173,7 @@ class FlatParamHandle:
             flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
             _free_storage(
                 flat_param._full_param_padded,
-                compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+                skip_if_compiling=True,
             )
 
             if self._uses_param_mixed_precision:
@@ -1186,7 +1186,7 @@ class FlatParamHandle:
                 )
                 _free_storage(
                     flat_param._full_prec_full_param_padded,
-                    compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+                    skip_if_compiling=True,
                 )
 
     ###################
@@ -1237,7 +1237,7 @@ class FlatParamHandle:
         _alloc_storage(
             flat_param._mp_shard,
             flat_param._local_shard.size(),  # type: ignore[attr-defined]
-            compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+            skip_if_compiling=True,
         )
         # `copy_()` implicitly casts to the low precision
         flat_param._mp_shard.copy_(  # type: ignore[attr-defined]
@@ -1297,7 +1297,7 @@ class FlatParamHandle:
         _alloc_storage(
             unsharded_flat_param,  # type: ignore[attr-defined]
             flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
-            compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+            skip_if_compiling=True,
         )
         return unsharded_flat_param
 
@@ -1327,7 +1327,7 @@ class FlatParamHandle:
             if flat_param._full_param_padded.untyped_storage().size() > 0:
                 _free_storage(
                     flat_param._full_param_padded,
-                    compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+                    skip_if_compiling=True,
                 )
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
@@ -1425,7 +1425,7 @@ class FlatParamHandle:
         _no_dispatch_record_stream(
             self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
         )
-        _free_storage(self.flat_param._mp_shard, compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling())  # type: ignore[attr-defined]
+        _free_storage(self.flat_param._mp_shard, skip_if_compiling=True)  # type: ignore[attr-defined]
 
     @torch.no_grad()
     def unshard_grad(self):
@@ -1701,7 +1701,7 @@ class FlatParamHandle:
         )
         _free_storage(
             unsharded_flat_param,
-            compiling=torch.distributed._functional_collectives.is_torchdynamo_compiling(),
+            skip_if_compiling=True,
         )
 
     def _use_sharded_flat_param(self) -> None:
