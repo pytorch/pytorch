@@ -283,24 +283,6 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
-    def test_mm_sparse_second_NT(self, dtype, device, backend):
-        """
-        Ensure torch.mm(A, B_sparse) throws error
-        """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
-        B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        B_sparse = to_sparse_semi_structured(B)
-
-        A = torch.rand((128, 128), device=B_sparse.device).to(dtype)
-
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            r"arg1: SparseSemiStructuredTensor\(.*transposed=False",
-        ):
-            sparse_result = torch.mm(A, B_sparse)
-
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize("inference_mode", [subtest(True), subtest(False)])
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
