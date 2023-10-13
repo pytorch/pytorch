@@ -1142,7 +1142,7 @@ class FlatParamHandle:
                     device=self.device,
                     dtype=self._fwd_bwd_param_dtype,
                 )
-                flat_param._mp_shard = _free_storage(flat_param._mp_shard)
+                _free_storage(flat_param._mp_shard)
             if self.uses_sharded_strategy:
                 # We maintain a padded unsharded tensor that serves as the
                 # all-gather destination and owns the original parameter storages.
@@ -1158,7 +1158,7 @@ class FlatParamHandle:
                     dtype=unsharded_param_dtype,
                 )
                 flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
-                flat_param._full_param_padded = _free_storage(
+                _free_storage(
                     flat_param._full_param_padded
                 )
 
@@ -1170,7 +1170,7 @@ class FlatParamHandle:
                         device=self.device,
                         dtype=flat_param.dtype,  # full precision
                     )
-                    flat_param._full_prec_full_param_padded = _free_storage(
+                    _free_storage(
                         flat_param._full_prec_full_param_padded
                     )
 
@@ -1219,7 +1219,7 @@ class FlatParamHandle:
         """
         self._check_low_precision_shard()
         flat_param = self.flat_param
-        flat_param._mp_shard = _alloc_storage(
+        _alloc_storage(
             flat_param._mp_shard, flat_param._local_shard.size()  # type: ignore[attr-defined]
         )
         # `copy_()` implicitly casts to the low precision
@@ -1280,7 +1280,7 @@ class FlatParamHandle:
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         # self._check_storage_freed(unsharded_flat_param)
-        unsharded_flat_param = _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
+        _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
     def _get_padded_unsharded_flat_param(self) -> torch.Tensor:
@@ -1307,7 +1307,7 @@ class FlatParamHandle:
             # so we should free it here to ensure a new all-gather for the next
             # forward/backward computation to persist the modifications.
             if flat_param._full_param_padded.untyped_storage().size() > 0:
-                flat_param._full_param_padded = _free_storage(
+                _free_storage(
                     flat_param._full_param_padded
                 )
         else:
@@ -1406,7 +1406,7 @@ class FlatParamHandle:
         # _no_dispatch_record_stream(
         #     self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
         # )
-        self.flat_param._mp_shard = _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
+        _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
     @torch.no_grad()
     def unshard_grad(self):
@@ -1678,7 +1678,7 @@ class FlatParamHandle:
         # _no_dispatch_record_stream(
         #     unsharded_flat_param, self._device_handle.current_stream()
         # )
-        unsharded_flat_param = _free_storage(unsharded_flat_param)
+        _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""

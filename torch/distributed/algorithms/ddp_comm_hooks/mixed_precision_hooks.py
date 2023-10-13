@@ -49,7 +49,7 @@ def _reducer_allreduce_and_upcast_hook(
             p.data = p._fp_param
             # free storage for mp param as it will be allocated again in next
             # forward pass.
-            p._mp_param = _free_storage(p._mp_param)
+            free_storage(p._mp_param)
             p.grad.data = p.grad.to(p.data.dtype)
 
     # enqueue a callback to wait for this stream at end of backward
