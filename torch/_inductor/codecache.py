@@ -535,7 +535,7 @@ cdll.LoadLibrary("__lib_path__")
 """
 
     def __init__(self) -> None:
-        self.bool_dunder_cached = functools.lru_cache(None)(self._bool_dunder_uncached)
+        self.get_truthiness_cached = functools.lru_cache(None)(self._get_truthiness_uncached)
 
     def bit_width(self) -> int:
         return self._bit_width
@@ -553,9 +553,9 @@ cdll.LoadLibrary("__lib_path__")
         return hash(str(self))
 
     def __bool__(self) -> bool:
-        return self.bool_dunder_cached()
+        return self.get_truthiness_cached()
 
-    def _bool_dunder_uncached(self):
+    def _get_truthiness_uncached(self):
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
