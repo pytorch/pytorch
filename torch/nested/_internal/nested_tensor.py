@@ -58,13 +58,13 @@ class NestedTensor(torch.Tensor):
             0,
             torch.contiguous_format,
             values.dtype,
-            values.layout,
+            torch.jagged,
             values.device,
             False,
             False,
             "sizes",
             False,
-            False,
+            True,  # dispatch_layout
             ks,
         )
         return r
@@ -188,11 +188,21 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
-    tensors: List[torch.Tensor], offsets: Optional[torch.Tensor]
+    tensors: List[torch.Tensor],
+    offsets: Optional[torch.Tensor],
+    dtype=None,
+    device=None,
 ) -> Tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
-    assert len(set(t.dtype for t in tensors)) == 1  # noqa: C401
-    assert len(set(t.device for t in tensors)) == 1  # noqa: C401
+
+    if not len(set(t.dtype for t in tensors)) == 1:  # noqa: C401
+        raise RuntimeError(
+            "When constructing a nested tensor, all tensors in list must have the same dtype"
+        )
+    if not len(set(t.device for t in tensors)) == 1:  # noqa: C401
+        raise RuntimeError(
+            "When constructing a nested tensor, all tensors in list must be on the same device"
+        )
 
     # Check that the NT is representable by the jagged layout.
     # Jagged layout represents (B, *, D_0, D_1, ..., D_N), where the only
@@ -207,18 +217,24 @@ def jagged_from_list(
             "(B, *, D_0, D_1, ..., D_N), with only * allowed to be ragged."
         )
 
+    # Set properties appropriately.
     values = torch.cat(tensors, dim=0)
-    # Jagged layout specifies that offsets are stored as int64 on the buffer's device.
-    _offsets = torch.cat(
-        [
-            torch.zeros(1, dtype=torch.int64, device=values.device),
-            torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
-        ]
-    )
-    if offsets is not None:
-        assert torch.all(offsets == _offsets).item()
-    else:
-        offsets = _offsets
+    to_kwargs = {}
+    if device is not None:
+        to_kwargs["device"] = device
+    if dtype is not None:
+        to_kwargs["dtype"] = dtype
+    values = values.to(**to_kwargs)
+
+    # Calculate jagged offsets if not provided.
+    if offsets is None:
+        # Jagged layout specifies that offsets are stored as int64 on the same device as values.
+        offsets = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.int64, device=values.device),
+                torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
+            ]
+        )
 
     return ViewNestedFromBuffer.apply(values, offsets), offsets  # type: ignore[call-overload]
 
