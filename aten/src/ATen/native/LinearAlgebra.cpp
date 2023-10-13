@@ -2590,15 +2590,14 @@ Tensor mexp_impl(
   std::array<scalar_t, total_n_degs> thetas,
   bool compute_highest_degree_approx = false
 ) {
-  auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
-
   const auto batch_size = a.size(0);
   if (batch_size > 1) {
     compute_highest_degree_approx = true;
   }
 
   if (!compute_highest_degree_approx) {
+    auto res = at::empty_like(a);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
