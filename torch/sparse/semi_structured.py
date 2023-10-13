@@ -233,6 +233,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             sparse_tensor_cutlass = None
             meta_tensor_cutlass = None
             compressed_tensor_cusparselt = inner_tensors['compressed_tensor_cusparselt']
+        else:
+            raise RuntimeError(f"Expected 1 or 2 inner tensors but got {len(inner_tensors)}")
 
         return SparseSemiStructuredTensor(
             None,
@@ -255,8 +257,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
         return (
             f"SparseSemiStructuredTensor(shape={self.shape}, "
             f"transposed={self.transposed})"
-            # f"values={self.values()}"
-            # f"metadata={self.indices()})"
+            f"values={self.values()}"
+            f"metadata={self.indices()})"
         )
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -303,7 +305,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
-                None,
+                args[0].original_tensor,
                 original_shape=args[0].shape,
                 compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
                 sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
@@ -316,18 +318,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
         if func is torch.ops.aten.t.default:
             return SparseSemiStructuredTensor(
-                None,
-                # transpose shape
-                original_shape=torch.Size([args[0].shape[1], args[0].shape[0]]),
-                compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
-                sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
-                meta_tensor_cutlass=args[0].meta_tensor_cutlass,
-                transposed=not args[0].transposed,
-            )
-
-        if func is torch.ops.aten.permute.default:
-            #TODO make sure [0,1] permute
-            return SparseSemiStructuredTensor(
                 args[0].original_tensor,
                 # transpose shape
                 original_shape=torch.Size([args[0].shape[1], args[0].shape[0]]),
@@ -336,55 +326,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 meta_tensor_cutlass=args[0].meta_tensor_cutlass,
                 transposed=not args[0].transposed,
             )
-
-        if func is torch.ops.prims.convert_element_type.default:
-            return SparseSemiStructuredTensor(
-                None,
-                # transpose shape
-                original_shape=args[0].shape,
-                compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
-                sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
-                meta_tensor_cutlass=args[0].meta_tensor_cutlass,
-                transposed=args[0].transposed,
-            )
-
-        if func is torch.ops.inductor._reinterpret_tensor.default:
-            return SparseSemiStructuredTensor(
-                None,
-                # transpose shape
-                original_shape=torch.Size([args[0].shape[1], args[0].shape[0]]),
-                compressed_tensor_cusparselt=args[0].compressed_tensor_cusparselt,
-                sparse_tensor_cutlass=args[0].sparse_tensor_cutlass,
-                meta_tensor_cutlass=args[0].meta_tensor_cutlass,
-                transposed=not args[0].transposed,
-            )
-        if func is torch.ops.aten.addmm.out:
-            print("ASDFASDF")
-            bias, input_A, input_B = args
-
-            # Currently, we only support the first matrix being sparse for addmm/mm in cuSPARSELT and CUTLASS.
-            # CUTLASS only supports the first input to be sparse for a given matmul.
-            # cuSPARSELt does not have this limitation, although our implementation is only for sparse first.
-
-            # We support second matrix sparse matmul by taking advantage of some transpose properties:
-            # This is also why we want an odd number of transposed for second matrix sparse vs an even number
-            # of transpose calss for first matrix sparse.
-            # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')''
-            #        = (W''x' + b')' = (Wx' + b')' = addmm(bias.T, weight, input).T
-            if isinstance(input_B, cls) and input_B.transposed:
-                row, col = input_A.shape
-                input_A_padded = input_B._pad_tensor_for_matmul(input_A)
-                if input_B.compressed_tensor_cusparselt is None:
-                    assert input_B.sparse_tensor_cutlass is not None and input_B.meta_tensor_cutlass is not None
-                    res = torch._sparse_semi_structured_linear(
-                        input_A_padded, input_B.sparse_tensor_cutlass, input_B.meta_tensor_cutlass, bias=bias
-                    )
-                else:
-                    res = torch._cslt_sparse_mm(
-                        input_B.compressed_tensor_cusparselt, input_A_padded.t(), bias, out=kwargs["out"], transpose_result=True # type: ignore[arg-type],
-                    )
-                return res[:row, :]
-
 
         # handle addmm
         if func is torch.ops.aten.addmm.default:
@@ -494,7 +435,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 m, k = args[0].shape
                 num_kept_elements = m * k // 2
                 metadata = args[0].compressed_tensor_cusparselt[num_kept_elements:].view(m, -1)
-                return metadata
+                indices_dtype = SparseSemiStructuredTensor.__get_indices_dtype(
+                    args[0].dtype
+                )
+                return metadata.view(indices_dtype)
 
         error_string = "\n".join(
             [f"func {func} with args: "]
