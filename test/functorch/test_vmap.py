@@ -3512,7 +3512,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('sparse.mm', 'reduce'),  # sparse
         xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
-        skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('linalg.eigh', ''),  # not always return the same result for the same input, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
@@ -3838,7 +3838,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         assert len(opinfos) > 0
 
         for op in opinfos:
-            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
+            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
 
     def test_slogdet(self, device):
