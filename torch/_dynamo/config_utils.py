@@ -17,7 +17,7 @@ def install_config_module(module):
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set({"_is_dirty", "_recompile_hash"})
+        _bypass_keys = set({"_is_dirty"})
 
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
@@ -154,6 +154,7 @@ class ConfigModule(ModuleType):
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
 
         if changes == {}:
+            print("NOT PATCHING DUE TO EMPTY")
             return contextlib.nullcontext()
 
         prior = {}
