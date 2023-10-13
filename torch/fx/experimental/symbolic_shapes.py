@@ -837,7 +837,7 @@ class SymNode:
         if self._hint is None:
             self._update_hint()
             if self._hint is None:
-                raise self.shape_env.make_data_dependent_error(self._hint_expr, self.expr)
+                raise self.shape_env._make_data_dependent_error(self._hint_expr, self.expr)
             else:
                 return self._hint
         else:
@@ -2303,6 +2303,11 @@ class ShapeEnv:
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
 
+        self.size_hint = lru_cache(256)(self._size_hint_uncached)
+        self.has_hint = lru_cache(256)(self._has_hint_uncached)
+        self.evaluate_expr = lru_cache(256)(self._evaluate_expr_uncached)
+        self._maybe_guard_eq = lru_cache(256)(self._maybe_guard_eq_uncached)
+
     def _init(
         self, *,
         allow_scalar_outputs=True,
@@ -3471,7 +3476,7 @@ class ShapeEnv:
 
         # First, issue all the non-trivial guards.
         for guard in self.guards:
-            if self.maybe_evaluate_static(guard.expr) is not None:
+            if self._maybe_evaluate_static(guard.expr) is not None:
                 continue
             issue_guard(guard)
 
@@ -3643,7 +3648,7 @@ class ShapeEnv:
         return bindings
 
     def get_nontrivial_guards(self):
-        return [self.simplify(guard.expr) for guard in self.guards if self.maybe_evaluate_static(guard.expr) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
 
     def format_guards(self, verbose=False):
         def format_tb(tb):
@@ -3660,7 +3665,7 @@ class ShapeEnv:
         return shape_groups
 
     @_lru_cache
-    def maybe_evaluate_static(
+    def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False
     ) -> "Optional[sympy.Expr]":
         """
@@ -3799,19 +3804,26 @@ class ShapeEnv:
                 expr = new_expr
         return expr
 
-    def size_hint(self, expr: "sympy.Expr"):
+    def _size_hint_uncached(self, expr: "sympy.Expr"):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
         Does not introduce a guard, so only use this when you can guarantee that
         your code is still valid for arbitrary shapes (such as optimization decisions)
         """
-        return _get_size_hint(self, expr)
+        result_expr = safe_expand(expr).xreplace(self.var_to_val)
+        if len(result_expr.free_symbols) != 0:
+            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
+            if r is not None:
+                return r
+            raise self._make_data_dependent_error(result_expr, expr)
+        return result_expr
 
     # NB: keep in sync with size_hint
-    def has_hint(self, expr: "sympy.Expr"):
-        return _expr_has_hint(self, expr)
+    def _has_hint_uncached(self, expr: "sympy.Expr"):
+        result_expr = safe_expand(expr).xreplace(self.var_to_val)
+        return len(result_expr.free_symbols) == 0 or self._maybe_evaluate_static(result_expr) is not None
 
-    def make_data_dependent_error(self, expr, unhinted_expr):
+    def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
@@ -3864,12 +3876,51 @@ class ShapeEnv:
         self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
-    def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
+    def _maybe_guard_eq_uncached(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
-        return _maybe_guard_eq(self, expr, concrete_bool)
+        assert type(concrete_bool) is bool
+        if isinstance(expr, sympy.Eq):
+            if not concrete_bool:
+                return
+        # NB: Apparently this is load bearing; to see what test fails if
+        # you comment it out run:
+        # python test/functorch/test_aotdispatch.py -k
+        # test_aot_autograd_symbolic_module_exhaustive_nn_LazyConv3d_cpu_float32
+        elif isinstance(expr, sympy.Ne):
+            if concrete_bool:
+                return
+        free = list(expr.free_symbols)
+
+        assert len(free) > 0, f"The expression should not be static by this point: {expr}"
+        # In case of really gnarly expression, we don't blow up
+        if len(free) > 5:
+            return
+        free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
+        lhs = expr.lhs
+        rhs = expr.rhs
+        if not expr.has(Mod):
+            try:
+                floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
+                if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
+                    raise NotImplementedError
+                r = try_solve(expr, free[0], floordiv_inequality=False)
+                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                    new_var = self._find(r[1])
+                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+            except NotImplementedError:
+                pass
+        if expr.has(Mod):
+            mod_expr = tuple(expr.atoms(Mod))[0]
+            try:
+                r = try_solve(expr, mod_expr, floordiv_inequality=False)
+                if r is not None and r[1] == 0:
+                    self.divisible.add(mod_expr)
+            except NotImplementedError:
+                pass
+        return
 
     # See: Note - On 0/1 specialization
     # NB: sys.maxsize is NOT allowed for sizes, because we use MAX_INT
@@ -3879,8 +3930,7 @@ class ShapeEnv:
         lower = 2 if self.specialize_zero_one else 0
         return ValueRanges(lower, sys.maxsize - 1)
 
-    @staticmethod
-    def _default_unspecified_value_range() -> ValueRanges:
+    def _default_unspecified_value_range(self) -> ValueRanges:
         return ValueRanges(-sys.maxsize - 1, sys.maxsize)
 
     @_lru_cache
@@ -3915,8 +3965,8 @@ class ShapeEnv:
             )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
-    @staticmethod
-    def _get_stack_summary():
+
+    def _get_stack_summary(self):
         fsummary = None
         frame = inspect.currentframe()
         try:
@@ -3964,11 +4014,133 @@ class ShapeEnv:
             )
 
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
+    def _evaluate_expr_uncached(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        return _evaluate_expr(self, orig_expr, hint, fx_node)
+        if hint is None:
+            concrete_val = self.size_hint(orig_expr)
+        else:
+            concrete_val = sympy.sympify(hint)
+
+        # Check if:
+        #   1. 'translation_validation' is set
+        #   2. the corresponding 'fx_node' is not 'None'
+        #   3. the guard should not be suppressed
+        #
+        # If all of the above check, we create an FX node representing the
+        # actual expression to be guarded.
+        node = None
+        fresh = False
+        if (
+                _translation_validation_enabled()
+                and fx_node is not None
+                and not self._suppress_guards_tls()
+        ):
+            if concrete_val is sympy.true:
+                node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
+            elif concrete_val is sympy.false:
+                neg, _ = self.create_fx_call_function(operator.not_, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (neg,))
+            else:
+                eql, _ = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
+                node, fresh = self.create_fx_call_function(torch._assert, (eql,))
+
+            assert node is not None
+            # If this is a fresh node, we have to remember the event index that
+            # corresponds to this assertion node.
+            # Reason: so that, given an assertion node, we can replay the ShapeEnv
+            # events until the point where this assertion node was freshly created.
+            if fresh:
+                self.add_fx_node_metadata(node)
+
+        # After creating the FX node corresponding to orig_expr, we must make sure that
+        # no error will be raised until the end of this function.
+        #
+        # Reason: the translation validation may become invalid otherwise.
+        #
+        # If an error is raised before the end of this function, we remove the FX node
+        # inserted, and re-raise the error.
+        guard = None
+        tb = None
+
+        try:
+            if len(orig_expr.free_symbols) == 0:
+                self.log.debug("eval %s [trivial]", orig_expr)
+                # NB: don't test float as there may be precision issues
+                if isinstance(hint, (int, bool)):
+                    assert orig_expr == hint, f"{orig_expr} != {hint}"
+                return orig_expr
+
+            expr = orig_expr
+
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
+                # NB: don't test float as there may be precision issues
+                if isinstance(hint, (int, bool)):
+                    assert static_expr == hint, f"{static_expr} != {hint}"
+                return static_expr
+
+            if not (expr.free_symbols <= self.var_to_val.keys()):
+                # TODO: dedupe this with _maybe_evaluate_static
+                # Attempt to eliminate the unbacked SymInt
+                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+                if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                expr = new_expr
+
+            self._check_frozen(expr, concrete_val)
+
+            if (
+                    torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
+                    and isinstance(hint, bool)
+                    and isinstance(expr, (sympy.Eq, sympy.Ne))
+            ):
+                expr = sympy.Not(expr)
+
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                self._maybe_guard_eq(expr, bool(concrete_val))
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol
+            elif isinstance(concrete_val, sympy.Integer):
+                # WARNING: we cannot actually do simplifications on guards
+                # on floating point values, because Sympy generally does not
+                # think expressions on integers can ever be equal to floating
+                # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+                # very clear algebraic laws that hold for floating point, such
+                # simplifications are error prone anyway, so be sure not to
+                # maybe_guard_eq in those cases.
+                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+
+            if concrete_val is sympy.true:
+                g = expr
+            elif concrete_val is sympy.false:
+                g = sympy.Not(expr)
+            else:
+                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+            if not self._suppress_guards_tls():
+                stack = CapturedTraceback.extract(skip=1)
+                guard = ShapeGuard(g, stack)
+                self.guards.append(guard)
+        except Exception:
+            if fresh:
+                self.remove_fx_node(node)
+            raise
+        else:
+            if not self._suppress_guards_tls():
+                assert guard is not None
+
+                self.refine_ranges(guard)
+
+                self._log_guard("eval", g)
+            else:
+                self.log.debug("eval %s [guard suppressed]", g)
+
+        return concrete_val
 
     def cleanup(self):
         # Break reference cycles.
@@ -3986,13 +4158,13 @@ class ShapeEnv:
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
         expr = orig_expr
 
-        static_expr = self.maybe_evaluate_static(expr)
+        static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             self.log.debug("runtime_assert %s == %s [statically known]", orig_expr, static_expr)
             return static_expr
 
         # Attempt to eliminate the unbacked SymInt
-        new_expr = self.maybe_evaluate_static(expr, unbacked_only=True)
+        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
         if new_expr.free_symbols <= self.var_to_val.keys():
             # Do a normal guard
             return self.evaluate_expr(new_expr, fx_node=fx_node)
@@ -4093,208 +4265,7 @@ class ShapeEnv:
             self.var_to_range[symbol] = ValueRanges(lower, upper)
             self.var_to_guards[symbol] = (lower_guard, upper_guard)
             # Clears the cache, since this update can change the result.
-            self.maybe_evaluate_static.cache_clear()
-
-
-@lru_cache(256)
-def _evaluate_expr(shape_env: ShapeEnv, orig_expr: "sympy.Expr", hint=None, fx_node=None):
-    """
-    Given an expression, evaluates it, adding guards if necessary
-    """
-    if hint is None:
-        concrete_val = shape_env.size_hint(orig_expr)
-    else:
-        concrete_val = sympy.sympify(hint)
-
-    # Check if:
-    #   1. 'translation_validation' is set
-    #   2. the corresponding 'fx_node' is not 'None'
-    #   3. the guard should not be suppressed
-    #
-    # If all of the above check, we create an FX node representing the
-    # actual expression to be guarded.
-    node = None
-    fresh = False
-    if (
-            _translation_validation_enabled()
-            and fx_node is not None
-            and not shape_env._suppress_guards_tls()
-    ):
-        if concrete_val is sympy.true:
-            node, fresh = shape_env.create_fx_call_function(torch._assert, (fx_node,))
-        elif concrete_val is sympy.false:
-            neg, _ = shape_env.create_fx_call_function(operator.not_, (fx_node,))
-            node, fresh = shape_env.create_fx_call_function(torch._assert, (neg,))
-        else:
-            eql, _ = shape_env.create_fx_call_function(operator.eq, (fx_node, concrete_val))
-            node, fresh = shape_env.create_fx_call_function(torch._assert, (eql,))
-
-        assert node is not None
-        # If this is a fresh node, we have to remember the event index that
-        # corresponds to this assertion node.
-        # Reason: so that, given an assertion node, we can replay the ShapeEnv
-        # events until the point where this assertion node was freshly created.
-        if fresh:
-            shape_env.add_fx_node_metadata(node)
-
-    # After creating the FX node corresponding to orig_expr, we must make sure that
-    # no error will be raised until the end of this function.
-    #
-    # Reason: the translation validation may become invalid otherwise.
-    #
-    # If an error is raised before the end of this function, we remove the FX node
-    # inserted, and re-raise the error.
-    guard = None
-    tb = None
-
-    try:
-        if len(orig_expr.free_symbols) == 0:
-            shape_env.log.debug("eval %s [trivial]", orig_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert orig_expr == hint, f"{orig_expr} != {hint}"
-            return orig_expr
-
-        expr = orig_expr
-
-        static_expr = shape_env.maybe_evaluate_static(expr)
-        if static_expr is not None:
-            shape_env.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert static_expr == hint, f"{static_expr} != {hint}"
-            return static_expr
-
-        if not (expr.free_symbols <= shape_env.var_to_val.keys()):
-            # TODO: dedupe this with _maybe_evaluate_static
-            # Attempt to eliminate the unbacked SymInt
-            new_expr = shape_env.maybe_evaluate_static(expr, unbacked_only=True)
-            if not (new_expr.free_symbols <= shape_env.var_to_val.keys()):
-                raise shape_env.make_data_dependent_error(expr.xreplace(shape_env.var_to_val), expr)
-            expr = new_expr
-
-        shape_env._check_frozen(expr, concrete_val)
-
-        if (
-                torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
-                and isinstance(hint, bool)
-                and isinstance(expr, (sympy.Eq, sympy.Ne))
-        ):
-            expr = sympy.Not(expr)
-
-        if isinstance(expr, (sympy.Eq, sympy.Ne)):
-            shape_env._maybe_guard_eq(expr, bool(concrete_val))
-            # TODO: If we successfully eliminate a symbol via equality, it
-            # is not actually necessary to save a guard for the equality,
-            # as we will implicitly generate a guard when we match that
-            # input against the symbol
-        elif isinstance(concrete_val, sympy.Integer):
-            # WARNING: we cannot actually do simplifications on guards
-            # on floating point values, because Sympy generally does not
-            # think expressions on integers can ever be equal to floating
-            # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
-            # very clear algebraic laws that hold for floating point, such
-            # simplifications are error prone anyway, so be sure not to
-            # maybe_guard_eq in those cases.
-            shape_env._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
-
-        if concrete_val is sympy.true:
-            g = expr
-        elif concrete_val is sympy.false:
-            g = sympy.Not(expr)
-        else:
-            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
-
-        if not shape_env._suppress_guards_tls():
-            stack = CapturedTraceback.extract(skip=1)
-            guard = ShapeGuard(g, stack)
-            shape_env.guards.append(guard)
-    except Exception:
-        if fresh:
-            shape_env.remove_fx_node(node)
-        raise
-    else:
-        if not shape_env._suppress_guards_tls():
-            assert guard is not None
-
-            shape_env.refine_ranges(guard)
-
-            shape_env._log_guard("eval", g)
-        else:
-            shape_env.log.debug("eval %s [guard suppressed]", g)
-
-    return concrete_val
-
-
-@lru_cache(256)
-def _maybe_guard_eq(shape_env: ShapeEnv, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
-    """
-    Evaluates the result of an eq call. If true, uses information to
-    simplify shapes (i.e. a == b or a % 5 == 0)
-    """
-    assert type(concrete_bool) is bool
-    if isinstance(expr, sympy.Eq):
-        if not concrete_bool:
-            return
-    # NB: Apparently this is load bearing; to see what test fails if
-    # you comment it out run:
-    # python test/functorch/test_aotdispatch.py -k
-    # test_aot_autograd_symbolic_module_exhaustive_nn_LazyConv3d_cpu_float32
-    elif isinstance(expr, sympy.Ne):
-        if concrete_bool:
-            return
-    free = list(expr.free_symbols)
-
-    assert len(free) > 0, f"The expression should not be static by this point: {expr}"
-    # In case of really gnarly expression, we don't blow up
-    if len(free) > 5:
-        return
-    free = sorted(free, key=lambda x: (shape_env.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
-    lhs = expr.lhs
-    rhs = expr.rhs
-    if not expr.has(Mod):
-        try:
-            floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
-            if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
-                raise NotImplementedError
-            r = try_solve(expr, free[0], floordiv_inequality=False)
-            if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                new_var = shape_env._find(r[1])
-                shape_env._set_replacement(cast(sympy.Symbol, free[0]), new_var)
-        except NotImplementedError:
-            pass
-    if expr.has(Mod):
-        mod_expr = tuple(expr.atoms(Mod))[0]
-        try:
-            r = try_solve(expr, mod_expr, floordiv_inequality=False)
-            if r is not None and r[1] == 0:
-                shape_env.divisible.add(mod_expr)
-        except NotImplementedError:
-            pass
-    return
-
-
-@lru_cache(256)
-def _get_size_hint(shape_env: ShapeEnv, expr: "sympy.Expr"):
-    """
-    Gets a size hint for a given expression from the underlying shapes we had.
-    Does not introduce a guard, so only use this when you can guarantee that
-    your code is still valid for arbitrary shapes (such as optimization decisions)
-    """
-    result_expr = safe_expand(expr).xreplace(shape_env.var_to_val)
-    if len(result_expr.free_symbols) != 0:
-        r = shape_env.maybe_evaluate_static(result_expr, compute_hint=True)
-        if r is not None:
-            return r
-        raise shape_env.make_data_dependent_error(result_expr, expr)
-    return result_expr
-
-
-@lru_cache(256)
-def _expr_has_hint(shape_env: ShapeEnv, expr: "sympy.Expr"):
-    result_expr = safe_expand(expr).xreplace(shape_env.var_to_val)
-    return len(result_expr.free_symbols) == 0 or shape_env.maybe_evaluate_static(result_expr) is not None
-
+            self._maybe_evaluate_static.cache_clear()
 
 def _is_int(expr):
     if not isinstance(expr, SymInt):
@@ -4302,7 +4273,6 @@ def _is_int(expr):
     if len(expr.node.expr.free_symbols) > 0:
         return False
     return True
-
 
 # WARNING: This is legacy, DO NOT USE
 def _is_dim_dynamic(t, d):
