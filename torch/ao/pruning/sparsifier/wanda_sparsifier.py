@@ -35,28 +35,28 @@ class WandaSparsifier(BaseSparsifier):
             "semi_structured_block_size": semi_structured_block_size,
         }
         if semi_structured_block_size is not None:
+            m = semi_structured_block_size
             warnings.warn(
-                f"WandaSparsifier got semi_structured_bock_size={semi_structured_block_size}, sparsity_level fixed to 50% ({semi_structured_block_size // 2}:{semi_structured_block_size}) sparsity"
+                f"WandaSparsifier got semi_structured_bock_size={m}, sparsity_level fixed to 50% ({m // 2}:{m}) sparsity"
             )
         super().__init__(defaults=defaults)
 
     def prepare(self, model: nn.Module, config: List[Dict]) -> None:
-        """
-        This function will attach observers to the model, using the QuantizationAPI.
-        Prepare the model for sparsification.
-        """
         # activation: use PerChannelNormObserver
         # use no-op placeholder weight observer
         model.qconfig = QConfig(
             activation=PerChannelNormObserver, weight=default_placeholder_observer
-        )
+        )  # type: ignore[assignment]
         torch.ao.quantization.prepare(model, inplace=True)
 
         # call superclass prepare
         super().prepare(model, config)
 
-    def update_mask(self, module, tensor_name, sparsity_level, **kwargs) -> None:
+    def update_mask(  # type: ignore[override]
+        self, module: nn.Module, tensor_name: str, sparsity_level: float, **kwargs
+    ) -> None:
         r"""Pruning function for WandaSparsifier
+
         The activation statistics is retrieved first in the `act_per_input` variable.
         Then the Wanda pruning metric is computed. The weight matrix is then pruned
         by comparing this metric across the whole current layer.
@@ -91,7 +91,9 @@ class WandaSparsifier(BaseSparsifier):
         self,
         params_to_keep: Optional[Tuple[str, ...]] = None,
         params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
-    ) -> None:
+        *args,
+        **kwargs,
+    ):
         # remove quantization config
         for config in self.groups:
             module = config["module"]

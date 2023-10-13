@@ -178,4 +178,4 @@ class PerChannelNormObserver(UniformQuantizationObserverBase):
         return x_orig
 
     def calculate_qparams(self):
-        pass
+        raise NotImplementedError("PerChannelNormObserver is designed to store activatios only. ")
