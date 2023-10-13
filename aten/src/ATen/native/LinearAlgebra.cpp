@@ -2603,7 +2603,7 @@ Tensor mexp_impl(
   // For large batch size, the cost of the above decision on CPU will be quite
   // expensive (compared to the synchronization overhead from GPU to CPU), so
   // here we have a threshold to determine whether to move norm to CPU.
-  const auto batch_size = a_3d.size(0);
+  const auto batch_size = a.size(0);
   const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA)
     && batch_size < large_batch_threshold) ? norm.to(at::kCPU) : norm;
 
