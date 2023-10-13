@@ -1215,10 +1215,10 @@ def sort_overloads(
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (
-            str(t1) == "Tensor"
-            and str(t2) == "Scalar"
-            or str(t1) == "Tensor?"
-            and str(t2) == "Scalar?"
+            str(t1) == "Scalar"
+            and str(t2) == "Tensor"
+            or str(t1) == "Scalar?"
+            and str(t2) == "Tensor?"
             or "Dimname" in str(t1)
             and "Dimname" not in str(t2)
             or
@@ -1258,8 +1258,11 @@ def sort_overloads(
         return smaller_or_equal and not equal
 
     # First sort by signature
+    # NB: why reverse? See note [Order of overloads matters]. In the last case where the only
+    # difference is kwargs, we would still rather Tensor come before Scalar, so let's heuristically
+    # reverse ABC order.
     grouped_overloads = sorted(
-        grouped_overloads, key=lambda x: x.signature.signature_str(symint=symint)
+        grouped_overloads, key=lambda x: x.signature.signature_str(symint=symint), reverse=True
     )
 
     # Construct the relation graph
