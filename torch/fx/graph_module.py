@@ -106,9 +106,7 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
     import_strs: Set[str] = set()
     for name, obj in globals.items():
         import_strs.add(_format_import_statement(name, obj, importer))
-    # Sort the imports so we have a stable import block that allows us to
-    # hash the graph module and get a consistent key for use in a cache.
-    return "\n".join(sorted(import_strs))
+    return "\n".join(import_strs)
 
 
 @compatibility(is_backward_compatible=True)
