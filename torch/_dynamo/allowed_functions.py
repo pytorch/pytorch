@@ -237,13 +237,15 @@ def _allowed_function_ids():
     _find_torch_objects(math)
 
     if config.trace_distributed:
+        from torch.distributed import _functional_collectives_impl as fci
+
         for f in [
-            torch.distributed._functional_collectives_impl._all_gather_into_tensor,
-            torch.distributed._functional_collectives_impl._all_reduce,
-            torch.distributed._functional_collectives_impl._reduce_scatter_tensor,
-            torch.distributed._functional_collectives_impl._all_reduce_coalesced,
-            torch.distributed._functional_collectives_impl._all_gather_into_tensor_coalesced,
-            torch.distributed._functional_collectives_impl._reduce_scatter_tensor_coalesced,
+            fci._all_gather_into_tensor,
+            fci._all_reduce,
+            fci._reduce_scatter_tensor,
+            fci._all_reduce_coalesced,
+            fci._all_gather_into_tensor_coalesced,
+            fci._reduce_scatter_tensor_coalesced,
         ]:
             torch_object_ids[id(f)] = repr(f)
 
