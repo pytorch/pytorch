@@ -81,12 +81,6 @@ AOTIRuntimeError AOTInductorModelContainerGetInputName(
     size_t input_idx,
     const char** ret_input_names);
 
-// Retrieves the input dtype at the given index.
-AOTIRuntimeError AOTInductorModelContainerGetInputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const char** ret_input_dtypes);
-
 // Retrieves the number of outputs for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
@@ -97,26 +91,6 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     const char** ret_output_names);
-
-// Retrieves the output dtype at the given index.
-AOTIRuntimeError AOTInductorModelContainerGetOutputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const char** ret_output_dtypes);
-
-// Retieves the input shape with the maximum dimension size for each dimension.
-AOTIRuntimeError AOTInductorModelContainerGetMaxInputShape(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const int64_t** ret_input_sizes,
-    int64_t* ret_input_ndim);
-
-// Retieves the output shape with the maximum dimension size for each dimension.
-AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const int64_t** ret_output_sizes,
-    int64_t* ret_output_ndim);
 
 // Creates an AOTInductorModel instance.  This is a thin and light wrapper
 // around the compiled model; it doesn't handle concurrency, queueing, device

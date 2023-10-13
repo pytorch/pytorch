@@ -4,9 +4,6 @@ import functools
 import inspect
 from typing import Dict, List, Optional
 
-import torch
-import torch.fx
-
 from .. import variables
 from ..bytecode_transformation import (
     create_call_function,
@@ -16,29 +13,32 @@ from ..bytecode_transformation import (
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
-from ..guards import make_dupe_guard
-from ..source import AttrSource, GlobalWeakRefSource
-from ..utils import global_key_name, istensor, iter_contains
+from ..source import AttrSource
+from ..utils import HashableTracker, is_hashable
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
 
-        # All the keys are constants
-        assert not any(isinstance(x, VariableTracker) for x in items)
+        assert all(
+            isinstance(x, HashableTracker) and isinstance(v, VariableTracker)
+            for x, v in items.items()
+        )
         self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
 
     def as_proxy(self):
-        return {k: v.as_proxy() for k, v in self.items.items()}
+        return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
     def as_python_constant(self):
-        return {k: v.as_python_constant() for k, v in self.items.items()}
+        return {
+            k.vt.as_python_constant(): v.as_python_constant()
+            for k, v in self.items.items()
+        }
 
     def python_type(self):
         return self.user_cls
@@ -53,15 +53,9 @@ class ConstDictVariable(VariableTracker):
                 ]
             )
         # instructions to build the dict keys and values
-        for key in self.items.keys():
-            if istensor(key):
-                codegen.append_output(
-                    codegen.create_load_global(global_key_name(key), True, add=True)
-                )
-                codegen.extend_output(create_call_function(0, False))
-            else:
-                codegen.append_output(codegen.create_load_const(key))
-            codegen(self.items[key])
+        for key, value in self.items.items():
+            codegen(key.vt)
+            codegen(value)
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             return [
@@ -73,7 +67,8 @@ class ConstDictVariable(VariableTracker):
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
+        key = HashableTracker(arg)
+        return self.items[key].add_options(self, arg)
 
     def call_method(
         self,
@@ -92,23 +87,8 @@ class ConstDictVariable(VariableTracker):
 
         elif name == "items":
             assert not (args or kwargs)
-            return TupleVariable(
-                [
-                    TupleVariable(
-                        items=[
-                            ConstDictVariable._key_to_var(
-                                tx,
-                                k,
-                                **options,
-                            ),
-                            v,
-                        ],
-                        **options,
-                    )
-                    for k, v in val.items()
-                ],
-                **options,
-            )
+            items = [TupleVariable([k.vt, v], **options) for k, v in self.items.items()]
+            return TupleVariable(items, **options)
         elif name == "keys":
             assert not (args or kwargs)
             return DictKeys(self, **options)
@@ -121,14 +101,12 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "__setitem__"
             and args
-            and ConstDictVariable.is_valid_key(args[0])
+            and is_hashable(args[0])
             and self.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = ConstDictVariable.get_key(args[0])
+            k = HashableTracker(args[0])
 
-            if istensor(k):
-                tx.store_global_weakref(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
 
@@ -145,20 +123,15 @@ class ConstDictVariable(VariableTracker):
         elif (
             name in ("pop", "get")
             and args
-            and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) not in self.items
+            and is_hashable(args[0])
+            and HashableTracker(args[0]) not in self.items
             and len(args) == 2
         ):
             # missing item, return the default value
             return args[1].add_options(options)
-        elif (
-            name == "pop"
-            and args
-            and ConstDictVariable.is_valid_key(args[0])
-            and self.mutable_local
-        ):
+        elif name == "pop" and args and is_hashable(args[0]) and self.mutable_local:
             newval = collections.OrderedDict(val)
-            result = newval.pop(ConstDictVariable.get_key(args[0]))
+            result = newval.pop(HashableTracker(args[0]))
             tx.replace_all(self, self.modifed(newval, None, **options))
             return result.add_options(options)
         elif (
@@ -179,16 +152,15 @@ class ConstDictVariable(VariableTracker):
         elif (
             name in ("get", "__getattr__")
             and args
-            and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) in self.items
+            and is_hashable(args[0])
+            and HashableTracker(args[0]) in self.items
         ):
-            result = self.items[ConstDictVariable.get_key(args[0])]
+            result = self.items[HashableTracker(args[0])]
             return result.add_options(options)
-        elif (
-            name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
-        ):
+        elif name == "__contains__" and args:
             return ConstantVariable.create(
-                ConstDictVariable.get_key(args[0]) in self.items, **options
+                is_hashable(args[0]) and HashableTracker(args[0]) in self.items,
+                **options,
             )
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -200,37 +172,7 @@ class ConstDictVariable(VariableTracker):
         )
 
     def unpack_var_sequence(self, tx):
-        options = VariableTracker.propagate([self])
-        val = self.items
-        result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val.keys()]
-        return result
-
-    @classmethod
-    def get_key(cls, arg: VariableTracker):
-        if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
-            return arg.specialized_value
-        else:
-            return arg.as_python_constant()
-
-    @classmethod
-    def is_valid_key(cls, key):
-        return (
-            key.is_python_constant()
-            or isinstance(key, TensorVariable)
-            and key.specialized_value is not None
-            or isinstance(key, ConstantVariable)
-            and key.python_type() is torch.dtype
-        )
-
-    @classmethod
-    def _key_to_var(cls, tx, key, **options):
-        from .builder import VariableBuilder
-
-        if istensor(key):
-            return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
-        else:
-            assert ConstantVariable.is_literal(key)
-            return ConstantVariable.create(key, **options)
+        return [x.vt for x in self.items.keys()]
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -263,7 +205,7 @@ class DefaultDictVariable(ConstDictVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
-            k = ConstDictVariable.get_key(args[0])
+            k = HashableTracker(args[0])
 
             if k in self.items:
                 return self.getitem_const(args[0])
@@ -271,8 +213,6 @@ class DefaultDictVariable(ConstDictVariable):
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-                    if istensor(k):
-                        tx.store_global_weakref(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
@@ -307,35 +247,27 @@ class SetVariable(ConstDictVariable):
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, recursively_contains=recursively_contains, **kwargs)
 
+    @property
+    def set_items(self):
+        return set(super().items.keys())
+
     @staticmethod
     def _default_value():
         # Variable to fill in he keys of the dictinary
         return ConstantVariable.create(None)
 
     def as_proxy(self):
-        return set(super().as_proxy().keys())
+        return {k.vt.as_proxy() for k in self.items}
 
     def python_type(self):
         return set
 
     def as_python_constant(self):
-        return set(super().as_python_constant().keys())
+        return {k.vt.as_python_constant() for k in self.items}
 
     def reconstruct(self, codegen):
-        # instructions to build the keys and values
-        for key in self.items.keys():
-            if istensor(key):
-                codegen.append_output(
-                    codegen.create_load_global(global_key_name(key), True, add=True)
-                )
-                codegen.extend_output(create_call_function(0, False))
-            else:
-                codegen.append_output(codegen.create_load_const(key))
-            codegen(self.items[key])
-
-        return [
-            create_instruction("BUILD_SET", arg=len(self.items))
-        ] + create_call_function(1, True)
+        codegen.foreach([x.vt for x in self.items])
+        return [create_instruction("BUILD_SET", arg=len(self.items))]
 
     def call_method(
         self,
@@ -603,7 +535,7 @@ class CustomizedDictVariable(ConstDictVariable):
     # when is_matching_cls(cls) is true
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
-        # avoid tracing when returnning ModelOutput from forward func
+        # avoid tracing when returning ModelOutput from forward func
         for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)

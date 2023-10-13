@@ -29,6 +29,7 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   TORCH_API friend bool operator==(
       const LBFGSOptions& lhs,
       const LBFGSOptions& rhs);
+  ~LBFGSOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -53,6 +54,7 @@ struct TORCH_API LBFGSParamState
   TORCH_API friend bool operator==(
       const LBFGSParamState& lhs,
       const LBFGSParamState& rhs);
+  ~LBFGSParamState() override = default;
 };
 
 class TORCH_API LBFGS : public Optimizer {

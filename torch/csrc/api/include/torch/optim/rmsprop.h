@@ -37,6 +37,7 @@ struct TORCH_API RMSpropOptions
   TORCH_API friend bool operator==(
       const RMSpropOptions& lhs,
       const RMSpropOptions& rhs);
+  ~RMSpropOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -54,6 +55,7 @@ struct TORCH_API RMSpropParamState
   TORCH_API friend bool operator==(
       const RMSpropParamState& lhs,
       const RMSpropParamState& rhs);
+  ~RMSpropParamState() override = default;
 };
 
 class TORCH_API RMSprop : public Optimizer {
