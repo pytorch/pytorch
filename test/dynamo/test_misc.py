@@ -510,6 +510,56 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    def test_sys_modules(self):
+        def fn(x, y):
+            mod_a = sys.modules.get("aaaaaaaa")
+            assert mod_a is None
+            assert "bbbbbbbb" not in sys.modules
+
+            assert "operator" in sys.modules
+            operator = sys.modules["operator"]
+            builtins = sys.modules.get("builtins")
+            operator2 = sys.modules.get("cccccccc", operator)
+
+            return operator.add(x, y), operator2.neg(torch.abs(x))
+
+        torch._dynamo.testing.standard_test(self, fn, 2, expected_ops=3)
+
+        x = torch.randn(10, 10)
+        _, guards = torch._dynamo.export(fn, x, x)
+        guard_code = []
+        for guard in guards:
+            if guard.code_list:
+                guard_code += guard.code_list
+
+        # Filter out id-matches that won't reproduce run to run
+        guard_code = filter(
+            lambda line: "id" not in line and "lookup_backend" not in line,
+            sorted(guard_code),
+        )
+        self.assertExpectedInline(
+            "\n".join(guard_code),
+            """\
+2 <= L['x'].size()[0]
+L['x'] is L['y']
+L['x'].ndimension() == 2
+L['x'].requires_grad == False
+L['x'].size()[1] == L['x'].size()[0]
+L['x'].storage_offset() == 0
+___dict_contains('operator', G['sys'].modules)
+___dict_contains('operator', G['sys'].modules)
+___is_grad_enabled()
+___is_torch_function_enabled()
+hasattr(L['x'], '_dynamo_dynamic_indices') == False
+not ___are_deterministic_algorithms_enabled()
+not ___dict_contains('aaaaaaaa', G['sys'].modules)
+not ___dict_contains('bbbbbbbb', G['sys'].modules)
+not ___dict_contains('cccccccc', G['sys'].modules)
+str(L['x'].device) == 'cpu'
+str(L['x'].dtype) == 'torch.float32'
+utils_device.CURRENT_DEVICE == None""",
+        )
+
     def test_fold(self):
         def fn(a):
             return a + math.sqrt(63)
