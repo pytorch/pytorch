@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel._utils import (
     _deprecate_warnings,
     _prepare_input_validate,
@@ -397,7 +398,7 @@ def _is_redistribute_necessary(
     is needed to be called or not. If not, we can directly early return
     and save CPU overhead.
     """
-    return t._spec.placements == dst_placements
+    return dtensor._spec.placements == dst_placements
 
 
 def _get_prepare_input(
@@ -637,7 +638,7 @@ class PrepareModuleInput(ParallelStyle):
         self,
         input_layouts: LayoutsType = Shard(0),
         output_layouts: LayoutsType = Replicate(),
-        use_local: bool = False,
+        use_local_output: bool = False,
     ) -> None:
         """
         Args:
@@ -645,7 +646,7 @@ class PrepareModuleInput(ParallelStyle):
                 The layout of input tensor(s) which DTensor will be created upon.
             output_layouts (Union[Placement, Tuple[Placement, ...]]):
                 The layout of input tensor(s) which created DTensor will be redistributed to.
-            use_local (bool):
+            use_local_output (bool):
                 Whether to convert the DTensor to local tensor.
 
         Returns:
@@ -656,7 +657,8 @@ class PrepareModuleInput(ParallelStyle):
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
         >>> ...
         >>> parallelize_plan = {
-        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor.
+        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor
+        >>>                                     # and and redistributed to Replicated DTensor.
         >>>     ...
         >>> }
         >>> parallelize_module(
@@ -669,7 +671,7 @@ class PrepareModuleInput(ParallelStyle):
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
             _prepare_input=_get_prepare_input(
                 input_layouts,
                 output_layouts,
@@ -681,9 +683,9 @@ class PrepareModuleInput(ParallelStyle):
 class PrepareModuleOutput(ParallelStyle):
     """
     :class:`PrepareModuleOutput` enables users to annotate :class:`DTensor` outputs
-    with ``output_layouts`` and ``use_local`` so that each output can be converted to
+    with ``output_layouts`` and ``use_local_output`` so that each output can be converted to
     :class:`DTensor` or :class:`torch.Tensor` based on the annotation. Specifically, a DTensor
-    will be redistributed to another DTensor based on ``output_layouts`` and the flag ``use_local``
+    will be redistributed to another DTensor based on ``output_layouts`` and the flag ``use_local_output``
     to decide whether to convert the DTensor to local tensor.
 
     When the output is not a :class:`DTensor`, if no layout is specified, it will be
@@ -694,7 +696,8 @@ class PrepareModuleOutput(ParallelStyle):
     >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
     >>> ...
     >>> parallelize_plan = {
-    >>>     "submodule": PrepareModuleOutput(),   # The input of attn will be converted to Sharded tensor.
+    >>>     "submodule": PrepareModuleOutput(),   # The output of submodule will be converted to Replicated DTensor
+    >>>                                           # if it's not a DTensor, then redistributed to Sharded local tensor
     >>>     ...
     >>> }
     >>> parallelize_module(
@@ -709,12 +712,12 @@ class PrepareModuleOutput(ParallelStyle):
         self,
         input_layouts: LayoutsType = Replicate(),
         output_layouts: LayoutsType = Shard(0),
-        use_local: bool = True,
+        use_local_output: bool = True,
     ) -> None:
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
             _prepare_input=None,
-            _prepare_output=_get_prepare_output(output_layouts, use_local),
+            _prepare_output=_get_prepare_output(output_layouts, use_local_output),
         )
