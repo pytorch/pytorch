@@ -21,13 +21,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import (
-    AttrSource,
-    GetItemSource,
-    is_constant_source,
-    SuperSource,
-    TypeSource,
-)
+from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
@@ -1004,12 +998,7 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable.create(val)
 
     def call_super(self, tx, a, b):
-        source = (
-            None
-            if a.source is None or b.source is None
-            else SuperSource(type=a.source, base=b.source)
-        )
-        return variables.SuperVariable(a, b, source=source)
+        return variables.SuperVariable(a, b)
 
     def call_next(self, tx, arg):
         if isinstance(arg, variables.ListIteratorVariable):
@@ -1249,6 +1238,19 @@ class BuiltinVariable(VariableTracker):
                         return getattr_var
 
             obj.convert_to_unspecialized(tx)
+        # FIXME (tmanlaibaatar) this is utter hack to unblock HuggingFace export
+        # Export generally doesn't want to allow mutations on objects directly,
+        # but we don't have good way to do this rn. For now, we make it an undefined
+        # behaviour and just set attributes directly on the PretrainedConfig object
+        # for now.
+        elif isinstance(obj, variables.dicts.HFPretrainedConfigVariable) and tx.export:
+            if name_var.is_python_constant() and isinstance(
+                val, variables.ConstantVariable
+            ):
+                setattr(
+                    obj.obj, name_var.as_python_constant(), val.as_python_constant()
+                )
+                return ConstantVariable(None)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
