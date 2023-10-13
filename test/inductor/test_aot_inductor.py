@@ -11,6 +11,7 @@ import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
+from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher
 
 from torch.testing import FileCheck
@@ -839,23 +840,66 @@ class AOTInductorTestsTemplate:
                     exactly=True,
                 ).run(src_code)
 
+    def test_fake_tensor_device_validation(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
+
+        # Export on CPU
+        exported_program = torch._export.export(
+            Model(),
+            example_inputs,
+            constraints=[],
+        )
+
+        # Compile exported model on CUDA
+        gm = exported_program.graph_module.to(self.device)
+        with self.assertRaisesRegex(ValueError, "Device mismatch between fake input"):
+            torch._inductor.aot_compile(
+                gm, tuple(i.to(self.device) for i in example_inputs)
+            )
+
+    @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
+    def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
+        supported_dtype_of_cpp_wrapper_mock.return_value = False
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10).to(self.device),
+            torch.randn(10, 10).to(self.device),
+        )
+        with self.assertRaisesRegex(
+            CppWrapperCodeGenError, "Unsupported input dtype torch.float32"
+        ):
+            torch._export.aot_compile(Model(), example_inputs)
+
+        supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
+            torch.float32, self.device == "cuda"
+        )
+
     def test_normal_functional(self):
         class Model(torch.nn.Module):
-            def __init__(self, device):
+            def __init__(self):
                 super().__init__()
-                self.device = device
 
-            def forward(self):
-                empty = torch.ops.aten.empty.memory_format(
-                    [4, 1, 4, 4],
-                    dtype=torch.float32,
-                    layout=torch.strided,
-                    device=self.device,
-                    pin_memory=False,
-                )
-                return torch.ops.aten.normal_functional.default(empty)
+            def forward(self, x):
+                return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(self.device), ())
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):

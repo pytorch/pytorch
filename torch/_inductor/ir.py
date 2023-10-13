@@ -1890,7 +1890,7 @@ class ReinterpretView(BaseView):
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
         return V.graph.wrapper_code.codegen_reinterpret_view(
-            self.get_name(),
+            self.data,
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
