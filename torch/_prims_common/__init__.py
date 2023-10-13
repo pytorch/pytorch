@@ -1338,7 +1338,7 @@ def elementwise_dtypes(
     computation dtype the same as the result dtype when it's selected. NO_OPMATH is appropriate for kernels
     which perform no mathematical operations on their tensors (see below for examples).
 
-    The INT_TO_FLOAT type promotion kind maps boolean and integer maps result dtypes to the default floating point dtype,
+    The INT_TO_FLOAT type promotion kind maps boolean and integer result dtypes to the default floating point dtype,
     and computation dtypes to the appropriate op math dtype.
 
     The COMPLEX_TO_FLOAT type promotion kind maps complex result dtypes to the corresponding float dtype, following this
@@ -1494,11 +1494,27 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    # TODO: Move this somewhere central?
+    def _is_singleton(s):
+        # check for SingletonSymNode
+        if not isinstance(s, torch.SymInt):
+            return False
+        if s.node.singleton_int() is not None:
+            return True
+
+        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
+        return (
+            s.node.is_symbolic()
+            and s.node.hint is not None
+            and isinstance(s.node.hint, torch.SymInt)
+            and s.node.hint.node.singleton_int() is not None
+        )
+
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= sym_max(l, 1)
+        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
