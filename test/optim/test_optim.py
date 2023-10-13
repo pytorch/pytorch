@@ -972,11 +972,11 @@ class TestOptim(TestCase):
         )) + tuple(itertools.product(
             (optim.SGD,),
             [
-                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
-                for d, w, n in itertools.product((0.0, 0.5), (0.0, 0.5), (False,))
+                {"lr": lr, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
+                for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0, 0.5), (0.0, 0.5), (False,))
             ] + [
-                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
-                for d, w, n in itertools.product((0.0,), (0.0, 0.5), (True,))
+                {"lr": lr, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
+                for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0,), (0.0, 0.5), (True,))
             ]
         ))
 
@@ -2152,7 +2152,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
 
     def test_adam(self):
         state = {}
