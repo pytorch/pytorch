@@ -908,8 +908,7 @@ class SkipFilesVariable(VariableTracker):
             return tx.replace_all(args[1], args[1])
         elif self.value is cast:
             unimplemented(
-                f"Cast with {args}",
-            )
+                f"Cast with {args}")
         elif self.value is itertools.repeat:
             from .builder import SourcelessBuilder
 

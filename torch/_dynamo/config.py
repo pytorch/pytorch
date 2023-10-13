@@ -292,7 +292,7 @@ check_shape_env_recorded_events = False
 trace_numpy = True
 
 # Trace through torch.distributed code
-trace_distributed = False
+trace_distributed = True
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
