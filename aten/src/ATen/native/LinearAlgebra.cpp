@@ -2534,7 +2534,7 @@ Tensor compute_T18_scale_square(
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
 
   // Sort:
-  // Consider inputs are square matrix, so if we first power `martix 0,1,2`, then
+  // Consider inputs are square matrix, so if we first power `matrix 0,1,2`, then
   // the remain thing will only be multiply `matrix 0` by (2^4 - 1) times, which
   // gives us an opportunity to calculate the matrix multiplication in a batch.
   // The first thing we need to do is sort tensor `s`, which will be helpful to
@@ -2564,10 +2564,10 @@ Tensor compute_T18_scale_square(
   auto pts = &scs[section_numel];
 
   // We now will do the matrix muplication in a batch, with above example:
-  // 1. Multiply all matrixes by 0 (`mul_times[0]`) times, then do `slice`
-  // to get the remain matrixes by acc[1:] (`split_counts[0]`),
-  // 2. Multiply remain matrixes by 1 times and slice to acc[2:]
-  // 3. Multiply remain matrixes by 3 times and slice to acc[1:]
+  // 1. Multiply all matrices by 0 (`mul_times[0]`) times, then do `slice`
+  // to get the remain matrices by acc[1:] (`split_counts[0]`),
+  // 2. Multiply remain matrices by 1 times and slice to acc[2:]
+  // 3. Multiply remain matrices by 3 times and slice to acc[1:]
   // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
