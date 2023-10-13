@@ -863,12 +863,13 @@ def get_include_and_linking_paths(
             omp_available = not is_apple_clang()
 
             # check the `OMP_PREFIX` environment first
-            if os.getenv("OMP_PREFIX") is not None:
-                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+            omp_prefix = os.getenv("OMP_PREFIX")
+            if omp_prefix is not None:
+                header_path = os.path.join(omp_prefix, "include", "omp.h")
                 valid_env = os.path.exists(header_path)
                 if valid_env:
-                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                    ipaths.append(os.path.join(omp_prefix, "include"))
+                    lpaths.append(os.path.join(omp_prefix, "lib"))
                 else:
                     warnings.warn("environment variable `OMP_PREFIX` is invalid.")
                 omp_available = omp_available or valid_env
@@ -876,11 +877,12 @@ def get_include_and_linking_paths(
             libs = [] if omp_available else ["omp"]
 
             # prefer to use openmp from `conda install llvm-openmp`
-            if not omp_available and os.getenv("CONDA_PREFIX") is not None:
+            conda_prefix = os.getenv("CONDA_PREFIX")
+            if not omp_available and conda_prefix is not None:
                 omp_available = is_conda_llvm_openmp_installed()
                 if omp_available:
-                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                    conda_lib_path = os.path.join(conda_prefix, "lib")
+                    ipaths.append(os.path.join(conda_prefix, "include"))
                     lpaths.append(conda_lib_path)
                     # Prefer Intel OpenMP on x86 machine
                     if os.uname().machine == "x86_64" and os.path.exists(
