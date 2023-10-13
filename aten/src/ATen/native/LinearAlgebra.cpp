@@ -1495,6 +1495,9 @@ static void addmm_impl_cpu_(
       // We have dispatched to ACL GEMM for single precision float
       // so do not need to dispatch to BLAS GEMM below
       dispatched = true;
+      // This is a hack, but the mobile ops tracer sometimes falls into this path when tracing
+      // but on device it won't, so we need to make sure we record the dtype anyway
+      RECORD_KERNEL_FUNCTION_DTYPE("addmm_impl_cpu_", result.scalar_type())
   }
 #endif
 
