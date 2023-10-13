@@ -1,10 +1,10 @@
 import contextlib
 import dataclasses
 import functools
-import itertools
 import logging
 import sys
 import warnings
+from itertools import count
 
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
@@ -859,7 +859,7 @@ def compile_fx_aot(
         )
 
 
-_graph_counter = itertools.count(0)
+_graph_counter = count(0)
 
 
 def fw_compiler_freezing(
@@ -974,6 +974,14 @@ def compile_fx(
                     if node.op == "placeholder"
                 ]
                 if all(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi.device != i.device:
+                            raise ValueError(
+                                f"Device mismatch between fake input and example input at position #{idx}: "
+                                f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                "make sure torch.export() and torch.aot_compile() run on the same device."
+                            )
                     inputs_ = fake_inputs
             return compile_fx(
                 model_,
