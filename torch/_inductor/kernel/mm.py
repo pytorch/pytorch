@@ -288,7 +288,10 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
 
-
+# This op is a special case of the int_mm op which we use based on the pattern
+# _int_mm -> mul (defined in ../fx_passes/post_grad.py) in order to prevent
+# realization of the int32 _int_mm output by forcing fusion with the mul op.
+# This is only used when config.force_fuse_int_mm_with_mul = True
 def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
     out_dtype = (
         torch.promote_types(mat3.get_dtype(), torch.int32)
