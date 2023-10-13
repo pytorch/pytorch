@@ -642,7 +642,7 @@ def _register_dequant_promotion_pass(pattern, pass_number):
     )
     def dequant_promotion(match: Match, *args, **kwargs):
         # If dequant pattern used by multiply nodes,
-        # we will do dequant promotion. So each user node has a seperate dequant pattern connected.
+        # we will do dequant promotion. So each user node has a separate dequant pattern connected.
         def clone_to_new_node(graph, source_node, user_node):
             assert (
                 source_node.op == "call_function"

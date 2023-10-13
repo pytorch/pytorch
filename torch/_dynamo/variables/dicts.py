@@ -107,7 +107,6 @@ class ConstDictVariable(VariableTracker):
         elif name == "keys":
             assert not (args or kwargs)
             return SetVariable(
-                tx=tx,
                 items=[
                     ConstDictVariable._key_to_var(
                         tx,
@@ -467,7 +466,7 @@ class CustomizedDictVariable(ConstDictVariable):
     # when is_matching_cls(cls) is true
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
-        # avoid tracing when returnning ModelOutput from forward func
+        # avoid tracing when returning ModelOutput from forward func
         for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)
