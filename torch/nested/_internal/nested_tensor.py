@@ -34,8 +34,9 @@ class NestedTensor(torch.Tensor):
     # We also use singleton ints to represent the strides of this tensor.
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
-    _size: Tuple[int, ...]
-    _stride: Tuple[int, ...]
+    #
+    _size: Tuple[int, torch.SymInt, int]
+    _stride: Tuple[torch.SymInt, int, int]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -58,13 +59,13 @@ class NestedTensor(torch.Tensor):
             0,
             torch.contiguous_format,
             values.dtype,
-            torch.jagged,
+            values.layout,
             values.device,
             False,
             False,
             "sizes",
             False,
-            True,  # dispatch_layout
+            False,
             ks,
         )
         return r
@@ -75,6 +76,7 @@ class NestedTensor(torch.Tensor):
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
+        assert values.ndim == 2
 
         if ragged_size is None:
             # ragged_size needs to be explicitly passed during tracing (1) when
@@ -83,13 +85,11 @@ class NestedTensor(torch.Tensor):
             # Calling get_tensor_id won't work in those cases because we want
             # the existing symbolic ragged_size to be propagated.
             ragged_size = get_tensor_id(offsets, coeff=1)
+        D = values.shape[1]
         B = offsets.shape[0] - 1
-        Ds = values.shape[1:]
-        self._size = (B, ragged_size, *Ds)
-
-        from torch._prims_common import make_contiguous_strides_for
-
-        self._strides = make_contiguous_strides_for(self._size)
+        # TODO: generalize for generalized raggedness
+        self._size = (B, ragged_size, D)
+        self._strides = (ragged_size * D, D, 1)
         self._ragged_idx = 1
 
         if values.requires_grad:
@@ -99,6 +99,7 @@ class NestedTensor(torch.Tensor):
             )
         self._values = values
         self._offsets = offsets
+        return
 
     def values(self):
         return self._values
@@ -113,20 +114,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str})"
-
-    def __reduce_ex__(self, proto):
-        state = torch._utils._get_obj_state(self)
-
-        # SymNodes are not serializable
-        assert "_size" in state and "_strides" in state
-        state = dict(state)
-        del state["_size"]
-        del state["_strides"]
-
-        func = NestedTensor
-        args = (self._values, self._offsets)
-        return (torch._tensor._rebuild_from_type_v2, (func, type(self), args, state))
+        return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
         ctx = {
@@ -188,55 +176,22 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
-    tensors: List[torch.Tensor],
-    offsets: Optional[torch.Tensor],
-    dtype=None,
-    device=None,
+    tensors: Sequence[torch.Tensor], offsets: Optional[torch.Tensor]
 ) -> Tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
+    assert len(set(t.dtype for t in tensors)) == 1  # noqa: C401
+    assert len(set(t.device for t in tensors)) == 1  # noqa: C401
+    assert all(t.ndim == 2 for t in tensors)
+    assert len(set(t.shape[1] for t in tensors)) == 1  # noqa: C401
 
-    if not len(set(t.dtype for t in tensors)) == 1:  # noqa: C401
-        raise RuntimeError(
-            "When constructing a nested tensor, all tensors in list must have the same dtype"
-        )
-    if not len(set(t.device for t in tensors)) == 1:  # noqa: C401
-        raise RuntimeError(
-            "When constructing a nested tensor, all tensors in list must be on the same device"
-        )
+    lengths = torch.tensor([t.shape[0] for t in tensors])
+    _offsets = torch.cat([torch.tensor([0]), lengths.cumsum(0)])
+    if offsets is not None:
+        assert torch.all(offsets == _offsets).item()
+    else:
+        offsets = _offsets
 
-    # Check that the NT is representable by the jagged layout.
-    # Jagged layout represents (B, *, D_0, D_1, ..., D_N), where the only
-    # raggedness allowed is for the single dim immediately adjacent to the batch dim.
-    sizes = [t.shape for t in tensors]
-    non_first_sizes = [s[1:] for s in sizes]
-    at_most_first_ragged = all(s == non_first_sizes[0] for s in non_first_sizes)
-    if not at_most_first_ragged:
-        raise RuntimeError(
-            "Cannot represent given tensor list as a nested tensor with the jagged layout. "
-            "Note that the jagged layout only represents shapes of the form "
-            "(B, *, D_0, D_1, ..., D_N), with only * allowed to be ragged."
-        )
-
-    # Set properties appropriately.
-    values = torch.cat(tensors, dim=0)
-    to_kwargs = {}
-    if device is not None:
-        to_kwargs["device"] = device
-    if dtype is not None:
-        to_kwargs["dtype"] = dtype
-    values = values.to(**to_kwargs)
-
-    # Calculate jagged offsets if not provided.
-    if offsets is None:
-        # Jagged layout specifies that offsets are stored as int64 on the same device as values.
-        offsets = torch.cat(
-            [
-                torch.zeros(1, dtype=torch.int64, device=values.device),
-                torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
-            ]
-        )
-
-    return ViewNestedFromBuffer.apply(values, offsets), offsets  # type: ignore[call-overload]
+    return ViewNestedFromBuffer.apply(torch.cat(tensors, dim=0), offsets), offsets  # type: ignore[call-overload]
 
 
 def buffer_from_jagged(jagged):
