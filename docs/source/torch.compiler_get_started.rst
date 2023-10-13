@@ -21,7 +21,7 @@ understanding of how you can use ``torch.compile`` in your own programs.
 
    import torch
    def fn(x):
-      a = torch.cos(x) 
+      a = torch.cos(x)
       b = torch.sin(a)
       return b
    new_fn = torch.compile(fn, backend="inductor")
