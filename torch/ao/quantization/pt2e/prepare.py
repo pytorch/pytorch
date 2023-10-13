@@ -29,6 +29,14 @@ from torch.ao.quantization.quantizer import (
 from torch.ao.quantization import ObserverOrFakeQuantize
 
 def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
+    """Find the root node for the sharing tree
+    Args:
+        edge_or_node: edge/node that we want to find the root
+        shared_with_map: each edge/node points to the parent, the root node will points to itself
+
+    Returns:
+        root edge/node
+    """
     parent = shared_with_map[edge_or_node]
     if parent == edge_or_node:
         return edge_or_node
@@ -37,21 +45,29 @@ def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
     shared_with_map[edge_or_node] = root
     return root
 
-def _union(a: EdgeOrNode, b: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
+def _union(a: EdgeOrNode, b: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> None:
     """Merge the subtree for `b` with `a`, the order is important here
     """
     root_a = _find_root(a, shared_with_map)
     root_b = _find_root(b, shared_with_map)
     # union the two trees
     shared_with_map[root_b] = root_a
-    return
 
 def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
+    """Update the `shared_with_map` based on the qspec, this applies the `SharedQuantizationSpec`
+    configuration and established the relationship between `edge_or_node` with the edge/node that it
+    is pointing to, we'll use this information in the end to get the group id
+    """
     if isinstance(qspec, SharedQuantizationSpec):
         sharing_with = qspec.edge_or_node
         _union(sharing_with, edge_or_node, shared_with_map)
 
 def _find_root_qspec(qspec: QuantizationSpecBase, edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
+    """Unwraps qspec to get the final root qspec (non SharedQuantizationSpec)
+    if qspec is SharedQuantizationSpec
+       (1). tries to find the root node for the node that the qspec points to
+       (2). recursively find the root qspec based on the qspec for the root node
+    """
     if isinstance(qspec, SharedQuantizationSpec):
         sharing_with = qspec.edge_or_node
         root = _find_root(sharing_with, shared_with_map)
@@ -74,6 +90,8 @@ def _has_same_is_dynamic(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpe
     )
 
 def _get_edge_or_node_to_qspec(model: torch.fx.GraphModule) -> Dict[EdgeOrNode, QuantizationSpecBase]:
+    """Get a map from EdgeOrNode to quantization spec based on annotations on the nodes
+    """
     edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase] = {}
     for n in model.graph.nodes:
         if hasattr(n, "meta") and "quantization_annotation" in n.meta:
@@ -90,6 +108,43 @@ def _get_edge_or_node_to_qspec(model: torch.fx.GraphModule) -> Dict[EdgeOrNode, 
 def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase]) -> Dict[EdgeOrNode, int]:
     """Map from edge/node to the group ID, generated from quantization annotations,
     edge/node with the same group ID should use the same observer/fake_quant instance
+
+    This is applying SharedQuantizationSpec configuration and map each edge/node to a group
+    There is another implicit sharing that's built in the quantization, when we have the following:
+       * op1 -> op2
+       * output of op1: int8_qspec
+       * (op1 -> op2) input edge: int8_qspec
+    we'll assume sharing between the output of op1 and input of (op1 -> op2) since these are the same Tensor.
+
+    Figuring out the correct group ID for all edge/node is a standard union find problem:
+    https://www.geeksforgeeks.org/introduction-to-disjoint-set-data-structure-or-union-find-algorithm/
+
+    Args:
+        edge_or_node_to_qspec: Dictionary from edge_or_node to the qspec, derived from annotations
+    Returns:
+        edge_or_node_to_group_id: Dictionary from edge_or_node to group_id (int), all edge or node that
+        belongs to the same group should have the same id
+
+    Example:
+        op1 -> op3
+           op2 /
+
+        edge_or_node_to_qspec: {
+            op1: int8_qspec
+            op2: int8_qspec
+            (op1, op2): int8_qspc,
+            (op2, op3): SharedQuantizationSpec((op1, op2))
+            op3: int8_qspec
+        }
+
+        edge_or_node_to_group_id = _get_edge_or_node_to_group_id(edge_or_node_to_qspec)
+        edge_or_node_to_group_id: {
+            op1: 0,
+            op2: 1,
+            (op1, op2): 1,
+            (op2, op3): 1,
+            op3: 2
+        }
     """
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself
@@ -134,16 +189,21 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
 
     return edge_or_node_to_group_id
 
-def _get_edge_or_node_to_obs_or_fq(edge_or_node_to_group_id: Dict[EdgeOrNode, int], edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], is_qat: bool) -> Dict[EdgeOrNode, ObserverOrFakeQuantize]:
-    edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
+def _get_obs_or_fq_map(edge_or_node_to_group_id: Dict[EdgeOrNode, int], edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], is_qat: bool) -> Dict[EdgeOrNode, ObserverOrFakeQuantize]:
+    """Generates the EdgeOrNode to observer/fake_quant instances
+    Makes sure that for EdgeOrNode that has the same group_id should have the same observer or fake quant
+    instances
+    """
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
     group_id_to_obs_or_fq: Dict[int, ObserverOrFakeQuantize] = {}
-    # TODO: maybe edge_or_node_to_qspec should be edge_or_node_to_root_qspec
     for edge_or_node, qspec in edge_or_node_to_qspec.items():
         group_id = edge_or_node_to_group_id[edge_or_node]
         if group_id not in group_id_to_obs_or_fq:
-            group_id_to_obs_or_fq[group_id] = _create_obs_or_fq_from_qspec(qspec, edge_or_node_to_obs_or_fq, is_qat)
-        edge_or_node_to_obs_or_fq[edge_or_node] = group_id_to_obs_or_fq[group_id]
-    return edge_or_node_to_obs_or_fq
+            # TODO: maybe edge_or_node_to_qspec should be edge_or_node_to_root_qspec, this will simplify
+            # the implementation for _create_obs_or_fq_from_qspec
+            group_id_to_obs_or_fq[group_id] = _create_obs_or_fq_from_qspec(qspec, obs_or_fq_map, is_qat)
+        obs_or_fq_map[edge_or_node] = group_id_to_obs_or_fq[group_id]
+    return obs_or_fq_map
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
@@ -247,7 +307,7 @@ def _maybe_insert_input_observers_for_node(
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, int],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ) -> None:
     """
@@ -369,11 +429,14 @@ def prepare(
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
 
+    # At the high level we construct a map from EdgeOrNode to a observer_or_fake_quant instance
+    # all edge/nodes that belongs to the same group should use the same instance
     edge_or_node_to_qspec = _get_edge_or_node_to_qspec(model)
     edge_or_node_to_group_id = _get_edge_or_node_to_group_id(edge_or_node_to_qspec)
-    obs_or_fq_map = _get_edge_or_node_to_obs_or_fq(edge_or_node_to_group_id, edge_or_node_to_qspec, is_qat)
+    obs_or_fq_map = _get_obs_or_fq_map(edge_or_node_to_group_id, edge_or_node_to_qspec, is_qat)
 
     for node in nodes_before_observation:
+        # TODO: simplify logic for inserting observers
         _maybe_insert_input_and_output_observers_for_node(node, model, obs_or_fq_map, is_qat)
 
     model = GraphModule(model, model.graph)
