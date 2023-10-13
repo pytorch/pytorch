@@ -29,7 +29,12 @@ class MemoryDep(typing.NamedTuple):
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
 
-    def _get_numel(self) -> sympy.Expr:
+    @property
+    def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
+        """{c0: 128, c1: 512, ...}"""
+        return dict(zip(self.var_names, self.size))
+
+    def get_numel(self) -> sympy.Expr:
         if self.is_indirect():
             numel = V.graph.get_numel(self.name)
         else:
@@ -40,11 +45,6 @@ class MemoryDep(typing.NamedTuple):
                     numel = numel * size
         return numel
 
-    @property
-    def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
-        """{c0: 128, c1: 512, ...}"""
-        return dict(zip(self.var_names, self.size))
-
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
             return MemoryDep(
@@ -53,12 +53,12 @@ class MemoryDep(typing.NamedTuple):
         return self
 
     def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self._get_numel()) * get_dtype_size(
+        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
             V.graph.get_dtype(self.name)
         )
 
     def has_unbacked_symbols(self):
-        return len(free_unbacked_symbols(self._get_numel())) > 0
+        return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
@@ -80,18 +80,21 @@ class StarDep(typing.NamedTuple):
     def index(self):
         raise NotImplementedError("StarDep does not have an index")
 
+    def get_numel(self) -> sympy.Expr:
+        return V.graph.get_numel(self.name)
+
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
             return StarDep(renames[self.name])
         return self
 
     def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(
-            V.graph.get_numel(self.name)
-        ) * get_dtype_size(V.graph.get_dtype(self.name))
+        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+            V.graph.get_dtype(self.name)
+        )
 
     def has_unbacked_symbols(self):
-        return len(free_unbacked_symbols(V.graph.get_numel(self.name))) > 0
+        return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
         return False
@@ -115,6 +118,9 @@ class WeakDep(typing.NamedTuple):
     @property
     def index(self):
         raise NotImplementedError("WeakDep does not have an index")
+
+    def get_numel(self) -> sympy.Expr:
+        return sympy.Integer(1)
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:

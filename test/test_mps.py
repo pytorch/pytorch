@@ -69,7 +69,6 @@ def mps_ops_grad_modifier(ops):
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
-        'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
@@ -593,7 +592,6 @@ def mps_ops_modifier(ops):
         'nn.functional.multilabel_margin_loss': None,
         'nn.functional.pdist': None,
         'nn.functional.rrelu': None,
-        'nn.functional.softshrink': None,
         'nn.functional.norm': None,
         'ormqr': None,
         'pca_lowrank': None,
@@ -720,6 +718,7 @@ def mps_ops_modifier(ops):
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'unravel_index': [torch.int32, torch.int64],
 
         # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
         # the MPS framework doesn't support float64
@@ -749,16 +748,16 @@ def mps_ops_modifier(ops):
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'randn_like': [torch.float16, torch.float32],
-        'bernoulli': [torch.float32],
+        'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
-        'nn.functional.feature_alpha_dropoutwith_train': [torch.float32],
+        'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32],
         'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
         'normalin_place': [torch.float16, torch.float32],
         'normalnumber_mean': [torch.float16, torch.float32],
-        'nn.functional.alpha_dropout': [torch.float32],
-        'nn.functional.dropout': [torch.float32],
-        'nn.functional.dropout2d': [torch.float32],
-        'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.alpha_dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout2d': [torch.float16, torch.float32],
+        'nn.functional.dropout3d': [torch.float16, torch.float32],
         'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour

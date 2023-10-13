@@ -178,8 +178,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export.constrain_as_size,
-        torch.export.constrain_as_value,
         torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
@@ -1153,6 +1151,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
+        torch.unravel_index: lambda indices, shape: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
         torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -1846,7 +1845,7 @@ def is_tensor_like(inp):
     >>> is_tensor_like(TensorLike())
     True
     """
-    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")
 
 class TorchFunctionMode:
     """
