@@ -5602,6 +5602,7 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         torch.arange(w, device=a.device).unsqueeze(-2)
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) >= diagonal
+    mask = mask.broadcast_to(a.shape)
 
     # aten.triu always returns a new contiguous tensor
     # contiguous() is needed to correctly model the output stride
