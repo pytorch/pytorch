@@ -288,6 +288,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
 
+
 # This op is a special case of the int_mm op which we use based on the pattern
 # _int_mm -> mul (defined in ../fx_passes/post_grad.py) in order to prevent
 # realization of the int32 _int_mm output by forcing fusion with the mul op.
