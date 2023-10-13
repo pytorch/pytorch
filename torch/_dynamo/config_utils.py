@@ -171,11 +171,12 @@ class ConfigModule(ModuleType):
         """
         lines = []
         mod = self.__name__
+        has_saved_config_ignore = hasattr(self, "_save_config_ignore")
         for k, v in itertools.chain(
             self._config.items(), self._compile_ignored.items()
         ):
-            if k in self._save_config_ignore:
-                continue
+            if has_saved_config_ignore and k in self._save_config_ignore:
+                    continue
             if v == self._default[k]:
                 continue
             lines.append(f"{mod}.{k} = {v!r}")
