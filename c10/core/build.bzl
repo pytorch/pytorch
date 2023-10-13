@@ -79,24 +79,24 @@ def define_targets(rules):
             [
                 "*.cpp",
                 "impl/*.cpp",
-                "impl/cow/*.cpp",
             ],
             exclude = [
                 "CPUAllocator.cpp",
                 "MapAllocator.cpp",
                 "impl/alloc_cpu.cpp",
+                "impl/cow/*.cpp",
             ],
         ),
         hdrs = rules.glob(
             [
                 "*.h",
                 "impl/*.h",
-                "impl/cow/*.h",
             ],
             exclude = [
                 "CPUAllocator.h",
                 "MapAllocator.h",
                 "impl/alloc_cpu.h",
+                "impl/cow/*.h",
             ],
         ),
         linkstatic = True,
@@ -113,6 +113,22 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
+    )
+
+    rules.cc_library(
+        name = "impl_cow",
+        srcs = rules.glob([
+            "impl/cow/*.cpp",
+        ]),
+        hdrs = rules.glob([
+            "impl/cow/*.h",
+        ]),
+        deps = [
+            ":base",
+            ":CPUAllocator",
+        ],
+        visibility = ["//c10/test:__pkg__"],
+
     )
 
     rules.filegroup(
