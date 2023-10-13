@@ -492,41 +492,6 @@ def is_apple_clang() -> bool:
     return "Apple" in version_string.splitlines()[0]
 
 
-@functools.lru_cache(None)
-def _vec_isa_bool_dunder(vec_isa: VecISA) -> bool:
-    if config.cpp.vec_isa_ok is not None:
-        return config.cpp.vec_isa_ok
-
-    key, input_path = write(VecISA._avx_code, "cpp")
-    from filelock import FileLock
-
-    lock_dir = get_lock_dir()
-    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-    with lock:
-        output_path = input_path[:-3] + "so"
-        build_cmd = shlex.split(
-            cpp_compile_command(
-                input_path, output_path, warning_all=False, vec_isa=vec_isa
-            )
-        )
-        try:
-            # Check build result
-            compile_file(input_path, output_path, build_cmd)
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-c",
-                    VecISA._avx_py_load.replace("__lib_path__", output_path),
-                ],
-                stderr=subprocess.DEVNULL,
-                env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
-            )
-        except Exception as e:
-            return False
-
-        return True
-
-
 class VecISA:
     _bit_width: int
     _macro: str
@@ -569,6 +534,9 @@ from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
 """
 
+    def __init__(self) -> None:
+        self.bool_dunder_cached = functools.lru_cache(None)(self._bool_dunder_uncached)
+
     def bit_width(self) -> int:
         return self._bit_width
 
@@ -585,7 +553,40 @@ cdll.LoadLibrary("__lib_path__")
         return hash(str(self))
 
     def __bool__(self) -> bool:
-        return _vec_isa_bool_dunder(self)
+        return self.bool_dunder_cached()
+
+    def _bool_dunder_uncached(self):
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        key, input_path = write(VecISA._avx_code, "cpp")
+        from filelock import FileLock
+
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            output_path = input_path[:-3] + "so"
+            build_cmd = shlex.split(
+                cpp_compile_command(
+                    input_path, output_path, warning_all=False, vec_isa=self
+                )
+            )
+            try:
+                # Check build result
+                compile_file(input_path, output_path, build_cmd)
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-c",
+                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                    ],
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
+                )
+            except Exception as e:
+                return False
+
+            return True
 
 
 @dataclasses.dataclass
