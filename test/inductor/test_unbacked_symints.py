@@ -1,15 +1,9 @@
 # Owner(s): ["module: inductor"]
-import contextlib
-import unittest
 
 import torch
 
 from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
-from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, FixedLayout, Pointwise
-from torch._inductor.utils import is_big_gpu
-from torch._inductor.virtualized import ops, V
 
 from torch.testing._internal.common_utils import IS_LINUX, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -36,7 +30,6 @@ class TestUnbackedSymints(TorchTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @unittest.skipIf(not is_big_gpu(0), "autotuning won't work")
     def test_autotuning(self):
         def fn(x, y):
             nz = torch.nonzero(x)
@@ -64,6 +57,7 @@ class TestUnbackedSymints(TorchTestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+    from torch._inductor.utils import is_big_gpu
 
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()
