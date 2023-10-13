@@ -1304,8 +1304,10 @@ class CppCodeCache:
 
 @functools.lru_cache(None)
 def _stack_frames_for_code(
-    path: str, lineno: int, linemaps: Dict[str, List[Tuple[Any, ...]]] = dict(),
+    path: str, lineno: int, linemaps: Dict[str, List[Tuple[Any, ...]]] = None,
 ) -> Optional[List[Dict[str, Any]]]:
+    if linemaps is None:
+        return None
     if path not in linemaps:
         return None
     # [(starting_line, <fx node>), ...]
