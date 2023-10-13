@@ -7,7 +7,7 @@ from typing import Tuple
 import torch
 from torch import Tensor
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._inductor import config, utils
+from torch._inductor import utils
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -151,7 +151,7 @@ class TestFP8Types(TestCase):
         batch_size, sequence_length, hidden_size = shape
 
         def amax_fp8(x: Tensor, scale: Tensor):
-            y = torch.max(torch.abs(x))
+            y = torch.amax(torch.abs(x))
             y_scaled = y.to(dtype=torch.float) * scale
             bits_fp8 = _to_fp8_saturated(y_scaled, float8_dtype)
             return bits_fp8
@@ -179,7 +179,7 @@ class TestFP8Types(TestCase):
         batch_size, sequence_length, hidden_size = shape
 
         def amax_fp8(x: Tensor, scale: Tensor, amax_buffer: Tensor):
-            amax_buffer.fill_(torch.max(torch.abs(x)))
+            amax_buffer.fill_(torch.amax(torch.abs(x)))
             x_scaled = x.to(dtype=torch.float) * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
@@ -217,7 +217,7 @@ class TestFP8Types(TestCase):
                 bias=None,
                 eps=1e-05,
             )
-            amax_buffer.fill_(torch.max(torch.abs(x)))
+            amax_buffer.fill_(torch.amax(torch.abs(x)))
             x_scaled = x * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
@@ -267,7 +267,7 @@ class TestFP8Types(TestCase):
                 bias=None,
                 eps=1e-05,
             )
-            amax_buffer.fill_(torch.max(torch.abs(x)))
+            amax_buffer.fill_(torch.amax(torch.abs(x)))
             x_scaled = x * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
@@ -290,12 +290,12 @@ class TestFP8Types(TestCase):
 
         compiled_ln = torch.compile(ln, backend="inductor")
         _ = compiled_ln(x)
-        ln_latency = utils.do_bench_using_profiling(
-            functools.partial(compiled_ln, x)
-        )
+        ln_latency = utils.do_bench_using_profiling(functools.partial(compiled_ln, x))
 
         print(
-            f"Config: {float8_dtype=}, {shape=}. Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms, LN only Inductor: {ln_latency}ms."
+            f"Config: {float8_dtype=}, {shape=}. "
+            f"Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms, "
+            f"LN only Inductor: {ln_latency}ms."
         )
 
 

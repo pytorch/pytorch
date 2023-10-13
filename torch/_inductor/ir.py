@@ -26,6 +26,7 @@ from typing import (
 from unittest.mock import patch
 
 import sympy
+from sympy import Expr, Integer
 
 import torch._export.serde.schema as export_schema
 
@@ -33,7 +34,6 @@ import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
-from sympy import Expr, Integer
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
@@ -925,7 +925,9 @@ class Reduction(Loops):
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
         if split == -1:
-            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(input_node)
+            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                input_node
+            )
             return cls.create_multilayer_existing_ranges(
                 device,
                 dst_dtype,
@@ -1060,8 +1062,7 @@ class Reduction(Loops):
     ):
         assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
         reindex = View.dynamic_reshape_indexer(
-            original_reduction_ranges,
-            tuple(new_ranges) + tuple(new_reduction_ranges)
+            original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
         def wrapper_fn(index, reduction_index):
@@ -1108,6 +1109,7 @@ class Reduction(Loops):
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
+
         def intermediate_fn(index, reduction_index):
             return intermediate_loader([*index, *reduction_index])
 
@@ -1208,6 +1210,7 @@ class Reduction(Loops):
             -1,
             reduction_hint,
         )
+
 
 def num_reduction_outputs(reduction_type):
     return 3 if "welford" in reduction_type else 1

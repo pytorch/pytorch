@@ -359,8 +359,8 @@ def extract_read_writes(
     )
 
 
-def extract_input_node_reduction_ranges(
-    input_node: ".ir.TensorBox",
+def extract_input_node_reduction_ranges(  # noqa: F722
+    input_node: "TensorBox",  # noqa: F722
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -370,11 +370,17 @@ def extract_input_node_reduction_ranges(
     """
 
     from .ir import ComputedBuffer, Loops
+
     if not isinstance(input_node.data.data, Loops):
         # Input node has already been realized. Return its size and reduction_size.
-        return input_node.get_size(), input_node.get_reduction_size()
+        if hasattr(input_node, "get_size") and hasattr(
+            input_node, "get_reduction_size"
+        ):
+            return (input_node.get_size(), input_node.get_reduction_size())
+        else:
+            return (None, None)
 
-    # This is one issue: what if there are permutations between the input node and its dependent realized nodes?
+    # There is one issue: what if there are views / permutations between the input node and its dependent realized nodes?
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
