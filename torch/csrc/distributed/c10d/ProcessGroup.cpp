@@ -82,10 +82,14 @@ std::string opTypeToString(OpType opType) {
       return "RECVANYSOURCE";
     case OpType::BARRIER:
       return "BARRIER";
-    case OpType::UNKNOWN:
-      return "UNKNOWN";
     case OpType::_REDUCE_SCATTER_BASE:
       return "_REDUCE_SCATTER_BASE";
+    case OpType::COALESCED:
+      return "COALESCED";
+    case OpType::_ALLREDUCE_SPARSE:
+      return "_ALLREDUCE_SPARSE";
+    case OpType::UNKNOWN:
+      return "UNKNOWN";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }

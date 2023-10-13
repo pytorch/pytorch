@@ -245,7 +245,7 @@ class SetVariable(ConstDictVariable):
 
     @property
     def set_items(self):
-        return set(super().items.keys())
+        return set(self.items.keys())
 
     @staticmethod
     def _default_value():
@@ -281,9 +281,10 @@ class SetVariable(ConstDictVariable):
         elif name == "pop":
             assert not kwargs
             assert not args
-            items = set(self.items.keys())
-            result = items.pop()
-            args = (result,)
+            # Choose an item at random and pop it via the Dict.pop method
+            result = self.set_items.pop().vt
+            super().call_method(tx, name, (result,), kwargs)
+            return result
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):

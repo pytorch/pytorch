@@ -207,7 +207,7 @@ struct TORCH_API ClassType : public NamedType {
   // it is unsafe to maintain uses of the old type of the attribute,
   // and any code that works on the attribute is now invalid.
   // Only newly created code is valid again.
-  void unsafeChangeAttributeType(const std::string& name, TypePtr new_ty);
+  void unsafeChangeAttributeType(const std::string& name, const TypePtr& new_ty);
 
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
