@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import copy
 import math
 import operator
@@ -14,20 +13,15 @@ import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
-__all__ = ["_AddRuntimeAssertionsForConstraintsPass", "InputDim", "RangeConstraint"]
+__all__ = ["_AddRuntimeAssertionsForConstraintsPass", "InputDim"]
 
 
 class InputDim(NamedTuple):
     input_name: str
     dim: int
-
-
-@dataclass
-class RangeConstraint:
-    min_val: sympy.Expr
-    max_val: sympy.Expr
 
 
 def _convert_to_int(val):
@@ -43,21 +37,21 @@ def _convert_to_int(val):
     )
 
 
-def _convert_range_to_int(range: RangeConstraint):
-    assert isinstance(range, RangeConstraint)
-    min_val = _convert_to_int(range.min_val)
-    max_val = _convert_to_int(range.max_val)
+def _convert_range_to_int(range: ValueRanges):
+    assert isinstance(range, ValueRanges)
+    min_val = _convert_to_int(range.lower)
+    max_val = _convert_to_int(range.upper)
     return min_val, max_val
 
 
 class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
     def __init__(
         self,
-        range_constraints: Dict[sympy.Symbol, RangeConstraint],
+        range_constraints: Dict[sympy.Symbol, ValueRanges],
         equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__()
-        self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
+        self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
         self.counter = 0
 
@@ -98,7 +92,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         # We use post-order traversal to collect all the proxies callbacks needed, construct
         # the error message callbacks, and at the top-level traversal tree we execute all the callbacks.
         # We need the callbacks because, in order to call the function to create a proxy for shape[0], we
-        # need the proxy for shape, which further requries the proxy for ret[1], etc.
+        # need the proxy for shape, which further requires the proxy for ret[1], etc.
         def add_assertions(val):
             call_backs = []
             messages = []
@@ -157,7 +151,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
 class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineConstraintsPass):
     def __init__(
         self,
-        range_constraints: Dict[sympy.Symbol, RangeConstraint],
+        range_constraints: Dict[sympy.Symbol, ValueRanges],
         equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__(range_constraints, equality_constraints)
@@ -249,7 +243,7 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
             _ = graph.call_function(torch.ops.aten._assert_async.msg, (tensor_eq_node, assert_msg))
 
     def _insert_range_assert_inplace(
-        self, graph: torch.fx.Graph, input_dim: InputDim, dim_node: torch.fx.Node, range: RangeConstraint
+        self, graph: torch.fx.Graph, input_dim: InputDim, dim_node: torch.fx.Node, range: ValueRanges
     ):
         """
         Add runtime asserts for user-specified range constraints for
@@ -265,7 +259,7 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
         # input dim N >=2 generalizes to N < 2. Ideally we should check that:
         # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
         # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
-        # Above can be achieved via a seperate pass.
+        # Above can be achieved via a separate pass.
         with graph.inserting_after(dim_node):
             if min_val > 2:
                 self._insert_assert_async_inplace(
