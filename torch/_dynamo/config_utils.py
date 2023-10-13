@@ -4,7 +4,7 @@ import copy
 import pickle
 import unittest
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -17,7 +17,7 @@ def install_config_module(module):
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set()
+        _bypass_keys = set({"_is_dirty", "_recompile_hash"})
 
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
@@ -43,6 +43,7 @@ def install_config_module(module):
     config = dict()
     default = dict()
     visit(module, module, "")
+    module._is_dirty = True
     module._config = config
     module._default = default
     module._allowed_keys = set(config.keys())
@@ -59,6 +60,12 @@ class ConfigModule(ModuleType):
     _config: Dict[str, Any]
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
+    # The hash that determines whether this config has changed in a way that
+    # requires recompilation
+    _recompile_hash: Optional[str]
+    # The set of keys that are not used in computing the _recompile_hash
+    _recompile_hash_ignore_list: Set[str]
+    _is_dirty: bool
 
     def __init__(self):
         raise NotImplementedError(
@@ -71,6 +78,7 @@ class ConfigModule(ModuleType):
         elif name not in self._allowed_keys:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
+            self._is_dirty = True
             self._config[name] = value
 
     def __getattr__(self, name):
@@ -83,6 +91,7 @@ class ConfigModule(ModuleType):
     def __delattr__(self, name):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
+        self._is_dirty = True
         del self._config[name]
 
     def save_config(self):
@@ -108,9 +117,11 @@ class ConfigModule(ModuleType):
 
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
+        self._is_dirty = True
         self.to_dict().update(pickle.loads(data))
 
     def to_dict(self):
+        self._is_dirty = True  # mutable access
         return self._config
 
     def get_config_copy(self):
@@ -146,6 +157,10 @@ class ConfigModule(ModuleType):
             changes = kwargs
             assert arg2 is None
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
+
+        if changes == {}:
+            return contextlib.nullcontext()
+
         prior = {}
         config = self
 
@@ -155,6 +170,7 @@ class ConfigModule(ModuleType):
                 for key in changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config._config[key]
+                config._is_dirty = True
                 config._config.update(changes)
 
             def __exit__(self, exc_type, exc_val, exc_tb):
