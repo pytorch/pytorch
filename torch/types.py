@@ -7,6 +7,10 @@ import builtins
 # to talk about in PyTorch
 
 _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
+_TensorOrTensorsOrGradEdge = Union[
+    torch.Tensor, Sequence[torch.Tensor],
+    "torch.autograd.graph.GradientEdge",
+    Sequence["torch.autograd.graph.GradientEdge"]]
 
 # In some cases, these basic types are shadowed by corresponding
 # top-level values.  The underscore variants let us refer to these
