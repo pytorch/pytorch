@@ -256,7 +256,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         """
         return (
             f"SparseSemiStructuredTensor(shape={self.shape}, "
-            f"transposed={self.transposed})"
+            f"transposed={self.transposed}"
             f"values={self.values()}"
             f"metadata={self.indices()})"
         )
@@ -443,7 +443,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         error_string = "\n".join(
             [f"func {func} with args: "]
             + [f"arg{i}: {arg}" for i, arg in enumerate(args)]
-            + [f"{key}: {kwargs[key]}" for key in kwargs]
         )
         raise NotImplementedError(error_string)
 
