@@ -470,6 +470,18 @@ Available options:
   appended to the end of the segment. This process does not create as many slivers
   of unusable memory, so it is more likely to succeed at finding this memory.
 
+  `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
+  use the CUDA API's cudaHostRegister function for allocating pinned memory instead
+  of the default cudaHostAlloc. When set to True, the memory is allocated using regular
+  malloc and then pages are mapped to the memory before calling cudaHostRegister.
+  This pre-mapping of pages helps reduce the lock time during the execution
+  of cudaHostRegister.
+
+  `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
+  is set to True. By default, one thread is used to map the pages. This option allows
+  using more threads to parallelize the page mapping operations to reduce the overall
+  allocation time of pinned memory. A good value for this option is 8 based on
+  benchmarking results.
 
 .. note::
 
