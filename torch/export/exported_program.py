@@ -433,10 +433,7 @@ class ExportedProgram:
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         dialect: Optional[str] = None,
     ):
-        from torch._export.exported_program import (
-            _create_graph_module_for_export,
-            CallSpec,
-        )
+        from torch._export.exported_program import _create_graph_module_for_export
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             InputDim,
         )
@@ -448,7 +445,6 @@ class ExportedProgram:
             self._graph_module.meta.update(root.meta)
 
         self._graph_signature: ExportGraphSignature = graph_signature
-        self._call_spec: CallSpec = call_spec
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         self._equality_constraints: List[
@@ -514,11 +510,6 @@ class ExportedProgram:
 
     @property
     @compatibility(is_backward_compatible=False)
-    def call_spec(self):
-        return self._call_spec
-
-    @property
-    @compatibility(is_backward_compatible=False)
     def range_constraints(self):
         return self._range_constraints
 
@@ -536,6 +527,19 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def example_inputs(self):
         return self._example_inputs
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def call_spec(self):
+        from torch._export.exported_program import CallSpec
+
+        if len(self.module_call_graph) == 0:
+            return CallSpec(in_spec=None, out_spec=None)
+        assert self.module_call_graph[0].fqn == ""
+        return CallSpec(
+            in_spec=self.module_call_graph[0].signature.in_spec,
+            out_spec=self.module_call_graph[0].signature.out_spec,
+        )
 
     @property
     def dialect(self):
