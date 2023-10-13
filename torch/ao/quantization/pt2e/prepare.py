@@ -5,13 +5,13 @@ from torch.ao.quantization.fx.prepare import (
     _get_output_act_obs_or_fq,
     _get_dtype_and_is_dynamic,
     _insert_obs_or_fq,
-    _maybe_insert_output_observer_for_node,
     _save_state,
     _is_activation_post_process_node,
-    _get_qspec_for_arg,
+    _create_obs_or_fq_from_qspec,
 )
 from torch.fx import (
     GraphModule,
+    Graph,
     Node,
 )
 from torch.fx.node import Argument
@@ -19,7 +19,7 @@ from torch.fx.node import Argument
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
-from typing import Dict, Tuple, Union, Any
+from typing import Dict, Tuple, Union, Any, Optional
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     EdgeOrNode,
@@ -43,7 +43,6 @@ def _union(a: EdgeOrNode, b: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
     root_a = _find_root(a, shared_with_map)
     root_b = _find_root(b, shared_with_map)
     # union the two trees
-    print("union:", root_a, root_b)
     shared_with_map[root_b] = root_a
     return
 
@@ -60,11 +59,21 @@ def _find_root_qspec(qspec: QuantizationSpecBase, edge_or_node_to_qspec: Dict[Ed
         return _find_root_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
     return qspec
 
-def _get_edge_or_node_to_group_id(model: torch.fx.GraphModule):
-    """Map from edge/node to the group ID, generated from quantization annotations,
-    edge/node with the same group ID should use the same observer/fake_quant instance
-    """
-    print("model.graph:", model.graph)
+def _has_same_dtype(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
+    return (
+        hasattr(qspec_a, "dtype") and
+        hasattr(qspec_b, "dtype") and
+        qspec_a.dtype == qspec_b.dtype
+    )
+
+def _has_same_is_dynamic(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
+    return (
+        hasattr(qspec_a, "is_dynamic") and
+        hasattr(qspec_b, "is_dynamic") and
+        qspec_a.is_dynamic == qspec_b.is_dynamic
+    )
+
+def _get_edge_or_node_to_qspec(model: torch.fx.GraphModule) -> Dict[EdgeOrNode, QuantizationSpecBase]:
     edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase] = {}
     for n in model.graph.nodes:
         if hasattr(n, "meta") and "quantization_annotation" in n.meta:
@@ -76,7 +85,12 @@ def _get_edge_or_node_to_group_id(model: torch.fx.GraphModule):
                 output_node = n
                 qspec = qa.output_qspec
                 edge_or_node_to_qspec[output_node] = qspec
+    return edge_or_node_to_qspec
 
+def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase]) -> Dict[EdgeOrNode, int]:
+    """Map from edge/node to the group ID, generated from quantization annotations,
+    edge/node with the same group ID should use the same observer/fake_quant instance
+    """
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself
     shared_with_map: Dict[EdgeOrNode, EdgeOrNode] = {k: k for k in edge_or_node_to_qspec.keys()}
@@ -86,30 +100,28 @@ def _get_edge_or_node_to_group_id(model: torch.fx.GraphModule):
             _update_shared_with(output_node, qspec, shared_with_map)
         else:
             input_edge = edge_or_node
+            input_edge_root = _find_root(input_edge, shared_with_map)
+            input_edge_root_qspec = edge_or_node_to_qspec[input_edge_root]
+            input_edge_root_qspec = _find_root_qspec(input_edge_root_qspec, edge_or_node_to_qspec, shared_with_map)
+
+            # find root_qspec for `arg` Node (the output of previous node)
             arg, n = input_edge
             arg_as_output_root_qspec = None
             if arg in edge_or_node_to_qspec:
                 arg_as_output_qspec = edge_or_node_to_qspec[arg]
                 arg_as_output_root_qspec = _find_root_qspec(arg_as_output_qspec, edge_or_node_to_qspec, shared_with_map)
-
-            input_edge_root = _find_root(input_edge, shared_with_map)
-            input_edge_root_qspec = edge_or_node_to_qspec[input_edge_root]
-            input_edge_root_qspec = _find_root_qspec(input_edge_root_qspec, edge_or_node_to_qspec, shared_with_map)
-            print(f"{input_edge} root qspec: {input_edge_root_qspec} output qspec: {arg_as_output_root_qspec}")
+            # TODO: add assertions for types of root qspecs
             if (
                 arg_as_output_root_qspec is not None and
-                hasattr(arg_as_output_root_qspec, "dtype") and
-                hasattr(input_edge_root_qspec, "dtype") and
-                arg_as_output_root_qspec.dtype == input_edge_root_qspec.dtype
+                _has_same_dtype(arg_as_output_root_qspec, input_edge_root_qspec) and
+                _has_same_is_dynamic(arg_as_output_root_qspec, input_edge_root_qspec)
             ):
-                print(f"union input edge: {input_edge} with {arg}")
                 # the input arg to the node should reuse the existing output observer for arg
                 # since dtype is the same (we may want to extend this to be a more strict check
                 # in the future)
                 _union(arg, input_edge, shared_with_map)
             _update_shared_with(input_edge, qspec, shared_with_map)
 
-    print("sharing:", shared_with_map)
     # now that we get the sharing relations between all edges and nodes, we can assingn group ids
     cur_group_id = 0
     edge_or_node_to_group_id: Dict[EdgeOrNode, int] = {}
@@ -122,14 +134,24 @@ def _get_edge_or_node_to_group_id(model: torch.fx.GraphModule):
 
     return edge_or_node_to_group_id
 
+def _get_edge_or_node_to_obs_or_fq(edge_or_node_to_group_id: Dict[EdgeOrNode, int], edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], is_qat: bool) -> Dict[EdgeOrNode, ObserverOrFakeQuantize]:
+    edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
+    group_id_to_obs_or_fq: Dict[int, ObserverOrFakeQuantize] = {}
+    # TODO: maybe edge_or_node_to_qspec should be edge_or_node_to_root_qspec
+    for edge_or_node, qspec in edge_or_node_to_qspec.items():
+        group_id = edge_or_node_to_group_id[edge_or_node]
+        if group_id not in group_id_to_obs_or_fq:
+            group_id_to_obs_or_fq[group_id] = _create_obs_or_fq_from_qspec(qspec, edge_or_node_to_obs_or_fq, is_qat)
+        edge_or_node_to_obs_or_fq[edge_or_node] = group_id_to_obs_or_fq[group_id]
+    return edge_or_node_to_obs_or_fq
+
 def _maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
     arg: Argument,
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    edge_or_node_to_group_id: Dict[EdgeOrNode, int],
-    group_id_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ) -> Argument:
     """
@@ -142,7 +164,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         new_arg_to_return = []
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
-                node, inner_arg, qconfig, model, named_modules, edge_or_node_to_group_id, group_id_to_obs_or_fq, is_qat,
+                node, inner_arg, qconfig, model, named_modules, obs_or_fq_map, is_qat,
             )
             new_arg_to_return.append(new_inner_arg)
         return type(arg)(new_arg_to_return)
@@ -154,10 +176,10 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     new_arg = arg
 
     quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
-    arg_as_input_act_obs_or_fq = _get_arg_as_input_act_obs_or_fq(arg, node, named_modules, edge_or_node_to_group_id, group_id_to_obs_or_fq, is_qat)
+    arg_as_input_act_obs_or_fq = _get_arg_as_input_act_obs_or_fq(arg, node, named_modules, obs_or_fq_map, is_qat)
     arg_as_input_target_dtype, arg_as_input_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_input_act_obs_or_fq)
 
-    arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(arg, named_modules, edge_or_node_to_group_id, group_id_to_obs_or_fq, is_qat)
+    arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(arg, named_modules, obs_or_fq_map, is_qat)
     arg_as_output_target_dtype, arg_as_output_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq)
 
     if arg_as_input_target_is_dynamic or arg_as_input_target_dtype not in [torch.float, None]:
@@ -167,11 +189,10 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             assert arg_as_input_act_obs_or_fq is not None
             observed_arg = arg.args[0]
             assert isinstance(observed_arg, Node), f"expect observed argument to be a Node, but got: {type(observed_arg)}"
-            assert observed_arg in edge_or_node_to_group_id, \
+            assert observed_arg in obs_or_fq_map, \
                 f"can't find a sharing group for node: {observed_arg}"
-            group_id = edge_or_node_to_group_id[observed_arg]
             # reuse the existing obs/fq
-            arg_as_input_act_obs_or_fq = group_id_to_obs_or_fq[group_id]
+            arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
             # we don't need to insert new observer node
             new_arg = arg
         else:
@@ -200,6 +221,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
             assert arg_as_input_act_obs_or_fq is not None
             if existing_obs_node is None:
+                maybe_observed_arg = arg
                 # When quantizing two layers with different configs we can have
                 # conv2d (int8) -> avgpool(uint8)
                 # In this case observer insertion for avgpool will come here but the input
@@ -210,14 +232,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 # original input and not the observed one.
                 while _is_activation_post_process_node(arg, named_modules):
                     arg = arg.args[0]  # type: ignore[assignment]
-                group_id = edge_or_node_to_group_id[(arg, node)]
-                print(f"group id: {group_id} {group_id_to_obs_or_fq}")
-                if group_id not in group_id_to_obs_or_fq:
-                    group_id_to_obs_or_fq[group_id] = arg_as_input_act_obs_or_fq
-                arg_as_input_act_obs_or_fq = group_id_to_obs_or_fq[group_id]
-                print(f"group id: {group_id} {group_id_to_obs_or_fq}")
+                arg_as_input_act_obs_or_fq = obs_or_fq_map[(arg, node)]
                 new_obs_node = _insert_obs_or_fq(
-                    arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)
+                    maybe_observed_arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)
                 # override this arg to be the observed arg
                 new_arg = new_obs_node
             else:
@@ -230,8 +247,7 @@ def _maybe_insert_input_observers_for_node(
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    edge_or_node_to_group_id: Dict[EdgeOrNode, int],
-    group_id_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, int],
     is_qat: bool,
 ) -> None:
     """
@@ -252,7 +268,7 @@ def _maybe_insert_input_observers_for_node(
     new_args = []
     for arg in node.args:
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
-            node, arg, qconfig, model, named_modules, edge_or_node_to_group_id, group_id_to_obs_or_fq, is_qat,
+            node, arg, qconfig, model, named_modules, obs_or_fq_map, is_qat,
         )
         new_args.append(new_arg)
 
@@ -265,11 +281,23 @@ def _maybe_insert_input_observers_for_node(
     # assign the new args to the node, inplace
     node.args = tuple(new_args)
 
+def _maybe_insert_output_observer_for_node(
+    node: Node,
+    model: torch.nn.Module,
+    named_modules: Dict[str, torch.nn.Module],
+    graph: Graph,
+    edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    is_qat: bool,
+) -> Optional[Node]:
+    if node in edge_or_node_to_obs_or_fq:
+        output_act_obs_or_fq = edge_or_node_to_obs_or_fq[node]
+        return _insert_obs_or_fq(node, output_act_obs_or_fq, model, named_modules, graph)
+    return None
+
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
     model: torch.fx.GraphModule,
-    edge_or_node_to_group_id: Dict[EdgeOrNode, int],
-    group_id_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
     this_node_quantization_annotation = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
@@ -295,8 +323,7 @@ def _maybe_insert_input_and_output_observers_for_node(
         None,  # qconfig
         model,
         named_modules,
-        edge_or_node_to_group_id,
-        group_id_to_obs_or_fq,
+        edge_or_node_to_obs_or_fq,
         is_qat,
     )
 
@@ -308,7 +335,7 @@ def _maybe_insert_input_and_output_observers_for_node(
         return
 
     # this returns the new observer node if it was needed
-    maybe_output_obs_node = _maybe_insert_output_observer_for_node(node, model, named_modules, model.graph, edge_or_node_to_group_id, group_id_to_obs_or_fq, is_qat)
+    maybe_output_obs_node = _maybe_insert_output_observer_for_node(node, model, named_modules, model.graph, edge_or_node_to_obs_or_fq, is_qat)
 
     if maybe_output_obs_node is None:
         return
@@ -341,13 +368,13 @@ def prepare(
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
-    # obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
-    edge_or_node_to_group_id = _get_edge_or_node_to_group_id(model)
-    print("edge or node to group:", edge_or_node_to_group_id)
-    group_id_to_obs_or_fq: Dict[int, ObserverOrFakeQuantize] = {}
+
+    edge_or_node_to_qspec = _get_edge_or_node_to_qspec(model)
+    edge_or_node_to_group_id = _get_edge_or_node_to_group_id(edge_or_node_to_qspec)
+    obs_or_fq_map = _get_edge_or_node_to_obs_or_fq(edge_or_node_to_group_id, edge_or_node_to_qspec, is_qat)
 
     for node in nodes_before_observation:
-        _maybe_insert_input_and_output_observers_for_node(node, model, edge_or_node_to_group_id, group_id_to_obs_or_fq, is_qat)
+        _maybe_insert_input_and_output_observers_for_node(node, model, obs_or_fq_map, is_qat)
 
     model = GraphModule(model, model.graph)
 

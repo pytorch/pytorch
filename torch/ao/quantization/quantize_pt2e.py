@@ -232,7 +232,6 @@ def convert_pt2e(
     model = _fold_conv_bn_qat(model)
     pm = PassManager([DuplicateDQPass()])
     model = pm(model).graph_module
-
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 

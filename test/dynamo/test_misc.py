@@ -558,6 +558,54 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    def test_sys_modules(self):
+        def fn(x, y):
+            mod_a = sys.modules.get("aaaaaaaa")
+            assert mod_a is None
+            assert "bbbbbbbb" not in sys.modules
+
+            assert "operator" in sys.modules
+            operator = sys.modules["operator"]
+            builtins = sys.modules.get("builtins")
+            operator2 = sys.modules.get("cccccccc", operator)
+
+            return operator.add(x, y), operator2.neg(builtins.abs(x))
+
+        torch._dynamo.testing.standard_test(self, fn, 2, expected_ops=3)
+
+        x = torch.randn(10, 10)
+        _, guards = torch._dynamo.export(fn, x, x)
+        guard_code = []
+        for guard in guards:
+            if guard.code_list:
+                guard_code += guard.code_list
+
+        # Filter out id-matches that won't reproduce run to run
+        guard_code = filter(
+            lambda line: "id" not in line and "lookup_backend" not in line,
+            sorted(guard_code),
+        )
+        self.assertExpectedInline(
+            "\n".join(guard_code),
+            """\
+2 <= L['x'].size()[0]
+L['x'] is L['y']
+L['x'].ndimension() == 2
+L['x'].requires_grad == False
+L['x'].size()[1] == L['x'].size()[0]
+L['x'].storage_offset() == 0
+___dict_contains('builtins', G['sys'].modules)
+___dict_contains('operator', G['sys'].modules)
+___dict_contains('operator', G['sys'].modules)
+hasattr(L['x'], '_dynamo_dynamic_indices') == False
+not ___dict_contains('aaaaaaaa', G['sys'].modules)
+not ___dict_contains('bbbbbbbb', G['sys'].modules)
+not ___dict_contains('cccccccc', G['sys'].modules)
+str(L['x'].device) == 'cpu'
+str(L['x'].dtype) == 'torch.float32'
+utils_device.CURRENT_DEVICE == None""",
+        )
+
     def test_fold(self):
         def fn(a):
             return a + math.sqrt(63)
@@ -630,6 +678,38 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             expected_ops=1,
             expected_ops_dynamic=ifdynstaticdefault(1, 17),
         )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(y >= 0)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_is_size(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            # unsound 0/1 specialization!
+            if y == 0:
+                assert False
+            else:
+                return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_config_obj(self):
         class Cfg:
@@ -6864,13 +6944,11 @@ def ___make_guard_fn():
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     def test_unbacked_symint(self):
-        from torch._export.constraints import constrain_as_size
-
         @torch.compile(backend="eager")
         def f(lengths, values):
             sizes = lengths.tolist()
             for s in sizes:
-                constrain_as_size(s, min=2, max=100)
+                torch._constrain_as_size(s, min=2, max=100)
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))

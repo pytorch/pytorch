@@ -409,45 +409,28 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
-  try {
-    // if timing is disabled we won't have allocated start events
-    if (!timingEnabled_) {
+  // if timing is disabled we won't have allocated start events
+  if (!timingEnabled_) {
+    return false;
+  }
+  for (const auto i : c10::irange(devices_.size())) {
+    // Checking the work's corresponding CUDA events' status
+    if (!(*ncclStartEvents_)[i].query()) {
       return false;
     }
-    for (const auto i : c10::irange(devices_.size())) {
-      // Checking the work's corresponding CUDA events' status
-      if (!(*ncclStartEvents_)[i].query()) {
-        return false;
-      }
-    }
-  } catch (const std::exception& e) {
-    if (std::string(e.what()).find("driver shutting down") ==
-        std::string::npos) {
-      throw;
-    }
-    LOG(INFO) << "[Rank " << rank_
-              << "] Event query failed with exception: " << e.what();
   }
 
   return true;
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
-  try {
-    for (const auto i : c10::irange(devices_.size())) {
-      // Checking the work's corresponding CUDA events' status
-      if (!(*ncclEndEvents_)[i].query()) {
-        return false;
-      }
+  for (const auto i : c10::irange(devices_.size())) {
+    // Checking the work's corresponding CUDA events' status
+    if (!(*ncclEndEvents_)[i].query()) {
+      return false;
     }
-  } catch (const std::exception& e) {
-    if (std::string(e.what()).find("driver shutting down") ==
-        std::string::npos) {
-      throw;
-    }
-    LOG(INFO) << "[Rank " << rank_
-              << "] Event query failed with exception: " << e.what();
   }
+
   return true;
 }
 
@@ -690,13 +673,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
   LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options:"
-#ifdef NCCL_VERSION_CODE
-            // NCCL > 2.3.5 should have NCCL_VERSION_CODE defined
-            << "NCCL VERSION: " << NCCL_VERSION_CODE
-#else
-            << "NCCL VERSION: " << NCCL_MAJOR << NCCL_MINOR << NCCL_PATCH
-#endif
+            << "] ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion()
             << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
@@ -922,15 +900,26 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
-    // Append error message reported from workCleanupLoop
-    const auto exitMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] NCCL watchdog thread terminated with exception: ",
-        e.what());
-    LOG(ERROR) << exitMsg;
-    watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
-    std::rethrow_exception(watchDogException_);
+    if (std::string(e.what()).find("driver shutting down") !=
+        std::string::npos) {
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
+          << " (Watchdog caught exception: " << e.what();
+
+    } else {
+      // Append error message reported from workCleanupLoop
+      const auto exitMsg = c10::str(
+          "[Rank ",
+          rank_,
+          "] NCCL watchdog thread terminated with exception: ",
+          e.what());
+      LOG(ERROR) << exitMsg;
+      // TODO(whc) clean up the rethrow - why is it stored in a class var and
+      // rethrown?
+      watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+      std::rethrow_exception(watchDogException_);
+    }
   } catch (...) {
     const auto exitMsg = c10::str(
         "[Rank ",
@@ -1089,20 +1078,30 @@ void ProcessGroupNCCL::runHookLoop() {
         it = completedWorkList_.erase(it);
       }
     } catch (std::exception& e) {
-      // PythonOnCompletionHook has already extracted Python exception message
-      // and wrapped it with a cpp one. So we no longer need to acquire GIL
-      // here.
-      const auto errorStr = c10::str(
-          "Caught exception on rank ",
-          rank_,
-          " while running onCompletion hook for ProcessGroupNCCL: ",
-          e.what(),
-          ". Aborting all communicators.");
+      if (std::string(e.what()).find("driver shutting down") !=
+          std::string::npos) {
+        LOG(INFO)
+            << "[Rank " << rank_
+            << "] main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
+            << " (runHookLoop caught exception: " << e.what();
 
-      // No need to call abort() on WorkNCCL here as that collective has already
-      // finished successfully at this point. We just need to abort the process
-      // Abort all NCCL Communicators on this ProcessGroupNCCL instance.
-      abort(errorStr);
+      } else {
+        // PythonOnCompletionHook has already extracted Python exception message
+        // and wrapped it with a cpp one. So we no longer need to acquire GIL
+        // here.
+        const auto errorStr = c10::str(
+            "Caught exception on rank ",
+            rank_,
+            " while running onCompletion hook for ProcessGroupNCCL: ",
+            e.what(),
+            ". Aborting all communicators.");
+
+        // No need to call abort() on WorkNCCL here as that collective has
+        // already finished successfully at this point. We just need to abort
+        // the process Abort all NCCL Communicators on this ProcessGroupNCCL
+        // instance.
+        abort(errorStr);
+      }
     }
 
     // Lock is still acquired at this point
@@ -1615,7 +1614,7 @@ void ProcessGroupNCCL::workEnqueue(
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : Backend::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME, kProcessGroupNCCLDefaultTimeout),
       is_high_priority_stream(is_high_priority_stream) {}
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
