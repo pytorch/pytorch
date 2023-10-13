@@ -195,9 +195,9 @@ def linear_backward_default(func, *args, **kwargs):
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
 
-register_jagged_func(torch.ops.aten.detach.default, "self: jt")(
-    jagged_unary_pointwise
-)
+
+register_jagged_func(torch.ops.aten.detach.default, "self: jt")(jagged_unary_pointwise)
+
 
 @register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
 def is_same_size_default(func, *args, **kwargs):

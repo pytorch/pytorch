@@ -39,7 +39,6 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
-from torch.nested._internal.nested_tensor import NestedTensor
 
 
 original_zip = zip

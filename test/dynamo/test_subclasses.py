@@ -648,7 +648,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         def fn1(nt1, nt2):
             return (nt1 + nt2).sin().cos()
 
-        compiled_f = torch.compile(fn1, fullgraph=True, backend="aot_eager", dynamic=True)
+        compiled_f = torch.compile(
+            fn1, fullgraph=True, backend="aot_eager", dynamic=True
+        )
         out = compiled_f(nt, nt2)
         out_buffer = ViewBufferFromNested.apply(out)
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
