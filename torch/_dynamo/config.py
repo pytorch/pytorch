@@ -233,8 +233,6 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
-# TODO(janimesh) - Remove as once internal is not reliant on this flag. This
-# flag has no meaning now after nn_module_guard is introduced.
 skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
@@ -288,6 +286,9 @@ check_shape_env_recorded_events = False
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
+
+# Trace through torch.distributed code
+trace_distributed = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
@@ -348,10 +349,10 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
+
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
-
 
 from .config_utils import install_config_module
 
