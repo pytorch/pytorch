@@ -76,6 +76,26 @@ class RAIIAtenTensorHandle {
     handle_.reset();
   }
 
+  int64_t size(int64_t d) {
+    int64_t size;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(handle_.get(), d, &size));
+    return size;
+  }
+
+  int64_t stride(int64_t d) {
+    int64_t stride;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_stride(handle_.get(), d, &stride));
+    return stride;
+  }
+
+  int64_t storage_offset() {
+    int64_t storage_offset;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
+    return storage_offset;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
@@ -283,6 +303,12 @@ class AOTInductorModelBase {
   int device_idx_;
 };
 
+// Codegen-ed classes can derive from this to keep pointers to loaded kernels.
+class AOTInductorModelKernelsBase {
+ public:
+  virtual ~AOTInductorModelKernelsBase() = default;
+};
+
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
   AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
@@ -301,8 +327,11 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants,
       std::optional<std::string> cubin_dir) {
-    return std::make_unique<AOTInductorModel>(constants, cubin_dir);
+    return std::make_unique<AOTInductorModel>(std::move(constants), cubin_dir);
   }
+
+ private:
+  std::unique_ptr<AOTInductorModelKernelsBase> kernels_;
 };
 
 #ifdef USE_CUDA
