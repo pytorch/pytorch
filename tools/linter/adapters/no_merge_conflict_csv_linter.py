@@ -34,24 +34,6 @@ class LintMessage(NamedTuple):
     description: Optional[str]
 
 
-def as_posix(name: str) -> str:
-    return name.replace("\\", "/") if IS_WINDOWS else name
-
-
-def format_error_message(filename: str, err: Exception) -> LintMessage:
-    return LintMessage(
-        path=filename,
-        line=None,
-        char=None,
-        code="MERGE_CONFLICTLESS_CSV",
-        severity=LintSeverity.ADVICE,
-        name="command-failed",
-        original=None,
-        replacement=None,
-        description=(f"Failed due to {err.__class__.__name__}:\n{err}"),
-    )
-
-
 def check_file(filename: str) -> List[LintMessage]:
     with open(filename, "rb") as f:
         original = f.read().decode("utf-8")
@@ -72,7 +54,7 @@ def check_file(filename: str) -> List[LintMessage]:
                 path=filename,
                 line=None,
                 char=None,
-                code="UFMT",
+                code="MERGE_CONFLICTLESS_CSV",
                 severity=LintSeverity.WARNING,
                 name="format",
                 original=original,
@@ -84,7 +66,7 @@ def check_file(filename: str) -> List[LintMessage]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Format files with ufmt (black + usort).",
+        description="Format csv files to have 3 lines of space between each line to prevent merge conflicts.",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
