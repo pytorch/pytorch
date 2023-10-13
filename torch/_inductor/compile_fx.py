@@ -341,7 +341,8 @@ def compile_fx_inner(
         *graph_args, **graph_kwargs  # type: ignore[arg-type]
     )
 
-    if aot_mode:
+    if isinstance(compiled_graph, str):
+        assert aot_mode, "Only AOTInductor should a string"
         return compiled_graph
 
     if cudagraphs:
