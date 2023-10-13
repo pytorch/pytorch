@@ -89,6 +89,27 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             assert k in torch._dynamo.config._compile_ignored
             assert k not in torch._dynamo.config._config
 
+    def test_config_hash(self):
+        config = torch._dynamo.config
+        starting_hash = config.get_hash()
+
+        with config.patch({"verbose": not config.verbose}):
+            new_hash = config.get_hash()
+            assert "verbose" in config._compile_ignored
+            assert new_hash == starting_hash
+
+        new_hash = config.get_hash()
+        assert new_hash == starting_hash
+
+        with config.patch({"dead_code_elimination": not config.dead_code_elimination}):
+            changed_hash = config.get_hash()
+            assert "dead_code_elimination" not in config._compile_ignored
+            assert changed_hash != starting_hash
+
+        newest_hash = config.get_hash()
+        assert changed_hash != newest_hash
+        assert newest_hash == starting_hash
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
