@@ -337,16 +337,14 @@ def export(
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
-    a method) and produces a traced graph representing only the Tensor
-    computation of the function in an Ahead-of-Time (AOT) fashion, which can
-    subsequently be executed with different outputs or serialized.  The traced
-    graph (1) produces a normalized operator set consisting only of functional
-    `Core ATen Operator Set <https://pytorch.org/docs/stable/ir.html>`_
-    and user specified custom operators, (2) has eliminated all Python control
-    flow and data structures (except for certain
-    conditions), and (3) has the set of shape constraints needed to show that
-    this normalization and control flow elimination is sound for a future
-    input.
+    a method) along with example inputs, and produces a traced graph representing
+    only the Tensor computation of the function in an Ahead-of-Time (AOT) fashion,
+    which can subsequently be executed with different inputs or serialized.  The
+    traced graph (1) produces normalized operators in the functional ATen operator set
+    (as well as any user-specified custom operators), (2) has eliminated all Python control
+    flow and data structures (with certain exceptions), and (3) records the set of
+    shape constraints needed to show that this normalization and control-flow elimination
+    is sound for future inputs.
 
     **Soundness Guarantee**
 
