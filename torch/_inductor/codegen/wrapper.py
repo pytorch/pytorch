@@ -795,7 +795,7 @@ class WrapperCodeGen(CodeGen):
         else:
             self.writeline(self.wrap_kernel_call(name, call_args))
 
-    def writeline(self, line) -> None:
+    def writeline(self, line):
         self.lines.append(line)
 
     def enter_context(self, ctx):
@@ -973,6 +973,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+
+        self.codegen_int_array_var = functools.lru_cache(None)(self._codegen_int_array_var_uncached)
 
         from .cpp import cexpr, CppPrinter
 
@@ -1522,6 +1524,22 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             return DTYPE_TO_ATEN[dtype]
 
+    def _codegen_int_array_var_uncached(self, int_array: str, writer=None):
+        # Because the memory planning is done in two passes (see the implementation
+        # of self.generate), the writeline behavior is different in the two passes.
+        # As a result, the emitted int array declarations may appear in a later
+        # position of the generated code, so the second pass codegen should not
+        # reuse int array declarations generated in the first pass
+        if writer is None:
+            # The first pass codegen uses `self` as the writer
+            writer = self
+
+        var = f"int_array_{next(self.int_array_id)}"
+        if var not in self.declared_int_array_vars:
+            self.declared_int_array_vars.add(var)
+            writer.writeline(f"int64_t {var}[] = {int_array};")
+        return var
+
     def make_buffer_allocation(self, buffer):
         name = buffer.get_name()
         device = self.codegen_device(buffer.get_device())
@@ -1532,8 +1550,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             device_type, device_id = device.split(",")
             args = [
                 str(len(buffer.get_size())),
-                _codegen_int_array_var(cpp_wrapper=self, int_array=size, writer=self.wrapper_call),
-                _codegen_int_array_var(cpp_wrapper=self, int_array=stride, writer=self.wrapper_call),
+                self.codegen_int_array_var(size, self.wrapper_call),
+                self.codegen_int_array_var(stride, self.wrapper_call),
                 dtype,
                 device_type,
                 "this->device_idx_" if V.graph.aot_mode else device_id,
@@ -1569,8 +1587,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args = [
                 f"{name}",
                 dim,
-                _codegen_int_array_var(cpp_wrapper=self, int_array=size, writer=self.wrapper_call),
-                _codegen_int_array_var(cpp_wrapper=self, int_array=stride, writer=self.wrapper_call),
+                self.codegen_int_array_var(size, writer),
+                self.codegen_int_array_var(stride, writer),
                 offset,
                 f"&{tmp_name}",
             ]
@@ -1878,7 +1896,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
-                return f"{_codegen_int_array_var(cpp_wrapper=self, int_array=result, writer=None),}, {len(val)}"
+                return f"{self.codegen_int_array_var(result)}, {len(val)}"
             else:
                 return result
         else:
@@ -1894,6 +1912,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         super().__init__()
         self.grid_id = count()
         self.cuda = True
+
+        self._generate_load_kernel_once = functools.lru_cache(None)(self._generate_load_kernel_once_uncached)
 
     def write_header(self):
         super().write_header()
@@ -1999,6 +2019,22 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             self.prefix.writeline("\n")
         return super().generate()
 
+    def _generate_load_kernel_once_uncached(
+        self, name: str, mangled_name: str, cubin_path: str, shared_mem: int
+    ):
+        if V.graph.aot_mode:
+            self.writeline(f"if (kernels.{name} == nullptr) {{")
+            self.writeline(
+                f"""    kernels.{name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem}, this->cubin_dir_);"""
+            )
+            self.writeline("}")
+        else:
+            self.writeline(f"if ({name} == nullptr) {{")
+            self.writeline(
+                f"""    {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
+            )
+            self.writeline("}")
+
     def generate_args_decl(self, call_args):
         dynamic_symbols = V.graph.sizevars.free_symbols()
         # TODO: only works for constant now, need type info
@@ -2076,7 +2112,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"cubin file should already exist at this moment: {cubin_path}"
         shared_mem = params.get("shared_mem", 0)
 
-        _generate_load_kernel_once(self, name, mangled_name, cubin_path, shared_mem)
+        self._generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
@@ -2112,43 +2148,3 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         )
         if grid_has_unbacked_symbols:
             self.writeline("}")
-
-
-@functools.lru_cache(None)
-def _generate_load_kernel_once(
-    cpp_wrapper: CppWrapperCodeGen, name: str, mangled_name: str, cubin_path: str, shared_mem: int
-):
-    if V.graph.aot_mode:
-        cpp_wrapper.writeline(f"if (kernels.{name} == nullptr) {{")
-        cpp_wrapper.writeline(
-            f"""    kernels.{name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem}, this->cubin_dir_);"""
-        )
-        cpp_wrapper.writeline("}")
-    else:
-        cpp_wrapper.writeline(f"if ({name} == nullptr) {{")
-        cpp_wrapper.writeline(
-            f"""    {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
-        )
-        cpp_wrapper.writeline("}")
-
-
-@functools.lru_cache(None)
-def _codegen_int_array_var(
-    cpp_wrapper: CppWrapperCodeGen,
-    int_array: str,
-    writer: Optional[IndentedBuffer]
-) -> str:
-    # Because the memory planning is done in two passes (see the implementation
-    # of self.generate), the writeline behavior is different in the two passes.
-    # As a result, the emitted int array declarations may appear in a later
-    # position of the generated code, so the second pass codegen should not
-    # reuse int array declarations generated in the first pass
-    if writer is None:
-        # The first pass codegen uses the CppWrapperCodeGen object as the writer
-        writer = cpp_wrapper
-
-    var = f"int_array_{next(cpp_wrapper.int_array_id)}"
-    if var not in cpp_wrapper.declared_int_array_vars:
-        cpp_wrapper.declared_int_array_vars.add(var)
-        writer.writeline(f"int64_t {var}[] = {int_array};")
-    return var
