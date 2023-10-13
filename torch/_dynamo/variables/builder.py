@@ -60,7 +60,6 @@ from ..utils import (
     clone_input,
     get_fake_value,
     get_static_address_type,
-    getfile,
     global_key_name,
     is_namedtuple,
     is_typing,
@@ -534,12 +533,12 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(getfile(value), allow_torch=True)
+            and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
                 value,
-                skipfiles.check_verbose(getfile(value), allow_torch=True).reason,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
