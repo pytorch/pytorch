@@ -30,8 +30,8 @@ Tensor Parallelism supports the following parallel styles:
 Since Tensor Parallelism is built on top of DTensor, we need to specify the
 DTensor layout of the input and output of the module so it can interact with
 the module parameters and module afterwards. Users can achieve this by specifying
-the ``input_layouts`` and ``output_layouts`` which decide what the DTensor of inputs
-and outputs.
+the ``input_layouts`` and ``output_layouts`` which annotate inputs as DTensors
+and redistribute the outputs, if needed.
 
 If users only want to annotate the DTensor layout for inputs/outputs and no need to
 distribute its parameters, the following classes can be used in the ``parallelize_plan``

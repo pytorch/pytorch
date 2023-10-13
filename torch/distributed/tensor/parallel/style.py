@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel._utils import (
     _deprecate_warnings,
     _prepare_input_validate,
@@ -44,7 +45,7 @@ class ParallelStyle(ABC):
     _prepare_output: _PrepareOutputType
     input_layouts: LayoutsType
     output_layouts: LayoutsType
-    use_local: bool
+    use_local_output: bool
 
     @abstractmethod
     def __init__(
@@ -54,11 +55,11 @@ class ParallelStyle(ABC):
         *,
         input_layouts,
         output_layouts,
-        use_local,
+        use_local_output,
     ) -> None:
         self.input_layouts = input_layouts
         self.output_layouts = output_layouts
-        self.use_local = use_local
+        self.use_local_output = use_local_output
         self._prepare_input = _prepare_input  # type: ignore[assignment, misc]
         self._prepare_output = _prepare_output  # type: ignore[assignment, misc]
 
@@ -77,7 +78,6 @@ class PairwiseParallel(ParallelStyle):
         for even-number-layer MLP for now.
     """
 
-    @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
         _prepare_input=None,
@@ -85,8 +85,11 @@ class PairwiseParallel(ParallelStyle):
         *,
         input_layouts=None,
         output_layouts=None,
-        use_local=True,
+        use_local_output=True,
     ) -> None:
+        _deprecate_warnings(
+            "PairwiseParallel", "Use ColwiseParallel and RowwiseParallel instead."
+        )
         _prepare_input = (
             make_input_replicate_1d if _prepare_input is None else _prepare_input
         )
@@ -98,7 +101,7 @@ class PairwiseParallel(ParallelStyle):
             _prepare_output,
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
         )
 
 
@@ -117,7 +120,6 @@ class SequenceParallel(PairwiseParallel):
         for even-number-layer MLP for now.
     """
 
-    @_deprecate_warnings("Use ColwiseParallel and RowwiseParallel instead.")  # type: ignore[misc]
     def __init__(
         self,
         _prepare_input=None,
@@ -125,18 +127,20 @@ class SequenceParallel(PairwiseParallel):
         *,
         input_layouts=None,
         output_layouts=None,
-        use_local=True,
+        use_local_output=True,
     ) -> None:
+        _deprecate_warnings(
+            "SequenceParallel", "Use ColwiseParallel and RowwiseParallel instead."
+        )
         super().__init__(  # type: ignore[misc]
             _prepare_input,
             _prepare_output,
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
         )
 
 
-@_deprecate_warnings("Specify input_layouts instead.")  # type: ignore[arg-type]
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_shard_1d(
     input: Union[torch.Tensor, DTensor],
@@ -162,6 +166,7 @@ def make_input_shard_1d(
     Returns:
         A :class:`DTensor` sharded on dimension ``dim`` over ``device_mesh``.
     """
+    _deprecate_warnings("make_input_shard_1d", "Specify input_layouts instead.")
     shard_spec = [Shard(dim)]
     if isinstance(input, DTensor):
         return input.redistribute(device_mesh, shard_spec)
@@ -174,7 +179,6 @@ def make_input_shard_1d(
         )
 
 
-@_deprecate_warnings("Specify input_layouts instead.")  # type: ignore[arg-type]
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_shard_1d_last_dim(
     input: Union[torch.Tensor, DTensor],
@@ -197,10 +201,12 @@ def make_input_shard_1d_last_dim(
     Returns:
         A :class:`DTensor` sharded on the last dimension over ``device_mesh``.
     """
+    _deprecate_warnings(
+        "make_input_shard_1d_last_dim", "Specify input_layouts instead."
+    )
     return make_input_shard_1d(input, device_mesh, dim=input.dim() - 1)  # type: ignore[call-arg, misc]
 
 
-@_deprecate_warnings("Specify input_layouts instead.")  # type: ignore[arg-type]
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_reshard_replicate(
     input: torch.Tensor,
@@ -224,12 +230,14 @@ def make_input_reshard_replicate(
         A :class:`DTensor` sharded on dimension ``0`` over ``device_mesh``
             and then converted to replicate.
     """
+    _deprecate_warnings(
+        "make_input_reshard_replicate", "Specify input_layouts instead."
+    )
     return make_input_replicate_1d(  # type: ignore[call-arg, misc]
         make_input_shard_1d(input, device_mesh, dim=0), device_mesh  # type: ignore[call-arg, misc]
     )
 
 
-@_deprecate_warnings("Specify input_layouts instead.")  # type: ignore[arg-type]
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_replicate_1d(
     input: Union[torch.Tensor, DTensor],
@@ -251,6 +259,7 @@ def make_input_replicate_1d(
     Returns:
         A :class:`DTensor` replicated over ``device_mesh``.
     """
+    _deprecate_warnings("make_input_replicate_1d", "Specify input_layouts instead.")
     replicate = [Replicate()]
     if isinstance(input, DTensor):
         return input.redistribute(device_mesh, replicate)
@@ -263,7 +272,6 @@ def make_input_replicate_1d(
         )
 
 
-@_deprecate_warnings("Specify output_layouts instead.")  # type: ignore[arg-type]
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_shard_1d(
     output: DTensor, device_mesh: Optional[DeviceMesh] = None, dim: int = 0
@@ -284,11 +292,10 @@ def make_output_shard_1d(
     Return:
         A :class:`DTensor` object sharded on the given dim.
     """
-
+    _deprecate_warnings("make_output_shard_1d", "Specify output_layouts instead.")
     return output.redistribute(device_mesh, [Shard(dim)])
 
 
-@_deprecate_warnings("Specify output_layouts instead.")  # type: ignore[arg-type]
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_replicate_1d(
     output: DTensor, device_mesh: Optional[DeviceMesh] = None
@@ -308,11 +315,10 @@ def make_output_replicate_1d(
     Return:
         A :class:`DTensor` object made replicate.
     """
-
+    _deprecate_warnings("make_output_replicate_1d", "Specify output_layouts instead.")
     return output.redistribute(device_mesh, [Replicate()])
 
 
-@_deprecate_warnings("Specify output_layouts instead.")  # type: ignore[arg-type]
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_tensor(
     output: DTensor, device_mesh: Optional[DeviceMesh] = None
@@ -333,13 +339,12 @@ def make_output_tensor(
     Return:
         A :class:`torch.Tensor` object converted from output DTensor.
     """
-
+    _deprecate_warnings("make_output_tensor", "Specify output_layouts instead.")
     return make_output_replicate_1d(  # type: ignore[attr-defined, misc]
         output, device_mesh
     ).to_local()  # type: ignore[call-arg]
 
 
-@_deprecate_warnings("Specify output_layouts instead.")  # type: ignore[arg-type]
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_sharded_output_tensor(
     output: DTensor, _device_mesh: Optional[DeviceMesh] = None
@@ -357,11 +362,10 @@ def make_sharded_output_tensor(
     ``_device_mesh`` is not needed and is just kept to match with
         the signature in its callsite in ``distribute_module``.
     """
-
+    _deprecate_warnings("make_sharded_output_tensor", "Specify output_layouts instead.")
     return output.to_local()  # type: ignore[call-arg]
 
 
-@_deprecate_warnings("Specify output_layouts instead.")  # type: ignore[arg-type]
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_reshard_tensor(
     output: DTensor,
@@ -382,8 +386,19 @@ def make_output_reshard_tensor(
     Return:
         A :class:`torch.Tensor` object converted from output DTensor.
     """
-
+    _deprecate_warnings("make_output_reshard_tensor", "Specify output_layouts instead.")
     return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined, misc]
+
+
+def _is_redistribute_necessary(
+    dst_placements: Tuple[Placement, ...], dtensor: DTensor
+) -> bool:
+    """
+    Check DTensor placements to decide whether the DTensor redistribute
+    is needed to be called or not. If not, we can directly early return
+    and save CPU overhead.
+    """
+    return dtensor._spec.placements == dst_placements
 
 
 def _get_prepare_input(
@@ -394,7 +409,23 @@ def _get_prepare_input(
     """
 
     def _redistribute_per_both_layouts(t, input_layout, output_layout, device_mesh):
-        if not isinstance(t, (DTensor, torch.Tensor)):
+        dst_placements = (output_layout,)
+        if isinstance(t, DTensor):
+            return (
+                t
+                if _is_redistribute_necessary(dst_placements, t)
+                else t.redistribute(device_mesh, dst_placements)
+            )
+        elif isinstance(t, torch.Tensor):
+            dtensor = DTensor.from_local(
+                t, device_mesh, [input_layout], run_check=False
+            )
+            return (
+                dtensor
+                if _is_redistribute_necessary(dst_placements, dtensor)
+                else dtensor.redistribute(device_mesh, dst_placements)
+            )
+        else:
             if input_layout is not None:
                 raise RuntimeError(
                     "Tensor parallel module expects DTensor or tensor"
@@ -402,13 +433,6 @@ def _get_prepare_input(
                 )
             else:
                 return t
-        elif isinstance(t, DTensor):
-            return t.redistribute(device_mesh, [output_layout])
-        else:  # t is torch.Tensor.
-            dtensor = DTensor.from_local(
-                t, device_mesh, [input_layout], run_check=False
-            )
-            return dtensor.redistribute(device_mesh, [output_layout])
 
     def make_input_redistribute_1d(
         input_layouts: LayoutsType,
@@ -432,18 +456,15 @@ def _get_prepare_input(
         Returns:
             A :class:`DTensor` replicated over ``device_mesh``.
         """
+        # Early return to save CPU overhead when there is only one input.
         if not isinstance(inputs, tuple):
             return _redistribute_per_both_layouts(
                 inputs, input_layouts, output_layouts, device_mesh
             )
 
         if not isinstance(input_layouts, tuple):
-            input_layouts = [  # type: ignore[assignment]
-                input_layouts,
-            ]
-            output_layouts = [  # type: ignore[assignment]
-                output_layouts,
-            ]
+            input_layouts = (input_layouts,)  # type: ignore[assignment]
+            output_layouts = (output_layouts,)  # type: ignore[assignment]
         results = []
         for input, input_layout, output_layout in zip(
             inputs, input_layouts, output_layouts  # type: ignore[arg-type]
@@ -459,14 +480,22 @@ def _get_prepare_input(
 
 
 def _get_prepare_output(
-    output_layouts: LayoutsType, use_local: bool
+    output_layouts: LayoutsType, use_local_output: bool
 ) -> Callable[[Any], Any]:
     """
     Get the prepare input function for this parallel style.
     """
 
-    def _redistribute_per_layout(t, layout, device_mesh, use_local):
-        if not isinstance(t, DTensor):
+    def _redistribute_per_layout(t, layout, device_mesh, use_local_output):
+        dst_placements = (layout,)
+        if isinstance(t, DTensor):
+            dtensor = (
+                t
+                if _is_redistribute_necessary(dst_placements, t)
+                else t.redistribute(device_mesh, dst_placements)
+            )
+            return dtensor.to_local() if use_local_output else dtensor
+        else:
             if layout is not None:
                 raise RuntimeError(
                     "Tensor parallel module expects DTensor or tensor"
@@ -474,13 +503,10 @@ def _get_prepare_output(
                 )
             else:
                 return t
-        else:  # t is DTensor.
-            dtensor = t.redistribute(device_mesh, [layout])
-            return dtensor.to_local() if use_local else dtensor
 
     def make_output_redistribute_1d(
         output_layouts: LayoutsType,
-        use_local: bool,
+        use_local_output: bool,
         outputs: Tuple[Any, ...],
         device_mesh: Optional[DeviceMesh] = None,
     ) -> Optional[Any]:
@@ -500,23 +526,26 @@ def _get_prepare_output(
         Returns:
             A :class:`DTensor` replicated over ``device_mesh``.
         """
+        # Early return to save CPU overhead when there is only one output.
         if not isinstance(outputs, tuple):
             return _redistribute_per_layout(
-                outputs, output_layouts, device_mesh, use_local
+                outputs, output_layouts, device_mesh, use_local_output
             )
 
         if not isinstance(output_layouts, tuple):
-            output_layouts = [  # type: ignore[assignment]
-                output_layouts,
-            ]
+            output_layouts = (output_layouts,)  # type: ignore[assignment]
         results = []
         for output, output_layout in zip(outputs, output_layouts):  # type: ignore[arg-type]
             results.append(
-                _redistribute_per_layout(output, output_layout, device_mesh, use_local)
+                _redistribute_per_layout(
+                    output, output_layout, device_mesh, use_local_output
+                )
             )
         return tuple(results)
 
-    return functools.partial(make_output_redistribute_1d, output_layouts, use_local)
+    return functools.partial(
+        make_output_redistribute_1d, output_layouts, use_local_output
+    )
 
 
 class RowwiseParallel(ParallelStyle):
@@ -532,7 +561,7 @@ class RowwiseParallel(ParallelStyle):
         *,
         input_layouts=Shard(-1),
         output_layouts=Replicate(),
-        use_local=True,
+        use_local_output=True,
     ) -> None:
         if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
             raise NotImplementedError(
@@ -542,7 +571,7 @@ class RowwiseParallel(ParallelStyle):
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
             _prepare_input=_prepare_input
             if _prepare_input is not None
             else _get_prepare_input(
@@ -551,7 +580,7 @@ class RowwiseParallel(ParallelStyle):
             ),
             _prepare_output=_prepare_output
             if _prepare_output is not None
-            else _get_prepare_output(output_layouts, use_local),
+            else _get_prepare_output(output_layouts, use_local_output),
         )
 
 
@@ -568,7 +597,7 @@ class ColwiseParallel(ParallelStyle):
         *,
         input_layouts=Replicate(),
         output_layouts=Shard(-1),
-        use_local=True,
+        use_local_output=True,
     ) -> None:
         if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
             raise NotImplementedError(
@@ -578,7 +607,7 @@ class ColwiseParallel(ParallelStyle):
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
             _prepare_input=_prepare_input
             if _prepare_input is not None
             else _get_prepare_input(
@@ -589,7 +618,7 @@ class ColwiseParallel(ParallelStyle):
             ),
             _prepare_output=_prepare_output
             if _prepare_output is not None
-            else _get_prepare_output(output_layouts, use_local),
+            else _get_prepare_output(output_layouts, use_local_output),
         )
 
 
@@ -609,7 +638,7 @@ class PrepareModuleInput(ParallelStyle):
         self,
         input_layouts: LayoutsType = Shard(0),
         output_layouts: LayoutsType = Replicate(),
-        use_local: bool = False,
+        use_local_output: bool = False,
     ) -> None:
         """
         Args:
@@ -617,7 +646,7 @@ class PrepareModuleInput(ParallelStyle):
                 The layout of input tensor(s) which DTensor will be created upon.
             output_layouts (Union[Placement, Tuple[Placement, ...]]):
                 The layout of input tensor(s) which created DTensor will be redistributed to.
-            use_local (bool):
+            use_local_output (bool):
                 Whether to convert the DTensor to local tensor.
 
         Returns:
@@ -628,7 +657,8 @@ class PrepareModuleInput(ParallelStyle):
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
         >>> ...
         >>> parallelize_plan = {
-        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor.
+        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor
+        >>>                                     # and and redistributed to Replicated DTensor.
         >>>     ...
         >>> }
         >>> parallelize_module(
@@ -641,7 +671,7 @@ class PrepareModuleInput(ParallelStyle):
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
             _prepare_input=_get_prepare_input(
                 input_layouts,
                 output_layouts,
@@ -653,9 +683,9 @@ class PrepareModuleInput(ParallelStyle):
 class PrepareModuleOutput(ParallelStyle):
     """
     :class:`PrepareModuleOutput` enables users to annotate :class:`DTensor` outputs
-    with ``output_layouts`` and ``use_local`` so that each output can be converted to
+    with ``output_layouts`` and ``use_local_output`` so that each output can be converted to
     :class:`DTensor` or :class:`torch.Tensor` based on the annotation. Specifically, a DTensor
-    will be redistributed to another DTensor based on ``output_layouts`` and the flag ``use_local``
+    will be redistributed to another DTensor based on ``output_layouts`` and the flag ``use_local_output``
     to decide whether to convert the DTensor to local tensor.
 
     When the output is not a :class:`DTensor`, if no layout is specified, it will be
@@ -666,7 +696,8 @@ class PrepareModuleOutput(ParallelStyle):
     >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
     >>> ...
     >>> parallelize_plan = {
-    >>>     "submodule": PrepareModuleOutput(),   # The input of attn will be converted to Sharded tensor.
+    >>>     "submodule": PrepareModuleOutput(),   # The output of submodule will be converted to Replicated DTensor
+    >>>                                           # if it's not a DTensor, then redistributed to Sharded local tensor
     >>>     ...
     >>> }
     >>> parallelize_module(
@@ -681,12 +712,12 @@ class PrepareModuleOutput(ParallelStyle):
         self,
         input_layouts: LayoutsType = Replicate(),
         output_layouts: LayoutsType = Shard(0),
-        use_local: bool = True,
+        use_local_output: bool = True,
     ) -> None:
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
-            use_local=use_local,
+            use_local_output=use_local_output,
             _prepare_input=None,
-            _prepare_output=_get_prepare_output(output_layouts, use_local),
+            _prepare_output=_get_prepare_output(output_layouts, use_local_output),
         )
