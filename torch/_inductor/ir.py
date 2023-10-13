@@ -3977,7 +3977,7 @@ class FallbackKernel(ExternKernelAlloc):
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
 
-        serializer = GraphModuleSerializer(None, None, None)
+        serializer = GraphModuleSerializer(None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
