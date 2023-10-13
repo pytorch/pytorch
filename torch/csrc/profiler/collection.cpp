@@ -307,15 +307,14 @@ uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
 // ---------------------------------
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn) {
-  KinetoObserverContext::Event* event = nullptr;
-  uint64_t corr_id = 0;
-  std::tie(event, corr_id) = torch_ops_.op_events_.emplace_back(
-      fn.seqNr(),
-      fn.forwardThreadId(),
-      fn.scope(),
-      fn.isAsync(),
-      fn.debugHandle(),
-      fn.name());
+  auto [event, corr_id] = torch_ops_.op_events_.emplace_back(
+      torch::profiler::impl::TorchOpBasicFields{
+          fn.seqNr(),
+          fn.forwardThreadId(),
+          fn.scope(),
+          fn.isAsync(),
+          fn.debugHandle(),
+          fn.name()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
   }
