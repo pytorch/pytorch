@@ -485,9 +485,13 @@ test_inductor_torchbench_smoketest_perf() {
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
     --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
-  # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
-  # this value needs to be actively maintained to make this check useful
-  python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
+  # The threshold value needs to be actively maintained to make this check useful
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
+
+  python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
+    --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
+  # The threshold value needs to be actively maintained to make this check useful
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 5.2
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do

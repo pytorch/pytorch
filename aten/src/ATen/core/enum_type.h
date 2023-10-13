@@ -64,7 +64,7 @@ struct TORCH_API EnumType : public NamedType {
     return cu;
   }
 
-  const QualifiedName qualifiedClassName() const {
+  const QualifiedName& qualifiedClassName() const {
     return name().value();
   }
 
