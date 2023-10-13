@@ -7,6 +7,7 @@ import sympy
 import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
+
 from ..utils import ceildiv as cdiv, next_power_of_2
 
 log = logging.getLogger(__name__)
@@ -32,13 +33,28 @@ def filtered_configs(
     # tensors
     min_block_size = 32 if has_int8_tensor else 16
     m = max(
-        next_power_of_2(V.graph.sizevars.size_hint(m, fallback=8192)), min_block_size
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                m, fallback=torch._inductor.config.unbacked_symint_fallback
+            )
+        ),
+        min_block_size,
     )
     n = max(
-        next_power_of_2(V.graph.sizevars.size_hint(n, fallback=8192)), min_block_size
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                n, fallback=torch._inductor.config.unbacked_symint_fallback
+            )
+        ),
+        min_block_size,
     )
     k = max(
-        next_power_of_2(V.graph.sizevars.size_hint(k, fallback=8192)), min_block_size
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                k, fallback=torch._inductor.config.unbacked_symint_fallback
+            )
+        ),
+        min_block_size,
     )
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:

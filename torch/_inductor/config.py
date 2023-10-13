@@ -114,6 +114,10 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# the value used as a fallback for the unbacked SymInts
+# that can appear in the input shapes (e.g., in autotuning)
+unbacked_symint_fallback = 8192
+
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
