@@ -4,7 +4,7 @@ import copy
 import pickle
 import unittest
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Set
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -60,11 +60,6 @@ class ConfigModule(ModuleType):
     _config: Dict[str, Any]
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
-    # The hash that determines whether this config has changed in a way that
-    # requires recompilation
-    _recompile_hash: Optional[str]
-    # The set of keys that are not used in computing the _recompile_hash
-    _recompile_hash_ignore_list: Set[str]
     _is_dirty: bool
 
     def __init__(self):
