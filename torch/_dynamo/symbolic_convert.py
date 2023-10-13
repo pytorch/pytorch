@@ -32,7 +32,7 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_constant
+from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
 from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
@@ -552,12 +552,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inner_fn = fn.value
         if hasattr(fn, "fn"):
             inner_fn = fn.fn
-        if (
-            inner_fn
-            and callable(inner_fn)
-            and hasattr(inner_fn, "_dynamo_forbidden")
-            and inner_fn._dynamo_forbidden
-        ):
+        if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
