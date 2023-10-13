@@ -11,6 +11,7 @@ import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
+from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher
 
 from torch.testing import FileCheck
@@ -63,6 +64,7 @@ class AOTInductorModelRunner:
             example_inputs,
             options=options,
             constraints=constraints,
+            remove_runtime_assertions=True,
         )
         return so_path, exported
 
@@ -186,6 +188,19 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_small_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"always_keep_tensor_constants": True}):
+            self.check_model(Model().to(self.device), example_inputs)
 
     def test_output_path(self):
         class Model(torch.nn.Module):
@@ -685,10 +700,18 @@ class AOTInductorTestsTemplate:
             torch.tensor([1, 1, 1], device="cuda"),
             torch.randn((1, 32), dtype=torch.float16, device="cuda"),
         )
-        with torch._dynamo.config.patch(
-            {"add_runtime_assertions_for_inline_constraints": False}
-        ):
-            self.check_model(Repro(), example_inputs)
+        self.check_model(Repro(), example_inputs)
+
+    def test_repeat_interleave(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
+
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
         class Model(torch.nn.Module):
@@ -811,6 +834,57 @@ class AOTInductorTestsTemplate:
                     exactly=True,
                 ).run(src_code)
 
+    def test_fake_tensor_device_validation(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
+
+        # Export on CPU
+        exported_program = torch._export.export(
+            Model(),
+            example_inputs,
+            constraints=[],
+        )
+
+        # Compile exported model on CUDA
+        gm = exported_program.graph_module.to(self.device)
+        with self.assertRaisesRegex(ValueError, "Device mismatch between fake input"):
+            torch._inductor.aot_compile(
+                gm, tuple(i.to(self.device) for i in example_inputs)
+            )
+
+    @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
+    def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
+        supported_dtype_of_cpp_wrapper_mock.return_value = False
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10).to(self.device),
+            torch.randn(10, 10).to(self.device),
+        )
+        with self.assertRaisesRegex(
+            CppWrapperCodeGenError, "Unsupported input dtype torch.float32"
+        ):
+            torch._export.aot_compile(Model(), example_inputs)
+
+        supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
+            torch.float32, self.device == "cuda"
+        )
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -837,9 +911,6 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cpu",), is_skip=True
-        ),
     },
 )
 
@@ -856,11 +927,6 @@ copy_tests(
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cuda",), is_skip=True
-        ),
-    },
 )
 
 

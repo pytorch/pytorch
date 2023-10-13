@@ -20,6 +20,7 @@ import torch.export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils._pytree import tree_map_only, treespec_dumps, treespec_loads
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,
@@ -65,8 +66,8 @@ __all__ = [
 
 from torch.export.exported_program import (
     ConstantArgument as PyConstantArgument,
-    TensorArgument as PyTensorArgument,
     SymIntArgument as PySymIntArgument,
+    TensorArgument as PyTensorArgument,
 )
 
 from .upgrade import GraphModuleOpUpgrader
@@ -232,26 +233,6 @@ def serialize_signature(sig: ep.ExportGraphSignature) -> GraphSignature:
     return graph_signature
 
 
-def deserialize_signature(sig: GraphSignature) -> ep.ExportGraphSignature:
-    backward_signature = None
-    if bw_sig := sig.backward_signature:
-        backward_signature = ep.ExportBackwardSignature(
-            gradients_to_parameters=dict(bw_sig.gradients_to_parameters),
-            gradients_to_user_inputs=dict(bw_sig.gradients_to_user_inputs),
-            loss_output=bw_sig.loss_output,
-        )
-    return ep.ExportGraphSignature(
-        parameters=list(sig.inputs_to_parameters.values()),  # type: ignore[arg-type]
-        buffers=list(sig.inputs_to_buffers.values()),  # type: ignore[arg-type]
-        user_inputs=list(sig.user_inputs),  # type: ignore[arg-type]
-        user_outputs=list(sig.user_outputs),  # type: ignore[arg-type]
-        inputs_to_buffers=dict(sig.inputs_to_buffers),  # type: ignore[arg-type]
-        inputs_to_parameters=dict(sig.inputs_to_parameters),  # type: ignore[arg-type]
-        buffers_to_mutate=dict(sig.buffers_to_mutate),  # type: ignore[arg-type]
-        backward_signature=backward_signature,
-    )
-
-
 def serialize_torch_artifact(artifact) -> bytes:
     buffer = io.BytesIO()
     # This is a workaround for backend's tensor deserialization problem:
@@ -296,12 +277,12 @@ def _int_to_sympy_int(val) -> sympy.Expr:
 
 
 def serialize_range_constraints(
-    range_constraints: Dict[sympy.Symbol, torch._export.exported_program.RangeConstraint]
+    range_constraints: Dict[sympy.Symbol, ValueRanges]
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.min_val),
-            _sympy_int_to_int(v.max_val),
+            _sympy_int_to_int(v.lower),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.upper),  # type: ignore[arg-type]
         )
         for k, v in range_constraints.items()
     }
@@ -1088,6 +1069,36 @@ class GraphModuleDeserializer:
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
+    def deserialize_signature(
+        self,
+        sig: GraphSignature,
+        inputs: List[Argument],
+        outputs: List[Argument]
+    ) -> ep.ExportGraphSignature:
+        # TODO(zhxchen17) Remove these after we change serialization schema.
+        def make_argument_spec(arg: Argument) -> ep.ArgumentSpec:
+            if arg.as_tensor is not None:
+                return ep.TensorArgument(name=arg.as_tensor.name)
+            elif arg.as_sym_int is not None:
+                assert arg.as_sym_int.as_name is not None
+                return ep.SymIntArgument(name=arg.as_sym_int.as_name)
+            else:
+                return ep.ConstantArgument(value=arg.value)
+
+        input_specs, output_specs = ep._sig_to_specs(
+            user_inputs=set(sig.user_inputs),
+            inputs_to_parameters=sig.inputs_to_parameters,
+            inputs_to_buffers=sig.inputs_to_buffers,
+            user_outputs=set(sig.user_outputs),
+            buffer_mutations=sig.buffers_to_mutate,
+            grad_params=sig.backward_signature.gradients_to_parameters if sig.backward_signature is not None else {},
+            grad_user_inputs=sig.backward_signature.gradients_to_user_inputs if sig.backward_signature is not None else {},
+            loss_output=sig.backward_signature.loss_output if sig.backward_signature is not None else None,
+            inputs=[make_argument_spec(i) for i in inputs],
+            outputs=[make_argument_spec(o) for o in outputs],
+        )
+        return ep.ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)
+
     def deserialize(
         self,
         serialized_graph_module: GraphModule,
@@ -1110,7 +1121,11 @@ class GraphModuleDeserializer:
 
         self.deserialize_graph(serialized_graph_module.graph)
 
-        sig = deserialize_signature(serialized_graph_module.signature)
+        sig = self.deserialize_signature(
+            serialized_graph_module.signature,
+            serialized_graph_module.graph.inputs,
+            serialized_graph_module.graph.outputs
+        )
         call_spec = deserialize_call_spec(serialized_graph_module.call_spec)
         module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
         return (
@@ -1388,11 +1403,11 @@ class ExportedProgramDeserializer:
         self,
         symbol_name_to_range: Dict[str, symbolic_shapes.ValueRanges],
         symbol_name_to_symbol: Dict[str, sympy.Symbol],
-    ) -> Dict[sympy.Symbol, torch._export.exported_program.RangeConstraint]:
+    ) -> Dict[sympy.Symbol, ValueRanges]:
         range_constraints = {}
         for k, v in symbol_name_to_range.items():
             if symbol := symbol_name_to_symbol.get(k):
-                range_constraints[symbol] = torch._export.exported_program.RangeConstraint(v.lower, v.upper)  # type: ignore[arg-type]
+                range_constraints[symbol] = v  # type: ignore[arg-type]
             else:
                 log.warning(f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
         return range_constraints
