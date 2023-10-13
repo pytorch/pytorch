@@ -558,9 +558,13 @@ class CustomizedDictVariable(ConstDictVariable):
         else:
             unimplemented("custome dict init with args/kwargs unimplemented")
 
+        def make_key(k):
+            return HashableTracker(variables.ConstantVariable.create(k))
+
         items = collections.OrderedDict()
         for key in raw_items.keys():
             val = raw_items[key]
+            key = make_key(key)
             if isinstance(val, VariableTracker):
                 items[key] = val
             elif variables.ConstantVariable.is_literal(val):
