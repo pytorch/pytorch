@@ -76,6 +76,26 @@ class RAIIAtenTensorHandle {
     handle_.reset();
   }
 
+  int64_t size(int64_t d) {
+    int64_t size;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(handle_.get(), d, &size));
+    return size;
+  }
+
+  int64_t stride(int64_t d) {
+    int64_t stride;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_stride(handle_.get(), d, &stride));
+    return stride;
+  }
+
+  int64_t storage_offset() {
+    int64_t storage_offset;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
+    return storage_offset;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
