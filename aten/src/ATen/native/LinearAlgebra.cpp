@@ -2547,21 +2547,22 @@ Tensor compute_T18_scale_square(
   // Then we call `unique_consecutive` and we will use it to split `sorted_s`,
   // with above example, `split_counts` is [1, 2, 1].
   auto split_counts = std::get<2>(at::unique_consecutive(sorted_s, true, /*return_counts=*/true));
-  auto split_counts_cpu = split_counts.to(at::kCPU);
   // We also need to know the index of the last element of each split, so we can
   // know how many times we need to do the multiplication for each split matrix.
   // Notice that, we will not need to calculate the actual pows, because we will
   // use the cumulative matrix multiplication.
   // With about example, `mul_times` will be [0, 1, 3].
   auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
-  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kCPU).to(at::kLong);
+  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong);
   auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1}));
 
   // Square
-  TORCH_INTERNAL_ASSERT(split_counts_cpu.is_contiguous());
-  TORCH_INTERNAL_ASSERT(mul_times.is_contiguous());
-  auto scs = split_counts_cpu.data_ptr<int64_t>();
-  auto pts = mul_times.data_ptr<int64_t>();
+  auto section_values = at::cat({split_counts, mul_times}, 0).to(at::kCPU);
+
+  TORCH_INTERNAL_ASSERT(section_values.is_contiguous());
+  const auto section_numel = section_values.numel() / 2;
+  auto scs = section_values.data_ptr<int64_t>();
+  auto pts = &scs[section_numel];
 
   // We now will do the matrix muplication in a batch, with above example:
   // 1. Multiply all matrixes by 0 (`mul_times[0]`) times, then do `slice`
@@ -2571,7 +2572,7 @@ Tensor compute_T18_scale_square(
   // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
-  for (int64_t i = 0; i < split_counts_cpu.numel(); ++i) {
+  for (int64_t i = 0; i < section_numel; ++i) {
     for (int64_t j = 0; j < pts[i]; j++) {
         acc = at::matmul(acc, acc);
     }
@@ -2606,8 +2607,9 @@ Tensor mexp_impl(
   // For large batch size, the cost of the above decision on CPU will be quite
   // expensive (compared to the synchronization overhead from GPU to CPU), so
   // here we have a threshold to determine whether to move norm to CPU.
+  const auto batch_size = a_3d.size(0);
   const auto norm_small_to_cpu = ((a.device().type() == at::kCUDA)
-    && a.size(0) < large_batch_threshold) ? norm.to(at::kCPU) : norm;
+    && batch_size < large_batch_threshold) ? norm.to(at::kCPU) : norm;
 
   if (!compute_highest_degree_approx) {
     constexpr std::array<
