@@ -551,7 +551,7 @@ def _traceable_collectives_source(fn):
     assert fn in valid_values
     inner_name = fn.__name__
     path_source = AttrSource(
-        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
+        base=AttrSource(base=GlobalSource(global_name="__import_torch"), member="distributed"),
         member="_functional_collectives",
     )
     return AttrSource(path_source, inner_name)
