@@ -13696,7 +13696,14 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
+                         dtypes=(torch.bfloat16,), device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
+                         dtypes=(torch.bfloat16,), device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         dtypes=(torch.bfloat16,), device_type="cuda"),
+        ),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
@@ -16384,9 +16391,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
-               # RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
-               # memory location.
-               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides")
            )),
     OpInfo('empty_strided',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.empty_strided, inp, *args, **kwargs),
