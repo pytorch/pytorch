@@ -1215,10 +1215,10 @@ def sort_overloads(
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (
-            str(t1) == "Scalar"
-            and str(t2) == "Tensor"
-            or str(t1) == "Scalar?"
-            and str(t2) == "Tensor?"
+            str(t1) == "Tensor"
+            and str(t2) == "Scalar"
+            or str(t1) == "Tensor?"
+            and str(t2) == "Scalar?"
             or "Dimname" in str(t1)
             and "Dimname" not in str(t2)
             or
