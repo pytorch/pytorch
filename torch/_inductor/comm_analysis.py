@@ -66,7 +66,7 @@ bwNVLINK = 300  # unit: GB/s, uni-directional P2P bandwidth per card
 bwInfiniBand = 25  # unit: GB/s, uni-directional P2P bandwidth per node
 
 
-def get_collective_type(snode: "BaseSchedulerNode") -> str:
+def get_collective_type(snode: "BaseSchedulerNode") -> str:  # type: ignore[name-defined]
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return ncclFuncAllReduce
     elif isinstance(
@@ -81,7 +81,7 @@ def get_collective_type(snode: "BaseSchedulerNode") -> str:
         raise Exception(f"Unsupported collective type: {snode.node}")
 
 
-def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
+def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # type: ignore[name-defined]
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
 
