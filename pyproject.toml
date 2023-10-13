@@ -52,7 +52,6 @@ ignore = [
     "PYI034",
     "PYI036",
     "PYI041",
-    "PYI042",
     "PYI045",
     "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles

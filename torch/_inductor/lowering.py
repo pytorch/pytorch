@@ -3205,14 +3205,12 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.evaluate_static_shape(h)
-    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
-        size = ops.constant(size - 1, torch.int32)
+        size = ops.index_expr(size - 1, torch.int32)
         x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.constant(offset, torch.int32))
+        x = ops.sub(x, ops.index_expr(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
         return ops.indirect_indexing(x, size_num, check=False)
 
@@ -3226,7 +3224,7 @@ def reflection_pad2d(x, padding):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+        ranges=[*batch, sympy.sympify(h + top + bot), sympy.sympify(w + left + right)],
     )
 
 
