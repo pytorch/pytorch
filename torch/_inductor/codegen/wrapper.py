@@ -346,7 +346,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
 
-                from torch import empty, empty_strided, device
+                from torch import device, empty, empty_strided
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
 
@@ -972,11 +972,6 @@ class WrapperCodeGen(CodeGen):
             return
 
         if not self.can_reuse(buffer):
-            return
-
-        layout = buffer.get_layout()
-        if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            self.writeline(self.make_buffer_free(buffer))
             return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
@@ -1623,11 +1618,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def make_allocation(self, name, device, dtype, shape, stride):
+        device = self.codegen_device(device)
+        dtype = self.codegen_dtype(dtype)
+        size = self.codegen_shape_tuple(shape)
+        stride = self.codegen_shape_tuple(stride)
         if config.aot_inductor.abi_compatible:
-            device = self.codegen_device(device)
-            dtype = self.codegen_dtype(dtype)
-            size = self.codegen_shape_tuple(tuple(shape))
-            stride = self.codegen_shape_tuple(tuple(stride))
             device_type, device_id = device.split(",")
             args = [
                 str(len(shape)),
@@ -1644,18 +1639,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
 
-        device_str = self.codegen_device(device)
-        if V.graph.aot_mode and device_str.startswith("c10::Device("):
-            tensor_device = f"{device_str.split(',')[0]}, this->device_idx_)"
+        if V.graph.aot_mode and device.startswith("c10::Device("):
+            tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
         else:
-            tensor_device = device_str
+            tensor_device = device
 
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
-            f"{self.codegen_shape_tuple(shape)}, "
-            f"{self.codegen_shape_tuple(stride)}, "
-            f"at::TensorOptions({tensor_device})"
-            f".dtype({self.codegen_dtype(dtype)})){self.ending}"
+            f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype})){self.ending}"
         )
 
     def make_free_by_names(self, names_to_del: List[str]):
@@ -1666,22 +1657,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             size = self.codegen_shape_tuple(shape)
             stride = self.codegen_shape_tuple(stride)
-            ndim = len(shape)
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
-            args = list(
-                map(
-                    str,
-                    [
-                        name,
-                        pexpr(offset),  # bytes not numel
-                        self.codegen_dtype(dtype),
-                        ndim,
-                        self.codegen_int_array_var(size, self.wrapper_call),
-                        self.codegen_int_array_var(stride, self.wrapper_call),
-                        f"&{tmp_name}",
-                    ],
-                )
-            )
+            args = [
+                name,
+                pexpr(offset),  # bytes not numel
+                self.codegen_dtype(dtype),
+                str(len(shape)),
+                self.codegen_int_array_var(size, self.wrapper_call),
+                self.codegen_int_array_var(stride, self.wrapper_call),
+                f"&{tmp_name}",
+            ]
             self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));"
@@ -1709,7 +1694,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         offset = self.codegen_sizevar(offset)
 
         if config.aot_inductor.abi_compatible:
-            dim = str(len(shape))
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
@@ -1717,7 +1701,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 writer = self
             args = [
                 f"{name}",
-                dim,
+                str(len(shape)),
                 self.codegen_int_array_var(size, writer),
                 self.codegen_int_array_var(stride, writer),
                 offset,

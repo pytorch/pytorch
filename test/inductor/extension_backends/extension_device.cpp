@@ -153,8 +153,8 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("to.Device", &custom_to_device);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
-  m.impl("empty_strided", &custom_empty_strided);
   m.impl("empty.memory_format", &custom_empty_memory_format);
+  m.impl("empty_strided", &custom_empty_strided);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
