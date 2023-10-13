@@ -66,7 +66,7 @@ bwNVLINK = 300  # unit: GB/s, uni-directional P2P bandwidth per card
 bwInfiniBand = 25  # unit: GB/s, uni-directional P2P bandwidth per node
 
 
-def get_collective_type(snode: "scheduler.BaseSchedulerNode") -> str:
+def get_collective_type(snode: "BaseSchedulerNode") -> str:
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return ncclFuncAllReduce
     elif isinstance(
@@ -81,7 +81,7 @@ def get_collective_type(snode: "scheduler.BaseSchedulerNode") -> str:
         raise Exception(f"Unsupported collective type: {snode.node}")
 
 
-def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
+def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
 
@@ -92,7 +92,7 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
     - only ring algorithm (NCCL_ALGO_RING) is used
     - only Low-Latency protocol (NCCL_PROTO_LL) is used, i.e. Simple or LL128 is not used
     - only A100 gpu
-    - 8 gpus per node  # TODO: is there a way to get accurate info?
+    - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     - intra-node is only NVLINK
     - inter-node is only InfiniBand
     - collective is one of: allreduce, reducescatter, allgather
@@ -103,7 +103,8 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
     # Convert bytes to GB
     tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
 
-    # TODO: is there a way to get accurate "gpus per node" and "# nodes" info?
+    # Currently assumes 8 gpus per node. And when >1 node is used, assumes each node provides 8 gpus.
+    # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
     _, _, group_size = snode.node.constant_args
     nNodes = math.ceil(group_size / num_gpus_per_node)

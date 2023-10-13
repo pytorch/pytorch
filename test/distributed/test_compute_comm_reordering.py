@@ -22,6 +22,23 @@ from torch.testing._internal.common_distributed import (
 from torch.utils._triton import has_triton
 
 
+def get_snode_runtime_for_reorder_compute_test(snode):
+    # NOTE: custom cost model to show that the compute reordering algorithm is working
+    # Collective kernels
+    if isinstance(snode.node, ir.CollectiveKernel):
+        if isinstance(snode.node, ir.AllReduce):
+            return 100
+        else:
+            return 100
+    elif isinstance(snode.node, ir.Wait):
+        return 0
+    # High-arithmetic-intensity compute kernels
+    elif isinstance(snode.node, ir.ExternKernel):
+        return 5
+    # All other kernels
+    return 1
+
+
 @requires_nccl()
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
@@ -193,22 +210,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
-
-    def get_snode_runtime_for_reorder_compute_test(snode):
-        # NOTE: custom cost model to show that the compute reordering algorithm is working
-        # Collective kernels
-        if isinstance(snode.node, ir.CollectiveKernel):
-            if isinstance(snode.node, ir.AllReduce):
-                return 100
-            else:
-                return 100
-        elif isinstance(snode.node, ir.Wait):
-            return 0
-        # High-arithmetic-intensity compute kernels
-        elif isinstance(snode.node, ir.ExternKernel):
-            return 5
-        # All other kernels
-        return 1
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)

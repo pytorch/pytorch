@@ -114,7 +114,7 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()
     else:
-        runtime = config.estimate_op_runtime(snode)
+        runtime = config.estimate_op_runtime(snode)  # type: ignore[operator]
     return runtime
 
 
@@ -122,10 +122,15 @@ def reorder_compute_for_overlap(
     snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
-    Decides a global ordering of all compute and communication nodes. Assumes that we already have a global ordering of communication nodes.
+    Decides a global ordering of all compute and communication nodes,
+    assuming that we already have a global ordering of communication nodes.
+
     Overall scheduling procedure is:
-        Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes that are required for comm N + 1 but do not depend on comm N, to run at the same time with comm N.
-        Step 2: If all those compute nodes are sufficient to overlap comm N, we're done. Otherwise, we now need to look elsewhere to find compute that overlaps with comm N. We prioritize compute nodes that are needed sooner.
+        Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes
+            that are required for comm N + 1 but do not depend on comm N, to run at the same time with comm N.
+        Step 2: If all those compute nodes are sufficient to overlap comm N, we're done.
+            Otherwise, we now need to look elsewhere to find compute that overlaps with comm N.
+            We prioritize compute nodes that are needed sooner.
         Step 3: We schedule the compute nodes dependent on comm N and required for comm N + 1.
         Step 4: We schedule comm N + 1.
         Repeat this for subsequent comm nodes.
@@ -186,7 +191,8 @@ def reorder_compute_for_overlap(
                     progress = True
             if not progress:
                 raise Exception(
-                    "Unable to find a free node (indeg == 0). This is an impossible state to reach. Please report a bug to PyTorch."
+                    "Unable to find a free node (indeg == 0). This is an impossible state to reach. "
+                    "Please report a bug to PyTorch."
                 )
 
     # First, schedule all compute nodes that are required by first comm node,
@@ -272,7 +278,7 @@ def reorder_compute_for_overlap(
         if is_prev_comm_blocking_next_comm:
             rolled_over_compute_cost = 0
         else:
-            rolled_over_compute_cost = rollable_compute_cost
+            rolled_over_compute_cost = rollable_compute_cost  # type: ignore[assignment]
 
     schedule_nodes(unscheduled_nodes)
     return final_order
@@ -285,5 +291,5 @@ def reorder_compute_and_comm_for_overlap(
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
-        ret = p(ret)
+        ret = p(ret)  # type: ignore[operator]
     return ret
