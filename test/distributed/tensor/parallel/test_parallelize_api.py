@@ -5,7 +5,7 @@ import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
-    _parallelize_linear,
+    _parallelize_linear_like_module,
     _parallelize_mlp,
     parallelize_module,
 )
@@ -264,7 +264,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        model_tp = _parallelize_linear(model_tp, device_mesh, rowwise)
+        model_tp = _parallelize_linear_like_module(model_tp, device_mesh, rowwise)
 
         # let each rank generate unique local input
         torch.manual_seed(self.rank)
@@ -283,7 +283,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        model_tp = _parallelize_linear(model_tp, device_mesh, colwise)
+        model_tp = _parallelize_linear_like_module(model_tp, device_mesh, colwise)
 
         self._compare_module(model, model_tp, inp_size)
 
