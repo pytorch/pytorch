@@ -1,8 +1,8 @@
 import math
 
-from .utils import get_dtype_size
 from . import ir
-from .utils import sympy_product
+
+from .utils import get_dtype_size, sympy_product
 from .virtualized import V
 
 ncclFuncAllReduce = "allreduce"
@@ -25,8 +25,8 @@ baseLat = [
 hwLat = [
     # NVLINK
     [
-        .6,  # Tree (LL)
-        .6,  # Ring (LL)
+        0.6,  # Tree (LL)
+        0.6,  # Ring (LL)
     ],
     # PCI
     [
@@ -69,9 +69,13 @@ bwInfiniBand = 25  # unit: GB/s, uni-directional P2P bandwidth per node
 def get_collective_type(snode: "scheduler.BaseSchedulerNode") -> str:
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return ncclFuncAllReduce
-    elif isinstance(snode.node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)):
+    elif isinstance(
+        snode.node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)
+    ):
         return ncclFuncAllGather
-    elif isinstance(snode.node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)):
+    elif isinstance(
+        snode.node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)
+    ):
         return ncclFuncReduceScatter
     else:
         raise Exception(f"Unsupported collective type: {snode.node}")
@@ -115,27 +119,27 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
 
     # Assume A100 gpu
     compCapIndex = AMPERE_COMPCAP_IDX
-    index2 = nNodes-1 if nNodes <= 2 else 2
+    index2 = nNodes - 1 if nNodes <= 2 else 2
     # LL: for single node, we look at GPU type; for multi-node, we look at CPU type
     index1 = compCapIndex if nNodes == 1 else 0
     llMaxBw = llMaxBws[index1][index2]
 
-    intraHw = NCCL_HW_NVLINK;
+    intraHw = NCCL_HW_NVLINK
     hw = intraHw if nNodes == 1 else NCCL_HW_NET
 
     coll = get_collective_type(snode)
 
     if coll == ncclFuncAllReduce:
-        nsteps = 2*(nRanks-1)
-    elif coll == ncclFuncReduceScatter or coll == ncclFuncAllGather:
-        nsteps = nRanks-1
+        nsteps = 2 * (nRanks - 1)
+    elif coll in (ncclFuncReduceScatter, ncclFuncAllGather):
+        nsteps = nRanks - 1
 
     if coll == ncclFuncAllReduce:
         if nNodes > 1:
-            nInterSteps = 2*nNodes
+            nInterSteps = 2 * nNodes
         else:
             nInterSteps = 0
-    elif coll == ncclFuncReduceScatter or coll == ncclFuncAllGather:
+    elif coll in (ncclFuncReduceScatter, ncclFuncAllGather):
         nInterSteps = nNodes - 1
 
     # =============== bandwidth computation ===============
@@ -150,7 +154,10 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
     busBw = nChannels * bw
 
     # Various model refinements
-    busBw = min(llMaxBw, busBw * (1.0/4.0 if (nNodes > 1 or coll == ncclFuncAllReduce) else 1.0/3.0))
+    busBw = min(
+        llMaxBw,
+        busBw * (1.0 / 4.0 if (nNodes > 1 or coll == ncclFuncAllReduce) else 1.0 / 3.0),
+    )
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
     ratio = (1.0 * nRanks) / nsteps
@@ -160,7 +167,7 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
 
     # =============== latency computation ===============
     # First compute latency in us; then at the end, convert it to ns
-    latency = baseLat[NCCL_ALGO_RING];
+    latency = baseLat[NCCL_ALGO_RING]
     intraLat = hwLat[intraHw][NCCL_ALGO_RING]
     interLat = hwLat[NCCL_HW_NET][NCCL_ALGO_RING]
 
@@ -170,7 +177,7 @@ def estimate_nccl_collective_runtime(snode: "scheduler.BaseSchedulerNode") -> fl
     if nNodes > 1:
         netOverhead = 1.0  # getNetOverhead(comm);
     intraLat = max(intraLat, netOverhead)
-    latency += (nsteps-nInterSteps)*intraLat + nInterSteps*interLat
+    latency += (nsteps - nInterSteps) * intraLat + nInterSteps * interLat
     # Convert us to ns
     latency_ns = latency * 1e3
 

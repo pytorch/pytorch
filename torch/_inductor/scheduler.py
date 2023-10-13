@@ -16,6 +16,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
+from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
@@ -29,7 +30,6 @@ from .utils import (
     sympy_product,
 )
 from .virtualized import V
-from .comm_analysis import estimate_nccl_collective_runtime
 
 
 log = logging.getLogger(__name__)
@@ -1280,9 +1280,7 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                node.add_fake_dep(
-                    StarDep(unbacked_symbol_to_origin_node[s].get_name())
-                )
+                node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
             for alt_name in node.get_mutations():

@@ -1,16 +1,15 @@
 # pyre-strict
 
-import os
 from typing import List
 
-import torch.fx as fx
-
-from . import ir, scheduler, config
+from . import config, ir, scheduler
 from .dependencies import WeakDep
 from .utils import tuple_sorted
 
 
-def sink_waits(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+def sink_waits(
+    result: List["scheduler.BaseSchedulerNode"],
+) -> List["scheduler.BaseSchedulerNode"]:
     """
     Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
     communication overlap.
@@ -31,7 +30,9 @@ def sink_waits(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.B
     return new_result
 
 
-def raise_comms(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+def raise_comms(
+    result: List["scheduler.BaseSchedulerNode"],
+) -> List["scheduler.BaseSchedulerNode"]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
     Optimal in terms of communication overlap.
@@ -49,7 +50,9 @@ def raise_comms(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.
         else:
             for comm in cur_comms:
                 assert len(comm.inverse_users) > 0
-            while len(cur_comms) > 0 and any([snode in comm.inverse_users for comm in cur_comms]):
+            while len(cur_comms) > 0 and any(
+                snode in comm.inverse_users for comm in cur_comms
+            ):
                 comm = cur_comms.pop(0)
                 new_result.append(comm)
             new_result.append(snode)
@@ -115,7 +118,9 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
     return runtime
 
 
-def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+def reorder_compute_for_overlap(
+    snodes: List["scheduler.BaseSchedulerNode"],
+) -> List["scheduler.BaseSchedulerNode"]:
     """
     Decides a global ordering of all compute and communication nodes. Assumes that we already have a global ordering of communication nodes.
     Overall scheduling procedure is:
@@ -143,10 +148,10 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         for user in snode.node_users:
             if user in indeg:
                 indeg[user] += 1
-    ready_to_schedule_nodes = set([node for node in snodes if indeg[node] == 0])
+    ready_to_schedule_nodes = {node for node in snodes if indeg[node] == 0}
 
     unscheduled_nodes = set()
-    unscheduled_nodes = set([snode for snode in snodes])
+    unscheduled_nodes = set(snodes)
 
     def schedule_node(snode):
         """
@@ -168,7 +173,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         Schedules all nodes in `snodes` in an arbitrary topologically valid order.
         """
         all_nodes = set(snodes)
-        assert all([node in unscheduled_nodes for node in all_nodes])
+        assert all(node in unscheduled_nodes for node in all_nodes)
         while len(all_nodes) > 0:
             # NOTE: since model graph is always a DAG and does not have circular dependency inside,
             # there should be at least one node that is a "free node" (i.e. indeg == 0),
@@ -180,7 +185,9 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
                     all_nodes.remove(node)
                     progress = True
             if not progress:
-                raise Exception("Unable to find a free node (indeg == 0). This is an impossible state to reach. Please report a bug to PyTorch.")
+                raise Exception(
+                    "Unable to find a free node (indeg == 0). This is an impossible state to reach. Please report a bug to PyTorch."
+                )
 
     # First, schedule all compute nodes that are required by first comm node,
     # as well as the first comm node itself.
@@ -200,7 +207,10 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         assert_no_comm_nodes(needed_by_next_comm_and_ready_compute_nodes)
 
         total_compute_runtime_cost = rolled_over_compute_cost + sum(
-            [estimate_op_runtime(node) for node in needed_by_next_comm_and_ready_compute_nodes]
+            [
+                estimate_op_runtime(node)
+                for node in needed_by_next_comm_and_ready_compute_nodes
+            ]
         )
         prev_comm_runtime_cost = estimate_op_runtime(comm_nodes[idx - 1])
         schedule_nodes(tuple_sorted(needed_by_next_comm_and_ready_compute_nodes))
@@ -239,7 +249,9 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
                 # If we're not able to leverage more than half of this
                 # node's compute to overlap, we skip it.
                 # TODO: Smarter heuristics here
-                if (prev_comm_runtime_cost - total_compute_runtime_cost) <= compute_runtime_cost / 2:
+                if (
+                    prev_comm_runtime_cost - total_compute_runtime_cost
+                ) <= compute_runtime_cost / 2:
                     continue
                 schedule_node(snode)
                 total_compute_runtime_cost += compute_runtime_cost
@@ -266,7 +278,9 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
     return final_order
 
 
-def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+def reorder_compute_and_comm_for_overlap(
+    snodes: List["scheduler.BaseSchedulerNode"],
+) -> List["scheduler.BaseSchedulerNode"]:
     ret = snodes
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():

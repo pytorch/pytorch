@@ -1,30 +1,25 @@
 # Owner(s): ["module: inductor"]
-import functools
 import unittest
 from unittest.mock import patch
+
 import torch
-from torch._C import FileCheck
+import torch._dynamo
+import torch._dynamo.logging
+import torch._dynamo.test_case
+
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 import torch.distributed._functional_collectives as _functional_collectives
-import torch._dynamo
-import torch._dynamo.test_case
+from torch._C import FileCheck
 from torch._dynamo.utils import same
-from torch._dynamo.testing import CompileCounter
-from torch.distributed.distributed_c10d import GroupMember
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch._inductor import ir
+from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
-    DynamoDistributedSingleProcTestCase,
-    DynamoDistributedMultiProcTestCase,
     _dynamo_dist_per_rank_init,
+    DynamoDistributedMultiProcTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import run_and_get_triton_code
 from torch.utils._triton import has_triton
-import torch._dynamo.logging
-from torch._inductor import ir
-
 
 
 @requires_nccl()
@@ -32,6 +27,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
+
     def get_world_trs(self):
         return {
             "tag": "",
@@ -51,9 +47,13 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap_passes", [
-        "sink_waits",
-    ])
+    @patch.object(
+        torch._inductor.config,
+        "reorder_for_compute_comm_overlap_passes",
+        [
+            "sink_waits",
+        ],
+    )
     def test_sink_waits(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -67,11 +67,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: notice that `_wait_tensor` is delayed until right before first use
-            FileCheck() \
-                .check("dist.all_reduce(") \
-                .check("triton_poi_fused_relu") \
-                .check("_wait_tensor(") \
-                .run(code)
+            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
+                "_wait_tensor("
+            ).run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -82,9 +80,13 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap_passes", [
-        "raise_comms",
-    ])
+    @patch.object(
+        torch._inductor.config,
+        "reorder_for_compute_comm_overlap_passes",
+        [
+            "raise_comms",
+        ],
+    )
     def test_raise_comms(self):
         def func(a, *, tag, ranks, group_size):
             c = torch.relu(a)
@@ -98,12 +100,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: notice that `dist.all_reduce` is raised above relu and matmul
-            FileCheck() \
-                .check("dist.all_reduce(") \
-                .check("_wait_tensor(") \
-                .check("triton_poi_fused_relu") \
-                .check("extern_kernels.addmm(") \
-                .run(code)
+            FileCheck().check("dist.all_reduce(").check("_wait_tensor(").check(
+                "triton_poi_fused_relu"
+            ).check("extern_kernels.addmm(").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -114,10 +113,14 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap_passes", [
-        "sink_waits",
-        "raise_comms",
-    ])
+    @patch.object(
+        torch._inductor.config,
+        "reorder_for_compute_comm_overlap_passes",
+        [
+            "sink_waits",
+            "raise_comms",
+        ],
+    )
     def test_sink_waits_raise_comms(self):
         def func(a, *, tag, ranks, group_size):
             c = torch.relu(a)
@@ -132,12 +135,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: notice that `dist.all_reduce` is raised above relu and matmul,
             # and `_wait_tensor` is delayed until right before first use
-            FileCheck() \
-                .check("dist.all_reduce(") \
-                .check("triton_poi_fused_relu") \
-                .check("_wait_tensor(") \
-                .check("extern_kernels.addmm(") \
-                .run(code)
+            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
+                "_wait_tensor("
+            ).check("extern_kernels.addmm(").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -148,9 +148,13 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap_passes", [
-        "reorder_compute_for_overlap",
-    ])
+    @patch.object(
+        torch._inductor.config,
+        "reorder_for_compute_comm_overlap_passes",
+        [
+            "reorder_compute_for_overlap",
+        ],
+    )
     def test_reorder_compute_for_overlap(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -171,18 +175,21 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck() \
-                .check("dist.all_reduce(") \
-                .check("triton_poi_fused_relu") \
-                .check("extern_kernels.mm(") \
-                .check("extern_kernels.mm(") \
-                .check("_wait_tensor(") \
-                .check("triton_poi_fused_mul") \
-                .check("dist.all_reduce(") \
-                .check("_wait_tensor(") \
-                .check("triton_poi_fused_add") \
-                .check("extern_kernels.mm(") \
-                .run(code)
+            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
+                "extern_kernels.mm("
+            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
+                "triton_poi_fused_mul"
+            ).check(
+                "dist.all_reduce("
+            ).check(
+                "_wait_tensor("
+            ).check(
+                "triton_poi_fused_add"
+            ).check(
+                "extern_kernels.mm("
+            ).run(
+                code
+            )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -209,10 +216,18 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap_passes", [
-        "reorder_compute_for_overlap",
-    ])
-    @patch.object(torch._inductor.config, "estimate_op_runtime", get_snode_runtime_for_reorder_compute_test)
+    @patch.object(
+        torch._inductor.config,
+        "reorder_for_compute_comm_overlap_passes",
+        [
+            "reorder_compute_for_overlap",
+        ],
+    )
+    @patch.object(
+        torch._inductor.config,
+        "estimate_op_runtime",
+        get_snode_runtime_for_reorder_compute_test,
+    )
     def test_reorder_compute_for_overlap_custom_runtime_estimation(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -233,18 +248,21 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck() \
-                .check("dist.all_reduce(") \
-                .check("triton_poi_fused_relu") \
-                .check("extern_kernels.mm(") \
-                .check("extern_kernels.mm(") \
-                .check("_wait_tensor(") \
-                .check("triton_poi_fused_mul") \
-                .check("dist.all_reduce(") \
-                .check("_wait_tensor(") \
-                .check("triton_poi_fused_add") \
-                .check("extern_kernels.mm(") \
-                .run(code)
+            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
+                "extern_kernels.mm("
+            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
+                "triton_poi_fused_mul"
+            ).check(
+                "dist.all_reduce("
+            ).check(
+                "_wait_tensor("
+            ).check(
+                "triton_poi_fused_add"
+            ).check(
+                "extern_kernels.mm("
+            ).run(
+                code
+            )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
