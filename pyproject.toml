@@ -49,7 +49,6 @@ ignore = [
     "PYI001", # these ignores are from PYI; please fix!
     "PYI019",
     "PYI024",
-    "PYI034",
     "PYI036",
     "PYI041",
     "PYI045",
