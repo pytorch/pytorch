@@ -188,7 +188,10 @@ class DeviceMesh:
             # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
             # NOTE: This device selection would only work for homogeneous hardware.
             num_devices_per_host = device_handle.device_count()
-            if world_size % num_devices_per_host != 0:
+            if (
+                world_size > num_devices_per_host
+                and world_size % num_devices_per_host != 0
+            ):
                 raise RuntimeError(
                     f"DeviceMesh only support homogeneous hardware, but found "
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
