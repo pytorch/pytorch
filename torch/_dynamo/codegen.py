@@ -3,7 +3,8 @@ import dataclasses
 import re
 import sys
 import types
-from typing import List
+import typing
+from typing import List, Optional
 
 import torch.nn
 from . import utils
@@ -48,14 +49,14 @@ class PyCodegen:
     def __init__(
         self,
         tx=None,
-        root: torch.nn.Module = None,
-        graph_output_var: str = None,
+        root: Optional[torch.nn.Module] = None,
+        graph_output_var: Optional[str] = None,
         tempvars=None,
     ):
         self.root = root
-        self.top_of_stack = None
-        self.uses = collections.Counter()
-        self.graph_outputs = collections.OrderedDict()
+        self.top_of_stack: Optional[VariableTracker] = None
+        self.uses: typing.Counter[VariableTracker] = collections.Counter()
+        self.graph_outputs = collections.OrderedDict[int, GraphOutputEntry]()
         self._output: List[Instruction] = []
         self.tempvars = tempvars or {}
         self.tx = tx
@@ -316,7 +317,7 @@ class PyCodegen:
             self.tx.output.install_global(mangled_name, mod)
         return self.create_load_global(mangled_name, push_null, add=True)
 
-    def make_call_generated_code(self, fn_name: str) -> List[Instruction]:
+    def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 

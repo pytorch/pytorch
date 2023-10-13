@@ -1,6 +1,8 @@
 import tokenize
 
-cache = {}
+from typing import Any, Dict, List
+
+cache: Dict[str, Any] = {}
 
 
 def clearcache():
@@ -21,7 +23,7 @@ def _add_file(filename):
     # current full funcname, e.g. xxx.yyy.zzz
     cur_name = ""
     cur_indent = 0
-    significant_indents = []
+    significant_indents: List[int] = []
 
     for i, token in enumerate(tokens):
         if token.type == tokenize.INDENT:
