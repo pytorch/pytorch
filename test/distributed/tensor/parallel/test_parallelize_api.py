@@ -220,7 +220,13 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_parallelize_mlp_error(self):
         class DummyParallel(ParallelStyle):
             def __init__(self) -> None:
-                super().__init__(make_input_replicate_1d, make_output_replicate_1d)
+                super().__init__(
+                    make_input_replicate_1d,
+                    make_output_replicate_1d,
+                    input_layouts=None,
+                    output_layouts=None,
+                    use_local_output=False,
+                )
 
         model_tp = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))

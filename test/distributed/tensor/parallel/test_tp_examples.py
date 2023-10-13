@@ -3,15 +3,16 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
 from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
     PairwiseParallel,
     parallelize_module,
-    SequenceParallel,
+    RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_utils import (
@@ -64,7 +65,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, NUM_DEVICES),
         )
-        parallel_style = SequenceParallel() if is_seq_parallel else PairwiseParallel()
+        parallel_style = {
+            "net1": ColwiseParallel(input_layouts=Shard(0))
+            if is_seq_parallel
+            else ColwiseParallel(),
+            "net2": RowwiseParallel(output_layouts=Shard(0))
+            if is_seq_parallel
+            else RowwiseParallel(),
+        }
         model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
         if recompute_activation:
             model_tp = input_reshard(
