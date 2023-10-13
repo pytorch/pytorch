@@ -35,6 +35,7 @@ from ..utils import (
     check_unspec_python_args,
     get_fake_value,
     guard_if_dyn,
+    HashableTracker,
     is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
@@ -892,12 +893,16 @@ class BuiltinVariable(VariableTracker):
                 items = user_cls()
                 for x in arg.unpack_var_sequence(tx):
                     k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
+                    k = HashableTracker(k)
                     items.update({k: v})
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
+            kwargs = {
+                HashableTracker(ConstantVariable.create(k)): v
+                for k, v in kwargs.items()
+            }
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
+                kwargs, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"dict(): {args} {kwargs}")
 

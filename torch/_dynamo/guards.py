@@ -60,6 +60,7 @@ from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
     dict_const_keys_repr,
+    dict_keys_getitem,
     dict_param_key_ids,
     guard_failures,
     is_guard_failure_reporting_enabled,
@@ -113,6 +114,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
         ("___dict_version", dict_version),
+        ("___dict_keys_getitem", dict_keys_getitem),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),

@@ -903,6 +903,12 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def dict_keys_getitem(d, n):
+    from itertools import islice
+
+    return next(islice(iter(d), n, n + 1))
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
@@ -911,6 +917,61 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+def is_hashable_python_var(x):
+    from .allowed_functions import is_builtin_callable
+    from .variables import ConstantVariable
+
+    return (
+        ConstantVariable.is_literal(x)
+        or isinstance(x, torch.Tensor)
+        or is_builtin_callable(x)
+    )
+
+
+def is_hashable(x):
+    from .variables import (
+        BuiltinVariable,
+        ConstantVariable,
+        EnumVariable,
+        TensorVariable,
+    )
+
+    return isinstance(
+        x,
+        (
+            BuiltinVariable,
+            ConstantVariable,
+            EnumVariable,
+            TensorVariable,
+        ),
+    )
+
+
+class HashableTracker:
+    def __init__(self, vt):
+        assert is_hashable(vt), type(vt)
+        self.vt = vt
+
+    @property
+    def underlying_value(self):
+        from .variables import TensorVariable
+
+        if isinstance(self.vt, TensorVariable):
+            x = self.vt.as_proxy().node
+        else:
+            x = self.vt.as_python_constant()
+        return x
+
+    def __hash__(self):
+        return hash(self.underlying_value)
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, HashableTracker)
+            and self.underlying_value == other.underlying_value
+        )
 
 
 def iter_contains(items, search, tx, options):
@@ -948,16 +1009,23 @@ def dict_const_keys(value):
     }
 
 
-def dict_const_keys_repr(const_keys, *, local):
-    if any(isinstance(k, enum.Enum) for k in const_keys):
+def const_repr(x, *, local):
+    from .allowed_functions import is_builtin_callable
+
+    if isinstance(x, (tuple, list)):
+        return f"{x.__name__}({','.join(const_repr(s, local=local) for s in x)})"
+    elif isinstance(x, enum.Enum):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
-            "'", ""
-        )
+        return enum_repr(x, local=local).replace("'", "")
+    elif is_builtin_callable(x):
+        return x.__name__
     else:
-        const_keys_str = f"{const_keys!r}"
-    return const_keys_str
+        return str(x)
+
+
+def dict_const_keys_repr(const_keys, *, local):
+    return {const_repr(x, local=local) for x in const_keys}
 
 
 def global_key_name(key):

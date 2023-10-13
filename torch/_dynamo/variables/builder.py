@@ -45,9 +45,9 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConstDictKeySource,
     ConvertIntSource,
     GetItemSource,
-    GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
     NumpyTensorSource,
@@ -61,7 +61,8 @@ from ..utils import (
     get_fake_value,
     get_static_address_type,
     getfile,
-    global_key_name,
+    HashableTracker,
+    is_hashable_python_var,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -390,8 +391,12 @@ class VariableBuilder:
             return self.wrap_listlike(value)
 
         elif value is torch.utils._pytree.SUPPORTED_NODES:
+
+            def wrap_key(k):
+                return HashableTracker(ConstantVariable.create(k))
+
             result = {
-                k: UserDefinedObjectVariable(
+                wrap_key(k): UserDefinedObjectVariable(
                     value[k],
                     source=GetItemSource(self.get_source(), k),
                     # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
@@ -404,12 +409,7 @@ class VariableBuilder:
 
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) and all(
-            ConstantVariable.is_literal(k)
-            or self.tensor_can_be_dict_key(k)
-            or isinstance(k, enum.Enum)
-            for k in value.keys()
-        ):
+        ) and all(is_hashable_python_var(k) for k in value.keys()):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -422,23 +422,20 @@ class VariableBuilder:
             else:
                 guards = self.make_guards(GuardBuilder.DICT_KEYS)
 
-            # store key variables in global location for reconstruction
-            for key in value.keys():
-                if self.tensor_can_be_dict_key(key):
-                    self.tx.store_global_weakref(global_key_name(key), key)
+            idx = 0
 
-            def index_source(key):
-                if self.tensor_can_be_dict_key(key):
-                    return GlobalWeakRefSource(global_key_name(key))
-                else:
-                    return key
+            def build_key_value(k, v):
+                nonlocal idx
+                source_key = ConstDictKeySource(self.get_source(), idx)
+                key = VariableBuilder(self.tx, source_key)(k)
+                source_value = GetItemSource(self.get_source(), source_key)
 
-            result = {
-                k: VariableBuilder(
-                    self.tx, GetItemSource(self.get_source(), index_source(k))
-                )(value[k]).add_guards(guards)
-                for k in value.keys()
-            }
+                idx += 1
+                key = HashableTracker(key.add_guards(guards))
+                value = VariableBuilder(self.tx, source_value)(v)
+                return key, value
+
+            result = dict(build_key_value(k, v) for k, v in value.items())
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
@@ -1778,7 +1775,10 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, dict):
             return ConstDictVariable(
-                {k: self(tx, v) for k, v in value.items()},
+                {
+                    HashableTracker(ConstantVariable.create(k)): self(tx, v)
+                    for k, v in value.items()
+                },
                 dict,
                 mutable_local=MutableLocal(),
             )

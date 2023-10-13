@@ -336,12 +336,13 @@ class PyCodegen:
 
         self.extend_output(create_call_function(len(graphargs), False))
 
-    def load_import_from(self, module_name, object_name):
-        self.extend_output(
-            AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self
-            )
+    def create_load_import_from(self, module_name, object_name):
+        return AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
+            self
         )
+
+    def load_import_from(self, module_name, object_name):
+        self.extend_output(self.create_load_import_from(module_name, object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null):
         if sys.version_info >= (3, 11):
