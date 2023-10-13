@@ -1341,11 +1341,11 @@ def method_to_operator(method):
     return op
 
 
-def _if_then_else(bool_expr, then_expr, else_expr):
-    if bool_expr:
-        return then_expr
+def _if_then_else(sym_bool: torch.SymBool, then_val, else_val):
+    if sym_bool:
+        return then_val
     else:
-        return else_expr
+        return else_val
 
 SYMPY_INTERP = {
     'Abs': operator.abs,
