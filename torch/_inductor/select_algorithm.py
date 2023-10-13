@@ -553,25 +553,29 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)
     def hash_key(self):
-        fn = self.to_callable()
-        parts = [
-            self.name,
-            getattr(fn, "__name__", ""),
-            getattr(fn, "__module__", ""),
-        ]
-        try:
-            parts.append(inspect.getsource(fn))
-        except Exception:
-            pass
-        return code_hash("-".join(parts))
+        return _extern_kernel_hash_key(self)
 
     def bind(self, input_nodes, layout, ordered_kwargs_for_cpp_kernel=(), **kwargs):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
+
+
+@functools.lru_cache(None)
+def _extern_kernel_hash_key(extern_kernel: ExternKernelChoice):
+    fn = extern_kernel.to_callable()
+    parts = [
+        extern_kernel.name,
+        getattr(fn, "__name__", ""),
+        getattr(fn, "__module__", ""),
+    ]
+    try:
+        parts.append(inspect.getsource(fn))
+    except Exception:
+        pass
+    return code_hash("-".join(parts))
 
 
 class TritonTemplateCaller(ChoiceCaller):
