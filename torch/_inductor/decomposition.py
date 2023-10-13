@@ -203,6 +203,9 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
             return alpha * out + beta * self
+        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+            out = (mat1.T * mat2).sum(dim=0, keepdim=True)
+            return alpha * out + beta * self
     return NotImplemented
 
 
@@ -244,7 +247,7 @@ def cat(tensors, dim=0):
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
-    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
+    # when no 'filtering' has occurred, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 
