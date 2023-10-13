@@ -3268,6 +3268,10 @@
   dispatch:
     CUDA: _sparse_semi_structured_linear
 
+- func: _mixed_dtypes_linear(Tensor input, Tensor weight, Tensor scale, *, Tensor? bias=None, str? activation=None) -> Tensor
+  dispatch:
+    CUDA: _mixed_dtypes_linear
+
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
@@ -4009,6 +4013,14 @@
 - func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CUDA: _int_mm_out_cuda
+
+- func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
+  dispatch:
+    CUDA: _convert_weight_to_int4pack_cuda
+
+- func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
+  dispatch:
+    CUDA: _weight_int4pack_mm_cuda
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
