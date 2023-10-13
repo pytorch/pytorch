@@ -259,7 +259,7 @@ class SizeVarAllocator:
             return bool(expr)
 
         try:
-            simplified = self.shape_env._maybe_evaluate_static(expr)
+            simplified = self.shape_env.maybe_evaluate_static(expr)
             if simplified is not None:
                 return bool(simplified)
         except Exception:
