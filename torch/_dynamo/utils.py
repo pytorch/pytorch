@@ -86,7 +86,6 @@ frame_phase_timing = collections.OrderedDict()
 
 timer_counter = itertools.count()
 
-
 def tabulate(rows, headers):
     try:
         import tabulate

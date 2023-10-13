@@ -7,7 +7,9 @@ from os.path import abspath, dirname
 
 import torch
 from . import external_utils
+from .config_utils import CompileIgnored
 
+compile_ignored = CompileIgnored()
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -16,9 +18,11 @@ from . import external_utils
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
+compile_ignored.\
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
+compile_ignored.\
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
 # verify the correctness of optimized backend
@@ -76,6 +80,7 @@ automatic_dynamic_shapes = True
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
 # while the shapes of torch.Tensor are assumed to be dynamic.
+# @does_not_affect_compile
 force_parameter_static_shapes = True
 
 # This flag ensures that the shapes of a nn module are always assumed to be static
@@ -354,6 +359,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
+print("REGISTRY", compile_ignored._registry)
 
 from .config_utils import install_config_module
 

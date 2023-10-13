@@ -10,6 +10,40 @@ from unittest import mock
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
+class CompileIgnored:
+    def __init__(self):
+        self.__dict__["_registry"] = set({})
+
+    def __setattr__(self, name, value):
+        self.__dict__["_registry"].add(name)
+        if hasattr(value, "__module__"):
+            print("THIS MODULE", type(value), ":",  value.__module__)
+            # setattr(value, "__module__", self.__module__) 
+        super().__setattr__(name, value)
+
+
+def get_assignments_with_compile_ignored_comments(module):
+    tree = ast.parse(inspect.getsource(module))
+    assignments = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            comment_before_assignment = get_comment_before_assignment(node, tree)
+            if comment_before_assignment and '@compile_ignored' in comment_before_assignment:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assignments.append(target.id)
+
+    return assignments
+
+def get_comment_before_assignment(assignment_node, tree):
+    for sibling in ast.walk(tree):
+        if sibling == assignment_node:
+            break
+        if isinstance(sibling, ast.Expr) and isinstance(sibling.value, ast.Str):
+            return sibling.value.s
+    return None
+
 
 def install_config_module(module):
     """
@@ -17,14 +51,16 @@ def install_config_module(module):
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set()
+        _bypass_keys = set("compile_ignored")
 
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
+        ignored = get_assignments_with_compile_ignored_comments(source)
+        print("IGNORED", ignored)
         for key, value in list(source.__dict__.items()):
             if key.startswith("__") or isinstance(value, (ModuleType, FunctionType)):
                 continue
-
+            
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
                 config[name] = value
@@ -32,11 +68,15 @@ def install_config_module(module):
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
+                if value is CompileIgnored:
+                    continue
                 assert value.__module__ == module.__name__
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
                 setattr(dest, key, proxy)
+            elif isinstance(value, CompileIgnored):
+                continue
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
