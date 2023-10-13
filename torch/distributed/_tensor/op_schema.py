@@ -207,6 +207,9 @@ class OpSchema:
             f" kwargs_schema={self.kwargs_schema})"
         )
 
+    def __str__(self) -> str:
+        return f"Op(op={self.op}, args_sharding={','.join([str(spec) for spec in self.args_schema if isinstance(spec, DTensorSpec) or isinstance(spec, OpStrategy)])}"
+
     def __post_init__(self) -> None:
         has_symints = False
         for a in self.args_schema:
