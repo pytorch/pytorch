@@ -132,7 +132,7 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
                     Expr,
-                    torch._inductor.ir.ExpandView,
+                    torch._inductor.ir.MultiOutput
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -4388,6 +4388,19 @@ class FallbackKernel(ExternKernelAlloc):
 
     def apply_constraint(self):
         return super().apply_constraint()
+
+
+
+@dataclasses.dataclass
+class ComplexView(FallbackKernel):
+    """View a complex number as two dtyped numbers or vice versa"""
+
+    def should_allocate(self):
+        return False
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].get_name()]
 
 
 @dataclasses.dataclass

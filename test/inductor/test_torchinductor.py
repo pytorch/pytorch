@@ -3056,7 +3056,7 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
         class ToComplex(nn.Module):
             def forward(self, x):
