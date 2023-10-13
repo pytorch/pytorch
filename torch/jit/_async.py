@@ -91,7 +91,7 @@ def wait(future):
     Args:
         future (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
     Returns:
-        `T`: the return value of the the completed task
+        `T`: the return value of the completed task
     """
     return torch._C.wait(future)
 
