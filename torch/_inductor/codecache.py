@@ -1302,37 +1302,6 @@ class CppCodeCache:
 
         return cls.cache[key]
 
-
-@functools.lru_cache(None)
-def _stack_frames_for_code(
-    path: str, lineno: int, linemaps: Dict[str, List[Tuple[Any, ...]]] = None,
-) -> Optional[List[Dict[str, Any]]]:
-    if linemaps is None:
-        return None
-    if path not in linemaps:
-        return None
-    # [(starting_line, <fx node>), ...]
-    lines, nodes = linemaps[path]
-    p = bisect_right(lines, lineno)
-    if p == 0:
-        return None
-    entry = nodes[p - 1]
-    if not entry:
-        return None
-
-    def parse_stack_trace(stack_trace: str) -> List[Dict[str, Any]]:
-        # ideally fx stores stack traces as data rather than a string
-        # but this is not along a performance critical path
-        regex = r'File "(.+)", line (\d+), in (.+)\n'
-        matches = re.findall(regex, stack_trace)
-        return [
-            {"filename": f, "line": int(l), "name": n}
-            for f, l, n in reversed(matches)
-        ]
-
-    return parse_stack_trace(entry)
-
-
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
@@ -1385,7 +1354,28 @@ class PyCodeCache:
     def stack_frames_for_code(
         cls, path: str, lineno: int
     ) -> Optional[List[Dict[str, Any]]]:
-        return _stack_frames_for_code(path, lineno, cls.linemaps)
+        if path not in cls.linemaps:
+            return None
+        # [(starting_line, <fx node>), ...]
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
+        if p == 0:
+            return None
+        entry = nodes[p - 1]
+        if not entry:
+            return None
+
+        def parse_stack_trace(stack_trace: str) -> List[Dict[str, Any]]:
+            # ideally fx stores stack traces as data rather than a string
+            # but this is not along a performance critical path
+            regex = r'File "(.+)", line (\d+), in (.+)\n'
+            matches = re.findall(regex, stack_trace)
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
+
+        return parse_stack_trace(entry)
 
 
 def cpp_wrapper_cache_dir(name: str) -> str:
