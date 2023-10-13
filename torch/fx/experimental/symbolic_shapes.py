@@ -1128,19 +1128,42 @@ def safe_expand(r):
     else:
         return r
 
+cast_bool_to_int_magic_methods = {
+    'add',
+    'sub',
+    'mul',
+    'pow',
+    'mod',
+    'truediv',
+    'floordiv',
+    'rshift',
+    'lshift',
+    'abs',
+    'ceil',
+    'floor',
+    'neg',
+    'sym_sqrt',
+}
+
+def b2i(sympy_val):
+    if isinstance(sympy_val, sympy.logic.boolalg.Boolean) and not isinstance(sympy_val, sympy.Symbol):
+        return sympy.Piecewise((1, sympy_val), (0, True))
+    else:
+        return sympy_val
+
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
-    'add': lambda a, b: a + b,
-    'sub': lambda a, b: a - b,
-    'mul': lambda a, b: a * b,
-    'mod': lambda a, b: Mod(a, b),
-    'pow': lambda a, b: Pow(a, b),
+    'add': lambda a, b: b2i(a) + b2i(b),
+    'sub': lambda a, b: b2i(a) - b2i(b),
+    'mul': lambda a, b: b2i(a) * b2i(b),
+    'mod': lambda a, b: Mod(b2i(a), b2i(b)),
+    'pow': lambda a, b: Pow(b2i(a), b2i(b)),
     'and': lambda a, b: sympy.And(a, b),
     'or': lambda a, b: sympy.Or(a, b),
-    'truediv': lambda a, b: TrueDiv(a, b),
-    'floordiv': lambda a, b: FloorDiv(a, b),
-    'lshift': lambda a, b: LShift(a, b),
-    'rshift': lambda a, b: RShift(a, b),
+    'truediv': lambda a, b: TrueDiv(b2i(a), b2i(b)),
+    'floordiv': lambda a, b: FloorDiv(b2i(a), b2i(b)),
+    'lshift': lambda a, b: LShift(b2i(a), b2i(b)),
+    'rshift': lambda a, b: RShift(b2i(a), b2i(b)),
 }
 
 
@@ -1175,14 +1198,14 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'floor': floor_impl,
+    'floor': lambda a: floor_impl(b2i(a)),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
-    'ceil': ceil_impl,
-    'neg': lambda a: -a,
+    'ceil': lambda a: ceil_impl(b2i(a)),
+    'neg': lambda a: -b2i(a),
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
-    'sym_sqrt': lambda a: sympy.sqrt(a),
-    'abs': lambda a: sympy.Abs(a),
+    'sym_sqrt': lambda a: sympy.sqrt(b2i(a)),
+    'abs': lambda a: sympy.Abs(b2i(a)),
 }
 
 sizes_strides_methods = {
@@ -1361,6 +1384,7 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
+    'Piecewise': lambda x, y: x[0] if x[1] else y[0],
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
@@ -1380,7 +1404,7 @@ def wrap_node(x):
     else:
         raise AssertionError(f"unrecognized return type {x}")
 
-def _make_node_magic(method, func):
+def _make_node_magic(method: str, func):
     func = lru_cache(256)(func)
 
     if method in magic_methods_on_operator_with_trailing_underscore:
@@ -1388,7 +1412,7 @@ def _make_node_magic(method, func):
     else:
         method_attr = method
 
-    def binary_magic_impl(self, other):
+    def binary_magic_impl(self: SymNode, other: SymNode):
         op = method_to_operator(method)
 
         out_hint = None
@@ -1423,6 +1447,8 @@ def _make_node_magic(method, func):
             pytype = bool
         elif self.pytype is float or other.pytype is float:
             pytype = float
+        elif method in cast_bool_to_int_magic_methods:
+            pytype = int
         else:
             pytype = self.pytype
 

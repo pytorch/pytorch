@@ -320,6 +320,9 @@ class ExprPrinter(Printer):
         # Go figure...
         return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_Piecewise(self, expr):
+        # This is a hack, but we only ever emit `Piecewise` when converting bool to int
+        return f"bool({expr.args[0]}[0])"
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
