@@ -194,6 +194,23 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
                 wrap_with_proxy(ee, proxy[idx], get_constant(idx))
+        elif isinstance(e, dict):
+            # In theory we could support const-prop when proxy-tensor-tracing
+            # operators that returns dicts of tensors, but we have no use case
+            # for it today (since the only op we currently trace that can
+            # return a dict is triton_kernel_wrapper_functional/mutation,
+            # which does not participate in const-prop)
+            assert constant is None
+
+            if isinstance(proxy, fx.Proxy):
+                set_meta(proxy, e)
+
+            # example use case: triton_kernel_wrapper takes arguments as kwargs
+            for key, val in e.items():
+                wrap_with_proxy(val, proxy[key], None)
+        else:
+            # intentionally pass on primitives
+            pass
 
 
     def get_constant(idx):
@@ -325,7 +342,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     #
     # If lift_fresh returns t directly, the subsequent add_ call will
     # modify the tensor constant. Really, the problem is we've violated
-    # the invariant the the argument to lift is fresh.  So what we should
+    # the invariant the argument to lift is fresh.  So what we should
     # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
     #
     #       t = self._tensor_constant0  # initialized to torch.tensor(1)
