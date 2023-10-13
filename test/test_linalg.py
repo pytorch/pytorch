@@ -29,7 +29,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -5769,6 +5769,123 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertRaisesRegex(RuntimeError,
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
+
+    def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
+        assert w.dim() == 2
+        w = w.transpose(0, 1).contiguous()
+        assert q_group_size > 1
+        assert w.shape[-1] % q_group_size == 0
+
+        to_quant = w.reshape(-1, q_group_size)
+        assert torch.isnan(to_quant).sum() == 0
+
+        max_val = to_quant.amax(dim=1, keepdim=True)
+        min_val = to_quant.amin(dim=1, keepdim=True)
+        max_int = 2 ** n_bit - 1
+        min_int = 0
+        scales = (max_val - min_val).clamp(min=1e-6) / max_int
+        assert torch.isnan(scales).sum() == 0
+
+        zeros = min_val + scales * (2 ** (n_bit - 1))
+        assert torch.isnan(zeros).sum() == 0
+
+        out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
+        assert torch.isnan(out).sum() == 0
+
+        out = out.to(dtype=torch.int32).reshape(w.shape)
+
+        # Scales and zeros for the same q-group should be contiguous, so we can
+        # load as a 32-bit word
+        scales = scales.view(w.shape[0], -1)
+        zeros = zeros.view(w.shape[0], -1)
+        scales_and_zeros = (
+            torch.cat(
+                [
+                    scales.reshape(scales.size(0), scales.size(1), 1),
+                    zeros.reshape(zeros.size(0), zeros.size(1), 1),
+                ],
+                2,
+            ).transpose(0, 1).contiguous()
+        )
+
+        return out, scales_and_zeros
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @onlyCUDA
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int4_mm(self, device, m, k, n):
+        if TEST_WITH_ROCM:
+            self.skipTest("_int4_mm not compiled for ROCM")
+
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int4pack(b):
+            b_int32, b_scales_and_zeros = self._group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32, inner_k_tiles
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
+        b_int4pack, b_scales_and_zeros = convert_weight_to_int4pack(b)
+        res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+        ref = torch.mm(a, b)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @onlyCUDA
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test_compile_int4_mm(self, device, m, k, n):
+        if TEST_WITH_ROCM:
+            self.skipTest("_int4_mm not compiled for ROCM")
+
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+
+        b_int32, b_scales_and_zeros = self._group_quantize_tensor(
+            b, n_bit=4, q_group_size=q_group
+        )
+
+        @torch.compile
+        def int4_mm(a, b_int32, b_scales_and_zeros):
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32, inner_k_tiles
+            )
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
+        res = int4_mm(a, b_int32, b_scales_and_zeros)
+        ref = torch.mm(a, b)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
     @slowTest
     @onlyNativeDeviceTypes
