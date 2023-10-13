@@ -17,7 +17,7 @@ caching_worker_current_devices: Dict[str, int] = {}
 
 
 class DeviceInterfaceMeta(type):
-    def __new__(cls, *args, **kwargs):
+    def __new__(metacls, *args, **kwargs):
         class_member = args[2]
         if "Event" in class_member:
             assert inspect.isclass(class_member["Event"]) and issubclass(
@@ -27,7 +27,7 @@ class DeviceInterfaceMeta(type):
             assert inspect.isclass(class_member["Stream"]) and issubclass(
                 class_member["Stream"], StreamBase
             ), "DeviceInterface member Stream should be inherit from StreamBase"
-        return super().__new__(cls, *args, **kwargs)
+        return super().__new__(metacls, *args, **kwargs)
 
 
 class DeviceInterface(metaclass=DeviceInterfaceMeta):
