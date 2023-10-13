@@ -51,7 +51,7 @@ ignore = [
     "PYI024",
     "PYI034",
     "PYI036",
-    "PYI041",
+    "PYI041", # keep disabled due to mypy support scope
     "PYI042",
     "PYI045",
     "PYI056",
