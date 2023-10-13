@@ -15,7 +15,7 @@ from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh, _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
@@ -94,6 +94,9 @@ def parallelize_module(  # type: ignore[return]
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
+    else:
+        _validate_tp_mesh_dim(device_mesh)
+
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel

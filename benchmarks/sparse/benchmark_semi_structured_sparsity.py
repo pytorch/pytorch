@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
+from torch.sparse import to_sparse_semi_structured
 from tqdm import tqdm
 
 
@@ -47,9 +47,9 @@ def rand_sparse_semi_structured_mask(
         .contiguous()
     )
 
-#@torch.inference_mode()
+
 def test_linear(m, k, n, dtype, contiguous, backend):
-    SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
+    SparseSemiStructuredTensor.fuse_transpose = contiguous
     mask = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
     sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
@@ -61,7 +61,6 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     ).blocked_autorange()
 
     dense_output = model(input_tensor)
-    print(dense_output.shape)
 
     # sparsify weights
     model.linear.weight = nn.Parameter(
@@ -71,7 +70,6 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     )
 
     sparse_output = model(input_tensor)
-    print(sparse_output.shape)
 
     sparse_measurement = benchmark.Timer(
         stmt="model(input_tensor)",
