@@ -60,6 +60,8 @@ def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, s
     """
     if isinstance(qspec, SharedQuantizationSpec):
         sharing_with = qspec.edge_or_node
+        # we point from edge_or_node to the node that it is sharing_with, e.g.
+        # qspec for a = SharedQuantizationSpec(b) means `a` points to `b`
         _union(sharing_with, edge_or_node, shared_with_map)
 
 def _find_root_qspec(qspec: QuantizationSpecBase, edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
@@ -174,6 +176,7 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
                 # the input arg to the node should reuse the existing output observer for arg
                 # since dtype is the same (we may want to extend this to be a more strict check
                 # in the future)
+                # so we point from `input_edge` to `arg` (output of the argument)
                 _union(arg, input_edge, shared_with_map)
             _update_shared_with(input_edge, qspec, shared_with_map)
 
