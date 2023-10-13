@@ -38,7 +38,6 @@ class NestedTensor(torch.Tensor):
     _stride: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(
@@ -160,6 +159,27 @@ class NestedTensor(torch.Tensor):
             return fn(*args, **kwargs)
 
         raise NotImplementedError(func)
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        # Handle SDPA specially since it's CompositeImplicit. We don't want
+        # the nestedness of the inputs to affect the kernel choice, so unwrap
+        # the NTs here before passing to SDPA -> rewrap the output as NT.
+        if func is torch._C._nn.scaled_dot_product_attention:
+            t_args = [t._values if isinstance(t, NestedTensor) else t for t in args]
+            t_kwargs = {
+                k: v._values if isinstance(v, NestedTensor) else v
+                for k, v in kwargs.items()
+            }
+
+            from torch.nested._internal.ops import extract_kwargs
+
+            output = func(*t_args, **t_kwargs)
+            return NestedTensor(output, **extract_kwargs(args[0]))
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
 
 
 # Not actually a view!
