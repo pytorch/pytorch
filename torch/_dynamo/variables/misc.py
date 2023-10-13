@@ -133,6 +133,11 @@ class SuperVariable(VariableTracker):
 
             original_torch_or_getattr_variable = args[0]
             new_args = args[2].items
+            # TODO (mlazos): this is a hack to handle kwargs properly for a test
+            # we assume that kwargs is either a dict or None.
+            # Rather than inserting the base torch function impl into the graph
+            # we should trace it properly. We should be able to remove all of this
+            # code starting from "is_original_tensor_torch_function" above.
             if not isinstance(args[3], ConstantVariable):
                 new_kwargs = args[3].items
                 options = VariableTracker.propagate(self, new_args, new_kwargs)
