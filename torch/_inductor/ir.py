@@ -3397,21 +3397,22 @@ class ExternKernel(InputsKernel):
         )
 
     def codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            if V.graph.cpp_wrapper:
-                # TODO: use native_functions.yaml as the ground truth
+        if V.graph.cpp_wrapper:
+            # FIXME: we should unconditionally fill self.kwargs with missing default values
+            # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
+            if self.kwargs:
                 assert (
                     self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel has to be provided"
-                for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    v = self.get_kwargs_value(arg_name)
-                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
-            else:
-                kwargs = [
-                    f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
-                    for k, v in self.kwargs.items()
-                ]
+                ), "ordered_kwargs_for_cpp_kernel is missing"
+            kwargs = []
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                v = self.get_kwargs_value(arg_name)
+                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+        else:
+            kwargs = [
+                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
+                for k, v in self.kwargs.items()
+            ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
