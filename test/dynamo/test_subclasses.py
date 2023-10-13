@@ -493,20 +493,31 @@ class GraphModule(torch.nn.Module):
                 return torch.ones([4, 3])
 
         def test_recompilation(
-            f, x, sizes, exp_graphs, exp_frame_count, exp_shape_env_guards
+            f,
+            x,
+            sizes,
+            exp_graphs,
+            exp_frame_count,
+            different_shape_env,
+            exp_shape_env_guards,
         ):
             torch._dynamo.reset()
-            shape_env = ShapeEnv()
             backend = torch._dynamo.testing.EagerAndRecordGraphs()
             cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
             f_cond = torch.compile(f, backend=cnt, fullgraph=True)
-            with torch._subclasses.fake_tensor.FakeTensorMode(
-                shape_env=shape_env
-            ) as fake_mode:
-                fake_inp = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for i in range(x.dim())]
-                )
-                for i, size in enumerate(sizes):
+            fake_mode = torch._subclasses.fake_tensor.FakeTensorMode(
+                shape_env=ShapeEnv()
+            )
+            for i, size in enumerate(sizes):
+                if different_shape_env:
+                    fake_mode = torch._subclasses.fake_tensor.FakeTensorMode(
+                        shape_env=ShapeEnv()
+                    )
+
+                with fake_mode:
+                    fake_inp = fake_mode.from_tensor(
+                        x, dynamic_dims=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    )
                     pred = fake_inp.size(0) == size
                     f_cond(pred)
                     actual = normalize_gm(
@@ -514,7 +525,9 @@ class GraphModule(torch.nn.Module):
                             print_output=False
                         )
                     )
-                    actual_guard_str = [str(guard.expr) for guard in shape_env.guards]
+                    actual_guard_str = [
+                        str(guard.expr) for guard in fake_mode.shape_env.guards
+                    ]
                     self.assertExpectedInline(actual, exp_graphs[i])
                     self.assertEqual(cnt.frame_count, exp_frame_count[i])
                     self.assertEqual(actual_guard_str, exp_shape_env_guards[i])
@@ -537,7 +550,26 @@ class GraphModule(torch.nn.Module):
             [3, 3, 4, 5],
             exp_graphs=[true_graph, true_graph, false_graph, false_graph],
             exp_frame_count=[1, 1, 2, 2],
+            different_shape_env=True,
             exp_shape_env_guards=[
+                # The shape_env is different from iterations to iterations. Each shape_env gets a new guard installed.
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+                ["Ne(s0, 4)"],
+                ["Ne(s0, 5)"],
+            ],
+        )
+
+        test_recompilation(
+            f,
+            torch.randn([3, 4]),
+            [3, 3, 4, 5],
+            exp_graphs=[true_graph, true_graph, false_graph, false_graph],
+            exp_frame_count=[1, 1, 2, 2],
+            different_shape_env=False,
+            exp_shape_env_guards=[
+                # The shape_env is shared. pred are simplified to concreate values for the latter three export,
+                # specifically, they become True, False, False. Only the first export installs a guard in outer shape_env
                 ["Eq(s0, 3)"],
                 ["Eq(s0, 3)"],
                 ["Eq(s0, 3)"],
@@ -551,7 +583,25 @@ class GraphModule(torch.nn.Module):
             [4, 5, 3, 3],
             exp_graphs=[false_graph, false_graph, true_graph, true_graph],
             exp_frame_count=[1, 1, 2, 2],
+            different_shape_env=True,
             exp_shape_env_guards=[
+                # The shape_env is different from iterations to iterations. Each shape_env gets a new guard installed.
+                ["Ne(s0, 4)"],
+                ["Ne(s0, 5)"],
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+            ],
+        )
+
+        test_recompilation(
+            f,
+            torch.randn([3, 4]),
+            [4, 5, 3, 3],
+            exp_graphs=[false_graph, false_graph, true_graph, true_graph],
+            exp_frame_count=[1, 1, 2, 2],
+            different_shape_env=False,
+            exp_shape_env_guards=[
+                # The shape_env is shared. guards are simplified and accumulated in outer shape_env
                 ["Ne(s0, 4)"],
                 ["Ne(s0, 4)", "Ne(s0, 5)"],
                 ["Ne(s0, 4)", "Ne(s0, 5)", "Eq(s0, 3)"],
