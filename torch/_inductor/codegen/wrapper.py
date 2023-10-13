@@ -5,7 +5,7 @@ import functools
 import os
 import re
 from itertools import count
-from typing import Any, Dict, List, Optional, Tuple, Iterator, Set
+from typing import Any, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
