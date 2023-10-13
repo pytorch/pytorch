@@ -2553,7 +2553,7 @@ Tensor compute_T18_scale_square(
   // use the cumulative matrix multiplication.
   // With about example, `mul_times` will be [0, 1, 3].
   auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
-  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong);
+  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong).clamp(/*min=*/0);
   auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1}));
 
   // Square
@@ -2592,12 +2592,8 @@ Tensor mexp_impl(
   bool compute_highest_degree_approx = false
 ) {
   auto res = at::empty_like(a);
+  res.index_put_({at::indexing::Slice(), 0, 0}, std::numeric_limits<double>::quiet_NaN());
   const auto norm = operator_1_norm(a);
-  const auto norm_max = norm.max().to(at::kCPU).item<float>();
-  if (std::isnan(norm_max)) {
-    res.fill_(std::numeric_limits<double>::quiet_NaN());
-    return res;
-  }
 
   // `norm_small_to_cpu` is used to decide which Tensors require which
   // approximation based on their norm. This decision may take place on CPU.
