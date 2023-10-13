@@ -362,14 +362,18 @@ class TestStateDict(FSDPTest):
 
         model_state_dict, _ = state_dict(model)
         key = next(iter(model_state_dict.keys()))
-        model_state_dict.pop(key)
-        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+        model_state_dict["abc"] = torch.zeros(10)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
             load_state_dict(model, model_state_dict=model_state_dict)
+        model_state_dict.pop("abc")
+        model_state_dict.pop(key)
         load_state_dict(
             model,
             model_state_dict=model_state_dict,
             options=StateDictOptions(strict=False),
         )
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            load_state_dict(model, model_state_dict=model_state_dict)
 
     @skip_if_lt_x_gpu(1)
     def test_partial(self) -> None:
