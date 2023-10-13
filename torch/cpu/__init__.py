@@ -7,12 +7,14 @@ from contextlib import AbstractContextManager
 from typing import Any, Optional, Union
 
 import torch
+
 from .. import device as _device
 from . import amp
 
 __all__ = [
     "is_available",
     "synchronize",
+    "current_device",
     "current_stream",
     "stream",
     "set_device",
@@ -126,3 +128,11 @@ def set_device(device: _device_t) -> None:
     N.B. This function only exists to facilitate device-agnostic code
     """
     pass
+
+
+def current_device() -> str:
+    r"""Returns current device for cpu. Always 'cpu'.
+
+    N.B. This function only exists to facilitate device-agnostic code
+    """
+    return "cpu"
