@@ -10,7 +10,7 @@ from typing import Dict, List
 import torch
 from torch import sym_float, sym_int
 
-from .. import config, variables
+from .. import config, polyfill, variables
 from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
@@ -651,6 +651,7 @@ class BuiltinVariable(VariableTracker):
                     UserErrorType.STANDARD_LIBRARY,
                     "Calling round() on symbolic value is not supported. "
                     "You can use floor() to implement this functionality",
+                    case_name="dynamic_shape_round",
                 )
         return super().call_function(tx, args, kwargs)
 
@@ -1275,6 +1276,7 @@ class BuiltinVariable(VariableTracker):
             UserErrorType.ANTI_PATTERN,
             f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
+            case_name="type_reflection_method",
         )
 
     def call_reversed(self, tx, obj: VariableTracker):
@@ -1520,3 +1522,10 @@ class BuiltinVariable(VariableTracker):
     call_ne = _comparison
     call_is_ = _comparison
     call_is_not = _comparison
+
+    def call_all(self, tx, *args, **kwargs):
+        from .builder import SourcelessBuilder
+
+        return tx.inline_user_function_return(
+            SourcelessBuilder()(tx, polyfill.all), args, kwargs
+        )

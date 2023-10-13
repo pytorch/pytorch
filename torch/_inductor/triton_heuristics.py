@@ -1064,7 +1064,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
                 # halve the XBLOCK/RBLOCK compared to outer_config
-                # TODO: this may only be beneficial when each iteration of the reduciton
+                # TODO: this may only be beneficial when each iteration of the reduction
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
                 triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],

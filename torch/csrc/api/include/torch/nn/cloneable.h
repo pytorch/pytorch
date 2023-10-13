@@ -21,7 +21,7 @@ namespace nn {
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
 // NOLINTNEXTLINE(bugprone-exception-escape)
-class Cloneable : public Module {
+class Cloneable : public virtual Module {
  public:
   using Module::Module;
 
@@ -90,7 +90,7 @@ class Cloneable : public Module {
         clone != nullptr,
         "Attempted to clone submodule, but it is of a "
         "different type than the submodule it was to be cloned into");
-    static_cast<Derived&>(*this) = *clone;
+    static_cast<Derived&>(*this) = std::move(*clone);
   }
 };
 

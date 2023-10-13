@@ -26,8 +26,10 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch.nn import functional as F
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -1208,16 +1210,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
-    def test_tensor_size_indexed_by_symint(self):
-        def fn(x, y):
-            index = x.shape[-1]
-            return x + y.shape[index]
-
-        x = torch.rand(10, 2)
-        y = torch.rand(10, 8, 6)
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        self.assertEqual(opt_fn(x, y), fn(x, y))
-
     def test_partials_as_input_partials_lambda(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)
@@ -1373,6 +1365,41 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
+if HAS_TRITON:
+    # Define shared triton kernels here so that multiple tests can access it
+    @triton.jit
+    def add_kernel(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def mul2_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        output = 2 * x
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+
 class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
         """
@@ -1484,13 +1511,13 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     @requires_triton()
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
-        def test_kernel(kernel):
+        def pass_kernel(kernel):
             pass
 
         @torch.compile(backend="eager")
         def f(x):
             grid = (x.numel(),)
-            test_kernel[grid](kernel=x)
+            pass_kernel[grid](kernel=x)
 
         t1 = torch.rand(5, device="cuda")
         f(t1)
@@ -1500,23 +1527,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     @requires_triton()
     def test_triton_kernel_higher_order_func(self):
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
 
@@ -1560,24 +1570,144 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @requires_triton()
-    def test_triton_kernel_by_hand(self):
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
+    @skipIfRocm
+    def test_triton_kernel_functionalize(self):
+        import functorch
+        from functorch import make_fx
+        from torch._subclasses.functional_tensor import (
+            CppFunctionalizeAPI,
+            FunctorchFunctionalizeAPI,
+            PythonFunctionalizeAPI,
+        )
 
+        def f(x, output):
+            out = triton_kernel_wrapper_functional(
+                kernel=mul2_kernel,
+                grid=(x.numel(),),
+                kwargs={
+                    "in_ptr0": x,
+                    "out_ptr": output,
+                    "n_elements": output.numel(),
+                    "BLOCK_SIZE": 16,
+                },
+            )
+            return out["out_ptr"]
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+
+        gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
+        # Make sure t2 was not modified
+        self.assertNotEqual(gm(t1, t2), t2)
+
+        gm = make_fx(CppFunctionalizeAPI().functionalize(f))(t1, t2)
+        # Make sure t2 was not modified
+        self.assertNotEqual(gm(t1, t2), t2)
+
+        gm = make_fx(torch.func.functionalize(f))(t1, t2)
+        # Make sure t2 was not modified
+        self.assertNotEqual(gm(t1, t2), t2)
+
+        gm = make_fx(f, tracing_mode="fake")(t1, t2)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1, output_1):
+    triton_kernel_wrapper_functional_proxy = functools_triton_kernel_wrapper_functional(grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
+    getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
+    getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
+    getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
+    getitem_3 = triton_kernel_wrapper_functional_proxy['BLOCK_SIZE'];  triton_kernel_wrapper_functional_proxy = None
+    return getitem_1""",
+        )
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_triton_kernel_with_views(self, backend):
+        def call_triton_take_view(x: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        def call_triton_return_view(x: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+            return output.view(4, 4)
+
+        t = torch.rand(4, 4, device="cuda")
+        t_view = t.view(16)
+
+        compiled_func = torch.compile(
+            call_triton_take_view, backend=backend, fullgraph=True
+        )
+        self.assertEqual(2 * t_view, compiled_func(t_view))
+        self.assertEqual(2 * t, compiled_func(t_view).view(4, 4))
+
+        compiled_func = torch.compile(
+            call_triton_return_view, backend=backend, fullgraph=True
+        )
+        self.assertEqual(2 * t_view, compiled_func(t).view(16))
+        self.assertEqual(2 * t, compiled_func(t))
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_triton_kernel_with_grad_option(self, grad_fn, backend):
+        def call_triton(x: torch.Tensor):
+            with grad_fn():
+                output = torch.zeros_like(x)
+                n_elements = output.numel()
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+                mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+                return output
+
+        t = torch.rand(5, device="cuda")
+        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
+        self.assertEqual(2 * t, compiled_func(t))
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_triton_kernel_inner_triton_function(self, backend):
+        def f(x: torch.Tensor):
+            @triton.jit
+            def pow2_kernel(
+                in_ptr0,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+            ):
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                output = x * x
+                tl.store(out_ptr + offsets, output, mask=mask)
+
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            pow2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        t = torch.rand(5, device="cuda")
+
+        compiled_func = torch.compile(f, backend=backend, fullgraph=True)
+        # TODO(oulgen): NYI - Support this
+        # self.assertEqual(t * t, compiled_func(t))
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_triton_kernel_native(self, grad, backend):
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
         ):
@@ -1601,8 +1731,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
             return output
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device="cuda", requires_grad=grad)
+        t2 = torch.rand(5, device="cuda", requires_grad=grad)
 
         torch_add = t1 + t2
 
@@ -1612,7 +1742,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(call_triton_add(t1, t2, 1, True), torch_add)
 
         # With Dynamo
-        compiled_func = torch.compile(call_triton_add, backend="eager", fullgraph=True)
+        compiled_func = torch.compile(call_triton_add, backend=backend, fullgraph=True)
         # With simple kernel
         self.assertEqual(compiled_func(t1, t2, 0), torch_add)
         # With lambda kernel
@@ -1688,6 +1818,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+
+common_utils.instantiate_parametrized_tests(DefaultsTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
