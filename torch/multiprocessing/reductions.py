@@ -358,7 +358,7 @@ def rebuild_nested_tensor(
     sizes = rebuild_sizes_func(*rebuild_sizes_args)
     strides = rebuild_strides_func(*rebuild_strides_args)
     offsets = rebuild_offsets_func(*rebuild_offsets_args)
-    return torch._nested_view_from_buffer(buffer, sizes, strides, offsets)
+    return torch._nested_view_from_buffer_copy(buffer, sizes, strides, offsets)
 
 
 def reduce_nested_tensor(nt):
