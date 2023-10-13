@@ -1588,13 +1588,34 @@ def is_flaky(
     if not head_job or not drci_classifications:
         return False
 
-    workflow_name = head_job.get("workflow_name", "")
-    job_name = head_job.get("name", "")
-    full_name = f"{workflow_name} / {job_name}"
-
     # Consult the list of flaky failures from Dr.CI
     return any(
-        full_name == flaky["name"] for flaky in drci_classifications.get("FLAKY", [])
+        head_job.get("full_name", "") == flaky["name"]
+        for flaky in drci_classifications.get("FLAKY", [])
+    )
+
+
+def is_invalid_cancel(
+    head_job: Optional[Dict[str, Any]],
+    drci_classifications: Any,
+) -> bool:
+    """
+    After https://github.com/pytorch/test-infra/pull/4579, invalid cancelled
+    signals have been removed from HUD and Dr.CI. The same needs to be done
+    here for consistency
+    """
+    if not head_job or not drci_classifications:
+        return False
+
+    full_name = head_job.get("full_name", "")
+    if head_job.get("conclusion", "") != "cancelled" or not full_name:
+        return False
+
+    # If a job is cancelled and not listed as a failure by Dr.CI, it's an
+    # invalid signal and can be ignored
+    return all(
+        full_name != failure["name"]
+        for failure in drci_classifications.get("FAILED", [])
     )
 
 
@@ -1641,6 +1662,8 @@ def get_classifications(
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
             name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
+            rockset_result["full_name"] = name
+
             if rockset_result["head_sha"] == head_sha:
                 insert(
                     head_sha_jobs,
@@ -1697,6 +1720,19 @@ def get_classifications(
         elif is_flaky(head_sha_job, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id, check.title
+            )
+            continue
+        elif is_invalid_cancel(head_sha_job, drci_classifications):
+            # NB: Create a new category here for invalid cancelled signals because
+            # there are usually many of them when they happen. So, they shouldn't
+            # be counted toward ignorable failures threshold
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "INVALID_CANCEL",
+                check.job_id,
+                check.title,
             )
             continue
 
@@ -1876,6 +1912,8 @@ def categorize_checks(
             # ignored anyway. This is useful to not need to wait for scarce resources
             # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
+        elif classification == "INVALID_CANCEL":
+            continue
         elif not is_passing_status(check_runs[checkname].status):
             target = (
                 ignorable_failed_checks[classification]
