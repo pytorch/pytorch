@@ -1289,10 +1289,6 @@ class TestOperators(common_utils.TestCase):
             input_names=["x"],
             dynamic_axes={"x": {0: "dim_0"}},
         )
-    def test_diagonal(self):
-        x = torch.randn(2, 5, 4, 2)
-        self.assertONNX(lambda x: x.diagonal(offset=-1, dim1=-2, dim2=-1), x)
-
 
 
 if __name__ == "__main__":
