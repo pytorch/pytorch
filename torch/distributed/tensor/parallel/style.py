@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel._utils import (
     _deprecate_warnings,
     _prepare_input_validate,
@@ -395,7 +396,7 @@ def _is_redistribute_necessary(
     is needed to be called or not. If not, we can directly early return
     and save CPU overhead.
     """
-    return t._spec.placements == dst_placements
+    return dtensor._spec.placements == dst_placements
 
 
 def _get_prepare_input(
