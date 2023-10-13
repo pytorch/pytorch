@@ -1017,9 +1017,7 @@ def get_higher_type(a: type, b: type) -> type:
     a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
     # Type checking
     if a not in _ordered_types or b not in _ordered_types:
-        raise RuntimeError(
-            f"Expected builtin numeric types, found {type(a)}, {type(b)}"
-        )
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
 
     if a is b:
         return a
@@ -1122,9 +1120,7 @@ def is_weakly_lesser_type(a: type, b: type) -> bool:
     a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
 
     if a not in _ordered_types or b not in _ordered_types:
-        raise RuntimeError(
-            f"Expected builtin numeric types, found {type(a)}, {type(b)}"
-        )
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
 
     for typ in _ordered_types:
         if a == typ:
