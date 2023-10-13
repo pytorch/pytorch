@@ -508,7 +508,7 @@ def _multi_tensor_adam(params: List[Tensor],
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if str(device_state_steps[0].device) == 'cpu':
+        if device_state_steps[0].is_cpu:
             torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), 1.0)
         else:
             torch._foreach_add_(device_state_steps, 1)

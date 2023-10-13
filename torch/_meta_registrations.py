@@ -3021,6 +3021,39 @@ def meta__foreach_binop__list(self, other, alpha=1):
 
 @register_meta(
     [
+        aten._foreach_add.Tensor,
+    ]
+)
+def meta__foreach_binop_tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.Tensor,
+    ]
+)
+def meta__foreach_binop__tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+
+
+@register_meta(
+    [
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,

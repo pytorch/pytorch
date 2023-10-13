@@ -225,7 +225,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) <= 2
+        assert len(args) <= 3
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -4689,6 +4689,7 @@ register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)

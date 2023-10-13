@@ -319,10 +319,11 @@ def _multi_tensor_adamax(
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
-        # wrapped it now and passed it to the API as a tensor already. So we wrap it now.
-        step_device = grouped_state_steps[0].device
-        one = torch.tensor(1.0, device=step_device) if str(step_device) == "cpu" else 1
-        torch._foreach_add_(grouped_state_steps, one, 1.0)
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), 1.0)
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
             if maximize:
