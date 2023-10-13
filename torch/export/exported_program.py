@@ -643,6 +643,37 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
+        import math
+        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+            _convert_range_to_int,
+        )
+        placeholders = [p for p in self.graph.nodes if p.op == "placeholder" and p.name in self.graph_signature.user_inputs]
+        n_args, n_placeholders = len(args), len(placeholders)
+        assert n_args == n_placeholders, f"unexpected number of inputs (expected {n_placeholders}, got {n_args})"
+        unification_map = {}
+        for arg, p in zip(args, placeholders):
+            if isinstance(arg, torch.Tensor) and isinstance(p.meta["val"], torch.Tensor):
+                p_shape = p.meta['tensor_meta'].shape
+                n_arg_shape, n_p_shape = len(arg.shape), len(p_shape)
+                assert n_arg_shape == n_p_shape, f"unexpected number of dimensions in input {p.name}.shape (expected {n_p_shape}, got {n_arg_shape})"
+                for j, (arg_dim, p_dim) in enumerate(zip(arg.shape, p_shape)):
+                    if isinstance(p_dim, torch.SymInt):
+                        if p_dim.node.expr in unification_map:
+                            existing_dim = unification_map[p_dim.node.expr]
+                            assert arg_dim == existing_dim, f"expected input {p.name}.shape[{j}] to be equal to {existing_dim}, but got {arg_dim}"
+                        else:
+                            unification_map[p_dim.node.expr] = arg_dim
+                        min_val, max_val = _convert_range_to_int(self.range_constraints[p_dim.node.expr])
+                        if min_val > 2:
+                            assert arg_dim >= min_val, f"expected input {p.name}.shape[{j}] to be >= {min_val}, but got {arg_dim}"
+                        if max_val < math.inf:
+                            assert arg_dim <= max_val, f"expected input {p.name}.shape[{j}] to be <= {max_val}, but got {arg_dim}"
+                    else:
+                        assert arg_dim == p_dim, f"expected input {p.name}.shape[{j}] to be equal to {p_dim}, but got {arg_dim}"
+
+
+    def _check_input_constraints_graph(self, *args):
+
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForConstraintsPass,
         )
