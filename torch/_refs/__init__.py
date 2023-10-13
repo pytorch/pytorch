@@ -5936,7 +5936,7 @@ def normal(
     pin_memory=None,
 ):
     assert generator is None
-    assert layout is None
+    assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
         torch._check(
@@ -5950,7 +5950,7 @@ def normal(
             lambda: "normal expects that either mean or std is a tensor, or shape is defined",
         )
         torch._check(
-            layout is None and pin_memory is None,
+            pin_memory is None,
             lambda: "Cannot pass layout, or pin_memory without shape",
         )
 

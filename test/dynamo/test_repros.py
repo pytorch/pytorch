@@ -945,6 +945,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(a_ref.grad, a_test.grad)
         self.assertEqual(b_ref.grad, b_test.grad)
 
+    def test_normal_strided(self):
+        @torch.compile(backend="eager")
+        def fn(op_args, op_kargs):
+            return torch.normal(*op_args, **op_kargs)
+
+        op_args = [2.0, 2.0, [2, 2, 2]]
+        op_kargs = {'dtype': torch.bfloat16, 'layout': torch.strided}
+        coml_fn = torch.compile(fn)
+        res = coml_fn(op_args, op_kargs)
+
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):
             num_weights = 10
