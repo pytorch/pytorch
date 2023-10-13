@@ -951,7 +951,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.normal(*op_args, **op_kargs)
 
         op_args = [2.0, 2.0, [2, 2, 2]]
-        op_kargs = {'dtype': torch.bfloat16, 'layout': torch.strided}
+        op_kargs = {"dtype": torch.bfloat16, "layout": torch.strided}
         coml_fn = torch.compile(fn)
         res = coml_fn(op_args, op_kargs)
 
