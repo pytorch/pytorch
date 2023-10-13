@@ -381,7 +381,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                 "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                case_name="cond_operands",
             )
 
     return inner
@@ -2325,7 +2326,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
-        # Detect inline GraphModule calls in order to propgate node metadata,
+        # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
