@@ -174,7 +174,6 @@ class OptimizeForInferenceTemplate(TestCase):
             def forward(self, x):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
-
         class MM2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -203,7 +202,11 @@ class OptimizeForInferenceTemplate(TestCase):
                     ]
                 ]
 
-        for mod in [MM().to(self.device), MM2().to(self.device), AddMM().to(self.device)]:
+        for mod in [
+            MM().to(self.device),
+            MM2().to(self.device),
+            AddMM().to(self.device),
+        ]:
             inp = torch.rand([10, 10]).to(self.device)
 
             @torch.compile()
