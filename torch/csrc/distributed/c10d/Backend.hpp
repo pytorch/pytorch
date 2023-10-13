@@ -366,8 +366,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
-  void emitCollectiveStart(const Work& work);
-  void emitCollectiveEnd(const Work& work);
+  void callbackStartEvent(const Work& work);
+  void callbackEndEvent(const Work& work);
 
   const int rank_;
   const int size_;

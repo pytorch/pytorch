@@ -945,7 +945,7 @@ void ProcessGroupNCCL::logWorkStart(WorkNCCL& work, bool emitDesyncInfo) {
     return;
   work.startTraceUpdated_ = true;
 
-  emitCollectiveStart(work);
+  callbackStartEvent(work);
 
   if (!emitDesyncInfo || storeError_)
     return;
@@ -963,7 +963,7 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work, bool emitDesyncInfo) {
     logWorkStart(work, emitDesyncInfo);
   }
 
-  emitCollectiveEnd(work);
+  callbackEndEvent(work);
 
   if (!emitDesyncInfo || storeError_)
     return;
