@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import functools
+import unittest
 
 import torch
 
@@ -14,6 +15,9 @@ from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class MockSubclass(torch.Tensor):
@@ -633,7 +637,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
 
-    def test_basic_autograd(self):
+    # TODO: cannot parametrize this test class with device for some reason
+    def _test_autograd(self, backend):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
@@ -655,6 +660,14 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(ga, ga_ref))
         self.assertTrue(torch.allclose(gb, gb_ref))
         self.assertTrue(torch.allclose(gc, gc_ref))
+
+    def test_basic_autograd(self):
+        self._test_autograd("aot_eager")
+
+    @requires_cuda()
+    def test_basic_autograd_inductor(self):
+        self._test_autograd("inductor")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
