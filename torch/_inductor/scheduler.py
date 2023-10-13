@@ -581,7 +581,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # don't allow reuse of an 'input' buffer, we don't own it
             # (would this have been fixed if I tracked mutations properly above?)
             return False
-
         if not isinstance(
             self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
         ):
@@ -590,7 +589,8 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
         if len(self.read_writes.writes) == 1:
             write_dep = next(iter(self.read_writes.writes))
-            return read_dep.numbytes_hint() == write_dep.numbytes_hint()
+            numel_diff = read_dep.get_numel() - write_dep.get_numel()
+            return V.graph.sizevars.simplify(numel_diff) == 0
 
         return False
 
@@ -1734,6 +1734,9 @@ class Scheduler:
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
+        common_memory_deps = {
+            dep for dep in common_memory_deps if not dep.has_unbacked_symbols()
+        }
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def score_fusion_key(self, nodes):

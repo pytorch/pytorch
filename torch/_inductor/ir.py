@@ -1718,6 +1718,13 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
+        unbacked_symbols_in_sizes = False
+        if (
+            len(free_unbacked_symbols(old_size)) > 0
+            or len(free_unbacked_symbols(new_size)) > 0
+        ):
+            unbacked_symbols_in_sizes = True
+
         if 0 in new_size:
 
             def fake_reindex(index):
@@ -1725,7 +1732,11 @@ class View(GenericView):
 
             return cls(x, list(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x):
+        elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
+            if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
+                # realize x; otherwise, the dynamic_reshape_indexer below will fail
+                # due to the size_hint's inability to process unbacked SymInts
+                x.realize()
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
