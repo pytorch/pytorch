@@ -974,7 +974,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
 
-        self.codegen_int_array_var = functools.lru_cache(None)(self._codegen_int_array_var_uncached)
+        self.codegen_int_array_var = functools.lru_cache(None)(
+            self._codegen_int_array_var_uncached
+        )
 
         from .cpp import cexpr, CppPrinter
 
@@ -1913,7 +1915,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.grid_id = count()
         self.cuda = True
 
-        self._generate_load_kernel_once = functools.lru_cache(None)(self._generate_load_kernel_once_uncached)
+        self._generate_load_kernel_once = functools.lru_cache(None)(
+            self._generate_load_kernel_once_uncached
+        )
 
     def write_header(self):
         super().write_header()
