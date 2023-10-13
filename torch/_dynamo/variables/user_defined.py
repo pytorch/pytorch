@@ -24,6 +24,7 @@ from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
+    is_hashable,
     is_namedtuple_cls,
     is_utils_checkpoint,
     istype,
@@ -32,7 +33,6 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
-from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -586,9 +586,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
+        # TODO this should probably be merged with the dict handling
+
         index = (
             key.source
-            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            if is_hashable(key) and key.source is not None
             else key.as_python_constant()
         )
 

@@ -2266,6 +2266,7 @@ class TestCase(expecttest.TestCase):
                 torch.cuda.synchronize()
             except RuntimeError as rte:
                 print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
+                print(str(rte), file=sys.stderr)
                 return True
             return False
         else:

@@ -12,7 +12,13 @@ from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    HashableTracker,
+    identity,
+    is_hashable,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 from .functions import (
@@ -113,11 +119,11 @@ class SuperVariable(VariableTracker):
             inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
             and isinstance(self.objvar, variables.CustomizedDictVariable)
             and args
-            and variables.ConstDictVariable.is_valid_key(args[0])
+            and is_hashable(args[0])
             and self.objvar.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable.get_key(args[0])
+            k = HashableTracker(args[0])
 
             newval = collections.OrderedDict(self.objvar.items)
             newval[k] = args[1]

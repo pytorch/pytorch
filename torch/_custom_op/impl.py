@@ -78,13 +78,14 @@ def custom_op(
             you may provide us the schema string.
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import numpy as np
         >>> from torch import Tensor
         >>>
         >>> # Step 1: define the CustomOp.
         >>> # We need to provide the decorator a "prototype function"
         >>> # (a function with Python ellipses as the body).
-        >>> @custom_op("mylibrary::numpy_sin")
+        >>> @custom_op("my_library::numpy_sin")
         >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     ...
         >>>
@@ -94,12 +95,12 @@ def custom_op(
         >>> # Step 2: Register an implementation for various PyTorch subsystems
         >>>
         >>> # Register an implementation for CPU tensors
-        >>> @numpy_sin.impl('cpu'):
+        >>> @numpy_sin.impl('cpu')
         >>> def numpy_sin_impl_cpu(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Register an implementation for CUDA tensors
-        >>> @numpy_sin.impl('cuda'):
+        >>> @numpy_sin.impl('cuda')
         >>> def numpy_sin_impl_cuda(x):
         >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
         >>>
@@ -275,28 +276,29 @@ class CustomOp:
             device_types (str or Iterable[str]): the device type(s) to register the function for.
 
         Examples::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> import numpy as np
             >>> from torch import Tensor
             >>>
-            >>> @custom_op("mylibrary::numpy_sin")
-            >>> def numpy_sin(x: Tensor) -> Tensor:
+            >>> @custom_op("my_library::numpy_cos")
+            >>> def numpy_cos(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> # Register an implementation for CPU Tensors
-            >>> @numpy_sin.impl('cpu'):
-            >>> def numpy_sin_impl_cpu(x):
-            >>>     return torch.from_numpy(np.sin(x.numpy()))
+            >>> @numpy_cos.impl('cpu')
+            >>> def numpy_cos_impl_cpu(x):
+            >>>     return torch.from_numpy(np.cos(x.numpy()))
             >>>
             >>> # Register an implementation for CUDA Tensors
-            >>> @numpy_sin.impl('cuda'):
-            >>> def numpy_sin_impl_cuda(x):
-            >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
+            >>> @numpy_cos.impl('cuda')
+            >>> def numpy_cos_impl_cuda(x):
+            >>>     return torch.from_numpy(np.cos(x.cpu().numpy())).to(x.device)
             >>>
             >>> x = torch.randn(3)
-            >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
+            >>> numpy_cos(x)  # calls numpy_cos_impl_cpu
             >>>
             >>> x_cuda = x.cuda()
-            >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
+            >>> numpy_cos(x)  # calls numpy_cos_impl_cuda
 
         """
         if isinstance(device_types, str):
@@ -362,11 +364,11 @@ class CustomOp:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @custom_op('mylibrary::custom_linear')
-            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor):
+            >>> @custom_op('my_library::custom_linear')
+            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     ...
             >>>
-            >>> @custom_linear.impl_abstract():
+            >>> @custom_linear.impl_abstract()
             >>> def custom_linear_abstract(x, weight):
             >>>     assert x.dim() == 2
             >>>     assert weight.dim() == 2
@@ -378,11 +380,11 @@ class CustomOp:
             >>>     return (x @ weight.t()) + bias
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @custom_op('mylibrary::custom_nonzero')
+            >>> @custom_op('my_library::custom_nonzero')
             >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
-            >>> @custom_nonzero.impl_abstract():
+            >>> @custom_nonzero.impl_abstract()
             >>> def custom_nonzero_abstract(x):
             >>>     # Number of nonzero-elements is data-dependent.
             >>>     # Since we cannot peek at the data in an abstract impl,
@@ -394,7 +396,7 @@ class CustomOp:
             >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
             >>>
-            >>> @numpy_nonzero.impl(['cpu', 'cuda'])
+            >>> @custom_nonzero.impl(['cpu', 'cuda'])
             >>> def custom_nonzero_impl(x):
             >>>     x_np = to_numpy(x)
             >>>     res = np.stack(np.nonzero(x_np), axis=1)

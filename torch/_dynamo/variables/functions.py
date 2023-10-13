@@ -650,6 +650,7 @@ class TritonKernelVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from ..utils import HashableTracker
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
 
@@ -658,9 +659,14 @@ class TritonKernelVariable(VariableTracker):
         if grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")
 
+        def wrap_key(k):
+            return HashableTracker(variables.ConstantVariable.create(k))
+
         # Both for grid's meta as well as for the kernel, we need combined
         # args and kwargs normalized
-        normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        names = (wrap_key(name) for name in self.kernel.arg_names)
+        kwargs = {wrap_key(k): v for k, v in kwargs.items()}
+        normalized_args = {**dict(zip(names, args)), **kwargs}
         meta = ConstDictVariable(normalized_args, dict)
 
         # If the grid is a function, then lets execute it and convert it to
@@ -677,22 +683,18 @@ class TritonKernelVariable(VariableTracker):
             unimplemented(f"grid for the triton kernel is {type(grid)}")
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            prepare_triton_kernel_for_graph_node,
             triton_kernel_wrapper_mutation,
         )
-
-        fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
-        # FX graph needs __name__ and __module__ attributes
-        fn.__name__ = triton_kernel_wrapper_mutation.__name__
-        if not hasattr(fn, "__module__"):
-            # Super hacky but on AMD __module__ is not set
-            fn.__module__ = "itertools"
 
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
         tx.output.create_proxy(
             "call_function",
-            fn,
+            prepare_triton_kernel_for_graph_node(
+                triton_kernel_wrapper_mutation, self.kernel
+            ),
             (),
             {
                 "grid": grid,

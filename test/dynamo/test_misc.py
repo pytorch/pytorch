@@ -2853,11 +2853,21 @@ def fn():
         self.assertEqual(cnts.frame_count, 2)
 
     def test_const_dict_variable_python_type(self):
+        from torch._dynamo.utils import HashableTracker
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": ConstantVariable.create(10), "b": ConstantVariable.create(20)}
+        def create_key(x):
+            return HashableTracker(ConstantVariable.create(x))
+
+        d1 = {
+            create_key("a"): ConstantVariable.create(10),
+            create_key("b"): ConstantVariable.create(20),
+        }
         d2 = collections.OrderedDict(
-            [("x", ConstantVariable.create(12)), ("y", ConstantVariable.create(22))]
+            [
+                (create_key("x"), ConstantVariable.create(12)),
+                (create_key("y"), ConstantVariable.create(22)),
+            ]
         )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
@@ -6351,7 +6361,7 @@ def fn():
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
     def test_inline_dict_function_passed_as_arg(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(d, x, y):
             if d[x] is torch.float32:
                 return y.cos()
