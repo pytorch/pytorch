@@ -126,7 +126,7 @@ void foreach_binary_op_(
   void foreach_tensor_##NAME##_tensor_kernel_cuda_(                    \
       TensorList tensors, const Tensor& scalar, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors);                           \
-    if (!(can_use_fast_route(ArrayRef<TensorList>{tensors}, alpha) &&     \
+    if (!(can_use_fast_route(ArrayRef<TensorList>{tensors}, alpha) &&  \
           tensors[0].scalar_type() == scalar.scalar_type())) {         \
       return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(  \
           tensors, scalar, alpha);                                     \
@@ -138,7 +138,7 @@ void foreach_binary_op_(
   std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(      \
       TensorList tensors, const Tensor& scalar, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors);                           \
-    if (!(can_use_fast_route(ArrayRef<TensorList>{tensors}, alpha) &&     \
+    if (!(can_use_fast_route(ArrayRef<TensorList>{tensors}, alpha) &&  \
           tensors[0].scalar_type() == scalar.scalar_type())) {         \
       return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(   \
           tensors, scalar, alpha);                                     \
