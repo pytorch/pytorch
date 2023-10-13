@@ -267,17 +267,10 @@ class TestSparseSemiStructured(TestCase):
         ):
             sparse_result = torch.mm(A, B_sparse)
 
-<<<<<<< HEAD
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
         """
         This test is only needed for cuSPARSELt
-=======
-    @parametrize("dense_input_shape", [(128, 256)])
-    def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
-        """
-        Test sparse mam with int8 input with fp16 output for cuSPARSELt
->>>>>>> c84c50801ef ([wip] semi-structured sparse + torch.compile support)
         """
         if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             SparseSemiStructuredTensor._FORCE_CUTLASS = False
@@ -290,24 +283,6 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-<<<<<<< HEAD
-=======
-    def test_cslt_sparse_mm_int8_in_int32_out(self, device):
-        """
-        Test sparse mam with int8 input with int32 output for cuSPARSELt
-        """
-        if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
-            SparseSemiStructuredTensor._FORCE_CUTLASS = False
-            A = rand_sparse_semi_structured_mask(128, 256, dtype=torch.int8)
-            A_sparse = to_sparse_semi_structured(A)
-
-            B = torch.rand((128, 256), device=A_sparse.device).to(torch.int8)
-
-            dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.int32)
-            sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.int32)
-            assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
-
->>>>>>> c84c50801ef ([wip] semi-structured sparse + torch.compile support)
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize("inference_mode", [subtest(True), subtest(False)])
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)

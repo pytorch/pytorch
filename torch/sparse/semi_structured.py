@@ -266,10 +266,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         Calculates padding for dense tensor and pads tensor if necessary.
         If padding is not required, this function returns the original tensor.
         """
-<<<<<<< HEAD
-=======
-        return original_tensor
->>>>>>> c84c50801ef ([wip] semi-structured sparse + torch.compile support)
         # only 2d matmul
         assert original_tensor.dim() == 2
 
@@ -280,11 +276,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
         to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
         if to_pad_m or to_pad_n:
-<<<<<<< HEAD
             return torch.nn.functional.pad(original_tensor, (0, to_pad_n, 0, to_pad_m))
-=======
-            return original_tensor
->>>>>>> c84c50801ef ([wip] semi-structured sparse + torch.compile support)
         else:
             return original_tensor
 
