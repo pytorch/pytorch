@@ -87,7 +87,7 @@ class ConstDictVariable(VariableTracker):
             return TupleVariable(items, **options)
         elif name == "keys":
             assert not (args or kwargs)
-            return SetVariable(set(val.keys()), mutable_local=MutableLocal())
+            return SetVariable(val.keys(), mutable_local=MutableLocal())
         elif name == "values":
             assert not (args or kwargs)
             return TupleVariable(list(val.values()), **options)
