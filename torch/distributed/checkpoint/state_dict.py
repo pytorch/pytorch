@@ -73,6 +73,17 @@ def gc_context():
 
 @dataclass
 class StateDictOptions:
+    """
+    This specifies how get_state_dict/set_state_dict will work.
+
+    - ``fsdp_state_dict_type``: if the model is sharded by FSDP, what FSDP
+      state_dict type should be used.
+      The defalut value is SHARDED_STATE_DICT.
+
+    - ``ignore_frozen_params``: if the value is True, the returned state_dict
+      won't contain any parameters that are frozen -- the requires_grad is False.
+      The default value is False.
+    """
     # The default should be sharded_state_dict
     fsdp_state_dict_type: StateDictType = StateDictType.SHARDED_STATE_DICT
     # Whether to ignore the frozen parameters when getting the state_dict.
