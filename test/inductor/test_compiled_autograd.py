@@ -534,6 +534,7 @@ known_failing_tests = {
     "test_select_sum",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_unrelated_inputs",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
 }
 
 if not HAS_CUDA:
