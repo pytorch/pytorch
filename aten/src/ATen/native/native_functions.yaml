@@ -2582,6 +2582,9 @@
 
 - func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: flatten
+    NestedTensorCPU, NestedTensorCUDA: flatten_nested
 
 - func: flatten.named_out_dim(Tensor(a) self, int start_dim, int end_dim, Dimname out_dim) -> Tensor(a)
   variants: function, method

@@ -908,6 +908,11 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   return self.reshape(sizes);
 }
 
+Tensor flatten_nested(const Tensor& self, int64_t start_dim, int64_t end_dim) {
+  TORCH_CHECK(false, "flatten(): not yet implemented for nested tensors");
+  return Tensor();
+}
+
 Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.normal_(mean, std, gen);

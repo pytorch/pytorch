@@ -742,6 +742,10 @@ static std::tuple<Tensor, bool> batchify(
     const Tensor& input,
     const int64_t num_spatial_dims,
     const std::string& func_name) {
+  // assume NTs are always batched
+  if (input.is_nested()) {
+    return std::make_tuple(input, true);
+  }
   const auto dim_count_no_batch = num_spatial_dims + 1;
   const auto dim_count_batch = dim_count_no_batch + 1;
   const auto is_batched = (input.dim() == dim_count_batch);
