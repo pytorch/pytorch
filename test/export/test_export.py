@@ -10,7 +10,6 @@ from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint, Dim, export
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -37,7 +36,7 @@ class TestDynamismExpression(TestCase):
 
         def f(x):
             b = x.item()
-            constrain_as_size(b)
+            torch._constrain_as_size(b)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
@@ -67,8 +66,8 @@ class TestDynamismExpression(TestCase):
 
         def conflicting_constraints(x):
             b = x.item()
-            torch.export.constrain_as_size(b)
-            torch.export.constrain_as_value(b, min=4, max=5)
+            torch._constrain_as_size(b)
+            torch._constrain_as_value(b, min=4, max=5)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
@@ -889,7 +888,7 @@ class TestExport(TestCase):
     def test_constrain_value_with_no_default(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_value(n)
+            torch._constrain_as_value(n)
             return y + n
 
         ep = export(fn, (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3))))
@@ -899,7 +898,7 @@ class TestExport(TestCase):
     def test_constrain_value_with_symfloat(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_value(n)
+            torch._constrain_as_value(n)
             return y + n
 
         with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, "Constraining SymFloat or Symbool is nyi"):
@@ -908,7 +907,7 @@ class TestExport(TestCase):
     def test_constrain_size_in_eager(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_size(n)
+            torch._constrain_as_size(n)
             return y + n
 
         ep = export(fn, (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))))
@@ -918,8 +917,8 @@ class TestExport(TestCase):
     def test_constrain_size_with_constrain_value(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_value(n, 2, 10)
-            constrain_as_size(n)
+            torch._constrain_as_value(n, 2, 10)
+            torch._constrain_as_size(n)
             return y + n
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 10\]."):
@@ -934,27 +933,27 @@ class TestExport(TestCase):
 
         def case_1(x, y):
             n = x.item()
-            constrain_as_size(n, min=0)
+            torch._constrain_as_size(n, min=0)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_2(x, y):
             n = x.item()
-            constrain_as_size(n, min=0, max=6)
+            torch._constrain_as_size(n, min=0, max=6)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_3(x, y):
             n = x.item()
-            constrain_as_size(n, min=0, max=1)
+            torch._constrain_as_size(n, min=0, max=1)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_4(x, y):
             n = x.item()
-            constrain_as_size(n, min=2)
+            torch._constrain_as_size(n, min=2)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_5(x, y):
             n = x.item()
-            constrain_as_size(n, min=1)
+            torch._constrain_as_size(n, min=1)
             return y.sum() + torch.ones(n, 5).sum()
 
         ep = export(case_1, (torch.tensor(1), torch.ones(4, 5)))
@@ -1030,7 +1029,7 @@ class TestExport(TestCase):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_value(a, 4, 7)
+            torch._constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         ep = export(f, (torch.tensor([5]),))
@@ -1049,7 +1048,7 @@ class TestExport(TestCase):
     def test_export_with_inline_constraints_complex(self):
         def f(x):
             a = x.item()
-            constrain_as_value(a, 4, 7)
+            torch._constrain_as_value(a, 4, 7)
             empty = torch.empty((a, 4))
 
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)

@@ -45,6 +45,7 @@ using namespace torch::autograd;
 using at::Tensor;
 
 PyObject* THPFunctionClass = nullptr;
+PyObject* THPGradientEdgeClass = nullptr;
 
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
