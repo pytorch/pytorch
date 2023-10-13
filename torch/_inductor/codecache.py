@@ -492,6 +492,41 @@ def is_apple_clang() -> bool:
     return "Apple" in version_string.splitlines()[0]
 
 
+@functools.lru_cache(None)
+def _vec_isa_bool_dunder(vec_isa: VecISA) -> bool:
+    if config.cpp.vec_isa_ok is not None:
+        return config.cpp.vec_isa_ok
+
+    key, input_path = write(VecISA._avx_code, "cpp")
+    from filelock import FileLock
+
+    lock_dir = get_lock_dir()
+    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+    with lock:
+        output_path = input_path[:-3] + "so"
+        build_cmd = shlex.split(
+            cpp_compile_command(
+                input_path, output_path, warning_all=False, vec_isa=vec_isa
+            )
+        )
+        try:
+            # Check build result
+            compile_file(input_path, output_path, build_cmd)
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-c",
+                    VecISA._avx_py_load.replace("__lib_path__", output_path),
+                ],
+                stderr=subprocess.DEVNULL,
+                env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
+            )
+        except Exception as e:
+            return False
+
+        return True
+
+
 class VecISA:
     _bit_width: int
     _macro: str
@@ -501,7 +536,7 @@ class VecISA:
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
     # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
-    # like exp, pow, sin, cos and etc.
+    # like exp, pow, sin, cos etc.
     # But PyTorch and TorchInductor might use different compilers to build code. If
     # PyTorch uses gcc-7/g++-7 to build the release package, the libtorch_cpu.so
     # will not expose the Sleef* AVX512 symbols since gcc-7/g++-7 cannot pass
@@ -549,39 +584,8 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        key, input_path = write(VecISA._avx_code, "cpp")
-        from filelock import FileLock
-
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
-            )
-            try:
-                # Check build result
-                compile_file(input_path, output_path, build_cmd)
-                subprocess.check_call(
-                    [
-                        sys.executable,
-                        "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
-                    ],
-                    stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
-                )
-            except Exception as e:
-                return False
-
-            return True
+        return _vec_isa_bool_dunder(self)
 
 
 @dataclasses.dataclass
@@ -1298,6 +1302,34 @@ class CppCodeCache:
         return cls.cache[key]
 
 
+@functools.lru_cache(None)
+def _stack_frames_for_code(
+    path: str, lineno: int, linemaps: Dict[str, List[Tuple[Any, ...]]] = dict(),
+) -> Optional[List[Dict[str, Any]]]:
+    if path not in linemaps:
+        return None
+    # [(starting_line, <fx node>), ...]
+    lines, nodes = linemaps[path]
+    p = bisect_right(lines, lineno)
+    if p == 0:
+        return None
+    entry = nodes[p - 1]
+    if not entry:
+        return None
+
+    def parse_stack_trace(stack_trace: str) -> List[Dict[str, Any]]:
+        # ideally fx stores stack traces as data rather than a string
+        # but this is not along a performance critical path
+        regex = r'File "(.+)", line (\d+), in (.+)\n'
+        matches = re.findall(regex, stack_trace)
+        return [
+            {"filename": f, "line": int(l), "name": n}
+            for f, l, n in reversed(matches)
+        ]
+
+    return parse_stack_trace(entry)
+
+
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
@@ -1347,32 +1379,10 @@ class PyCodeCache:
         return cls.cache[key]
 
     @classmethod
-    @functools.lru_cache(None)
     def stack_frames_for_code(
         cls, path: str, lineno: int
     ) -> Optional[List[Dict[str, Any]]]:
-        if path not in cls.linemaps:
-            return None
-        # [(starting_line, <fx node>), ...]
-        lines, nodes = cls.linemaps[path]
-        p = bisect_right(lines, lineno)
-        if p == 0:
-            return None
-        entry = nodes[p - 1]
-        if not entry:
-            return None
-
-        def parse_stack_trace(stack_trace: str) -> List[Dict[str, Any]]:
-            # ideally fx stores stack traces as data rather than a string
-            # but this is not along a performance critical path
-            regex = r'File "(.+)", line (\d+), in (.+)\n'
-            matches = re.findall(regex, stack_trace)
-            return [
-                {"filename": f, "line": int(l), "name": n}
-                for f, l, n in reversed(matches)
-            ]
-
-        return parse_stack_trace(entry)
+        return _stack_frames_for_code(path, lineno, cls.linemaps)
 
 
 def cpp_wrapper_cache_dir(name: str) -> str:
@@ -1799,44 +1809,44 @@ def _async_compile_initializer(orig_ppid) -> None:
 _watchdog_thread: Optional[Thread] = None
 
 
+@functools.lru_cache(1)
+def _pool() -> ThreadPoolExecutor:
+    assert config.compile_threads > 1
+    return ThreadPoolExecutor(config.compile_threads)
+
+
+@functools.lru_cache(1)
+def _process_pool() -> ProcessPoolExecutor:
+    # ensure properties have been calculated before processes
+    # are forked
+    caching_device_properties()
+    assert config.compile_threads > 1
+    orig_ppid = os.getpid()
+
+    ctx = multiprocessing.get_context(config.worker_start_method)
+    pool = ProcessPoolExecutor(
+        config.compile_threads,
+        mp_context=ctx,
+        initializer=partial(_async_compile_initializer, orig_ppid),
+    )
+    # when this pool is created in a subprocess object, the normal exit handler
+    # doesn't run, and we need to register our own handler.
+    # exitpriority has to be high, because another one of the finalizers will
+    # kill the worker thread that sends the shutdown message to the workers...
+    multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+    return pool
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
-
-    @staticmethod
-    @functools.lru_cache(1)
-    def pool() -> ThreadPoolExecutor:
-        assert config.compile_threads > 1
-        return ThreadPoolExecutor(config.compile_threads)
-
-    @staticmethod
-    @functools.lru_cache(1)
-    def process_pool() -> ProcessPoolExecutor:
-        # ensure properties have been calculated before processes
-        # are forked
-        caching_device_properties()
-        assert config.compile_threads > 1
-        orig_ppid = os.getpid()
-
-        ctx = multiprocessing.get_context(config.worker_start_method)
-        pool = ProcessPoolExecutor(
-            config.compile_threads,
-            mp_context=ctx,
-            initializer=partial(_async_compile_initializer, orig_ppid),
-        )
-        # when this pool is created in a subprocess object, the normal exit handler
-        # doesn't run, and we need to register our own handler.
-        # exitpriority has to be high, because another one of the finalizers will
-        # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
-        return pool
 
     @classmethod
     def warm_pool(cls) -> None:
         if config.compile_threads <= 1:
             return
         _compile_start()
-        pool = cls.process_pool()
+        pool = _process_pool()
 
         # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
         # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
@@ -1865,13 +1875,13 @@ class AsyncCompile:
     def submit(cls, task: Callable[..., Any]) -> Any:
         if config.compile_threads <= 1:
             return task()
-        return cls.pool().submit(task)
+        return _pool().submit(task)
 
     @classmethod
     def map(cls, fn: Callable[..., Any], seq: List[Any]) -> List[Any]:
         if config.compile_threads <= 1 or len(seq) <= 1:
             return list(map(fn, seq))
-        return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
+        return [t.result() for t in [_pool().submit(fn, x) for x in seq]]
 
     def triton(
         self, kernel_name: str, source_code: str, device: str = "cuda"
@@ -1882,7 +1892,7 @@ class AsyncCompile:
             device_interface = get_interface_for_device(device)
             device = torch.device(device, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
-            future = self.process_pool().submit(
+            future = _process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device
             )
             return TritonFuture(kernel_name, source_code, future)
