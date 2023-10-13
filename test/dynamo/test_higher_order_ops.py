@@ -3420,6 +3420,25 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
+    def test_override_fallthrough_dispatch_key(self):
+        test_op = torch._ops.HigherOrderOperator("_fallthrough_test_only")
+        default_keys = torch._ops._HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS
+        self.assertTrue(
+            not any(test_op.non_fallthrough_keys.has(key) for key in default_keys)
+        )
+
+        foos = [lambda x=i: x for i, k in enumerate(default_keys)]
+        for foo, fallthrough_key in zip(foos, default_keys):
+            test_op.py_impl(fallthrough_key)(foo)
+
+        self.assertTrue(
+            all(test_op.non_fallthrough_keys.has(key) for key in default_keys)
+        )
+        self.assertEqual(
+            list(range(len(default_keys))),
+            [test_op.py_kernels[key]() for key in default_keys],
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

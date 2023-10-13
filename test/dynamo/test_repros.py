@@ -3067,6 +3067,60 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
+    def test_list_index(self):
+        for i, list_type in enumerate(
+            (
+                list,
+                tuple,
+                torch.Size,
+                collections.deque,
+                namedtuple("FourElems", "one two three four", defaults=[0, 0, 0, 0]),
+            )
+        ):
+            torch._dynamo.reset()
+            for index in ([], [2], [0, 3]):
+
+                def f(t):
+                    if i == 4:  # namedtuple
+                        xs = list_type(1, 2, 3, 4)
+                    else:
+                        xs = list_type([1, 2, 3, 4])
+                    res = xs.index(3, *index)
+                    return t + res
+
+                res = torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
+
+                self.assertEqual(res, torch.tensor([2.0]))
+
+    def test_list_index_not_found(self):
+        def f(t):
+            xs = ["bar", "foo", "baz", "buzz"]
+            res = xs.index("non-existent")
+            return t + res
+
+        # Raising ValueError from item not found is unsupported
+        with self.assertRaises(
+            torch._dynamo.exc.Unsupported,
+        ):
+            torch._dynamo.optimize(backend="eager", nopython=True)(f)(torch.zeros(1))
+
+    def test_list_index_tensor_unsupported(self):
+        for index in ([], [2], [0, 3]):
+
+            def f(t):
+                xs = [torch.tensor([i]) for i in range(4)]
+                res = xs.index(torch.tensor([2]), *index)
+                return t + res
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError, "Dynamic control flow is not supported"
+            ):
+                torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
+
     def test_hf_xsoftmax_inference(self):
         def fn(input, mask):
             return XSoftmax.apply(input + 1, mask, 1) + 2
