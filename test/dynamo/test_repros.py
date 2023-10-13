@@ -3516,6 +3516,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertTrue(same(fn(x), opt_fn(x)))
 
+    def test_add_sub_alpha_out(self):
+        inp = torch.randn(2, 3, 4)
+        other = 1
+        alpha = 2
+        for op in [torch.add, torch.sub]:
+            out = torch.zeros(2, 3, 4)
+            compile_out = torch.zeros(2, 3, 4)
+            op(inp, other, alpha=alpha, out=out)
+            compiled_fn = torch.compile(op, dynamic=True)
+            compiled_fn(inp, other, alpha=alpha, out=compile_out)
+            self.assertTrue(same(out, compile_out))
+
+    def test_addr_alpha_beta_out(self):
+        inp = torch.randn(2, 3)
+        vec1 = torch.randn(2)
+        vec2 = torch.randn(3)
+        alpha = 2
+        beta = 5
+
+        out = torch.zeros(2, 3)
+        compile_out = torch.zeros(2, 3)
+
+        torch.addr(inp, vec1, vec2, alpha=alpha, beta=beta, out=out)
+        compiled_fn = torch.compile(torch.addr, dynamic=True)
+        compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
+        self.assertTrue(same(out, compile_out))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

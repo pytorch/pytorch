@@ -60,7 +60,6 @@ from ..utils import (
     clone_input,
     get_fake_value,
     get_static_address_type,
-    getfile,
     global_key_name,
     is_namedtuple,
     is_typing,
@@ -534,12 +533,12 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(getfile(value), allow_torch=True)
+            and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
                 value,
-                skipfiles.check_verbose(getfile(value), allow_torch=True).reason,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
@@ -1036,23 +1035,6 @@ class VariableBuilder:
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
-
-        # We have accessed the SAME tensor from a different source.  In some
-        # situations, it doesn't matter if you have the same tensor identity
-        # or not, but we are unable to do this fine-grained tracking.  So
-        # instead we just say, if x is y, then to successfully reuse this
-        # compiled tensor again, you must have x is y again.  Negative
-        # aliases, that is, that x is not y, are IMPLICITLY checked as part of
-        # the code cache matching process, you don't need to explicitly
-        # generate a guard for it (nor would you want to, you need O(n^2)
-        # pairwise 'is not' tests to do it.)
-        if value in self.tx.output.real_value_tensor_positive_aliases:
-            stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
-            # TODO(voz): Decently common pattern, refactor at some point.
-            dup_guard = self._make_dupe_guard(stored_value)
-            if dup_guard:
-                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
-            return stored_value
 
         # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
         # When we've discovered an untracked tensor, then we actually need
