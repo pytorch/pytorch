@@ -113,79 +113,64 @@ def cache_dir() -> str:
     return cache_dir
 
 
-def cpp_wrapper_cache_dir(name: str) -> str:
-    cu_str = (
-        "cpu"
-        if torch.version.cuda is None
-        else f'cu{torch.version.cuda.replace(".", "")}'
-    )
-    python_version = f"py{sys.version_info.major}{sys.version_info.minor}"
-    build_folder = f"{python_version}_{cu_str}"
+@functools.lru_cache(None)
+def _get_system() -> Dict[str, Any]:
+    try:
+        import triton
 
-    cpp_wrapper_dir = os.path.join(cache_dir(), build_folder)
-    cpp_wrapper_build_directory = os.path.join(cpp_wrapper_dir, name)
-    os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
-    return cpp_wrapper_build_directory
+        triton_version = triton.__version__
+    except ModuleNotFoundError:
+        triton_version = None
+
+    try:
+        system: Dict[str, Any] = {
+            "device": {
+                "name": torch.cuda.get_device_properties(
+                    torch.cuda.current_device()
+                ).name,
+            },
+            "version": {
+                "cuda": torch.version.cuda,
+                "triton": triton_version,
+            },
+            "other": {
+                "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            },
+        }
+    except (AssertionError, RuntimeError):
+        # If cuda is not installed, none of the above config is relevant.
+        system = {}
+
+    system["hash"] = hashlib.sha256(
+        json.dumps(system, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    return system
+
+
+@functools.lru_cache(None)
+def _get_local_cache_path() -> Path:
+    return Path(os.path.join(cache_dir(), "cache", _get_system()["hash"]))
+
+
+@functools.lru_cache(None)
+def _get_global_cache_path() -> Optional[Path]:
+    return (
+        Path(os.path.join(config.global_cache_dir, _get_system()["hash"]))
+        if config.global_cache_dir is not None
+        else None
+    )
 
 
 class CacheBase:
-    @staticmethod
-    @functools.lru_cache(None)
-    def get_system() -> Dict[str, Any]:
-        try:
-            import triton
-
-            triton_version = triton.__version__
-        except ModuleNotFoundError:
-            triton_version = None
-
-        try:
-            system: Dict[str, Any] = {
-                "device": {
-                    "name": torch.cuda.get_device_properties(
-                        torch.cuda.current_device()
-                    ).name,
-                },
-                "version": {
-                    "cuda": torch.version.cuda,
-                    "triton": triton_version,
-                },
-                "other": {
-                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-                },
-            }
-        except (AssertionError, RuntimeError):
-            # If cuda is not installed, none of the above config is relevant.
-            system = {}
-
-        system["hash"] = hashlib.sha256(
-            json.dumps(system, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-
-        return system
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def get_local_cache_path() -> Path:
-        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def get_global_cache_path() -> Optional[Path]:
-        return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
-            if config.global_cache_dir is not None
-            else None
-        )
-
     def __init__(self) -> None:
         if not torch.cuda.is_available():
             return
 
-        self.system = CacheBase.get_system()
+        self.system = _get_system()
 
-        self.local_cache_path = CacheBase.get_local_cache_path()
-        self.global_cache_path = CacheBase.get_global_cache_path()
+        self.local_cache_path = _get_local_cache_path()
+        self.global_cache_path = _get_global_cache_path()
 
     def get_local_cache(self) -> Dict[str, Any]:
         if not self.local_cache_path.is_file():
@@ -228,15 +213,16 @@ class LocalCache(CacheBase):
         self.update_local_cache(cache)
 
 
-class PersistentCache(CacheBase):
-    @functools.lru_cache(None)
-    def get_global_cache(self):
-        if self.global_cache_path is None or not self.global_cache_path.is_file():
-            return {}
-        with open(self.global_cache_path) as global_cache_fp:
-            global_cache = json.load(global_cache_fp)
-        return global_cache["cache"]
+@functools.lru_cache(None)
+def _get_global_cache(global_cache_path: Optional[Path]):
+    if global_cache_path is None or not global_cache_path.is_file():
+        return {}
+    with open(global_cache_path) as global_cache_fp:
+        global_cache = json.load(global_cache_fp)
+    return global_cache["cache"]
 
+
+class PersistentCache(CacheBase):
     def lookup(
         self,
         choices: List[ChoiceCaller],
@@ -282,7 +268,9 @@ class PersistentCache(CacheBase):
             # check local cache first since it is data specific to the current machine
             if not check_cache(local_cache) and not (
                 use_global_cache()
-                and check_cache(self.get_global_cache(), callback=log_stats)
+                and check_cache(
+                    _get_global_cache(self.global_cache_path), callback=log_stats
+                )
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
@@ -306,7 +294,7 @@ class PersistentCache(CacheBase):
                 log_vals(timings_to_log)
         elif use_global_cache():
             # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=log_stats)
+            check_cache(_get_global_cache(self.global_cache_path), callback=log_stats)
             # may have a partial cache hit, where not everything is benchmarked
 
         return timings
@@ -1385,6 +1373,21 @@ class PyCodeCache:
             ]
 
         return parse_stack_trace(entry)
+
+
+def cpp_wrapper_cache_dir(name: str) -> str:
+    cu_str = (
+        "cpu"
+        if torch.version.cuda is None
+        else f'cu{torch.version.cuda.replace(".", "")}'
+    )
+    python_version = f"py{sys.version_info.major}{sys.version_info.minor}"
+    build_folder = f"{python_version}_{cu_str}"
+
+    cpp_wrapper_dir = os.path.join(cache_dir(), build_folder)
+    cpp_wrapper_build_directory = os.path.join(cpp_wrapper_dir, name)
+    os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
+    return cpp_wrapper_build_directory
 
 
 class CppWrapperCodeCache:
