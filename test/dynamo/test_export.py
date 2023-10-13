@@ -22,7 +22,6 @@ from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
 from torch._export import dynamic_dim
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -2183,7 +2182,7 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
-    def test_dataclass_input(self):
+    def test_dataclass_input_output(self):
         from dataclasses import dataclass
 
         @dataclass
@@ -2196,11 +2195,22 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "graph-captured input #0.*Tensor.*not among original args.*Tensors",
+            "graph-captured input #1, of type .*Tensor.*, "
+            "is not among original inputs of types: .*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
             )
+
+        def f(x, y):
+            return Tensors(x=x.sin(), y=y.cos())
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #1 is .*Tensors.*, "
+            "but only the following types are supported",
+        ):
+            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
     def test_none_out(self):
         def f(x, y):
@@ -2208,9 +2218,40 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "traced result #0.*NoneType.*not among graph-captured outputs.*or original args.*Tensor.*Tensor",
+            "original output #1 is None, but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+
+    def test_primitive_constant_output(self):
+        def foo(x):
+            # return a constant of primitive type
+            y = 5
+            return y * x, y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #2 is 5, but only the following types are supported",
+        ):
+            torch.export.export(foo, (torch.tensor(3),))
+
+        def bar(x, y):
+            return y * x, y
+
+        # new behavior
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #2 is 5, but only the following types are supported",
+        ):
+            torch.export.export(bar, (torch.tensor(3), 5))
+
+        def qux(x, y):
+            return y * x, y - 1
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "original output #2 is 4, but only the following types are supported",
+        ):
+            torch.export.export(qux, (torch.tensor(3), 5))
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
@@ -2449,7 +2490,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            constrain_as_size(b)
+            torch._constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2476,7 +2517,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_tensor(self):
         def f(x):
             b = x.nonzero()
-            constrain_as_value(b.shape[0], min=2, max=5)
+            torch._constrain_as_value(b.shape[0], min=2, max=5)
             return b
 
         y = torch.tensor([8, 8, 6])
@@ -2498,7 +2539,7 @@ def forward(self, x):
 
         def f(x, y):
             b = x.item()
-            constrain_as_size(b)
+            torch._constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])

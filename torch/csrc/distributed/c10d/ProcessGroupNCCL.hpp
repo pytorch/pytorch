@@ -46,6 +46,9 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+constexpr auto kProcessGroupNCCLDefaultTimeout =
+    std::chrono::milliseconds(10 * 60 * 1000);
+
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
 // CleanUpOnly: just clean up collectives and abort communicators without
@@ -164,7 +167,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
-    float getDuration() const override;
+    c10::optional<float> getDuration() const override;
 
     uint64_t getSequencenumber() const override;
 
@@ -612,10 +615,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void runHookLoop();
 
   // Desync debug helper
-  void logWorkStart(WorkNCCL& work);
+  void logWorkStart(WorkNCCL& work, bool emitDesyncInfo);
 
   // Desync debug helper
-  void logWorkEnd(WorkNCCL& work);
+  void logWorkEnd(WorkNCCL& work, bool emitDesyncInfo);
 
  protected:
   static const int64_t kWatchdogThreadSleepMillis;

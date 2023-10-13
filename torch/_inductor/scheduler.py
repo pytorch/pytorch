@@ -317,6 +317,12 @@ class BaseSchedulerNode:
                                 ir.AliasedLayout,
                             ),
                         )
+                        and not (
+                            isinstance(
+                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
+                            )
+                            and input_node.node.has_aliasing()
+                        )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
@@ -690,20 +696,21 @@ class SchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def _get_atomic_add_buffers(self) -> Set[str]:
         buffers_store_as_atomic_add = set()
-        for node in self._body.get_nodes():
-            if (
-                node.op == "call_method"
-                and node.target == "store"
-                and (
-                    ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
-                    or (len(node.args) == 5 and node.args[4] == "atomic_add")
-                )
-            ):
-                buffers_store_as_atomic_add.add(
-                    node.kwargs["name"]
-                    if "name" in node.kwargs
-                    else (node.args[1] if len(node.args) >= 2 else "")
-                )
+        if isinstance(self._body, ir.LoopBody):
+            for node in self._body.get_nodes():
+                if (
+                    node.op == "call_method"
+                    and node.target == "store"
+                    and (
+                        ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
+                        or (len(node.args) == 5 and node.args[4] == "atomic_add")
+                    )
+                ):
+                    buffers_store_as_atomic_add.add(
+                        node.kwargs["name"]
+                        if "name" in node.kwargs
+                        else (node.args[1] if len(node.args) >= 2 else "")
+                    )
         return buffers_store_as_atomic_add
 
     def has_atomic_add(self, check_buf):
@@ -1239,8 +1246,11 @@ class Scheduler:
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
-                assert s not in unbacked_symbol_to_origin_node
-                unbacked_symbol_to_origin_node[s] = node
+                # Pick the first definer as canonical.  There may be multiple
+                # because if a MultiOutputLayout buffer propagates an unbacked
+                # symint to multiple outputs, they will all claim to def it.
+                if s not in unbacked_symbol_to_origin_node:
+                    unbacked_symbol_to_origin_node[s] = node
 
             # if a kernel takes unbacked symints, register dependencies
             for s in node.node.get_unbacked_symbol_uses():
@@ -1509,7 +1519,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heursitic would be to use live
+        A better but difficult to implement heurisitic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of

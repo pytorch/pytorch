@@ -8,7 +8,8 @@ basic_gnn_edgecnn,pass,0
 basic_gnn_gcn,pass,6
 basic_gnn_gin,pass,0
 basic_gnn_sage,pass,0
-cm3leon_generate,pass,7
+clip,pass_due_to_skip,0
+cm3leon_generate,pass,5
 dcgan,pass,0
 dlrm,pass,0
 doctr_det_predictor,pass,2
@@ -31,7 +32,6 @@ mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
 moco,pass,11
-nanogpt,pass,0
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,32
 phlippe_densenet,pass,0
