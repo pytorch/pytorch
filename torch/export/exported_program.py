@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import math
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
@@ -643,56 +644,78 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
-        import math
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _convert_range_to_int,
         )
-        placeholders = [p for p in self.graph.nodes if p.op == "placeholder" and p.name in self.graph_signature.user_inputs]
+
+        def check(cond, msg):
+            if not cond:
+                # TODO(avik): maybe add more context, e.g., graph signature
+                raise RuntimeError(msg)
+
+        placeholders = [
+            p
+            for p in self.graph.nodes
+            if p.op == "placeholder" and p.name in self.graph_signature.user_inputs
+        ]
         n_args, n_placeholders = len(args), len(placeholders)
-        assert n_args == n_placeholders, f"unexpected number of inputs (expected {n_placeholders}, got {n_args})"
+        check(
+            n_args == n_placeholders,
+            f"unexpected number of inputs (expected {n_placeholders}, got {n_args})",
+        )
+        # NOTE: export already guarantees that the same symbol is used in metadata
+        # for all InputDims related by equality constraints, so we can just unify
+        # symbols with given input dimension values to check equality constraints.
+        # TODO(avik): remove equality constraints from ExportedProgram
         unification_map = {}
         for arg, p in zip(args, placeholders):
-            if isinstance(arg, torch.Tensor) and isinstance(p.meta["val"], torch.Tensor):
+            p_val = p.meta["val"]
+            if isinstance(arg, torch.Tensor) and isinstance(p_val, torch.Tensor):
                 p_shape = p.meta['tensor_meta'].shape
                 n_arg_shape, n_p_shape = len(arg.shape), len(p_shape)
-                assert n_arg_shape == n_p_shape, f"unexpected number of dimensions in input {p.name}.shape (expected {n_p_shape}, got {n_arg_shape})"
+                check(
+                    n_arg_shape == n_p_shape,
+                    f"unexpected number of dimensions in input {p.name}.shape "
+                    f"(expected {n_p_shape}, got {n_arg_shape})",
+                )
                 for j, (arg_dim, p_dim) in enumerate(zip(arg.shape, p_shape)):
                     if isinstance(p_dim, torch.SymInt):
                         if p_dim.node.expr in unification_map:
                             existing_dim = unification_map[p_dim.node.expr]
-                            assert arg_dim == existing_dim, f"expected input {p.name}.shape[{j}] to be equal to {existing_dim}, but got {arg_dim}"
+                            check(
+                                arg_dim == existing_dim,
+                                f"expected input {p.name}.shape[{j}] to be equal to "
+                                f"{existing_dim}, but got {arg_dim}",
+                            )
                         else:
                             unification_map[p_dim.node.expr] = arg_dim
-                        min_val, max_val = _convert_range_to_int(self.range_constraints[p_dim.node.expr])
+                        min_val, max_val = _convert_range_to_int(
+                            self.range_constraints[p_dim.node.expr]
+                        )
+                        # NOTE: we allow dimensions to be 0/1 at runtime
                         if min_val > 2:
-                            assert arg_dim >= min_val, f"expected input {p.name}.shape[{j}] to be >= {min_val}, but got {arg_dim}"
+                            check(
+                                arg_dim >= min_val,
+                                f"expected input {p.name}.shape[{j}] to be >= "
+                                f"{min_val}, but got {arg_dim}",
+                            )
                         if max_val < math.inf:
-                            assert arg_dim <= max_val, f"expected input {p.name}.shape[{j}] to be <= {max_val}, but got {arg_dim}"
+                            check(
+                                arg_dim <= max_val,
+                                f"expected input {p.name}.shape[{j}] to be <= "
+                                f"{max_val}, but got {arg_dim}",
+                            )
                     else:
-                        assert arg_dim == p_dim, f"expected input {p.name}.shape[{j}] to be equal to {p_dim}, but got {arg_dim}"
-
-
-    def _check_input_constraints_graph(self, *args):
-
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForConstraintsPass,
-        )
-
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
-        for p in self.graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            self.range_constraints,
-            self.equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
+                        check(
+                            arg_dim == p_dim,
+                            f"expected input {p.name}.shape[{j}] to be equal to "
+                            f"{p_dim}, but got {arg_dim}",
+                        )
+            elif isinstance(arg, (int, float, str)) and isinstance(p_val, (int, float, str)):
+                check(
+                    type(arg) == type(p_val) and arg == p_val,
+                    f"expected input {p.name} to be equal to {p_val}, but got {arg}",
+                )
 
     def _validate(self):
         from torch._export.verifier import Verifier, verify_exported_program_signature
