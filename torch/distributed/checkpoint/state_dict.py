@@ -359,7 +359,7 @@ def _get_model_state_dict(
 
 def _load_model_state_dict(
     model: nn.Module,
-    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
+    state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> None:
     if not info.handle_model or not state_dict:
@@ -594,8 +594,7 @@ def get_state_dict(
             `StateDictOptions` for the details.
 
     Returns:
-        ``Tuple`` with the model state_dict as the first element and optimizer
-        state_dict as the second element:
+        ``Tuple`` that contain model state_dict and optimizer state_dict:
             The model state_dict will be empty if `optim_only` is True.
             The optimizer state_dict will be empty if optimizers` is empty.
     """
@@ -621,6 +620,36 @@ def get_state_dict(
         optim_state_dict = _get_optim_state_dict(model, optimizers, info)
         _verify_state_dict(model_state_dict, optim_state_dict, info)
         return model_state_dict, optim_state_dict
+
+
+def _unflatten_model_state_dict(
+    model: nn.Module,
+    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
+) -> Dict[str, ValueType]:
+    if not state_dict:
+        return {}
+
+    if isinstance(next(iter(state_dict.keys())), nn.Module):
+        new_state_dict: Dict[str, ValueType] = {}
+        for submodule, sub_state_dict in state_dict.items():
+            for name, m in model.named_modules():
+                if m != submodule:
+                    continue
+
+                fqns = _get_fqns(model, name)
+                assert (
+                    len(fqns) == 1
+                ), "FQNs for a submodule should only have 1 element"
+                prefix = f"{next(iter(fqns))}."
+                new_state_dict.update(
+                    {
+                        prefix + subfqn: value
+                        for subfqn, value in sub_state_dict.items()
+                    }
+                )
+        return new_state_dict
+    else:
+        return cast(Dict[str, ValueType], state_dict)
 
 
 def set_state_dict(
@@ -651,7 +680,7 @@ def set_state_dict(
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
         model_state_dict: (Union[
-            None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+        None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
            the model state_dict to load. If the key of the ``model_state_dict``
            is nn.Module, the key is a submodule of ``model`` and the value should
            be the state_dict of the submodule. When loading the state_dict,
@@ -666,7 +695,9 @@ def set_state_dict(
         None
     """
 
-    model_state_dict = model_state_dict if model_state_dict else {}
+    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
+        model, model_state_dict
+    ) if model_state_dict else {}
     optim_state_dict = optim_state_dict if optim_state_dict else {}
     with gc_context():
         optimizers = (
@@ -681,26 +712,6 @@ def set_state_dict(
         info = _verify_options(
             model, optimizers, optim_only=not model_state_dict, options=options
         )
-
-        if model_state_dict and isinstance(
-            next(iter(model_state_dict.keys())), nn.Module
-        ):
-            new_state_dict: Dict[str, ValueType] = {}
-            for submodule, sub_state_dict in model_state_dict.items():
-                for name, m in model.named_modules():
-                    if m == submodule:
-                        fqns = _get_fqns(model, name)
-                        assert (
-                            len(fqns) == 1
-                        ), "FQNs for a submodule should only have 1 element"
-                        prefix = f"{next(iter(fqns))}."
-                        new_state_dict.update(
-                            {
-                                prefix + subfqn: value
-                                for subfqn, value in sub_state_dict.items()
-                            }
-                        )
-            model_state_dict = new_state_dict
 
         _verify_state_dict(model_state_dict, optim_state_dict, info)
         _load_model_state_dict(model, model_state_dict, info)
@@ -755,8 +766,8 @@ def _patch_model_state_dict(
         options=options,
     )
 
-    def load_state_dict_call():
-        _load_state_dict_call(state_dict=state_dict)[1]
+    def load_state_dict_call(state_dict: Dict[str, Any]):
+        _load_state_dict_call(model_state_dict=state_dict)[1]
 
     model.load_state_dict = load_state_dict_call
 
