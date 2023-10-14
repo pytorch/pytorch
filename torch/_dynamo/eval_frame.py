@@ -290,12 +290,9 @@ dynamo_config_guard_ignorelist = {
     "debug_dir_root",
 }
 
-dynamo_config_guard_nonserializable_list = {
-    # "is_fbcode",  # function def (removed by ConfigModule visit)
-    # "traceable_tensor_subclasses",
-}
-
 dynamo_config_guard_string_serialization_list = {
+    # "is_fbcode",  # function def (removed by ConfigModule visit)
+    "skipfiles_inline_module_allowlist",  # cannot pickle module (unused)
     "constant_functions",  # PyCapsules (i.e. function ptrs)
     "traceable_tensor_subclasses",  # Cannot pickle local object
 }
@@ -336,10 +333,9 @@ def get_config_and_hash(dynamic=None):
     dynamo_config = config.get_config_copy()
     for k in dynamo_config_guard_ignorelist:
         dynamo_config.pop(k)
-    for k in dynamo_config_guard_nonserializable_list:
-        dynamo_config.pop(k)
     for key in dynamo_config_guard_string_serialization_list:
         dynamo_config.update({key: str(dynamo_config[key])})
+        print({key: repr(dynamo_config[key])})
 
     # Set appropriate dynamo config flags
     if dynamic is None:
