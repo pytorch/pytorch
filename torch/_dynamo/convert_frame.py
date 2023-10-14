@@ -388,7 +388,7 @@ def convert_frame_assert(
             },
         )
 
-        with config.patch(patch_config_if_changed()):
+        with config.patch(_patch_config_if_changed()):
             compiled_product = _compile(
                 frame.f_code,
                 frame.f_globals,
@@ -415,7 +415,7 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
-def patch_config_if_changed():
+def _patch_config_if_changed():
     patch: Dict[str, Any] = {}
     eval_frame = torch._dynamo.eval_frame
     eval_frame._maybe_init_guarded_config_cache()
