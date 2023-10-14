@@ -1,5 +1,5 @@
 from ._ops import OpOverload
-from typing import Any, Optional, Set, List
+from typing import Any, Optional, Set, List, Union, Sequence
 import traceback
 import torch
 import weakref
@@ -11,6 +11,7 @@ __all__ = [
     'define',
     'fallthrough_kernel',
     'impl_abstract',
+    'impl_device',
     'get_ctx',
 ]
 
@@ -201,8 +202,8 @@ def define(name, schema, *, lib=None):
         >>> # Define the operator
         >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for DispatchKey::CPUj
-        >>> @torch.library.impl("mylibrary::sin", "CPU")
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl_device("mylibrary::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
@@ -242,6 +243,10 @@ def impl(name, dispatch_key, func=None, *, lib=None):
     torch.library.impl is a low-level API to directly register
     an implementation for an operator for some DispatchKey in PyTorch.
 
+    When possible, please prefer to use higher-level APIs, like
+    :func:`torch.library.impl_device`, :func:`torch.library.impl_abstract`.
+    These have more predictable behavior.
+
     This API may be used as a function or a decorator (see examples)
 
     Args:
@@ -275,6 +280,59 @@ def impl(name, dispatch_key, func=None, *, lib=None):
         else:
             use_lib = lib
         use_lib.impl(name, func, dispatch_key)
+
+    if func is None:
+        return register
+    else:
+        register(func)
+
+
+def _device_type_to_key(device_type: str) -> str:
+    if device_type == "default":
+        # This is technically not correct, because although all device_type
+        # DispatchKeys are included in CompositeExplicitAutograd,
+        # not everything in CompositeExplicitAutograd is associated with a
+        # device_type. I don't really care that much about the difference.
+        return "CompositeExplicitAutograd"
+    return torch._C._dispatch_key_for_device(device_type)
+
+
+def impl_device(
+        name: str,
+        types: Union[str, Sequence[str]],
+        func=None,
+        *,
+        lib=None):
+    """Register an implementation for a device type for this operator.
+
+    You may pass "default" for ``types`` to register this implementation as the
+    default implementation for ALL device types.
+    Please only use this if the implementation truly supports all device types;
+    for example, this is true if it is a composition of built-in PyTorch operators.
+
+    Args:
+        name (str): Should be a string that looks like "namespace::operator_name".
+        types (str | Sequence[str]): The device types to register an impl to.
+        lib (Optional[Library]): If provided, the lifetime of this registration
+            will be tied to the lifetime of the Library object.
+
+    """
+
+    if isinstance(types, str):
+        types = (types,)
+    keys = set({})
+    for typ in types:
+        keys.add(_device_type_to_key(typ))
+
+    def register(func):
+        namespace, _ = torch._library.utils.parse_namespace(name)
+        if lib is None:
+            use_lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(use_lib)
+        else:
+            use_lib = lib
+        for key in keys:
+            use_lib.impl(name, func, key)
 
     if func is None:
         return register
@@ -320,8 +378,9 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>> from torch import Tensor
         >>>
         >>> # Example 1: an operator without data-dependent output shape
-        >>> lib = torch.library.Library("mylib", "FRAGMENT")
-        >>> lib.define("mylib::custom_linear(Tensor x, Tensor weight, Tensor bias) -> Tensor")
+        >>> torch.library.define(
+        >>>     "mylib::custom_linear",
+        >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylib::custom_linear")
         >>> def custom_linear_abstract(x, weight):
@@ -335,8 +394,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     return (x @ weight.t()) + bias
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> lib = torch.library.Library("mylib", "FRAGMENT")
-        >>> lib.define("mylib::custom_nonzero(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::custom_nonzero", "(Tensor x) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylib::custom_nonzero")
         >>> def custom_nonzero_abstract(x):
@@ -350,7 +408,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
-        >>> @torch.library.impl(lib, "custom_nonzero", "CPU")
+        >>> @torch.library.impl_backend("mylib::custom_nonzero", "CPU")
         >>> def custom_nonzero_cpu(x):
         >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)

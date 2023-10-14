@@ -772,6 +772,16 @@ void initDispatchBindings(PyObject* module) {
     return at::functionalization::impl::commit_update(a);
   });
 
+  m.def("_dispatch_key_for_device", [](const std::string& device_type) {
+    auto device = c10::Device(device_type);
+    TORCH_CHECK(
+        !device.has_index(),
+        "Expected device_type string to not a device index; got ",
+        device_type);
+    return c10::toString(
+        c10::computeDispatchKey(c10::nullopt, c10::nullopt, device));
+  });
+
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
     return (
