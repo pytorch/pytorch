@@ -29,12 +29,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
-    def _check_module(self, m1, m2, check_grad=False, rank0_only_params=None):
-        rank0_only_params = [] if rank0_only_params is None else rank0_only_params
+    def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
-            if self.rank != 0 and name in rank0_only_params:
-                continue
             self.assertTrue(name in named_parameters)
             param_m1 = named_parameters[name]
             if check_grad:
@@ -108,7 +105,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         # Ensure model weights are still same after update.
         # Due to the trick we use for Partial aggregation, we only check the weight when local_rank = 0.
-        self._check_module(model, model_tp, rank0_only_params=["net2.bias"])
+        self._check_module(model, model_tp)
 
         inp = torch.rand(*inp_size, device=self.device_type)
         output = model(inp)

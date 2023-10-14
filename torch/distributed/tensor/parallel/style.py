@@ -390,7 +390,7 @@ def make_output_reshard_tensor(
     return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined, misc]
 
 
-def _is_redistribute_necessary(
+def _needs_redistribute(
     dst_placements: Tuple[Placement, ...], dtensor: DTensor
 ) -> bool:
     """
@@ -413,7 +413,7 @@ def _get_prepare_input(
         if isinstance(t, DTensor):
             return (
                 t
-                if _is_redistribute_necessary(dst_placements, t)
+                if _needs_redistribute(dst_placements, t)
                 else t.redistribute(device_mesh, dst_placements)
             )
         elif isinstance(t, torch.Tensor):
@@ -422,7 +422,7 @@ def _get_prepare_input(
             )
             return (
                 dtensor
-                if _is_redistribute_necessary(dst_placements, dtensor)
+                if _needs_redistribute(dst_placements, dtensor)
                 else dtensor.redistribute(device_mesh, dst_placements)
             )
         else:
@@ -491,7 +491,7 @@ def _get_prepare_output(
         if isinstance(t, DTensor):
             dtensor = (
                 t
-                if _is_redistribute_necessary(dst_placements, t)
+                if _needs_redistribute(dst_placements, t)
                 else t.redistribute(device_mesh, dst_placements)
             )
             return dtensor.to_local() if use_local_output else dtensor
@@ -570,10 +570,14 @@ class RowwiseParallel(ParallelStyle):
             output_layouts (Union[Placement, Tuple[Placement, ...]]):
                 The layout of input tensor(s) which created DTensor will be redistributed to.
             use_local_output (bool):
-                Whether to convert the DTensor to local tensor.
+                Whether to convert the DTensor to local :class:`torch.Tensor`.
 
         Returns:
             None.
+
+        .. warning::
+            RowwiseParallel now only support ``nn.Linear``. Users can compose it with ColwiseParallel
+            to achieve the sharding of more complicated modules.
 
         Example::
         >>> # xdoctest: +SKIP(failing)
@@ -581,7 +585,7 @@ class RowwiseParallel(ParallelStyle):
         >>> ...
         >>> parallelize_plan = {
         >>>     "wo": RowwiseParallel(),   # The input of Linear will be converted to Sharded DTensor
-        >>>                                # and we will return a replicate tensor as output.
+        >>>                                # and we will return a replicate :class:`torch.Tensor` as output.
         >>>     ...
         >>> }
         >>> parallelize_module(
@@ -634,10 +638,14 @@ class ColwiseParallel(ParallelStyle):
             output_layouts (Union[Placement, Tuple[Placement, ...]]):
                 The layout of input tensor(s) which created DTensor will be redistributed to.
             use_local_output (bool):
-                Whether to convert the DTensor to local tensor.
+                Whether to convert the DTensor to local :class:`torch.Tensor`.
 
         Returns:
             None.
+
+        .. warning::
+            ColwiseParallel now only support ``nn.Linear`` and ``nn.Embedding``. Users can compose
+            it with RowwiseParallel to achieve the sharding of more complicated modules.
 
         Example::
         >>> # xdoctest: +SKIP(failing)
@@ -645,7 +653,7 @@ class ColwiseParallel(ParallelStyle):
         >>> ...
         >>> parallelize_plan = {
         >>>     "w1": ColwiseParallel(),   # The input of Linear will be converted to Replicated DTensor
-        >>>                                # and we will return a sharded tensor as output.
+        >>>                                # and we will return a sharded :class:`torch.Tensor` as output.
         >>>     ...
         >>> }
         >>> parallelize_module(
@@ -703,7 +711,7 @@ class PrepareModuleInput(ParallelStyle):
             output_layouts (Union[Placement, Tuple[Placement, ...]]):
                 The layout of input tensor(s) which created DTensor will be redistributed to.
             use_local_output (bool):
-                Whether to convert the DTensor to local tensor.
+                Whether to convert the DTensor to local :class:`torch.Tensor`.
 
         Returns:
             None.
@@ -742,7 +750,7 @@ class PrepareModuleOutput(ParallelStyle):
     with ``output_layouts`` and ``use_local_output`` so that each output can be converted to
     :class:`DTensor` or :class:`torch.Tensor` based on the annotation. Specifically, a DTensor
     will be redistributed to another DTensor based on ``output_layouts`` and the flag ``use_local_output``
-    to decide whether to convert the DTensor to local tensor.
+    to decide whether to convert the DTensor to local :class:`torch.Tensor`.
 
     When the output is not a :class:`DTensor`, if no layout is specified, it will be
     a no-op. Otherwise, it will throw an error.
