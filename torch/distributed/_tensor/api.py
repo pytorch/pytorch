@@ -1,15 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import Callable, Union, cast, Optional, Sequence, Tuple
+from typing import Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
-import torch.distributed._tensor._xla.distribute_tensor as xla_distribute_tensor
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
+from torch.distributed._tensor._xla import xla_distribute_tensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -238,7 +238,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         assert (
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        assert isinstance(inner_tensors, dict) and len(inner_tensors) == 1
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
         return DTensor(
@@ -461,10 +460,12 @@ def distribute_tensor(
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
-    if device_type == 'xla':
+    if device_type == "xla":
         # call PyTorch/XLA SPMD for `xla` backend type device mesh.
         # This returns XLAShardedTensor
-        return xla_distribute_tensor(tensor, device_mesh, placements)  # type:ignore
+        return xla_distribute_tensor(
+            tensor, device_mesh, placements
+        )  # type:ignore[return-value]
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
