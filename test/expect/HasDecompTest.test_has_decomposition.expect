@@ -350,12 +350,6 @@ aten::_fused_sgd.tensor_lr
 aten::_fused_sgd.tensor_lr_out
 aten::_fused_sgd_
 aten::_fused_sgd_.tensor_lr
-aten::_fused_sgd_with_momentum
-aten::_fused_sgd_with_momentum.out
-aten::_fused_sgd_with_momentum.tensor_lr
-aten::_fused_sgd_with_momentum.tensor_lr_out
-aten::_fused_sgd_with_momentum_
-aten::_fused_sgd_with_momentum_.tensor_lr
 aten::_fw_primal
 aten::_fw_primal_copy
 aten::_fw_primal_copy.out
