@@ -90,7 +90,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             assert k not in torch._dynamo.config._config
 
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
