@@ -225,6 +225,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
+        assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
