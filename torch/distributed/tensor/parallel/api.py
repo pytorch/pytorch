@@ -20,6 +20,8 @@ from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
     ParallelStyle,
+    PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
 )
 
@@ -103,6 +105,12 @@ def parallelize_module(  # type: ignore[return]
         # RowwiseParallel or ColwiseParallel
         if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
+        elif isinstance(parallelize_plan, PrepareModuleInput):
+            module.register_forward_pre_hook(lambda _, inputs: parallelize_plan._prepare_input(inputs, device_mesh))  # type: ignore[misc, call-arg]
+            return module
+        elif isinstance(parallelize_plan, PrepareModuleOutput):
+            module.register_forward_hook(lambda _, _inputs, outputs: parallelize_plan._prepare_output(outputs, device_mesh))  # type: ignore[misc, call-arg]
+            return module
         # PairwiseParallel
         if _is_mlp_for_pairwise_parallel(module):
             return _parallelize_mlp(module, device_mesh, parallelize_plan)
