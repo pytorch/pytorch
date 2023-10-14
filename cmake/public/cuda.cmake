@@ -171,7 +171,7 @@ endif()
 
 # nvToolsExt
 add_library(torch::nvtoolsext INTERFACE IMPORTED)
-find_path(nvtx3_dir NAMES nvtx3 PATHS "${CUDA_INCLUDE_DIRS}" NO_DEFAULT_PATH)
+find_path(nvtx3_dir NAMES nvtx3 PATHS "${CUDA_INCLUDE_DIRS}" "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
 find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
 if(NOT nvtx3_FOUND)
   message(FATAL_ERROR "Cannot find NVTX3")
