@@ -238,7 +238,8 @@ class TorchVariable(VariableTracker):
 
         def get_full_name(value):
             if hasattr(value, "__module__") and hasattr(value, "__name__"):
-                return value.__module__ + "." + value.__name__
+                if value.__module__ is not None and value.__name__ is not None:
+                    return value.__module__ + "." + value.__name__
             return None
 
         if self.value is torch._functorch.vmap.vmap_impl:
