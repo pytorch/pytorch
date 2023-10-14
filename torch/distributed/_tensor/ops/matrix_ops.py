@@ -1,7 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import List, Tuple
-
 import torch
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -13,17 +11,10 @@ from torch.distributed._tensor.ops.utils import (
     infer_broadcast_dims_map,
     is_tensor_shardable,
     map_placements_after_broadcast,
-    normalize_dim,
     register_op_strategy,
     register_prop_rule,
 )
-from torch.distributed._tensor.placement_types import (
-    _Partial,
-    DTensorSpec,
-    Placement,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 aten = torch.ops.aten
 

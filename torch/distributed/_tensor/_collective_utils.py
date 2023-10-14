@@ -169,7 +169,7 @@ def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
 
 def get_bandwidth_factor(mesh: DeviceMesh) -> List[float]:
     # generate bandwidth factor for intra-host/inter-host communication pattern
-    factors = [1.0 * mesh.ndim]
+    factors = [1.0] * mesh.ndim
     num_devices_per_host = mesh_resources.num_devices_per_host(mesh.device_type)
 
     num_devices = 1

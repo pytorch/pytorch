@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import List
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -13,26 +14,16 @@ from torch.distributed._tensor.op_schema import (
     StrategyType,
 )
 
-from torch.distributed._tensor.ops.common_rules import (
-    linear_pointwise_rule,
-    pointwise_rule,
-)
+from torch.distributed._tensor.ops.common_rules import linear_pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
-    is_tensor_shardable,
     map_placements_after_broadcast,
     normalize_dim,
     register_op_strategy,
     register_prop_rule,
 )
-from torch.distributed._tensor.placement_types import (
-    _Partial,
-    DTensorSpec,
-    Placement,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Shard
 
 
 aten = torch.ops.aten
@@ -63,6 +54,8 @@ linear_pointwise_ops = [
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.abs.default,
+    aten.abs.out,
+    aten.abs_.default,
     aten.acos.default,
     aten.acos.out,
     aten.acos_.default,
@@ -402,10 +395,6 @@ pointwise_ops = [
 
 
 def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    print(f">>>>>>>> op input op schema: {op_schema}")
-    follow_placement_strategy_indices = []
-    followed_strategy: Optional[OpStrategy] = None
-
     max_shards_strategy_index = -1
     max_shards = -1
     # handle broadcasting
@@ -436,18 +425,19 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 max_shards = arg_max_shards
 
         followed_strategy = op_schema.args_schema[max_shards_strategy_index]
+        assert isinstance(followed_strategy, OpStrategy)
         follow_operand_dims_map = infer_broadcast_dims_map(
             common_shape, followed_strategy.output_shape
         )
 
-    assert isinstance(followed_strategy, OpStrategy), f">>>> {followed_strategy}"
-    # if not follow_placement_strategy_indices:
-    #     follow_placement_strategy_indices = list(range(len(followed_strategy.strategies)))
+    assert isinstance(
+        followed_strategy, OpStrategy
+    ), f"no strategy to follow for {op_schema}!"
     pointwise_strategy = OpStrategy([])
 
     for placement_strategy in followed_strategy.strategies:
         spec_to_follow = placement_strategy.output_spec
-        out_placements = []
+        out_placements: List[Placement] = []
 
         for placement in spec_to_follow.placements:
             if isinstance(placement, Shard):
@@ -459,7 +449,7 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 out_placements.append(placement)
 
         input_specs = []
-        redistribute_costs = []
+        redistribute_costs: List[List[float]] = []
         for idx, input_arg in enumerate(op_schema.args_schema):
             if isinstance(input_arg, OpStrategy):
                 if idx == max_shards_strategy_index:
@@ -474,7 +464,7 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                     common_shape, input_arg_spec.shape
                 )
                 input_placements = map_placements_after_broadcast(
-                    out_placements,
+                    tuple(out_placements),
                     common_shape,
                     input_arg_dims_map,
                 )
@@ -499,7 +489,6 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 redistribute_cost=redistribute_costs,
             )
         )
-    print(f">>>>>>> final pointwise strategy generated: {pointwise_strategy}.")
     return pointwise_strategy
 
 
@@ -508,9 +497,6 @@ for op in linear_pointwise_ops:
 
 
 for op in pointwise_ops:
-    # register_prop_rule(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-    #     pointwise_rule
-    # )
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
     )
