@@ -198,6 +198,15 @@ class ConfigModule(ModuleType):
             else:
                 self._config[k] = v
 
+    def load_config(self, data):
+        """Restore from a prior call to save_config()"""
+        self._is_dirty = True
+        for k, v in pickle.loads(data).items():
+            if k in self._compile_ignored_keys:
+                self._compile_ignored[k] = v
+            else:
+                self._config[k] = v
+
     def get_config_copy(self):
         return {**copy.deepcopy(self._config), **copy.deepcopy(self._compile_ignored)}
 
