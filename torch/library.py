@@ -182,7 +182,7 @@ def define(name, schema, *, lib=None):
 
     This entrypoint defines the custom operator (the first step)
     you must then perform the second step by calling various
-    ``impl_*`` APIs.
+    ``impl_*`` APIs, like :func:`torch.library.impl_backend`.
 
     Args:
         name (str): Should be a string that looks like
@@ -440,6 +440,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
 def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of an abstract impl.
+    Calling ``get_ctx()`` is only valid inside of an abstract impl
+    (see :func:`torch.library.impl_abstract` for more usage details.
     """
     return torch._library.abstract_impl.global_ctx_getter()
