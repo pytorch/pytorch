@@ -147,7 +147,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     # Convert bytes to GB
     tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
 
-    # Currently assumes 8 gpus per node. And when >1 node is used, assumes each node provides 8 gpus.
+    # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
     _, _, group_size = snode.node.constant_args
