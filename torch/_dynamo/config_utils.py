@@ -1,6 +1,7 @@
 import contextlib
 
 import copy
+import hashlib
 import inspect
 import io
 import itertools
@@ -9,7 +10,7 @@ import tokenize
 import unittest
 import warnings
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Tuple
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -22,7 +23,7 @@ def install_config_module(module):
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set()
+        _bypass_keys = set({"_is_dirty", "_hash_digest"})
 
     def visit(source, dest, prefix, ignore_all=False):
         """
@@ -65,7 +66,8 @@ def install_config_module(module):
     assert config_keys.isdisjoint(compile_ignored_keys)
     module._allowed_keys = config_keys | compile_ignored_keys
     module._compile_ignored_keys = set(compile_ignored.keys())
-    module._allowed_keys = set(config.keys())
+    module._is_dirty = True
+    module._hash_digest = None
 
     module.__class__ = ConfigModuleInstance
 
@@ -117,6 +119,8 @@ class ConfigModule(ModuleType):
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
+    _is_dirty: bool
+    _hash_digest: str
 
     def __init__(self):
         raise NotImplementedError(
@@ -132,6 +136,7 @@ class ConfigModule(ModuleType):
         elif name in self._compile_ignored_keys:
             self._compile_ignored[name] = value
         elif name in self._allowed_keys:
+            self._is_dirty = True
             self._config[name] = value
         else:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
@@ -152,6 +157,7 @@ class ConfigModule(ModuleType):
         if name in self._compile_ignored_keys:
             del self._compile_ignored[name]
         else:
+            self._is_dirty = True
             del self._config[name]
 
     def save_config(self):
@@ -178,9 +184,32 @@ class ConfigModule(ModuleType):
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
+    def get_config_and_hash_with_updates(
+        self, updates: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], str]:
+        """Hashes the configs that are not compile_ignored, along with updates"""
+        if any(k in self._compile_ignored_keys for k in updates):
+            raise ValueError("update keys cannot be @compile_ignored")
+        cfg = dict(self._config)
+        cfg.update(updates)
+        hashed = self._get_hash(cfg)
+        cfg.update(self._compile_ignored)
+        return cfg, hashed
+
+    def _get_hash(self, config: Dict[str, Any]) -> str:
+        string_to_hash = repr(sorted(config.items()))
+        return hashlib.md5(string_to_hash.encode("utf-8")).hexdigest()
+
+    def get_hash(self) -> str:
+        """Hashes the configs that are not compile_ignored"""
+        if self._is_dirty or self._hash_digest is None:
+            self._hash_digest = self._get_hash(self._config)
+            self._is_dirty = False
+        return self._hash_digest
+
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
-        self.to_dict().update(pickle.loads(data))
+        self._is_dirty = True
         for k, v in pickle.loads(data).items():
             if k in self._compile_ignored_keys:
                 self._compile_ignored[k] = v
@@ -189,8 +218,11 @@ class ConfigModule(ModuleType):
 
     def to_dict(self):
         warnings.warn(
-            "config.to_dict() has been deprecated. It may no longer change the underlying config.",
-            "use config.shallow_copy_dict() or config.get_config_copy() instead",
+            (
+                "config.to_dict() has been deprecated. It may no longer change the underlying config.",
+                "use config.shallow_copy_dict() or config.get_config_copy() instead",
+            ),
+            DeprecationWarning,
         )
         return self.shallow_copy_dict()
 
@@ -199,6 +231,7 @@ class ConfigModule(ModuleType):
 
     def load_dict(self, d):
         assert set(d.keys()) == self._allowed_keys
+        self._dirty = True
         for k, v in d.items():
             if k in self._compile_ignored_keys:
                 self._compile_ignored[k] = v
@@ -253,10 +286,12 @@ class ConfigModule(ModuleType):
                     else:
                         prior[key] = config._config[key]
                         config._config[key] = val
+                config._is_dirty = prior != {}
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 config._config.update(prior)
                 config._compile_ignored.update(prior_ignored)
+                config._is_dirty = prior != {}
                 prior.clear()
                 prior_ignored.clear()
 
