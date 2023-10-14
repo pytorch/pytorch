@@ -409,31 +409,17 @@ def _fused_sgd(
             if device not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device)
             device_found_inf = found_inf_dict[device]
-        if no_momentum_buffer:
-            torch._fused_sgd_(
-                device_params,
-                device_grads,
-                weight_decay=weight_decay,
-                momentum=momentum,
-                lr=lr,
-                dampening=dampening,
-                nesterov=nesterov,
-                maximize=maximize,
-                grad_scale=device_grad_scale,
-                found_inf=device_found_inf,
-            )
-        else:
-            torch._fused_sgd_with_momentum_(
-                device_params,
-                device_grads,
-                device_momentum_buffer_list,
-                weight_decay=weight_decay,
-                momentum=momentum,
-                lr=lr,
-                dampening=dampening,
-                nesterov=nesterov,
-                maximize=maximize,
-                is_first_step=is_first_step,
-                grad_scale=device_grad_scale,
-                found_inf=device_found_inf,
-            )
+        torch._fused_sgd_(
+            device_params,
+            device_grads,
+            [] if no_momentum_buffer else device_momentum_buffer_list,
+            weight_decay=weight_decay,
+            momentum=momentum,
+            lr=lr,
+            dampening=dampening,
+            nesterov=nesterov,
+            maximize=maximize,
+            is_first_step=is_first_step,
+            grad_scale=device_grad_scale,
+            found_inf=device_found_inf,
+        )

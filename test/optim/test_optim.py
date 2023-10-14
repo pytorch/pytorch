@@ -719,6 +719,7 @@ class TestOptim(TestCase):
         kIterations = 7
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
+            print(f"% {optimizer_constructor = }, {params = }")
             res, state = [], []
             for flag_value in (False, True):
                 input = torch.tensor(
@@ -958,23 +959,25 @@ class TestOptim(TestCase):
 
     @property
     def _fused_optimizer_configs(self):
+        # return tuple(itertools.product(
+        #     (optim.Adam, optim.AdamW),
+        #     (
+        #         dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
+        #         dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
+        #         dict(weight_decay=1., amsgrad=False, maximize=True),
+        #         dict(weight_decay=1., amsgrad=True),
+        #         dict(weight_decay=0., amsgrad=False),
+        #         dict(weight_decay=0., amsgrad=True, capturable=True, maximize=True),
+        #         dict(weight_decay=0., amsgrad=True, maximize=True),
+        #     ),
+        # )) + tuple(itertools.product(
         return tuple(itertools.product(
-            (optim.Adam, optim.AdamW),
-            (
-                dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
-                dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
-                dict(weight_decay=1., amsgrad=False, maximize=True),
-                dict(weight_decay=1., amsgrad=True),
-                dict(weight_decay=0., amsgrad=False),
-                dict(weight_decay=0., amsgrad=True, capturable=True, maximize=True),
-                dict(weight_decay=0., amsgrad=True, maximize=True),
-            ),
-        )) + tuple(itertools.product(
             (optim.SGD,),
+            # [
+            #     {"lr": lr, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
+            #     for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0, 0.5), (0.0, 0.5), (False,))
+            # ] + [
             [
-                {"lr": lr, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
-                for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0, 0.5), (0.0, 0.5), (False,))
-            ] + [
                 {"lr": lr, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
                 for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0,), (0.0, 0.5), (True, False))
             ]
