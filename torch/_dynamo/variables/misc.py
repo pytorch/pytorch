@@ -203,7 +203,7 @@ class SuperVariable(VariableTracker):
             inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
             and isinstance(self.objvar, variables.CustomizedDictVariable)
             and args
-            and variables.ConstDictVariable.is_valid_key(args[0])
+            and variables.ConstDictVariable.is_valid_key(tx, args[0])
             and self.objvar.mutable_local
         ):
             assert not kwargs and len(args) == 2

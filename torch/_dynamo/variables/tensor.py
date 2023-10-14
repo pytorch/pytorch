@@ -322,7 +322,7 @@ class TensorVariable(VariableTracker):
                 # symbolic_shapes, but that end up as int/sympy.Integer
                 assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
                 if isinstance(dyn_length, SymNodeVariable):
-                    length = dyn_length.evaluate_expr(tx.output)
+                    length = dyn_length.evaluate_expr()
                 else:
                     length = dyn_length.value
             idxes = range(length)
@@ -815,7 +815,7 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def evaluate_expr(self, output_graph=None):
+    def evaluate_expr(self):
         return guard_scalar(self.sym_num)
 
     def call_method(

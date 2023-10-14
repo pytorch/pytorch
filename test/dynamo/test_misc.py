@@ -7800,6 +7800,42 @@ ShapeEnv not equal: field values don't match:
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 
+    def test_symint_key(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                emb_dim_sizes: t.Dict[int, bool] = {}
+                for shape in [x.shape, y.shape]:
+                    emb_dim_sizes[shape[0]] = True
+                if len(emb_dim_sizes) != 1:
+                    raise RuntimeError(
+                        f"Found different dim sizes in all inputs: {emb_dim_sizes.keys()=}"
+                    )
+                return x + y
+
+        mod = Mod()
+        x = torch.rand(4, 5)
+        y = torch.rand(4, 5)
+        eager_out = mod(x, y)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod = torch._dynamo.optimize(cnts, nopython=True)(mod)
+        compiled_out = mod(x, y)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(eager_out, compiled_out)
+
+        x = torch.rand(5, 5)
+        y = torch.rand(5, 5)
+        mod(x, y)
+        self.assertEqual(cnts.frame_count, 2)  # recompile, shape[0] changed
+
+        x = torch.rand(5, 5)
+        y = torch.rand(5, 5)
+        mod(x, y)
+        self.assertEqual(cnts.frame_count, 2)  # no recompile, shape same
+
     def test_funcname_cache(self):
         src = """\
 import torch

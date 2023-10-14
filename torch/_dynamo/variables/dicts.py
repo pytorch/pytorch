@@ -16,7 +16,7 @@ from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
-from .tensor import TensorVariable
+from .tensor import SymNodeVariable, TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
@@ -214,6 +214,8 @@ class ConstDictVariable(VariableTracker):
     def get_key(cls, arg: VariableTracker):
         if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
             return arg.specialized_value
+        elif isinstance(arg, SymNodeVariable):
+            return arg.evaluate_expr()
         else:
             return arg.as_python_constant()
 
@@ -225,6 +227,8 @@ class ConstDictVariable(VariableTracker):
             and key.specialized_value is not None
             or isinstance(key, ConstantVariable)
             and key.python_type() is torch.dtype
+            # Relies on get_key above to specialize
+            or isinstance(key, SymNodeVariable)
         )
 
     @classmethod

@@ -588,7 +588,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         index = (
             key.source
-            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            if ConstDictVariable.is_valid_key(tx, key) and key.source is not None
             else key.as_python_constant()
         )
 
