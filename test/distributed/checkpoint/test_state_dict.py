@@ -139,7 +139,7 @@ class TestStateDict(FSDPTest):
         new_dist_osd = _gather_state_dict(dist_osd)
         load_state_dict(
             model,
-            [new_optim],
+            optimizers=new_optim,
             model_state_dict={},
             optim_state_dict=new_dist_osd,
             optim_only=True,
@@ -172,9 +172,9 @@ class TestStateDict(FSDPTest):
         # Get the state_dict, and compare the result
         msd = model.state_dict()
         osd = optim.state_dict()
-        if not isinstance(dist_optim, list):
-            dist_optim = [dist_optim]
-        dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
+        dist_msd, dist_osd = state_dict(
+            dist_model, optimizers=dist_optim, options=options
+        )
         self._verify_msd(model, msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
@@ -188,7 +188,7 @@ class TestStateDict(FSDPTest):
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
         curr_dist_msd, curr_dist_osd = state_dict(
-            dist_model, dist_optim, options=options
+            dist_model, optimizers=dist_optim, options=options
         )
         if test_frozen:
             # We won't be able to load the partial state_dict back.
@@ -199,21 +199,23 @@ class TestStateDict(FSDPTest):
         # self.assertEqual(len(curr_dist_osd[STATE]), len(dist_osd[STATE]))
         load_state_dict(
             dist_model,
-            dist_optim,
+            optimizers=dist_optim,
             model_state_dict=dist_msd,
             optim_state_dict=dist_osd,
             options=options,
         )
 
         # Check if the new state_dict are the same
-        dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
+        dist_msd, dist_osd = state_dict(
+            dist_model, optimizers=dist_optim, options=options
+        )
         self._verify_msd(model, msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
         # Test _patch_model_state_dict, and _patch_optimizer_state_dict
         _patch_model_state_dict(dist_model, options=options)
-        _patch_optimizer_state_dict(dist_model, dist_optim, options=options)
+        _patch_optimizer_state_dict(dist_model, optimizers=dist_optim, options=options)
         dist_msd = dist_model.state_dict()
         dist_osd = dist_optim[0].state_dict()
         self._verify_msd(model, msd, dist_msd, options)
