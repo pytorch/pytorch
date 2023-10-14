@@ -110,7 +110,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ),
         (
             "___applicable_config_hash",
-            lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash(),
+            lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex(),
         ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
@@ -600,7 +600,7 @@ class GuardBuilder(GuardBuilderBase):
 
         assert guard.source is GuardSource.GLOBAL
         code = [
-            f"___applicable_config_hash() == '{torch._dynamo.eval_frame.get_saved_else_current_config_hash()}'"
+            f"___applicable_config_hash() == '{torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()}'"
         ]
         self._produce_guard_code(guard, code)
 
