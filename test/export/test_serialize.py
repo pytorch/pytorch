@@ -100,7 +100,7 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-        exported_module = export(MyModule(), (input,))
+        exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
@@ -144,7 +144,7 @@ class TestSerialize(TestCase):
         exported_module = export(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
-        )
+        ).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
@@ -169,7 +169,7 @@ class TestSerialize(TestCase):
             return torch.searchsorted(x, values, side="right", right=True)
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export(f, (x,))
+        exported_module = export(f, (x,)).run_decompositions()
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
@@ -338,9 +338,10 @@ class TestDeserialize(TestCase):
 
     def test_sym_bool(self):
         def f(x, y):
-            return x.size(0) in y
+            assert x.size(0) in y
+            return x + y
 
-        self.check_graph(f, (torch.ones(2), torch.ones(3)))
+        self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
     def test_shape(self):
         def f(x):
