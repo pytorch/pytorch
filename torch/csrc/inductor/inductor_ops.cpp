@@ -63,11 +63,9 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_reinterpret_tensor(Tensor self, int[] size, int[] stride, int offset_increment=0) -> Tensor",
       _reinterpret_tensor);
-  m.def("accumulate_grad_(Tensor variable, Tensor new_grad) -> ()");
-}
-
-TORCH_LIBRARY_IMPL(inductor, CompositeExplicitAutograd, m) {
-  m.impl("accumulate_grad_", TORCH_FN(accumulate_grad_));
+  m.def(
+      "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_));
 }
 
 } // namespace inductor
