@@ -976,7 +976,7 @@ class TestOptim(TestCase):
                 for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0, 0.5), (0.0, 0.5), (False,))
             ] + [
                 {"lr": lr, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
-                for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0,), (0.0, 0.5), (True,))
+                for lr, d, w, n in itertools.product((0.1, torch.tensor(0.1)), (0.0,), (0.0, 0.5), (True, False))
             ]
         ))
 
