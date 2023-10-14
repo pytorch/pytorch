@@ -1,6 +1,7 @@
 import contextlib
 
 import copy
+import hashlib
 import inspect
 import io
 import itertools
@@ -177,6 +178,7 @@ class ConfigModule(ModuleType):
                 continue
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
+
 
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
