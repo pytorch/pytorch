@@ -2746,6 +2746,10 @@ class Buffer(IRNode):
         """
         return 0
 
+    def should_allocate(self):
+        # Returns False by default.
+        return False
+
 
 class InputBuffer(Buffer):
     pass
