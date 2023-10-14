@@ -278,7 +278,7 @@ def _maybe_init_guarded_config_cache():
 def restore_guarded_dynamo_config(
     first_ctx: bool,
     saved_config: Dict[str, Any],
-    saved_config_hash: str,
+    saved_config_hash: bytes,
 ):
     _maybe_init_guarded_config_cache()
     # Set exactly once from top-level compile
@@ -287,15 +287,17 @@ def restore_guarded_dynamo_config(
         if first_ctx and config_cache.saved_config_and_hash is None:
             is_top_level = True
             config_cache.saved_config_and_hash = saved_config, saved_config_hash
-            log.debug("Setting top-level compile config hash: %s", saved_config_hash)
+            log.debug(
+                "Setting top-level compile config hash: %s", saved_config_hash.hex()
+            )
         else:
-            log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
+            log.debug("Ignoring inner dynamo compile config and hash")
         yield
     finally:
         if is_top_level:
             log.debug(
                 "Unsetting top-level compile config hash: %s",
-                config_cache.saved_config_and_hash[1],
+                config_cache.saved_config_and_hash[1].hex(),
             )
             config_cache.saved_config_and_hash = None
 
@@ -311,7 +313,7 @@ def _get_config_and_hash(dynamic=None):
     return config.get_config_and_hash_with_updates(updates)
 
 
-def get_saved_else_current_config_hash():
+def get_saved_else_current_config_hash() -> bytes:
     _maybe_init_guarded_config_cache()
     if config_cache.saved_config_and_hash is not None:
         return config_cache.saved_config_and_hash[1]
@@ -353,7 +355,7 @@ class _TorchDynamoContext:
         self.saved_config, self.saved_config_hash = _get_config_and_hash(self.dynamic)
         log.debug(
             "Saving dynamo config and hash for new compiled object(s). Hash: %s",
-            self.saved_config_hash,
+            self.saved_config_hash.hex(),
         )
 
     def __enter__(self):

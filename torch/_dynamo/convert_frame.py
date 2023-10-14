@@ -453,10 +453,14 @@ def _patch_config_if_changed():
                     "Current config does not match config saved when compiling\n"
                     "Saved hash: %s, Current hash: %s\nRestoring saved config."
                 ),
-                saved_config_hash if config.verbose else saved_config_hash[:7],
-                current_config_hash if config.verbose else current_config_hash[:7],
+                saved_config_hash.hex()
+                if config.verbose
+                else saved_config_hash.hex()[:7],
+                current_config_hash.hex()
+                if config.verbose
+                else current_config_hash.hex()[:7],
             )
-            config_dict_ref = config.to_dict()
+            config_dict_ref = config.shallow_copy_dict()
             for key in patch:
                 if patch[key] != config_dict_ref[key]:
                     recompiles_log.debug(
