@@ -178,7 +178,7 @@ def define(name, schema, *, lib=None):
     In PyTorch, defining an op (short for "operator") is a two step-process:
     - we need to define the op (by providing an operator name and schema)
     - we need to implement behavior for how the operator interacts with
-      various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
+    various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
 
     This entrypoint defines the custom operator (the first step)
     you must then perform the second step by calling various
