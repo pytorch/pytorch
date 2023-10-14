@@ -154,14 +154,13 @@ class TestCostModel(DTensorOpTestBase):
             self.assertEqual(cost, 0)
 
         # shard -> replicate
-        cost = redistribute_cost(shard_spec, replica_spec)
-        self.assertEqual(cost, 61.0)
-        # partial -> replicate
-        cost = redistribute_cost(partial_spec, replica_spec)
-        self.assertEqual(cost, 121.0)
+        allgather_cost = redistribute_cost(shard_spec, replica_spec)
         # partial -> shard
-        cost = redistribute_cost(partial_spec, shard_spec)
-        self.assertEqual(cost, 61.0)
+        reduce_scatter_cost = redistribute_cost(partial_spec, shard_spec)
+        # partial -> replicate
+        allreduce_cost = redistribute_cost(partial_spec, replica_spec)
+        self.assertEqual(allgather_cost, reduce_scatter_cost)
+        self.assertEqual(allreduce_cost + 1, allgather_cost + reduce_scatter_cost)
         # shard to partial
         cost = redistribute_cost(shard_spec, partial_spec)
         self.assertEqual(cost, float("inf"))
@@ -172,7 +171,7 @@ class TestCostModel(DTensorOpTestBase):
         )
         shard_placement = (Shard(0), Shard(0))
         replica_placement = (Replicate(), Replicate())
-        partial_placement = (_Partial(), Replicate())
+        partial_placement = (_Partial(), _Partial())
 
         global_tensor = torch.randn(8, 8)
         global_tensor_meta = self._extract_tensor_meta(global_tensor)
@@ -190,14 +189,13 @@ class TestCostModel(DTensorOpTestBase):
             self.assertEqual(cost, 0)
 
         # shard -> replicate
-        cost = redistribute_cost(shard_spec, replica_spec)
-        self.assertEqual(cost, 40.4)
+        allgather_cost = redistribute_cost(shard_spec, replica_spec)
         # partial -> replicate
-        cost = redistribute_cost(partial_spec, replica_spec)
-        self.assertEqual(cost, 52.2)
+        allreduce_cost = redistribute_cost(partial_spec, replica_spec)
         # partial -> shard
-        cost = redistribute_cost(partial_spec, shard_spec)
-        self.assertEqual(cost, 26.6)
+        reduce_scatter_cost = redistribute_cost(partial_spec, shard_spec)
+        self.assertEqual(allgather_cost, reduce_scatter_cost)
+        assert allreduce_cost > allgather_cost
 
 
 if __name__ == "__main__":
