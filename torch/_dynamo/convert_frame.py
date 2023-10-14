@@ -386,21 +386,23 @@ def convert_frame_assert(
             },
         )
 
-        return _compile(
-            frame.f_code,
-            frame.f_globals,
-            frame.f_locals,
-            frame.f_builtins,
-            compiler_fn,
-            one_graph,
-            export,
-            export_constraints,
-            hooks,
-            cache_size,
-            frame,
-            frame_state=frame_state,
-            compile_id=compile_id,
-        )
+        with torch._dynamo.config.patch(patch_config_if_changed()):
+            compiled_product = _compile(
+                frame.f_code,
+                frame.f_globals,
+                frame.f_locals,
+                frame.f_builtins,
+                compiler_fn,
+                one_graph,
+                export,
+                export_constraints,
+                hooks,
+                cache_size,
+                frame,
+                frame_state=frame_state,
+                compile_id=compile_id,
+            )
+        return compiled_product
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
 
@@ -409,6 +411,23 @@ def convert_frame_assert(
 
     _convert_frame_assert._clone_with_backend = _clone_with_backend  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
+
+
+def patch_config_if_changed():
+    patch = {}
+
+    saved_config_hash = torch._dynamo.eval_frame.DYNAMO_SAVED_CONFIG_HASH
+    current_config_hash = torch._dynamo.eval_frame.get_cached_recompile_hash()
+
+    assert saved_config_hash is not None
+    assert current_config_hash is not None
+
+    if saved_config_hash != current_config_hash:
+        patch = torch._dynamo.eval_frame.DYNAMO_SAVED_CONFIG
+        recompiles_log.debug(
+            "Restoring Dynamo config due to hash mismatch",
+            f"Saved: {saved_config_hash}, Current: {current_config_hash}",
+        )
 
 
 def maybe_cprofile(func):
