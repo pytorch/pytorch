@@ -1675,6 +1675,33 @@ def forward(self, x_1):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
+    def test_define(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        lib.impl("foo", f, "CPU")
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_define_validation(self):
+        with self.assertRaisesRegex(ValueError, "namespace"):
+            torch.library.define("foo", "(Tensor x) -> Tensor")
+
+    def test_legacy_define(self):
+        lib = self.lib()
+
+        @torch.library.define(lib, "foo(Tensor x) -> Tensor")
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
 
 def op_with_incorrect_schema(testcase, name):
     lib = testcase.lib()
