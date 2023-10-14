@@ -184,7 +184,7 @@ class ConfigModule(ModuleType):
 
     def get_config_and_hash_with_updates(
         self, updates: Dict[str, Any]
-    ) -> Tuple[Dict[str, Any], str]:
+    ) -> Tuple[Dict[str, Any], bytes]:
         """Hashes the configs that are not compile_ignored, along with updates"""
         if any(k in self._compile_ignored_keys for k in updates):
             raise ValueError("update keys cannot be @compile_ignored")
@@ -193,11 +193,11 @@ class ConfigModule(ModuleType):
         hashed = self._get_hash(cfg)
         return cfg, hashed
 
-    def _get_hash(self, config: Dict[str, Any]) -> str:
+    def _get_hash(self, config: Dict[str, Any]) -> bytes:
         string_to_hash = repr(sorted(config.items()))
-        return hashlib.md5(string_to_hash.encode("utf-8")).hexdigest()
+        return hashlib.md5(string_to_hash.encode("utf-8")).digest()
 
-    def get_hash(self) -> str:
+    def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
             self._hash_digest = self._get_hash(self._config)
@@ -206,11 +206,9 @@ class ConfigModule(ModuleType):
 
     def to_dict(self):
         warnings.warn(
-            (
-                "config.to_dict() has been deprecated. It may no longer change the underlying config.",
-                "use config.shallow_copy_dict() or config.get_config_copy() instead",
-            ),
-            DeprecationWarning,
+            """config.to_dict() has been deprecated. It may no longer change the underlying config\
+use config.shallow_copy_dict() or config.get_config_copy() instead""",
+            FutureWarning,
         )
         return self.shallow_copy_dict()
 
