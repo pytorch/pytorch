@@ -358,18 +358,18 @@ def _maybe_insert_output_observer_for_node(
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ) -> Optional[Node]:
-    if node in edge_or_node_to_obs_or_fq:
-        output_act_obs_or_fq = edge_or_node_to_obs_or_fq[node]
+    if node in obs_or_fq_map:
+        output_act_obs_or_fq = obs_or_fq_map[node]
         return _insert_obs_or_fq(node, output_act_obs_or_fq, model, named_modules, graph)
     return None
 
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
     model: torch.fx.GraphModule,
-    edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
     this_node_quantization_annotation = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
@@ -395,7 +395,7 @@ def _maybe_insert_input_and_output_observers_for_node(
         None,  # qconfig
         model,
         named_modules,
-        edge_or_node_to_obs_or_fq,
+        obs_or_fq_map,
         is_qat,
     )
 
@@ -408,7 +408,7 @@ def _maybe_insert_input_and_output_observers_for_node(
 
     # this returns the new observer node if it was needed
     maybe_output_obs_node = _maybe_insert_output_observer_for_node(
-        node, model, named_modules, model.graph, edge_or_node_to_obs_or_fq, is_qat)
+        node, model, named_modules, model.graph, obs_or_fq_map, is_qat)
 
     if maybe_output_obs_node is None:
         return
@@ -443,7 +443,9 @@ def prepare(
     nodes_before_observation = list(model.graph.nodes)
 
     # At the high level we construct a map from EdgeOrNode to a observer_or_fake_quant instance
-    # all edge/nodes that belongs to the same group should use the same instance
+    # all edge/nodes that belongs to the same group will use the same instance
+    # and when we insert observers we'll just query this map to get the correct observer_or_fake_quant
+    # instance
     edge_or_node_to_qspec = _get_edge_or_node_to_qspec(model)
     edge_or_node_to_group_id = _get_edge_or_node_to_group_id(edge_or_node_to_qspec)
     obs_or_fq_map = _get_obs_or_fq_map(edge_or_node_to_group_id, edge_or_node_to_qspec, is_qat)
