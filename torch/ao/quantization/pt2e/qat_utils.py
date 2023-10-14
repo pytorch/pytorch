@@ -49,6 +49,7 @@ def _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(
     is_per_channel: bool,
     has_bias: bool,
     is_cuda: bool,
+    has_add: bool = False,
 ) -> Dict[str, Any]:
     """
     Optional example inputs for both `_quantized_qat_conv2d_bn_pattern`
@@ -65,6 +66,9 @@ def _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(
         kwargs["weight_zero_point"] = torch.tensor([0], dtype=torch.int)
     if has_bias:
         kwargs["conv_bias"] = torch.randn(1)
+    if has_add:
+        # extra_input_for_add, use same shape as x here since conv weight is torch.randn(1, 1, 1, 1)
+        kwargs["extra_input"] = torch.randn(1, 1, 3, 3)
     if is_cuda:
         for k, v in kwargs.items():
             if isinstance(v, torch.Tensor):
@@ -195,6 +199,8 @@ def _get_quantized_qat_conv2d_bn_pattern(
     has_relu: bool,
     has_bias: bool,
     relu_is_inplace: bool,
+    has_add: bool,
+    add_is_inplace: bool,
 ) -> Callable:
     """
     Return the quantized version of QAT conv + BN pattern.
@@ -250,6 +256,13 @@ def _get_quantized_qat_conv2d_bn_pattern(
         if has_bias:
             x = x + kwargs["conv_bias"].reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+
+        if has_add:
+            if add_is_inplace:
+                x += kwargs["extra_input"]
+            else:
+                x = x + kwargs["extra_input"]
+
         if has_relu:
             if relu_is_inplace:
                 x = F.relu_(x)
@@ -263,6 +276,8 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(
     has_relu: bool,
     has_bias: bool,
     relu_is_inplace: bool,
+    has_add: bool,
+    add_is_inplace: bool,
 ) -> Callable:
     """
     Quantized QAT conv - bn pattern with bn weights being folded into conv.
@@ -303,6 +318,13 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(
         else:
             x = F.conv2d(x, conv_weight, None)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+
+        if has_add:
+            if add_is_inplace:
+                x += kwargs["extra_input"]
+            else:
+                x = x + kwargs["extra_input"]
+
         if has_relu:
             if relu_is_inplace:
                 x = F.relu_(x)
@@ -682,20 +704,24 @@ def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
         [True, False],  # has_relu
         [True, False],  # has_bias
         [True, False],  # relu_is_inplace
+        [True, False],  # has_add
+        [True, False],  # add_is_inplace
     )
-    for is_per_channel, has_relu, has_bias, relu_is_inplace in replacement_options:
+    for is_per_channel, has_relu, has_bias, relu_is_inplace, has_add, add_is_inplace in replacement_options:
         # For the cases without relu, `relu_is_inplace` is irrelevant, so here we arbitrarily
         # filter out one of the values for this flag to avoid having duplicate patterns
         if not has_relu and relu_is_inplace:
             continue
+        if not has_add and add_is_inplace:
+            continue
         example_inputs = _quantized_conv2d_bn_pattern_example_inputs
-        kwargs = _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(is_per_channel, has_bias, is_cuda)
+        kwargs = _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(is_per_channel, has_bias, is_cuda, has_add)
         match_pattern = _get_quantized_qat_conv2d_bn_pattern(
-            is_per_channel, has_relu, has_bias, relu_is_inplace,
+            is_per_channel, has_relu, has_bias, relu_is_inplace, has_add, add_is_inplace
         )
         match_pattern = get_aten_graph_module(match_pattern, example_inputs, is_cuda, **kwargs)
         replacement_pattern = _get_folded_quantized_qat_conv2d_bn_pattern(
-            is_per_channel, has_relu, has_bias, relu_is_inplace,
+            is_per_channel, has_relu, has_bias, relu_is_inplace, has_add, add_is_inplace
         )
         replacement_pattern = get_aten_graph_module(replacement_pattern, example_inputs, is_cuda, **kwargs)
         replacements.extend(
