@@ -110,6 +110,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         assert changed_hash != newest_hash
         assert newest_hash == starting_hash
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
