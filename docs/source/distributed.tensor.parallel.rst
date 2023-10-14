@@ -62,8 +62,6 @@ of ``parallelize_module``:
 .. autofunction::  make_output_shard_1d
 .. autofunction::  make_output_tensor
 
-.. autofunction::  PrepareModuleInput
-.. autofunction::  PrepareModuleOutput
 
 Currently, there are some constraints which makes it hard for the ``MultiheadAttention``
 module to work out of box for Tensor Parallelism, so we recommend users to try ``ColwiseParallel``
