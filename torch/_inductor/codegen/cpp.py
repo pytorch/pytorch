@@ -1222,12 +1222,6 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
-    def index_to_str(self, index: sympy.Expr) -> str:
-        # TODO <Leslie>: Implementate it as refer to:
-        # https://github.com/pytorch/pytorch/blob/
-        # f0e7a910304c6af4fe59524ab29348d906cf1dd4/torch/_inductor/codegen/triton.py#L1088
-        return index
-
     def indirect_indexing(self, index_var, size, check=True):
         # Refer to triton implementation:
         # https://github.com/pytorch/pytorch/blob/
@@ -1247,7 +1241,7 @@ class CppKernel(Kernel):
                     pos = index_var.bounds & ValueRanges(0, sympy.oo)
                     new_bounds = new_bounds | pos
 
-            stm = f"{index_var} + {self.index_to_str(size)}"
+            stm = f"{index_var} + {self.rename_indexing(size)}"
             if index_var.bounds.upper >= 0:
                 stm = f"{index_var} < 0 ? {stm} : {index_var}"
             new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
