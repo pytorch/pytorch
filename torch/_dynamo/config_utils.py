@@ -171,7 +171,7 @@ class ConfigModule(ModuleType):
             self._config.items(), self._compile_ignored.items()
         ):
             if has_saved_config_ignore and k in self._save_config_ignore:
-                    continue
+                continue
             if v == self._default[k]:
                 continue
             lines.append(f"{mod}.{k} = {v!r}")
