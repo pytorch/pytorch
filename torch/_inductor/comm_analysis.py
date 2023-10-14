@@ -1,53 +1,85 @@
+# type: ignore
+
 import math
 
+import torch
 from . import ir
 
 from .utils import get_dtype_size, sympy_product
 from .virtualized import V
 
-ncclFuncAllReduce = "allreduce"
-ncclFuncAllGather = "allgather"
-ncclFuncReduceScatter = "reducescatter"
 
-NCCL_HW_NVLINK = 0
-NCCL_HW_PCI = 1
-NCCL_HW_NET = 2
+class NCCL_COLL(Enum):
+    ALL_REDUCE = 0
+    ALL_GATHER = 1
+    REDUCE_SCATTER = 2
 
-NCCL_ALGO_TREE = 0
-NCCL_ALGO_RING = 1
+
+class NCCL_HW(Enum):
+    NVLINK = 0
+    PCI = 1
+    NET = 2
+
+
+class NCCL_ALGO(Enum):
+    TREE = 0
+    RING = 1
+
+
+class NCCL_PROTO(Enum):
+    SIMPLE = 0
+    LL = 1
+    LL128 = 2
+
+
+class NVIDIA_GPU_TYPE(Enum):
+    VOLTA = 0
+    AMPERE = 1
+    HOPPER = 2
+
 
 # Latencies in us
-baseLat = [
-    6.8,  # Tree (LL)
-    6.6,  # Ring (LL)
-]
+# len(NCCL_ALGO) x len(NCCL_PROTO)
+baseLat = torch.tensor([
+    # Tree
+    [
+        6.8,  # LL
+    ],
+    # Ring
+    [
+        6.6,  # LL
+    ],
+])
+
 # Latencies in us
-hwLat = [
+# len(NCCL_HW) x len(NCCL_ALGO) x len(NCCL_PROTO)
+hwLat = torch.tensor([
     # NVLINK
     [
-        0.6,  # Tree (LL)
-        0.6,  # Ring (LL)
+        [0.6],  # Tree (LL)
+        [0.6],  # Ring (LL)
     ],
     # PCI
     [
-        1.0,  # Tree (LL)
-        1.0,  # Ring (LL)
+        [1.0],  # Tree (LL)
+        [1.0],  # Ring (LL)
     ],
     # NET
     [
-        5.0,  # Tree (LL)
-        2.7,  # Ring (LL)
+        [5.0],  # Tree (LL)
+        [2.7],  # Ring (LL)
     ],
-]
+])
 
-VOLTA_COMPCAP_IDX = 0
-AMPERE_COMPCAP_IDX = 1
-HOPPER_COMPCAP_IDX = 2
 
 # LL128 max BW per channel
-llMaxBws = [
+llMaxBws = torch.tensor([
     # Volta-N1/Intel-N2/Intel-N4
-    [39.0, 39.0, 20.4],
+    [
+        39.0,
+        39.0,
+        20.4,
+    ],
     # Ampere-N1/AMD-N2/AMD-N4
     [
         87.7,
@@ -60,23 +92,33 @@ llMaxBws = [
         22.5,  # avg of ring & tree
         19.0,
     ],
-]
+])
 
-bwNVLINK = 300  # unit: GB/s, uni-directional P2P bandwidth per card
-bwInfiniBand = 25  # unit: GB/s, uni-directional P2P bandwidth per node
+
+def get_gpu_type():
+    gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run)
+    if "V100" in gpu_info:
+        return NVIDIA_GPU_TYPE.VOLTA
+    elif "A100" in gpu_info:
+        return NVIDIA_GPU_TYPE.AMPERE
+    elif "H100" in gpu_info:
+        return NVIDIA_GPU_TYPE.HOPPER
+    else:
+        # for other gpu types, assume Ampere
+        return NVIDIA_GPU_TYPE.AMPERE
 
 
 def get_collective_type(snode: "BaseSchedulerNode") -> str:  # type: ignore[name-defined]
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
-        return ncclFuncAllReduce
+        return NCCL_COLL.ALL_REDUCE
     elif isinstance(
         snode.node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)
     ):
-        return ncclFuncAllGather
+        return NCCL_COLL.ALL_GATHER
     elif isinstance(
         snode.node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)
     ):
-        return ncclFuncReduceScatter
+        return NCCL_COLL.REDUCE_SCATTER
     else:
         raise Exception(f"Unsupported collective type: {snode.node}")
 
@@ -91,10 +133,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     Assumptions:
     - only ring algorithm (NCCL_ALGO_RING) is used
     - only Low-Latency protocol (NCCL_PROTO_LL) is used, i.e. Simple or LL128 is not used
-    - only A100 gpu
     - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
-    - intra-node is only NVLINK
-    - inter-node is only InfiniBand
     - collective is one of: allreduce, reducescatter, allgather
     """
     tensor_numel = V.graph.sizevars.size_hint(sympy_product(snode.node.layout.size))
@@ -110,16 +149,13 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
-    # Assume intra-node is NVLink
-    bwIntra = bwNVLINK
-    # Assume inter-node is InfiniBand
-    bwInter = bwInfiniBand
+    bwIntra = torch._inductor.config.intra_node_bw
+    bwInter = torch._inductor.config.inter_node_bw
 
     if nRanks <= 1:
         return 0
 
-    # Assume A100 gpu
-    compCapIndex = AMPERE_COMPCAP_IDX
+    compCapIndex = get_gpu_type()
     index2 = nNodes - 1 if nNodes <= 2 else 2
     # LL: for single node, we look at GPU type; for multi-node, we look at CPU type
     index1 = compCapIndex if nNodes == 1 else 0
