@@ -368,7 +368,7 @@ def _get_model_state_dict(
 
 def _load_model_state_dict(
     model: nn.Module,
-    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
+    state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> None:
     if not info.handle_model or not state_dict:
@@ -637,6 +637,34 @@ def state_dict(
         return model_state_dict, optim_state_dict
 
 
+def _unflatten_model_state_dict(
+    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
+) -> Dict[str, ValueType]:
+    if not state_dict:
+        return {}
+
+    if isinstance(next(iter(state_dict.keys())), nn.Module):
+        new_state_dict: Dict[str, ValueType] = {}
+        for submodule, sub_state_dict in state_dict.items():
+            for name, m in model.named_modules():
+                if m != submodule:
+                    continue
+
+                fqns = _get_fqns(model, name)
+                assert (
+                    len(fqns) == 1
+                ), "FQNs for a submodule should only have 1 element"
+                prefix = f"{next(iter(fqns))}."
+                new_state_dict.update(
+                    {
+                        prefix + subfqn: value
+                        for subfqn, value in sub_state_dict.items()
+                    }
+                )
+        return new_state_dict
+    else:
+        return cast(Dict[str, ValueType], state_dict)
+
 def load_state_dict(
     model: nn.Module,
     *,
@@ -667,7 +695,7 @@ def load_state_dict(
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
         model_state_dict: (Union[
-            None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+        None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
            the model state_dict to load. If the key of the ``model_state_dict``
            is nn.Module, the key is a submodule of ``model`` and the value should
            be the state_dict of the submodule. When loading the state_dict,
@@ -686,7 +714,9 @@ def load_state_dict(
         None
     """
 
-    model_state_dict = model_state_dict if model_state_dict else {}
+    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
+        model_state_dict
+    ) if model_state_dict else {}
     optim_state_dict = optim_state_dict if optim_state_dict else {}
     with gc_context():
         optimizers = (
@@ -701,26 +731,6 @@ def load_state_dict(
         info = _verify_options(
             model, optimizers, model_only, optim_only, options=options
         )
-
-        if model_state_dict and isinstance(
-            next(iter(model_state_dict.keys())), nn.Module
-        ):
-            new_state_dict: Dict[str, ValueType] = {}
-            for submodule, sub_state_dict in model_state_dict.items():
-                for name, m in model.named_modules():
-                    if m == submodule:
-                        fqns = _get_fqns(model, name)
-                        assert (
-                            len(fqns) == 1
-                        ), "FQNs for a submodule should only have 1 element"
-                        prefix = f"{next(iter(fqns))}."
-                        new_state_dict.update(
-                            {
-                                prefix + subfqn: value
-                                for subfqn, value in sub_state_dict.items()
-                            }
-                        )
-            model_state_dict = new_state_dict
 
         _verify_state_dict(model_state_dict, optim_state_dict, info)
         _load_model_state_dict(model, model_state_dict, info)
