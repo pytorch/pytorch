@@ -84,6 +84,7 @@ class StateDictOptions:
       won't contain any parameters that are frozen -- the requires_grad is False.
       The default value is False.
     """
+
     # The default should be sharded_state_dict
     fsdp_state_dict_type: StateDictType = StateDictType.SHARDED_STATE_DICT
     # Whether to ignore the frozen parameters when getting the state_dict.
@@ -502,9 +503,9 @@ def state_dict(
     and any combination of these parallelisms. The main functions of
     ``state_dict`` are:
             1. Creating a model and optimizer state_dict that can be resharded with
-               different workers and/or different parallelisms.
+            different workers and/or different parallelisms.
             2. Eliminating the need for users to call parallelism-specific
-                    state_dict APIs.
+            state_dict APIs.
             3. Sanity checking the result state_dict.
     The keys of the result state_dict are the canonical FQNs (Fully Qualified Names).
     A canonical FQN refers to the FQN based on a parameter's position in an
@@ -561,6 +562,7 @@ def state_dict(
         `optim_only` is True. The optimizer state_dict will be empty if
         `model_only` is True or `optimizers` is empty.
     """
+
     with gc_context():
         optimizers = (
             tuple()
@@ -600,7 +602,7 @@ def load_state_dict(
         1. All FQNs are canonical FQNs as defined in ``state_dict``.
         2. If a tensor is sharded, it must be a ShardedTensor or DTensor.
         3. Optimizer state_dict must contain the canonical FQNs instead of
-           parameter IDs.
+        parameter IDs.
 
     Args:
         model (nn.Module): the nn.Module to the model.
@@ -616,6 +618,7 @@ def load_state_dict(
     Returns:
         None
     """
+
     model_state_dict = model_state_dict if model_state_dict else {}
     optim_state_dict = optim_state_dict if optim_state_dict else {}
     with gc_context():
