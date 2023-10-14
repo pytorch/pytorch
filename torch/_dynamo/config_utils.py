@@ -10,7 +10,7 @@ import tokenize
 import unittest
 import warnings
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Set
 from unittest import mock
 
 # Types saved/loaded in configs

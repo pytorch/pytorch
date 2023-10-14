@@ -386,7 +386,7 @@ def convert_frame_assert(
             },
         )
 
-        with torch._dynamo.config.patch(patch_config_if_changed()):
+        with config.patch(patch_config_if_changed()):
             compiled_product = _compile(
                 frame.f_code,
                 frame.f_globals,
@@ -416,14 +416,16 @@ def convert_frame_assert(
 def patch_config_if_changed():
     patch = {}
 
-    saved_config_hash = torch._dynamo.eval_frame.DYNAMO_SAVED_CONFIG_HASH
-    current_config_hash = torch._dynamo.eval_frame.get_cached_recompile_hash()
+    eval_frame = torch._dynamo.eval_frame
+
+    saved_config_hash = eval_frame.DYNAMO_SAVED_CONFIG_HASH
+    current_config_hash = eval_frame.get_cached_recompile_hash()
 
     assert saved_config_hash is not None
     assert current_config_hash is not None
 
     if saved_config_hash != current_config_hash:
-        patch = torch._dynamo.eval_frame.DYNAMO_SAVED_CONFIG
+        patch = eval_frame.DYNAMO_SAVED_CONFIG
         recompiles_log.debug(
             "Restoring Dynamo config due to hash mismatch",
             f"Saved: {saved_config_hash}, Current: {current_config_hash}",
