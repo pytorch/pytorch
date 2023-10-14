@@ -687,8 +687,12 @@ class ExportedProgram:
             for old_node, new_node in zip(old_outputs, new_outputs)
         }
 
-        def make_argument_spec(node) -> ArgumentSpec:
-            val = node.meta["val"]
+        def make_argument_spec(old_node, node) -> ArgumentSpec:
+            if "val" not in node.meta:
+                assert len(node.users) == 0
+                val = old_node.meta["val"]
+            else:
+                val = node.meta["val"]
             if isinstance(val, torch.Tensor):
                 return TensorArgument(name=node.name)
             elif isinstance(val, torch.SymInt):
@@ -719,15 +723,15 @@ class ExportedProgram:
             grad_user_inputs={},
             loss_output=None,
             inputs=[
-                make_argument_spec(node)
-                for node in gm.graph.nodes
+                make_argument_spec(old_placeholders[i], node)
+                for i, node in enumerate(gm.graph.nodes)
                 if node.op == "placeholder"
             ],
             outputs=[
-                make_argument_spec(node)
-                for node in pytree.tree_flatten(
-                    next(iter(reversed(gm.graph.nodes))).args
-                )[0]
+                make_argument_spec(old_outputs[i], node)
+                for i, node in enumerate(
+                    pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]
+                )
             ],
         )
 
