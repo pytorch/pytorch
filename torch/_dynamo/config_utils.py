@@ -10,7 +10,7 @@ import tokenize
 import unittest
 import warnings
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -58,6 +58,7 @@ def install_config_module(module):
     default = dict()
 
     visit(module, module, "")
+    module._is_dirty = True
     module._config = config
     module._compile_ignored = compile_ignored
     module._default = default
@@ -242,6 +243,10 @@ class ConfigModule(ModuleType):
             changes = kwargs
             assert arg2 is None
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
+
+        if changes == {}:
+            return contextlib.nullcontext()
+
         prior = {}
         prior_ignored = {}
         config = self

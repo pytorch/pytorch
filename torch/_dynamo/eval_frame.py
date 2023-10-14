@@ -3,9 +3,11 @@ from __future__ import annotations
 import contextlib
 import dis
 import functools
+import hashlib
 import inspect
 import logging
 import os
+import pickle
 import sys
 import textwrap
 import threading
@@ -262,19 +264,102 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
+dynamo_config_guard_ignorelist = {
+    "log_file_name",
+    "verbose",
+    "verify_correctness",  # will not affect model, will raise RuntimeError
+    # (no silent change to compilation behaviour)
+    "cache_size_limit",
+    "accumulated_cache_size_limit",
+    "print_specializations",
+    "replay_record_enabled",
+    "cprofile",  # only wraps _compile, not graph
+    "repro_after",
+    "repro_level",
+    "repro_forward_only",
+    "repro_tolerance",
+    "same_two_models_use_fp64",
+    "error_on_recompile",  # safe because: will throw error
+    "report_guard_failures",
+    "report_all_guard_failures",
+    "base_dir",  # used for minifying / logging
+    "translation_validation",
+    "translation_validation_timeout",
+    "translation_validation_no_bisect",
+    "DEBUG_DIR_VAR_NAME",
+    "debug_dir_root",
+}
+
+dynamo_config_guard_nonserializable_list = {
+    # "is_fbcode",  # function def (removed by ConfigModule visit)
+    "constant_functions",  # PyCapsules (i.e. function ptrs)
+    "skipfiles_inline_module_allowlist",  # cannot pickle module (unused)
+}
+
+# The config to restore to should dynamo compile / recompile when
+# executing from the compiled function's _TorchDynamoContext
+DYNAMO_SAVED_CONFIG: Optional[Dict[str, Any]] = None
+DYNAMO_SAVED_CONFIG_HASH: Optional[str] = None
+
+DYNAMO_CACHED_RECOMPILE_HASH: Optional[str] = None
+
+
 @contextlib.contextmanager
-def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
-    if enable is None:
+def restore_compiled_dynamo_config(
+    first_ctx: bool,
+    saved_config: Dict[str, Any],
+    saved_config_hash: str,
+):
+    global DYNAMO_SAVED_CONFIG, DYNAMO_SAVED_CONFIG_HASH
+    # Set exactly once from top-level compile
+    is_top_level = False
+    try:
+        if DYNAMO_SAVED_CONFIG_HASH == DYNAMO_SAVED_CONFIG is None:
+            is_top_level = True
+            DYNAMO_SAVED_CONFIG = saved_config
+            DYNAMO_SAVED_CONFIG_HASH = saved_config_hash
+            log.debug("Set top-level compile config hash: %s", DYNAMO_SAVED_CONFIG_HASH)
+        else:
+            log.debug("Ignoring inner dynamo compile config and hash")  # TODO: remove?
         yield
-    elif enable:
-        # Assume everything is dynamic by default
-        with config.patch(assume_static_by_default=False):
-            yield
+    finally:
+        if is_top_level:
+            DYNAMO_SAVED_CONFIG_HASH = DYNAMO_SAVED_CONFIG = None
+
+
+def get_config_and_hash(dynamic=None):
+    # get current value of dynamo configs
+    dynamo_config = config.get_config_copy()
+    for k in dynamo_config_guard_ignorelist:
+        dynamo_config.pop(k)
+    for k in dynamo_config_guard_nonserializable_list:
+        dynamo_config.pop(k)
+
+    # Set appropriate dynamo config flags
+    if dynamic is None:
+        pass
+    elif dynamic:
+        dynamo_config.update(
+            {"automatic_dynamic_shapes": False, "assume_static_by_default": True}
+        )
     else:
-        with config.patch(
-            automatic_dynamic_shapes=False, assume_static_by_default=True
-        ):
-            yield
+        dynamo_config.update({"assume_static_by_default": False})
+
+    dynamo_config_bytes = pickle.dumps(
+        dynamo_config
+    )  # TODO we need this to be deterministic, sort_keys=True)
+    sha256_hash = hashlib.sha256(dynamo_config_bytes).hexdigest()
+    return dynamo_config, sha256_hash
+
+
+# Used to test if the config needs to be restored by checking the current hash.
+# We cache this, only to recompute it when config is possibly out of sync (i.e. is dirty).
+def get_cached_recompile_hash():
+    global DYNAMO_CACHED_RECOMPILE_HASH
+    if config._is_dirty or DYNAMO_CACHED_RECOMPILE_HASH is None:
+        _, DYNAMO_CACHED_RECOMPILE_HASH = get_config_and_hash(dynamic=None)
+        config._is_dirty = False
+    return DYNAMO_CACHED_RECOMPILE_HASH
 
 
 class _TorchDynamoContext:
@@ -300,7 +385,13 @@ class _TorchDynamoContext:
         self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
+        self.save_and_hash_config()
         patch_fn()
+
+    def save_and_hash_config(self):
+        # save current value of dynamo configs
+        self.saved_config, self.saved_config_hash = get_config_and_hash(self.dynamic)
+        log.debug("Saved dynamo config and hash for new compiled object. Hash: %s", self.saved_config_hash)
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -315,15 +406,17 @@ class _TorchDynamoContext:
         self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-        self.dynamic_ctx.__enter__()
+        self.dynamo_config_ctx = restore_compiled_dynamo_config(
+            self.first_ctx, self.saved_config, self.saved_config_hash
+        )
+        self.dynamo_config_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
         # TODO: This is totally not the right way to chain contexts manually
-        self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
+        self.dynamo_config_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
@@ -395,15 +488,17 @@ class _TorchDynamoContext:
             backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-            dynamic_ctx.__enter__()
+            dynamo_config_ctx = restore_compiled_dynamo_config(
+                self.first_ctx, self.saved_config, self.saved_config_hash
+            )
+            dynamo_config_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
                 backend_cache_manager.__exit__(None, None, None)
+                dynamo_config_ctx.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
