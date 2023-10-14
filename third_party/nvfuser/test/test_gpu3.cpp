@@ -3149,7 +3149,6 @@ TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   }
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({9999}, options);
 
@@ -4943,8 +4942,6 @@ TEST_F(NVFuserTest, FusionIssueRepro1844_CUDA) {
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  const auto mask_options =
-      at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
   at::manual_seed(0);
 
   at::Tensor a = at::randn(shape, options);
