@@ -39,12 +39,16 @@ class PreTrainedModel(nn.Module):
         self.layer1 = nn.Linear(DIM, DIM)
         self.layer2 = nn.Linear(DIM, DIM)
         self.layer3 = nn.Linear(DIM, DIM)
+        self.sequential = nn.Sequential(nn.Linear(DIM, DIM), nn.ReLU())
+        self.module_list = nn.ModuleList([nn.Linear(DIM, DIM), nn.ReLU()])
         self.relu = nn.ReLU()
 
     def forward(self, batch):
         x = self.relu(self.layer1(batch))
         x = self.relu(self.layer2(x))
         x = self.relu(self.layer3(x))
+        x = self.sequential(x)
+        x = self.module_list[1](self.module_list[0](x))
         return x
 
 
