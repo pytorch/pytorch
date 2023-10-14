@@ -390,7 +390,7 @@ def make_output_reshard_tensor(
     return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined, misc]
 
 
-def _is_redistribute_necessary(
+def _needs_redistribute(
     dst_placements: Tuple[Placement, ...], dtensor: DTensor
 ) -> bool:
     """
@@ -413,7 +413,7 @@ def _get_prepare_input(
         if isinstance(t, DTensor):
             return (
                 t
-                if _is_redistribute_necessary(dst_placements, t)
+                if _needs_redistribute(dst_placements, t)
                 else t.redistribute(device_mesh, dst_placements)
             )
         elif isinstance(t, torch.Tensor):
@@ -422,7 +422,7 @@ def _get_prepare_input(
             )
             return (
                 dtensor
-                if _is_redistribute_necessary(dst_placements, dtensor)
+                if _needs_redistribute(dst_placements, dtensor)
                 else dtensor.redistribute(device_mesh, dst_placements)
             )
         else:
@@ -491,7 +491,7 @@ def _get_prepare_output(
         if isinstance(t, DTensor):
             dtensor = (
                 t
-                if _is_redistribute_necessary(dst_placements, t)
+                if _needs_redistribute(dst_placements, t)
                 else t.redistribute(device_mesh, dst_placements)
             )
             return dtensor.to_local() if use_local_output else dtensor
