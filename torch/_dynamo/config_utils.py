@@ -218,10 +218,11 @@ class ConfigModule(ModuleType):
 
     def to_dict(self):
         warnings.warn(
-            DeprecationWarning(
+            (
                 "config.to_dict() has been deprecated. It may no longer change the underlying config.",
                 "use config.shallow_copy_dict() or config.get_config_copy() instead",
-            )
+            ),
+            DeprecationWarning,
         )
         return self.shallow_copy_dict()
 
