@@ -334,26 +334,45 @@ def convert_frame_assert(
                 # We could add a verbose mode if needed
                 return f"  reasons: {str(guard_failures[code][-1])}\n"
 
+            if cache_size.will_compilation_exceed_total():
+                exceed_reason = "will exceed total cache size"
+                relevant_limit, value = (
+                    "config.accumulated_cache_size_limit",
+                    config.accumulated_cache_size_limit,
+                )
+            else:
+                exceed_reason = (
+                    "will exceed cache size for: same config & same-ID inputs"
+                )
+                relevant_limit, value = (
+                    "config.cache_size_limit",
+                    config.cache_size_limit,
+                )
+
             if config.report_guard_failures:
                 assert code in guard_failures, "TODO(whc) any other recompile reasons?"
 
                 log.warning(
-                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "torch._dynamo %s. %s: %s\n"
                     "   function: %s\n"
                     "   reasons:  %s\n"
                     "to diagnose recompilation issues, see %s.",
-                    config.cache_size_limit,
+                    exceed_reason,
+                    relevant_limit,
+                    value,
                     format_func_info(code),
                     format_guard_failures(code),
                     troubleshooting_url,
                 )
             else:
                 log.warning(
-                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "torch._dynamo %s. %s: %s\n"
                     "   function: %s\n"
                     "to diagnose recompilation issues, set env variable TORCHDYNAMO_REPORT_GUARD_FAILURES=1"
                     " and also see %s.",
-                    config.cache_size_limit,
+                    exceed_reason,
+                    relevant_limit,
+                    value,
                     format_func_info(code),
                     troubleshooting_url,
                 )
@@ -383,7 +402,7 @@ def convert_frame_assert(
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
-                "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
+                "cache_size": cache_size.num_cache_entries_in_bucket,
                 "accumulated_cache_size": cache_size.num_cache_entries,
             },
         )
@@ -434,8 +453,8 @@ def patch_config_if_changed():
                     "Current config does not match config saved when compiling\n"
                     "Saved hash: %s, Current hash: %s\nRestoring saved config."
                 ),
-                saved_config_hash,
-                current_config_hash,
+                saved_config_hash if config.verbose else saved_config_hash[:7],
+                current_config_hash if config.verbose else current_config_hash[:7],
             )
             config_dict_ref = config.to_dict()
             for key in patch:
@@ -685,7 +704,7 @@ def _compile(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries_in_bucket,
                 cache_size.num_cache_entries,
                 guard_count,
                 graph_op_count,
