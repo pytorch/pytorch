@@ -64,7 +64,11 @@ def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, s
         # qspec for a = SharedQuantizationSpec(b) means `a` points to `b`
         _union(sharing_with, edge_or_node, shared_with_map)
 
-def _find_root_qspec(qspec: QuantizationSpecBase, edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
+def _find_root_qspec(
+    qspec: QuantizationSpecBase,
+    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
+    shared_with_map: Dict[EdgeOrNode, EdgeOrNode]
+) -> QuantizationSpecBase:
     """Unwraps qspec to get the final root qspec (non SharedQuantizationSpec)
     if qspec is SharedQuantizationSpec
        (1). tries to find the root node for the node that the qspec points to
@@ -162,6 +166,7 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
             input_edge_root_qspec = _find_root_qspec(input_edge_root_qspec, edge_or_node_to_qspec, shared_with_map)
 
             # find root_qspec for `arg` Node (the output of previous node)
+            assert isinstance(input_edge, tuple)
             arg, n = input_edge
             arg_as_output_root_qspec = None
             if arg in edge_or_node_to_qspec:
@@ -183,7 +188,7 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
     # now that we get the sharing relations between all edges and nodes, we can assingn group ids
     cur_group_id = 0
     edge_or_node_to_group_id: Dict[EdgeOrNode, int] = {}
-    for edge_or_node, shared_with in shared_with_map.items():
+    for edge_or_node in shared_with_map.keys():
         root = _find_root(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
             edge_or_node_to_group_id[root] = cur_group_id
@@ -192,7 +197,11 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
 
     return edge_or_node_to_group_id
 
-def _get_obs_or_fq_map(edge_or_node_to_group_id: Dict[EdgeOrNode, int], edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase], is_qat: bool) -> Dict[EdgeOrNode, ObserverOrFakeQuantize]:
+def _get_obs_or_fq_map(
+    edge_or_node_to_group_id: Dict[EdgeOrNode, int],
+    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
+    is_qat: bool
+) -> Dict[EdgeOrNode, ObserverOrFakeQuantize]:
     """Generates the EdgeOrNode to observer/fake_quant instances
     Makes sure that for EdgeOrNode that has the same group_id should have the same observer or fake quant
     instances
@@ -398,7 +407,8 @@ def _maybe_insert_input_and_output_observers_for_node(
         return
 
     # this returns the new observer node if it was needed
-    maybe_output_obs_node = _maybe_insert_output_observer_for_node(node, model, named_modules, model.graph, edge_or_node_to_obs_or_fq, is_qat)
+    maybe_output_obs_node = _maybe_insert_output_observer_for_node(
+        node, model, named_modules, model.graph, edge_or_node_to_obs_or_fq, is_qat)
 
     if maybe_output_obs_node is None:
         return
