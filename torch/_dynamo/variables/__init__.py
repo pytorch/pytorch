@@ -23,6 +23,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -68,8 +69,8 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
-    "DataClassVariable",
     "CustomizedDictVariable",
+    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -79,13 +80,14 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "LambdaVariable",
+    "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
-    "NNModuleVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
     "NewGlobalVariable",
+    "NNModuleVariable",
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",

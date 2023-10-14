@@ -90,15 +90,26 @@ def is_side_effect_safe(m: MutableLocalBase):
     return m.scope == scope_id
 
 
-# metaclass to call post_init
-class HasPostInit(type):
+class VariableTrackerMeta(type):
     def __call__(cls, *args, **kwargs):
+        """Call __post_init__"""
         obj = type.__call__(cls, *args, **kwargs)
         obj.__post_init__(*args, **kwargs)
         return obj
 
+    def __instancecheck__(cls, instance) -> bool:
+        """Make isinstance work with LazyVariableTracker"""
+        from .lazy import LazyVariableTracker
 
-class VariableTracker(metaclass=HasPostInit):
+        if type.__instancecheck__(LazyVariableTracker, instance) and cls not in (
+            VariableTracker,
+            LazyVariableTracker,
+        ):
+            instance = instance.realize()
+        return type.__instancecheck__(cls, instance)
+
+
+class VariableTracker(metaclass=VariableTrackerMeta):
     """
     Base class for tracked locals and stack values
 
@@ -159,6 +170,7 @@ class VariableTracker(metaclass=HasPostInit):
             return cache[idx][0]
 
         if isinstance(value, VariableTracker):
+            value = value.unwrap()
             if not skip_fn(value):
                 updated_dict = dict(value.__dict__)
                 for key in updated_dict.keys():
@@ -336,6 +348,14 @@ class VariableTracker(metaclass=HasPostInit):
             return self
         new_vt = self.clone(user_code_variable_name=new_name)
         return tx.replace_all(self, new_vt)
+
+    def realize(self) -> "VariableTracker":
+        """Used by LazyVariableTracker to build the real VariableTracker"""
+        return self
+
+    def unwrap(self) -> "VariableTracker":
+        """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
+        return self
 
     def __init__(
         self,

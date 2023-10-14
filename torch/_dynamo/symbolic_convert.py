@@ -11,6 +11,7 @@ import linecache
 import logging
 import operator
 import sys
+import threading
 import traceback
 import types
 import typing
@@ -123,6 +124,7 @@ log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
+tls = threading.local()
 
 
 @functools.lru_cache(None)
@@ -1982,6 +1984,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
 class InstructionTranslator(InstructionTranslatorBase):
     mutated_closure_cell_contents: Set[str]
+
+    @staticmethod
+    def current_tx() -> "InstructionTranslator":
+        return tls.current_tx
+
+    @contextlib.contextmanager
+    def set_current_tx(self):
+        prior = getattr(tls, "current_tx", None)
+        tls.current_tx = self
+        yield
+        tls.current_tx = prior
 
     def __init__(
         self,
