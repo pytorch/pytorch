@@ -30,7 +30,7 @@ class MLPListModule(torch.nn.Module):
         x = torch.chunk(x, 2, dim=1)[0]
         for mlp in self.mlps:
             x = mlp(x)
-        return x
+        return x + torch.ones_like(x)
 
 
 class TensorParallelTest(DTensorTestBase):

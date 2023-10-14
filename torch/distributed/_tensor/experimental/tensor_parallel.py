@@ -135,17 +135,6 @@ def mark_sharding(
     """
     Mark the sharding strategy for each node in the graph module.
     """
-    non_compute_ops = [
-        aten.clone.default,
-        aten.detach.default,
-        aten.ones_like.default,
-        aten.reshape.default,
-        aten.t.default,
-        aten.view.default,
-        operator.getitem,
-        aten.permute.default,
-    ]
-
     placement_strategies: Dict[
         Node, PlacementStrategy
     ] = mark_tensor_parallel_shardings(gm, graph_signiture, mesh)
@@ -158,46 +147,20 @@ def mark_sharding(
                 )
             node.meta["sharding"] = placement_strategies[node]
         elif node.op == "call_function":
-            if node.target in non_compute_ops:
+            if node.target == operator.getitem:
                 input_nodes = node.all_input_nodes
                 assert (
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
                 arg_strategy = placement_strategies[input_nodes[0]]
-                if node.target == torch.ops.aten.permute.default:
-                    dims = node.args[1]
-                    placement: Placement
-                    if arg_strategy.output_spec.placements[0].is_shard():
-                        assert isinstance(arg_strategy.output_spec.placements[0], Shard)
-                        shard_dim = arg_strategy.output_spec.placements[0].dim
-                        placement = Shard(dims.index(shard_dim))
-                    else:
-                        placement = Replicate()
-                    placement_strategies[node] = _create_placement_strategy(
-                        node,
-                        mesh,
-                        placements=(placement,),
-                        input_specs=_get_input_node_specs(node, placement_strategies),
-                    )
-                elif node.target == operator.getitem:
-                    # for getitem call, just forward the strategy from the input
-                    getitem_idx = node.args[1]
-                    placement_strategies[node] = _create_placement_strategy(
-                        node,
-                        mesh,
-                        placements=arg_strategy.output_spec.placements,
-                        input_specs=_get_input_node_specs(node, placement_strategies),
-                    )
-                else:
-                    placement_strategies[node] = _create_placement_strategy(
-                        node,
-                        mesh,
-                        placements=arg_strategy.output_spec.placements,
-                        input_specs=_get_input_node_specs(node, placement_strategies),
-                    )
+                placement_strategies[node] = _create_placement_strategy(
+                    node,
+                    mesh,
+                    placements=arg_strategy.output_spec.placements,
+                    input_specs=_get_input_node_specs(node, placement_strategies),
+                )
                 node.meta["sharding"] = placement_strategies[node]
             else:
-                # Handle compute nodes
                 op_overload = cast(torch._ops.OpOverload, node.target)
                 op_schema = OpSchema(
                     op=op_overload,
@@ -233,8 +196,6 @@ def _get_output_spec_from_output_sharding(
     if isinstance(output_sharding.output_spec, DTensorSpec):
         return output_sharding.output_spec
     else:
-        # When a node has multiple outputs, the placement of them should be same. E.g.: split_with_sizes
-        # Does this always hold?
         assert isinstance(output_sharding.output_spec, Sequence)
         output_spec_set = set(output_sharding.output_spec)
         assert len(output_spec_set) == 1
