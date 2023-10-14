@@ -594,10 +594,10 @@ def get_state_dict(
             `StateDictOptions` for the details.
 
     Returns:
-        A tuple of state_dict's. The first one is the module  state_dict and the
-        second one is the optimizer state_dict. The model state_dict will be
-        empty if `optim_only` is True. The optimizer state_dict will be empty if
-        optimizers` is empty.
+        ``Tuple`` with the model state_dict as the first element and optimizer
+        state_dict as the second element:
+            The model state_dict will be empty if `optim_only` is True.
+            The optimizer state_dict will be empty if optimizers` is empty.
     """
 
     with gc_context():
