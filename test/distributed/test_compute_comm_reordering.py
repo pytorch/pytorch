@@ -12,7 +12,14 @@ import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor import ir
-from torch._inductor.comm_analysis import baseLat, NCCL_ALGO, NCCL_PROTO, hwLat, NCCL_HW, NVIDIA_GPU_TYPE
+from torch._inductor.comm_analysis import (
+    baseLat,
+    hwLat,
+    NCCL_ALGO,
+    NCCL_HW,
+    NCCL_PROTO,
+    NVIDIA_GPU_TYPE,
+)
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,

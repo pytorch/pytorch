@@ -1,6 +1,5 @@
-# type: ignore
-
 import math
+from enum import Enum
 
 import torch
 from . import ir
@@ -40,62 +39,68 @@ class NVIDIA_GPU_TYPE(Enum):
 
 # Latencies in us
 # len(NCCL_ALGO) x len(NCCL_PROTO)
-baseLat = torch.tensor([
-    # Tree
+baseLat = torch.tensor(
     [
-        6.8,  # LL
-    ],
-    # Ring
-    [
-        6.6,  # LL
-    ],
-])
+        # Tree
+        [
+            6.8,  # LL
+        ],
+        # Ring
+        [
+            6.6,  # LL
+        ],
+    ]
+)
 
 # Latencies in us
 # len(NCCL_HW) x len(NCCL_ALGO) x len(NCCL_PROTO)
-hwLat = torch.tensor([
-    # NVLINK
+hwLat = torch.tensor(
     [
-        [0.6],  # Tree (LL)
-        [0.6],  # Ring (LL)
-    ],
-    # PCI
-    [
-        [1.0],  # Tree (LL)
-        [1.0],  # Ring (LL)
-    ],
-    # NET
-    [
-        [5.0],  # Tree (LL)
-        [2.7],  # Ring (LL)
-    ],
-])
+        # NVLINK
+        [
+            [0.6],  # Tree (LL)
+            [0.6],  # Ring (LL)
+        ],
+        # PCI
+        [
+            [1.0],  # Tree (LL)
+            [1.0],  # Ring (LL)
+        ],
+        # NET
+        [
+            [5.0],  # Tree (LL)
+            [2.7],  # Ring (LL)
+        ],
+    ]
+)
 
 
 # LL128 max BW per channel
-llMaxBws = torch.tensor([
-    # Volta-N1/Intel-N2/Intel-N4
+llMaxBws = torch.tensor(
     [
-        39.0,
-        39.0,
-        20.4,
-    ],
-    # Ampere-N1/AMD-N2/AMD-N4
-    [
-        87.7,
-        22.5,  # avg of ring & tree
-        19.0,
-    ],
-    # Hopper-N1/AMD-N2/AMD-N4
-    [
-        87.7,
-        22.5,  # avg of ring & tree
-        19.0,
-    ],
-])
+        # Volta-N1/Intel-N2/Intel-N4
+        [
+            39.0,
+            39.0,
+            20.4,
+        ],
+        # Ampere-N1/AMD-N2/AMD-N4
+        [
+            87.7,
+            22.5,  # avg of ring & tree
+            19.0,
+        ],
+        # Hopper-N1/AMD-N2/AMD-N4
+        [
+            87.7,
+            22.5,  # avg of ring & tree
+            19.0,
+        ],
+    ]
+)
 
 
-def get_gpu_type():
+def get_gpu_type() -> NVIDIA_GPU_TYPE:
     gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run)
     if "V100" in gpu_info:
         return NVIDIA_GPU_TYPE.VOLTA
@@ -108,7 +113,7 @@ def get_gpu_type():
         return NVIDIA_GPU_TYPE.AMPERE
 
 
-def get_collective_type(snode: "BaseSchedulerNode") -> str:  # type: ignore[name-defined]
+def get_collective_type(snode: "BaseSchedulerNode") -> NCCL_COLL:  # type: ignore[name-defined]
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return NCCL_COLL.ALL_REDUCE
     elif isinstance(
@@ -149,11 +154,18 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
-    bwIntra = torch._inductor.config.intra_node_bw
-    bwInter = torch._inductor.config.inter_node_bw
-
     if nRanks <= 1:
         return 0
+
+    # Assumes ring algorithm
+    nccl_algo = NCCL_ALGO.RING
+    coll = get_collective_type(snode)
+
+    # =============== bandwidth computation ===============
+    # First compute bandwidth in GB/s; then at the end, convert it to GB/ns
+
+    bwIntra = torch._inductor.config.intra_node_bw
+    bwInter = torch._inductor.config.inter_node_bw
 
     compCapIndex = get_gpu_type()
     index2 = nNodes - 1 if nNodes <= 2 else 2
@@ -161,26 +173,6 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     index1 = compCapIndex if nNodes == 1 else 0
     llMaxBw = llMaxBws[index1][index2]
 
-    intraHw = NCCL_HW_NVLINK
-    hw = intraHw if nNodes == 1 else NCCL_HW_NET
-
-    coll = get_collective_type(snode)
-
-    if coll == ncclFuncAllReduce:
-        nsteps = 2 * (nRanks - 1)
-    elif coll in (ncclFuncReduceScatter, ncclFuncAllGather):
-        nsteps = nRanks - 1
-
-    if coll == ncclFuncAllReduce:
-        if nNodes > 1:
-            nInterSteps = 2 * nNodes
-        else:
-            nInterSteps = 0
-    elif coll in (ncclFuncReduceScatter, ncclFuncAllGather):
-        nInterSteps = nNodes - 1
-
-    # =============== bandwidth computation ===============
-    # First compute bandwidth in GB/s; then at the end, convert it to GB/ns
     # NOTE: each step of ring algorithm is synchronized,
     # and is bottlenecked by the slowest link which is the inter-node interconnect.
     # hence when nNodes >= 2, bw is inter-node bandwidth.
@@ -193,8 +185,14 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     # Various model refinements
     busBw = min(
         llMaxBw,
-        busBw * (1.0 / 4.0 if (nNodes > 1 or coll == ncclFuncAllReduce) else 1.0 / 3.0),
+        busBw
+        * (1.0 / 4.0 if (nNodes > 1 or coll == NCCL_COLL.ALL_REDUCE) else 1.0 / 3.0),
     )
+
+    if coll == NCCL_COLL.ALL_REDUCE:
+        nsteps = 2 * (nRanks - 1)
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+        nsteps = nRanks - 1
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
     ratio = (1.0 * nRanks) / nsteps
@@ -203,12 +201,23 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     bandwidth_GB_per_ns = bandwidth / 1e9
 
     # =============== latency computation ===============
-    # First compute latency in us; then at the end, convert it to ns
-    latency = baseLat[NCCL_ALGO_RING]
-    intraLat = hwLat[intraHw][NCCL_ALGO_RING]
-    interLat = hwLat[NCCL_HW_NET][NCCL_ALGO_RING]
+    intraHw = NCCL_HW.NVLINK
+    hw = intraHw if nNodes == 1 else NCCL_HW.NET
 
-    lat = hwLat[hw][NCCL_ALGO_RING]
+    if coll == NCCL_COLL.ALL_REDUCE:
+        if nNodes > 1:
+            nInterSteps = 2 * nNodes
+        else:
+            nInterSteps = 0
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+        nInterSteps = nNodes - 1
+
+    # First compute latency in us; then at the end, convert it to ns
+    latency = baseLat[nccl_algo]
+    intraLat = hwLat[intraHw][nccl_algo]
+    interLat = hwLat[NCCL_HW.NET][nccl_algo]
+
+    lat = hwLat[hw][nccl_algo]
     # Inter-node rings still have to launch nsteps * net overhead.
     netOverhead = 0.0
     if nNodes > 1:
