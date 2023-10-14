@@ -200,7 +200,6 @@ class ConfigModule(ModuleType):
 
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
-        self._is_dirty = True
         for k, v in pickle.loads(data).items():
             if k in self._compile_ignored_keys:
                 self._compile_ignored[k] = v
