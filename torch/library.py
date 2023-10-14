@@ -408,7 +408,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
-        >>> @torch.library.impl_backend("mylib::custom_nonzero", "CPU")
+        >>> @torch.library.impl_device("mylib::custom_nonzero", "CPU")
         >>> def custom_nonzero_cpu(x):
         >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
