@@ -1691,10 +1691,10 @@ if(BUILD_TEST)
           if(USE_ASAN)
             if(TARGET Sanitizer::address)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::address)
-            endif
+            endif()
             if(TARGET Sanitizer::undefined)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
-            endif
+            endif()
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
