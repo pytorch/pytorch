@@ -191,7 +191,6 @@ class ConfigModule(ModuleType):
         cfg = dict(self._config)
         cfg.update(updates)
         hashed = self._get_hash(cfg)
-        cfg.update(self._compile_ignored)
         return cfg, hashed
 
     def _get_hash(self, config: Dict[str, Any]) -> str:
@@ -201,8 +200,6 @@ class ConfigModule(ModuleType):
     def get_hash(self) -> str:
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
-            string_to_hash = repr(sorted(self._config.items()))
-            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
             self._hash_digest = self._get_hash(self._config)
             self._is_dirty = False
         return self._hash_digest
