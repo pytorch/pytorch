@@ -1437,19 +1437,25 @@ class BuiltinVariable(VariableTracker):
                 except RuntimeError:
                     # not broadcastable, can't be compared
                     _unimplemented()
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return wrap_fx_proxy_cls(
                 type(left),  # handle Ndarrays and Tensors
                 tx,
-                op(left.as_proxy(), right.as_proxy()),
+                proxy,
             )
 
         if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
 
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return SymNodeVariable.create(
                 tx,
-                op(left.as_proxy(), right.as_proxy()),
+                proxy,
                 sym_num=None,
             )
 

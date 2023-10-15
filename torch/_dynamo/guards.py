@@ -191,20 +191,14 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
-        user_scope: Optional[Dict[str, object]],
+        local_scope: Dict[str, object],
+        global_scope: Dict[str, object],
         check_fn_manager: CheckFunctionManager,
-        *,
-        local: bool,
     ):
-        self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        if user_scope:
-            scope = {"L" if local else "G": user_scope}
-        else:
-            scope = {"L" if local else "G": dict()}
-        self.scope: Dict[str, Dict[str, object]] = scope
+        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -219,7 +213,7 @@ class GuardBuilder(GuardBuilderBase):
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[GuardCodeList] = []
-        # shape_env_code is only used by local_builder and is used for
+        # shape_env_code is only used by builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
@@ -331,7 +325,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
         # cache size logic
-        if self.local and isinstance(guard.originating_source, LocalSource):
+        if isinstance(guard.originating_source, LocalSource):
             # TODO(janimesh) - This is currently restricted to nn.Module objects
             # because many other ID_MATCH'd objects fail - like DeviceMesh.
             # Increase the scope of ID_MATCH'd objects.
@@ -527,7 +521,9 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(const_keys, local=self.local)
+        const_keys_repr = dict_const_keys_repr(
+            const_keys, local=is_from_local_source(guard.originating_source)
+        )
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
             code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
@@ -949,40 +945,29 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
+        w_builder = None
+
         def source_ref(source):
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
                 # No need to track constants
                 return source.name()
-            builder = guard_source.select(w_local(), w_global())
-            assert builder is not None
-            return builder.arg_ref(source.name())
+            assert w_builder
+            r_builder = w_builder()
+            assert r_builder is not None
+            return r_builder.arg_ref(source.name())
 
-        local_builder = GuardBuilder(
+        builder = GuardBuilder(
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
-            combine_scopes(output_graph.global_scope, output_graph.local_scope),
-            self,
-            local=True,
-        )
-        global_builder = GuardBuilder(
-            self.id_ref,
-            source_ref,
-            self.lookup_weakrefs,
+            output_graph.local_scope,
             output_graph.global_scope,
             self,
-            local=False,
         )
+        # Break retain cycle. See test_release_input_memory
+        w_builder = weakref.ref(builder)
 
-        # We need to transplant a copy here, because some guards
-        # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
-        # the inverse is illegal.
-        if "G" in global_builder.scope:
-            local_builder.scope["G"] = global_builder.scope["G"]
-        # source_ref can cause a cycle, make sure we break it with weakref
-        w_local = weakref.ref(local_builder)
-        w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
@@ -995,10 +980,8 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(
-            local_builder, global_builder, guards, guard_fail_fn
-        )
+            guard.create(builder, builder)
+        self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
@@ -1008,14 +991,11 @@ class CheckFunctionManager:
         # eval_frame.c. In future, we should probably replace check_fn with a
         # queryable data structure such that this information is already present
         # in some form.
-        self.check_fn.id_matched_objs = local_builder.id_matched_objs
+        self.check_fn.id_matched_objs = builder.id_matched_objs
 
-    def compile_check_fn(
-        self, local_builder, global_builder, guards_out, guard_fail_fn
-    ):
-        assert not (set(local_builder.argnames) & set(global_builder.argnames))
+    def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
-        largs = local_builder.argnames
+        largs = builder.argnames
         largs += ["**___kwargs_ignored"]
 
         guards_log.debug("GUARDS:")
@@ -1056,33 +1036,20 @@ class CheckFunctionManager:
                 code_parts.append(code)
 
         seen = set()
-        for gcl in local_builder.code:
+        for gcl in builder.code:
             for code in gcl.code_list:
                 if code not in seen:
                     add_code_part(code, gcl.guard)
                     seen.add(code)
 
-        seen = set()
-        for gcl in global_builder.code:
-            for code in gcl.code_list:
-                if code not in seen:
-                    add_code_part(code, gcl.guard)
-                    seen.add(code)
-
-        tensor_check_names = (
-            local_builder.tensor_check_names + global_builder.tensor_check_names
-        )
-
+        tensor_check_names = builder.tensor_check_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
-            tensor_check_examples = (
-                local_builder.tensor_check_examples
-                + global_builder.tensor_check_examples
-            )
+            tensor_check_examples = builder.tensor_check_examples
 
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
@@ -1124,9 +1091,8 @@ class CheckFunctionManager:
             )
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = (
-                local_builder.tensor_check_guards + global_builder.tensor_check_guards
-            )
+            tensor_check_guards = builder.tensor_check_guards
+
             for i, name in enumerate(tensor_check_names):
                 # This is a copy of what guards.cpp checks against
                 # Keep this in sync with TensorCheck constructor
@@ -1163,11 +1129,10 @@ class CheckFunctionManager:
 
         # TODO: the "guard" here is actually just the top level SHAPE_ENV
         # which is useless.  Get ShapeEnv to pass in more provenance.
-        for gcl in local_builder.shape_env_code:
+        for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
 
-        assert not global_builder.shape_env_code
         global_state = convert_frame.initial_global_state
         if global_state is None:
             # we should only hit this case in NopTests()
@@ -1199,7 +1164,7 @@ class CheckFunctionManager:
             set_guard_fail_hook(guard_fail_hook)
 
         out: Dict[str, Any] = dict()
-        exec(pycode, global_builder.scope, out)
+        exec(pycode, builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
@@ -1207,7 +1172,7 @@ class CheckFunctionManager:
         guard_fn.code_parts = code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
-            "G": global_builder.scope["G"],
+            "G": builder.scope["G"],
         }
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
