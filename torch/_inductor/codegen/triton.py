@@ -1911,7 +1911,7 @@ class TritonKernel(Kernel):
 
         return result
 
-    def codegen_kernel(self, name=None, node_schedule=None):
+    def codegen_kernel(self, name=None):
         from triton import next_power_of_2
 
         code = IndentedBuffer()
@@ -1991,9 +1991,6 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.output_buffers[mutation])
         mutated_args = sorted(mutated_args)
 
-        op_info = None
-        if node_schedule and config.triton.descriptive_names:
-            op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
@@ -2510,16 +2507,6 @@ class TritonScheduling(BaseScheduling):
 
         return reduction_hint_val, mutations, index_dtype
 
-    def codegen_insert_marker(self, node_schedule):
-        if config.profiler_mark_wrapper_call:
-            wrapper = V.graph.wrapper_code
-            # Introduce a data structure to hold the marker info
-            # Then pass the new data structure to writeline
-            # This will cause a with record_function to be emitted on the
-            # next line
-            op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
-            wrapper.writeline(op_info)
-
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -2562,7 +2549,7 @@ class TritonScheduling(BaseScheduling):
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
-            src_code = kernel.codegen_kernel(node_schedule=node_schedule)
+            src_code = kernel.codegen_kernel()
 
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
@@ -2736,7 +2723,7 @@ class TritonScheduling(BaseScheduling):
                             node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
 
-            src_code = kernel.codegen_kernel(node_schedule=[foreach_node])
+            src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
             self.codegen_comment([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)

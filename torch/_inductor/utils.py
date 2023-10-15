@@ -882,14 +882,11 @@ class OriginOpList:
     def __repr__(self):
         return str(list(self.oi_list))
 
-    def codegen(self, code: IndentedBuffer, cm_stack: contextlib.ExitStack, line: str):
-        with cm_stack as k_stack:
-            marker_string = str(self)
-            code.writeline(
-                f'torch.cuda.nvtx.range_push("triton_info: {marker_string}")'
-            )
-            code.writeline(line)
-            code.writeline("torch.cuda.nvtx.range_pop()")
+    def codegen(self, code: IndentedBuffer, line: str):
+        marker_string = str(self)
+        code.writeline(f'torch.cuda.nvtx.range_push("triton_info: {marker_string}")')
+        code.writeline(line)
+        code.writeline("torch.cuda.nvtx.range_pop()")
         return
 
 

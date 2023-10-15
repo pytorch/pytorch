@@ -548,11 +548,11 @@ class WrapperCodeGen(CodeGen):
                     origin_info_list
                     and isinstance(line, str)
                     and config.profiler_mark_wrapper_call
-                    and re.search(r"triton|extern_kernels", line)
+                    and re.search(r"extern_kernels", line)
                 ):
                     # Inspect the contents of line to see if
-                    # it is a triton kernel.  If so add the record_func
-                    origin_info_list.codegen(self.wrapper_call, device_cm_stack, line)
+                    # it is an external kernel.  If so add nvtx range
+                    origin_info_list.codegen(self.wrapper_call, line)
                     origin_info_list = None
                 else:
                     self.wrapper_call.writeline(line)

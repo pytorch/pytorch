@@ -718,7 +718,6 @@ def cached_autotune(
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
             )
-
         return CachingAutotuner(
             fn,
             meta=meta,
