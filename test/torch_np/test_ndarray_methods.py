@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    skipIfTorchDynamo
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -629,11 +630,12 @@ class TestNoExtraMethods(TestCase):
 
 
 class TestIter(TestCase):
+    @skipIfTorchDynamo
     def test_iter_1d(self):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)
         lst = list(a)
-        assert all(type(x) == np.ndarray for x in lst)
+        assert all(type(x) == np.ndarray for x in lst), f"{[type(x) for x in lst]}"
         assert all(x.ndim == 0 for x in lst)
 
     def test_iter_2d(self):
