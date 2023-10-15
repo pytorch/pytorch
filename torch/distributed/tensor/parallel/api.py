@@ -75,8 +75,10 @@ def parallelize_module(  # type: ignore[return]
         >>>
 
     .. warning::
-        ``PairwiseParallel`` comes with constraints for now. If you need finer
-        granularity, you need to pass in a dict of module FQN and parallel style instead.
+        Currently, there are some constraints which makes it hard for complicated modules
+        like ``MultiheadAttention`` to work out of box for Tensor or Sequence Parallelism.
+        We recommend users to try ``ColwiseParallel`` and ``RowwiseParallel`` for each parameter
+        or submodule and there might be some code changes needed now.
     """
 
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
