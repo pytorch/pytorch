@@ -463,20 +463,19 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 input_arg_dims_map = infer_broadcast_dims_map(
                     common_shape, input_arg_spec.shape
                 )
-                input_placements = map_placements_after_broadcast(
+                input_target_placements = map_placements_after_broadcast(
                     tuple(out_placements),
                     common_shape,
                     input_arg_dims_map,
                 )
-                input_specs.append(
-                    DTensorSpec(
-                        mesh=mesh,
-                        placements=input_placements,
-                        tensor_meta=input_arg_spec.tensor_meta,
-                    )
+                input_arg_target_spec = DTensorSpec(
+                    mesh=mesh,
+                    placements=input_target_placements,
+                    tensor_meta=input_arg_spec.tensor_meta,
                 )
+                input_specs.append(input_arg_target_spec)
                 redistribute_costs.append(
-                    generate_redistribute_costs(input_arg, spec_to_follow)
+                    generate_redistribute_costs(input_arg, input_arg_target_spec)
                 )
 
         pointwise_strategy.strategies.append(
