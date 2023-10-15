@@ -1248,10 +1248,6 @@ class CppKernel(Kernel):
             new_var.update_on_args("index_wrap", (index_var,), {})
             index_var = new_var
 
-        # TODO <Leslie>: add the generate of assert as
-        # https://github.com/pytorch/pytorch/blob/
-        # f0e7a910304c6af4fe59524ab29348d906cf1dd4/torch/_inductor/codegen/triton.py#L1319
-
         return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
