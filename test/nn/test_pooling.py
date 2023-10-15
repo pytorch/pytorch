@@ -821,6 +821,7 @@ torch.cuda.synchronize()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @skipIfTorchDynamo("OOMs https://github.com/pytorch/pytorch/issues/111320")
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
         def check(x, *args, **kwargs):
