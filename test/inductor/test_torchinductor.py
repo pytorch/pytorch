@@ -6980,7 +6980,9 @@ class CommonTemplate:
 
     def test_negative_index(self):
         def fn(logits, sequence_lengths):
-            pooled_logits = logits[torch.arange(1, device=self.device), sequence_lengths]
+            pooled_logits = logits[
+                torch.arange(1, device=self.device), sequence_lengths
+            ]
             return pooled_logits
 
         self.common(fn, (torch.randn((1, 128, 64)), torch.tensor([-1])))
