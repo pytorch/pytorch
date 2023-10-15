@@ -13,16 +13,27 @@ and provides several parallelism styles: Rowwise and Colwise Parallelism.
 
 The entrypoint to parallelize your ``nn.Module`` using Tensor Parallelism is:
 
+.. automodule:: torch.distributed.tensor.parallel
+
 .. currentmodule:: torch.distributed.tensor.parallel
+
 .. autofunction::  parallelize_module
 
 Tensor Parallelism supports the following parallel styles:
 
-.. currentmodule:: torch.distributed.tensor.parallel.style
-.. autoclass:: RowwiseParallel
+.. autoclass:: torch.distributed.tensor.parallel.style.RowwiseParallel
   :members:
 
-.. autoclass:: ColwiseParallel
+.. autoclass:: torch.distributed.tensor.parallel.style.ColwiseParallel
+  :members:
+
+.. warning::
+    We are deprecating the styles below and will remove them soon:
+
+.. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
+  :members:
+
+.. autoclass:: torch.distributed.tensor.parallel.style.SequenceParallel
   :members:
 
 Since Tensor Parallelism is built on top of DTensor, we need to specify the
@@ -39,6 +50,17 @@ of ``parallelize_module``:
 .. currentmodule:: torch.distributed.tensor.parallel.style
 .. autofunction::  PrepareModuleInput
 .. autofunction::  PrepareModuleOutput
+
+.. warning::
+    We are deprecating the methods below and will remove them soon:
+.. autofunction::  make_input_replicate_1d
+.. autofunction::  make_input_reshard_replicate
+.. autofunction::  make_input_shard_1d
+.. autofunction::  make_input_shard_1d_last_dim
+.. autofunction::  make_output_replicate_1d
+.. autofunction::  make_output_reshard_tensor
+.. autofunction::  make_output_shard_1d
+.. autofunction::  make_output_tensor
 
 
 Currently, there are some constraints which makes it hard for the ``MultiheadAttention``
