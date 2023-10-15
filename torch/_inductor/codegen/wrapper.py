@@ -240,7 +240,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 
     def plan(self, state: MemoryPlanningState):
         if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            return
+            return self
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
