@@ -382,7 +382,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 #     x_view = generate_x_view(base)
 #     x_updated = x.mul(2)
 #     x_view_updated = x_updated.view(-1)
-#     out = x_updated * x_view_udpated
+#     out = x_updated * x_view_updated
 #     return x_updated, out
 #
 # # The calling convention change from (aliases) -> (base) happens
@@ -664,7 +664,7 @@ class ViewAndMutationMeta:
         # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
         self.num_forward_returns = self.num_mutated_inputs + self.num_outputs + self.num_intermediate_bases
         # In case of functionalization of rng ops, the fw_module returns one
-        # additinal output for rng offset. This rng offset is used right
+        # additional output for rng offset. This rng offset is used right
         # away to advance the rng state, and is not passed on to the raw
         # outputs. However, we need to know the exact boundary to identify
         # which tensors to be saved for the bwd graph.  num_forward captures
@@ -1053,7 +1053,7 @@ def run_functionalized_fw_and_collect_metadata(
                 requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
             ))
 
-        # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediiate,
+        # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
         # We need to make sure our graph returns the _base as a graph output, and we manually recreate the view
         # to return to the user. Why? The backend compiler is free to (incorrectly) not set requires_grad
         # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
@@ -1173,7 +1173,7 @@ def run_functionalized_fw_and_collect_metadata(
                 and not o.requires_grad
             ):
                 assert len(outs_with_identical_metadata_that_require_grad) > 0
-                # In theory we could use any of these tensors to regenerat the aliased outputs from,
+                # In theory we could use any of these tensors to regenerate the aliased outputs from,
                 # since they all alias each other and have identical metatadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
@@ -2222,7 +2222,7 @@ def merge_view_inputs(
             # to have incorrect sizes.
             example_idx = aliased_input_indices[0]
             example_alias = fwd_inputs[example_idx]
-            # Note that this function is re-used at both trace time and rutnime.
+            # Note that this function is re-used at both trace time and runtime.
             # At trace time, we're under a FakeMode so synthetic_base becomes a FakeTensor.
             synthetic_base = torch.empty((0,), dtype=example_alias.dtype, device=example_alias.device)
             # We don't actually have a convenient way of going from storage -> tensor,
@@ -2894,16 +2894,11 @@ def create_runtime_wrapper(
                     disable_amp=disable_amp,
                 )
         else:
-            # When we have an inference graph, we run with torch.no_grad.
-            # It's possible to get an inference graph with inputs that require grad,
-            # in which case we want to make sure autograd is disabled
-            # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            with torch.no_grad():
-                all_outs = call_func_with_args(
-                    compiled_fn,
-                    args,
-                    disable_amp=disable_amp,
-                )
+            all_outs = call_func_with_args(
+                compiled_fn,
+                args,
+                disable_amp=disable_amp,
+            )
 
         num_mutated_inps = runtime_metadata.num_mutated_inputs
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
@@ -3188,7 +3183,7 @@ def wrap_tensor_subclasses(
 
     # Note: [Partitioner handling for Subclasses, Part 2]
     # At the beginning of AOTAutograd, we collect metadata on the inputs and outputs of the user fw,
-    # to figure out which inputs/outputs are subclasses, and how to recontruct the subclasses after flattening them.
+    # to figure out which inputs/outputs are subclasses, and how to reconstruct the subclasses after flattening them.
     #
     # When this function is called at runtime in the forward,
     # we have been passed a list of (flattened) dense-tensor fw-outs, and need to reconstruct any subclass fw outs.
@@ -3459,7 +3454,7 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
 
-    # Redudant with the check above, but worth having in case tracing introduced
+    # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
@@ -4141,38 +4136,7 @@ def create_aot_dispatcher_function(
                     is_train=needs_autograd,
                 )(*fake_flat_args)
 
-                req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
-
-                if needs_autograd and not any(x.requires_grad for x in fw_metadata.output_info):
-                    # We realized that none of the outputs require grad,
-                    # so we actually have an inference graph.
-                    needs_autograd = False
-                    # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
-                    # changes depending on whether we pass in is_train / keep_input_mutations,
-                    # so we're forced to recompute the metadata.
-                    # TODO: refactor the subclass path of run_functionalized_fw_and_collect_metadata
-                    # so that this is unnecessary.
-                    if req_subclass_dispatch:
-                        fw_metadata = run_functionalized_fw_and_collect_metadata(
-                            flat_fn,
-                            keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
-                            is_train=needs_autograd,
-                        )(*fake_flat_args)
-                    else:
-                        fw_metadata = ViewAndMutationMeta(
-                            input_info=fw_metadata.input_info,
-                            requires_grad_info=fw_metadata.requires_grad_info,
-                            output_info=fw_metadata.output_info,
-                            num_intermediate_bases=fw_metadata.num_intermediate_bases,
-                            keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
-                            traced_tangents=fw_metadata.traced_tangents,
-                            subclass_inp_meta=fw_metadata.subclass_inp_meta,
-                            subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
-                            subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
-                            is_train=needs_autograd,
-                        )
-
-
+        req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
         if fw_metadata.num_intermediate_bases > 0:
             assert not req_subclass_dispatch, f"""\
 torch.compile is currently being used with tensor subclass inputs:
@@ -4288,7 +4252,7 @@ class PytreeThunk:
 
 
 def create_functional_call(mod, params_spec, params_len):
-    # Redudant with dynamo, but worth having in case this gets invoked elsewhere.
+    # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
@@ -4308,7 +4272,7 @@ def create_functional_call(mod, params_spec, params_len):
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "
-                "pytree processing of the ouputs. Please change the module to "
+                "pytree processing of the outputs. Please change the module to "
                 "have tuple outputs or use aot_module instead."
             )
         return out
@@ -4506,7 +4470,7 @@ def aot_function(
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
-        inference_compiler=inference_compiler,
+        inference_compiler=fw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
@@ -4906,7 +4870,7 @@ def aot_export_joint_simple(
     This function makes a high-level "no calling convention changes" guarantee:
     - If no inputs require grad (so we export an inference graph),
       there are *no* calling convention change between the exported graph, and "func".
-    - If at least one input requires grad (so we trace out and expot a joint fw-bw graph),
+    - If at least one input requires grad (so we trace out and export a joint fw-bw graph),
       Then if you were partition the graph into a separate forward and backward graph,
       The forward graph will have no calling convention changes compared to "func".
 

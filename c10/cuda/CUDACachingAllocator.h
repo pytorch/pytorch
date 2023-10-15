@@ -251,7 +251,7 @@ class CUDAAllocator : public Allocator {
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
-  // instead it requres cudaMemcpyAsyncPeer
+  // instead it requires cudaMemcpyAsyncPeer
   //  with P2P Enabled, all combinations work
   //  with P2P Disabled:
   //                       cudaMalloc cudaMallocAsync/cuMemMap
