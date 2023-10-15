@@ -672,14 +672,12 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                         tensor,
                         mesh.size(),
                         with_padding=True,
-                        contiguous=True,
                     )
             else:
                 splitted_tensor_list, pad_sizes = shard_placement._split_tensor(
                     tensor,
                     mesh.size(),
                     with_padding=True,
-                    contiguous=True,
                 )
                 expected_pad_sizes = [
                     0 if idx < size else 1

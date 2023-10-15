@@ -141,7 +141,6 @@ def redistribute_local_tensor(
                     local_tensor,
                     num_chunks,
                     with_padding=False,
-                    contiguous=False,
                 )
                 new_local_tensor = shards[my_coordinate[i]].clone()
             else:

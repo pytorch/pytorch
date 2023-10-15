@@ -322,7 +322,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             torch.manual_seed(0)
             global_tensor = torch.randn(scatter_tensor_shape, device=self.device_type)
             splitted_list, _ = shard_placement._split_tensor(
-                global_tensor, mesh.size(), with_padding=True, contiguous=True
+                global_tensor, mesh.size(), with_padding=True
             )
             recv_tensor = torch.empty_like(splitted_list[mesh.get_rank()])
             # scatter on dim > 0 would generate non-contiguous tensor, verify that works
@@ -351,7 +351,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 tensor_to_scatter,
                 device_mesh.size(),
                 with_padding=True,
-                contiguous=True,
             )
 
             scattered_tensor = torch.empty_like(padded_tensor_list[my_rank])
@@ -390,7 +389,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 tensor_to_split,
                 device_mesh.size(),
                 with_padding=True,
-                contiguous=True,
             )
             local_tensor = tensor_padded_list[my_rank]
             big_tensor = funcol.all_gather_tensor(
@@ -437,7 +435,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 tensor_to_scatter,
                 device_mesh.size(),
                 with_padding=True,
-                contiguous=True,
             )
 
             tensor_to_reduce = torch.cat(padded_tensor_list, shard_dim)

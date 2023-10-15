@@ -39,16 +39,17 @@ class Shard(Placement):
         num_chunks: int,
         *,
         with_padding: bool = True,
-        contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], List[int]]:
+    ) -> Tuple[List[torch.Tensor], Optional[List[int]]]:
         """
         This function uses torch.chunk to split a tensor into num_chunks shards along
         the Shard placement dimension, and return a list of shards with their pad sizes.
 
         Keyword args:
             with_padding (bool, optional): when True, we pad the tensor on the last
-            few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
-            This is because collectives usually require equal size tensor inputs
+            few ranks, and make the tensor contiguous before calling the collectives
+            (i.e. scatter/all_gather, etc.).
+            This is because collectives usually require equal size tensor inputs and
+            contiguous memory layout
         """
         assert (
             self.dim <= tensor.ndim
@@ -59,6 +60,12 @@ class Shard(Placement):
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
+
+        if not with_padding:
+            return tensor_list, None
+
+        # handle tensor splitting with padding
+
         # compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
@@ -80,17 +87,14 @@ class Shard(Placement):
         for _ in range(num_empty_tensors):
             tensor_list.append(tensor)
 
-        if with_padding or contiguous:
-            shard_list = []
-            for shard, pad_size in zip(tensor_list, pad_sizes):
-                # Fill the empty tensor with zeroes with padding.
-                if with_padding and pad_size > 0:
-                    shard = self._pad_tensor(shard, pad_size)
-                shard = shard.contiguous() if contiguous else shard
-                shard_list.append(shard)
-            return shard_list, pad_sizes
-        else:
-            return tensor_list, pad_sizes
+        shard_list = []
+        for shard, pad_size in zip(tensor_list, pad_sizes):
+            # Fill the empty tensor with zeroes with padding.
+            if with_padding and pad_size > 0:
+                shard = self._pad_tensor(shard, pad_size)
+            shard = shard if shard.is_contiguous() else shard.contiguous()
+            shard_list.append(shard)
+        return shard_list, pad_sizes
 
     def _pad_tensor(
         self,
@@ -162,13 +166,14 @@ class Shard(Placement):
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
         scatter_list, pad_sizes = self._split_tensor(
-            tensor, num_chunks, with_padding=True, contiguous=True
+            tensor, num_chunks, with_padding=True
         )
 
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
         mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
 
         # Only unpad if the local_tensor was padded on the dimension.
+        assert pad_sizes is not None
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
         if pad_size > 0:
             output = self._unpad_tensor(output, pad_size)
@@ -195,7 +200,7 @@ class Shard(Placement):
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
-                tensor, num_chunks, with_padding=True, contiguous=True
+                tensor, num_chunks, with_padding=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
 
@@ -204,6 +209,7 @@ class Shard(Placement):
         )
 
         if is_padded:
+            assert pad_sizes is not None
             output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])
         return output
 
@@ -226,23 +232,25 @@ class Shard(Placement):
             # which should be an empty tensor
             return local_tensor
 
-        # check if it needs to pad input tensor before all_gather
-        full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
-        chunk_sizes = [
-            max(
-                min(size[self.dim], full_chunk_size * (idx + 1))
-                - full_chunk_size * idx,
-                0,
-            )
-            for idx in range(num_chunks)
-        ]
-        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
         is_padded = size[self.dim] % num_chunks != 0
-
-        pad_size = pad_sizes[my_coordinate[mesh_dim]]
-        if pad_size > 0:
-            local_tensor = self._pad_tensor(local_tensor, pad_size)
-        local_tensor = local_tensor.contiguous()
+        if is_padded:
+            # check if it needs to pad input tensor before all_gather
+            full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
+            chunk_sizes = [
+                max(
+                    min(size[self.dim], full_chunk_size * (idx + 1))
+                    - full_chunk_size * idx,
+                    0,
+                )
+                for idx in range(num_chunks)
+            ]
+            pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
+            pad_size = pad_sizes[my_coordinate[mesh_dim]]
+            if pad_size > 0:
+                local_tensor = self._pad_tensor(local_tensor, pad_size)
+        local_tensor = (
+            local_tensor if local_tensor.is_contiguous() else local_tensor.contiguous()
+        )
 
         result = funcol.all_gather_tensor(
             local_tensor,
