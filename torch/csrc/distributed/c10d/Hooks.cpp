@@ -27,10 +27,10 @@ TORCH_API void register_collective_callback(
 
 namespace details {
 
-void call_collective_callbacks(EventInfo&& evt) {
+void enqueue_c10d_event(EventInfo&& evt) {
   std::unique_lock<std::mutex> lock(callbacks_lock);
-  for (auto& callback : callbacks_list) {
-    callback(evt);
+  for (auto& cb : callbacks_list) {
+    cb(evt);
   }
 }
 

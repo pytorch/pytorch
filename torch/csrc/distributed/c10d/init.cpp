@@ -313,7 +313,7 @@ void enqueue_event_for_python(const ::c10d::EventInfo& evt) {
   }
 }
 
-void enable_c10d_python_hooks(int pipe) {
+void enable_python_event_collection(int pipe) {
   sync_pipe = pipe;
   event_queue_enabled.store(true);
   ::c10d::register_collective_callback(enqueue_event_for_python);
@@ -345,8 +345,6 @@ py::object c10d_dequeue_python_event() {
   data["timestamp"] = evt.timestamp;
   data["duration"] = evt.duration_ms.value_or(-1);
   data["drop_count"] = evt.drop_count;
-  if (evt.error_message)
-    data["error_message"] = evt.error_message.value();
 
   return std::move(data);
 }
@@ -731,7 +729,7 @@ An enum for collective hooks event types.)")
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
       .def(
           "_enable_event_collection",
-          &enable_c10d_python_hooks,
+          &enable_python_event_collection,
           "(Enables events collection).",
           py::call_guard<py::gil_scoped_release>())
       .def(

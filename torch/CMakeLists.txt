@@ -311,10 +311,6 @@ if(USE_PRECOMPILED_HEADERS)
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
 endif()
 
-if(NOT MSVC)
-  target_compile_options(torch_python PRIVATE -Wno-unused-variable)
-endif()
-
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
