@@ -543,6 +543,10 @@ def run_meta_crossref(
                 else:
                     indices.append(meta_index)
             meta_args = (meta_args[0], indices)
+        elif func is torch.nn.functional.ctc_loss and all([isinstance(args[2], list), isinstance(args[3], list)]):
+            # torch.ops.aten._ctc_loss.IntList has a meta kernel but
+            # torch.ops.aten._ctc_loss.Tensor does not
+            test_expect = TestExpect.SUCCESS
 
         if kwargs.get("device", None) is not None:
             meta_kwargs["device"] = "meta"
@@ -790,7 +794,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten._to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten._ctc_loss.default : {f32, f64},  # Shape of second output depends on data.
     aten._ctc_loss.Tensor : {f32, f64},  # Shape of second output depends on data.
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
