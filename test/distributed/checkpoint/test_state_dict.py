@@ -14,11 +14,11 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
-    DistributedStateDictOptions,
     load_state_dict,
     PG,
     STATE,
     state_dict,
+    StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
@@ -64,13 +64,13 @@ class TestStateDict(FSDPTest):
         model: nn.Module,
         msd: Dict[str, Any],
         dist_msd: Dict[str, Any],
-        options: DistributedStateDictOptions,
+        options: StateDictOptions,
     ) -> None:
-        if options.save_frozen_params:
+        if not options.ignore_frozen_params:
             self.assertEqual(len(msd), len(dist_msd))
         for fqn, param in msd.items():
             dist_param = dist_msd.get(fqn, None)
-            if options.save_frozen_params:
+            if not options.ignore_frozen_params:
                 self.assertIsNotNone(dist_param)
                 self._compare_tensor(param, dist_param)
             elif dist_param is None:
@@ -151,7 +151,7 @@ class TestStateDict(FSDPTest):
         init_model_optim: Callable,
         test_frozen: bool = False,
     ) -> None:
-        options = DistributedStateDictOptions(save_frozen_params=(not test_frozen))
+        options = StateDictOptions(ignore_frozen_params=test_frozen)
         # Initialize original model and distributed model.
         model, optim, copy_optim, dist_model, dist_optim = init_model_optim()
 
@@ -355,3 +355,22 @@ class TestStateDict(FSDPTest):
             return orig_model, orig_optim, copy_optim, model_copy, optim_copy
 
         self._test_save_load(init_model_optim)
+
+    @skip_if_lt_x_gpu(1)
+    def test_strict(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        model_state_dict, _ = state_dict(model)
+        key = next(iter(model_state_dict.keys()))
+        model_state_dict["abc"] = torch.zeros(10)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
+            load_state_dict(model, model_state_dict=model_state_dict)
+        model_state_dict.pop("abc")
+        model_state_dict.pop(key)
+        load_state_dict(
+            model,
+            model_state_dict=model_state_dict,
+            options=StateDictOptions(strict=False),
+        )
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            load_state_dict(model, model_state_dict=model_state_dict)
