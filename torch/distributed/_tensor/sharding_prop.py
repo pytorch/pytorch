@@ -1,6 +1,6 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -151,20 +151,21 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # generate op strategy for the op.
-            input_spec = cast(DTensorSpec, op_schema.args_schema[0])
-            mesh = input_spec.mesh
+            mesh = op_schema.args_spec[0].mesh
 
             # swap the args spec with args strategies
-            args_sharding_strategy = [
-                spec_to_strategy(i) for i in op_schema.args_schema
-            ]
+            args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
+
+            kwargs_op_strategy = {
+                k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
+            }
 
             # construct a new OpSchema on args for strategy based propagation
             # TODO: op schema should contain flat sharding by default later
             strategy_schema: OpSchema = OpSchema(
                 op=op_schema.op,
-                args_schema=tuple(args_sharding_strategy),
-                kwargs_schema=op_schema.kwargs_schema,
+                args_schema=tuple(args_op_strategy),
+                kwargs_schema=kwargs_op_strategy,
             )
 
             op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
