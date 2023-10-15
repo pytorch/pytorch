@@ -67,7 +67,6 @@ class CollectiveStatus:
     timestamp: int = 0  # timestamp to the earliest time we noticed this event
     duration: Optional[float] = None  # value in milliseconds it took executing
     drop_count: int = 0  # number of events dropped following this one
-    error_message: Optional[str] = None  # if present, signals a failed operation
 
 
 COLLECTIVE_HOOK_TYPE = Callable[[CollectiveStatus], None]
