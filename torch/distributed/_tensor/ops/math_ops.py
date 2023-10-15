@@ -99,7 +99,7 @@ def map_placements_after_reduction(
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(_Partial(reduction_op))
             else:
-                new_placements.append(Shard(reduction_dims_map[shard_dim]))
+                new_placements.append(Shard(new_shard_dim))
     return tuple(new_placements)
 
 
