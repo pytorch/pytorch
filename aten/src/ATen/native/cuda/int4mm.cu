@@ -1028,6 +1028,9 @@ torch::Tensor _weight_int4pack_mm_cuda(
 #undef RUN_GEMM
 
   return C_final;
+#endif
+  TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
+  return C_final;
 }
 
 // input is [n][k] (int32 dtype)
