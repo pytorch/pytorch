@@ -6805,7 +6805,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmax of the flattened input is returned.
-    {keepdim} Ignored if ``dim=None``.
+    {keepdim}
 
 Example::
 
@@ -7469,7 +7469,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim}.
+    {keepdim}
 
 Example::
 

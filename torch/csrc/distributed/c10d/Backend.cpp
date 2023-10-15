@@ -7,17 +7,6 @@
 namespace c10d {
 
 namespace {
-
-std::string exceptionPtrWhat(const std::exception_ptr& eptr) {
-  try {
-    std::rethrow_exception(eptr);
-  } catch (const std::exception& e) {
-    return e.what();
-  } catch (...) {
-    return "<unknown error>";
-  }
-}
-
 void commonEventinit(
     ::c10d::EventInfo& evt,
     const Backend& backend,
@@ -29,9 +18,6 @@ void commonEventinit(
   evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
   evt.drop_count = 0;
-  // isCompleted is mutable :facepalm:
-  if (const_cast<Work&>(work).isCompleted() && !work.isSuccess())
-    evt.error_message = exceptionPtrWhat(work.exception());
 }
 } // namespace
 
@@ -46,21 +32,21 @@ void Backend::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
 }
 
-void Backend::callbackStartEvent(const Work& work) {
+void Backend::emitCollectiveStart(const Work& work) {
   EventInfo evt;
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveStart;
-  details::call_collective_callbacks(std::move(evt));
+  details::enqueue_c10d_event(std::move(evt));
 }
 
-void Backend::callbackEndEvent(const Work& work) {
+void Backend::emitCollectiveEnd(const Work& work) {
   EventInfo evt;
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveEnd;
   evt.duration_ms = work.getDuration();
-  details::call_collective_callbacks(std::move(evt));
+  details::enqueue_c10d_event(std::move(evt));
 }
 
 } // namespace c10d
