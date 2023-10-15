@@ -158,9 +158,10 @@ class TestDiag(TestCase):
         assert_equal(diag(vals, k=2), b)
         assert_equal(diag(vals, k=-2), c)
 
-    def test_matrix(self, vals=None):
-        if vals is None:
-            vals = (100 * get_mat(5) + 1).astype("l")
+    def test_matrix(self):
+        self.check_matrix(vals = (100 * get_mat(5) + 1).astype("l"))
+
+    def check_matrix(self, vals):
         b = zeros((5,))
         for k in range(5):
             b[k] = vals[k, k]
@@ -176,7 +177,7 @@ class TestDiag(TestCase):
     @xfail  # (reason="TODO implement orders")
     def test_fortran_order(self):
         vals = array((100 * get_mat(5) + 1), order="F", dtype="l")
-        self.test_matrix(vals)
+        self.check_matrix(vals)
 
     def test_diag_bounds(self):
         A = [[1, 2], [3, 4], [5, 6]]
