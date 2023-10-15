@@ -6,6 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
+from torch._higher_order_ops.scan import scan
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -203,7 +204,8 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2)
         xs = torch.rand(10, 2)
-        carry_out, ys = control_flow.scan(f, init, xs)
+        #carry_out, ys = control_flow.scan(f, init, xs)
+        carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
         self.assertEqual(expected_ys, ys)
@@ -214,7 +216,8 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2, requires_grad=True)
         xs = torch.rand(10, 2, requires_grad=True)
-        carry_out, ys = control_flow.scan(f, init, xs)
+        #carry_out, ys = control_flow.scan(f, init, xs)
+        carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
         self.assertEqual(expected_ys, ys)
@@ -230,7 +233,8 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2, requires_grad=True)
         xs = torch.rand(10, 2, requires_grad=False)
-        carry_out, ys = control_flow.scan(f, init, xs)
+        #carry_out, ys = control_flow.scan(f, init, xs)
+        carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
         self.assertEqual(expected_ys, ys)
@@ -246,7 +250,8 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2, requires_grad=True)
         xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
-        carry_out, ys = control_flow.scan(f, init, xs)
+        #carry_out, ys = control_flow.scan(f, init, xs)
+        carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
         self.assertEqual(expected_ys, ys)
