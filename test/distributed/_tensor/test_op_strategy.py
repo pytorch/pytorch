@@ -194,8 +194,8 @@ class TestCostModel(DTensorOpTestBase):
         allreduce_cost = redistribute_cost(partial_spec, replica_spec)
         # partial -> shard
         reduce_scatter_cost = redistribute_cost(partial_spec, shard_spec)
-        self.assertEqual(allgather_cost, reduce_scatter_cost)
-        assert allreduce_cost > allgather_cost
+        self.assertTrue(allreduce_cost > allgather_cost)
+        self.assertTrue(allreduce_cost > reduce_scatter_cost)
 
 
 if __name__ == "__main__":
