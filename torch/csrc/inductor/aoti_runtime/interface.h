@@ -103,6 +103,11 @@ AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// Retrieves the number of outputs for the model.
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs);
+
 // Run an AOTInductorModel (see AOTInductorModelCreate for when one should use
 // this function versus AOTInductorModelContainerRun).
 AOTIRuntimeError AOTInductorModelRun(

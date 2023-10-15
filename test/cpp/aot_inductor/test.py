@@ -30,10 +30,13 @@ for device in ["cpu", "cuda"]:
         ]
         model_so_path, _ = aot_compile(model, (x, y), constraints=constraints)
 
+    params = dict(model.named_parameters())
     data.update({
         f"model_so_path_{device}": model_so_path,
         f"inputs_{device}": [x, y],
         f"outputs_{device}": [ref_output],
+        f"fc_weight_{device}": params["fc.weight"],
+        f"fc_bias_{device}": params["fc.bias"],
     })
 
 # Use this to communicate tensors to the cpp code

@@ -148,6 +148,16 @@ AOTIRuntimeError AOTInductorModelCreate(
   })
 }
 
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs) {
+  auto* model =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(
+          model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_num_outputs = model->num_outputs(); })
+}
+
 AOTIRuntimeError AOTInductorModelRun(
     AOTInductorModelHandle model_handle,
     AtenTensorHandle* input_handles,
