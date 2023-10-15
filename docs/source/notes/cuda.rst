@@ -108,7 +108,7 @@ To get an idea of the precision and speed, see the example code below:
   error = (ab_fp32 - ab_full).abs().max()  # 0.0031
   relative_error = error / mean  # 0.000039
 
-From the above example, we can see that with TF32 enabled, the speed is ~7x faster on A100, and that 
+From the above example, we can see that with TF32 enabled, the speed is ~7x faster on A100, and that
 relative error compared to double precision is approximately 2 orders of magnitude larger. Note that
 the exact ratio of TF32 to single precision speed depends on the hardware generation, as properties
 such as the ratio of memory bandwidth to compute as well as the ratio of TF32 to FP32 matmul throughput
