@@ -6,6 +6,7 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
+from . import external_utils
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -49,13 +50,13 @@ specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
-    "torch.jit.is_scripting": False,
-    "torch.jit.is_tracing": False,
-    "torch._C._get_tracing_state": None,
-    "torch.fx._symbolic_trace.is_fx_tracing": False,
-    "torch.onnx.is_in_onnx_export": False,
-    "torch._dynamo.external_utils.is_compiling": True,
-    "torch._utils.is_compiling": True,
+    torch.jit.is_scripting: False,
+    torch.jit.is_tracing: False,
+    torch._C._get_tracing_state: None,
+    torch.fx._symbolic_trace.is_fx_tracing: False,
+    torch.onnx.is_in_onnx_export: False,
+    external_utils.is_compiling: True,
+    torch._utils.is_compiling: True,
 }
 
 # legacy config, does nothing now!
@@ -156,13 +157,13 @@ skipfiles_inline_module_allowlist = {}
 # the `allowed_functions.is_allowed` function will not consider it
 # when creating a list of PyTorch functions that will appear in
 # FX IR.
-allowed_functions_module_string_ignorelist = [
+allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
     "torch._refs",
     "torch._prims",
     "torch._decomp",
-]
+}
 
 # Debug Flag to try minifier at different stages. Possible values are {None, "aot", "dynamo"}
 # None - Minifier is switched off
