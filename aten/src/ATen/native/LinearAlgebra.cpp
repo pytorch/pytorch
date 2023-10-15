@@ -1489,12 +1489,14 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
-  if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
-      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
-      // We have dispatched to ACL GEMM for single precision float
-      // so do not need to dispatch to BLAS GEMM below
-      dispatched = true;
+  if (transpose_c) {
+    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+        mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+        // We have dispatched to ACL GEMM for single precision float
+        // so do not need to dispatch to BLAS GEMM below
+        dispatched = true;
+    }
   }
 #endif
 
@@ -1735,8 +1737,9 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     const auto sizes = t.sizes();
     const auto strides = t.strides();
-    return (strides[2] == 1 && strides[1] >= sizes[2])
-            || (strides[1] == 1 && strides[2] >= sizes[1]);
+    // we do not care dimension's stride if its size equals to 1
+    return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
+        (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
