@@ -85,6 +85,7 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.before(variable_copy);
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
+  // op is intentionally static
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("inductor::accumulate_grad_", "")
                        .typed<void(const at::Tensor&, const at::Tensor&)>();
