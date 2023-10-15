@@ -301,6 +301,7 @@ class ExportedProgram:
     graph_module: GraphModule
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
+    # TODO(avik): remove equality_constraints because it is redundant
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
     schema_version: int
     example_inputs: Optional[Tuple[List[bytes], Dict[str, bytes]]]
