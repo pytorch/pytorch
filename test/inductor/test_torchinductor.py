@@ -6979,19 +6979,11 @@ class CommonTemplate:
         )
 
     def test_negative_index(self):
-        def fn(primals_1, primals_2):
-            full_default = torch.ops.aten.full.default(
-                [1],
-                0,
-                dtype=torch.int64,
-                layout=torch.strided,
-                device=torch.device(type="cpu"),
-                pin_memory=False,
-            )
-            index = torch.ops.aten.index.Tensor(primals_1, [full_default, primals_2])
-            return index
+        def fn(logits, sequence_lengths):
+            pooled_logits = logits[torch.arange(1, device=self.device), sequence_lengths]
+            return pooled_logits
 
-        self.common(fn, (torch.randn((1, 4, 3)), torch.tensor([-1])))
+        self.common(fn, (torch.randn((1, 128, 64)), torch.tensor([-1])))
 
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
