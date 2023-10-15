@@ -699,7 +699,7 @@ class Hardshrink(Module):
         \end{cases}
 
     Args:
-        lambd: the :math:`\lambda` value for the Hardshrink formulation. Default: 0.5
+        lambda: the :math:`\lambda` value for the Hardshrink formulation. Default: 0.5
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
