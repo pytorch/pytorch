@@ -3,6 +3,7 @@
 import torch
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor._collective_utils import redistribute_cost
+from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed._tensor.ops.basic_strategy import (
     EinsumDims,
     gen_einsum_strategies,
@@ -196,6 +197,75 @@ class TestCostModel(DTensorOpTestBase):
         reduce_scatter_cost = redistribute_cost(partial_spec, shard_spec)
         self.assertTrue(allreduce_cost > allgather_cost)
         self.assertTrue(allreduce_cost > reduce_scatter_cost)
+
+    def test_mm_strategies(self):
+        from torch.distributed._tensor.ops.matrix_ops import mm_strategy
+
+        mesh = self.build_device_mesh()
+        lhs_tensor = torch.randn(6, 8)
+        rhs_tensor = torch.randn(8, 12)
+        lhs_tensor_meta = self._extract_tensor_meta(lhs_tensor)
+        rhs_tensor_meta = self._extract_tensor_meta(rhs_tensor)
+
+        mm_combs = (
+            (Shard(0), Replicate()),
+            (Replicate(), Shard(1)),
+            (Shard(1), Shard(0)),
+            (Replicate(), Replicate()),
+        )
+        for lhs, rhs in mm_combs:
+            lhs_spec = DTensorSpec(mesh, (lhs,), lhs_tensor_meta)
+            rhs_spec = DTensorSpec(mesh, (rhs,), rhs_tensor_meta)
+
+            op_schema = OpSchema(
+                torch.ops.aten.mm.default,
+                (
+                    OpStrategy([PlacementStrategy(lhs_spec)]),
+                    OpStrategy([PlacementStrategy(rhs_spec)]),
+                ),
+                {},
+            )
+            res_strategies = mm_strategy(mesh, op_schema)
+
+            for strtgy in res_strategies.strategies:
+                if strtgy.input_specs == (lhs_spec, rhs_spec):
+                    self.assertEqual(strtgy.redistribute_cost, [[0.0], [0.0]])
+                    break
+
+    def test_bmm_strategies(self):
+        from torch.distributed._tensor.ops.matrix_ops import bmm_strategy
+
+        mesh = self.build_device_mesh()
+        lhs_tensor = torch.randn(8, 6, 8)
+        rhs_tensor = torch.randn(8, 8, 12)
+        lhs_tensor_meta = self._extract_tensor_meta(lhs_tensor)
+        rhs_tensor_meta = self._extract_tensor_meta(rhs_tensor)
+
+        bmm_combs = (
+            (Shard(0), Shard(0)),
+            (Shard(1), Replicate()),
+            (Replicate(), Shard(2)),
+            (Shard(2), Shard(1)),
+            (Replicate(), Replicate()),
+        )
+        for lhs, rhs in bmm_combs:
+            lhs_spec = DTensorSpec(mesh, (lhs,), lhs_tensor_meta)
+            rhs_spec = DTensorSpec(mesh, (rhs,), rhs_tensor_meta)
+
+            op_schema = OpSchema(
+                torch.ops.aten.bmm.default,
+                (
+                    OpStrategy([PlacementStrategy(lhs_spec)]),
+                    OpStrategy([PlacementStrategy(rhs_spec)]),
+                ),
+                {},
+            )
+            res_strategies = bmm_strategy(mesh, op_schema)
+
+            for strtgy in res_strategies.strategies:
+                if strtgy.input_specs == (lhs_spec, rhs_spec):
+                    self.assertEqual(strtgy.redistribute_cost, [[0.0], [0.0]])
+                    break
 
 
 if __name__ == "__main__":
