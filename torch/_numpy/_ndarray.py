@@ -344,6 +344,9 @@ class ndarray:
     def tolist(self):
         return self.tensor.tolist()
 
+    def __iter__(self):
+        return (ndarray(x) for x in self.tensor.__iter__())
+
     def __str__(self):
         return (
             str(self.tensor)

@@ -578,3 +578,35 @@ def test_extra_methods(name):
     a = np.ones(3)
     with pytest.raises(AttributeError):
         getattr(a, name)
+
+
+@instantiate_parametrized_tests
+class TestNoExtraMethods(TestCase):
+    # make sure ndarray does not carry extra methods/attributes
+    # >>> set(dir(a)) - set(dir(a.tensor.numpy()))
+    @parametrize("name", ["fn", "ivar", "method", "name", "plain", "rvar"])
+    def test_extra_methods(self, name):
+        a = np.ones(3)
+        with pytest.raises(AttributeError):
+            getattr(a, name)
+
+
+class TestIter(TestCase):
+    def test_iter_1d(self):
+        # numpy generates array scalars, we do 0D arrays
+        a = np.arange(5)
+        lst = list(a)
+        assert all(type(x) == np.ndarray for x in lst)
+        assert all(x.ndim == 0 for x in lst)
+
+    def test_iter_2d(self):
+        # numpy iterates over the 0th axis
+        a = np.arange(5)[None, :]
+        lst = list(a)
+        assert len(lst) == 1
+        assert type(lst[0]) == np.ndarray
+        assert_equal(lst[0], np.arange(5))
+
+
+if __name__ == "__main__":
+    run_tests()
