@@ -159,7 +159,7 @@ class TestDiag(TestCase):
         assert_equal(diag(vals, k=-2), c)
 
     def test_matrix(self):
-        self.check_matrix(vals = (100 * get_mat(5) + 1).astype("l"))
+        self.check_matrix(vals=(100 * get_mat(5) + 1).astype("l"))
 
     def check_matrix(self, vals):
         b = zeros((5,))
