@@ -32,21 +32,21 @@ void Backend::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
 }
 
-void Backend::emitCollectiveStart(const Work& work) {
+void Backend::callbackStartEvent(const Work& work) {
   EventInfo evt;
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveStart;
-  details::enqueue_c10d_event(std::move(evt));
+  details::call_collective_callbacks(std::move(evt));
 }
 
-void Backend::emitCollectiveEnd(const Work& work) {
+void Backend::callbackEndEvent(const Work& work) {
   EventInfo evt;
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveEnd;
   evt.duration_ms = work.getDuration();
-  details::enqueue_c10d_event(std::move(evt));
+  details::call_collective_callbacks(std::move(evt));
 }
 
 } // namespace c10d

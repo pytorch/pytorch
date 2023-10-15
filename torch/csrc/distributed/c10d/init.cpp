@@ -313,7 +313,7 @@ void enqueue_event_for_python(const ::c10d::EventInfo& evt) {
   }
 }
 
-void enable_python_event_collection(int pipe) {
+void enable_c10d_python_hooks(int pipe) {
   sync_pipe = pipe;
   event_queue_enabled.store(true);
   ::c10d::register_collective_callback(enqueue_event_for_python);
@@ -729,7 +729,7 @@ An enum for collective hooks event types.)")
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
       .def(
           "_enable_event_collection",
-          &enable_python_event_collection,
+          &enable_c10d_python_hooks,
           "(Enables events collection).",
           py::call_guard<py::gil_scoped_release>())
       .def(

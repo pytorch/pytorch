@@ -18,12 +18,12 @@ class TORCH_API AOTIModelRunner {
   AOTIModelRunner(AOTIModelRunner&& other) = delete;
   AOTIModelRunner& operator=(const AOTIModelRunner& other) = delete;
   AOTIModelRunner& operator=(AOTIModelRunner&& other) = delete;
+  ~AOTIModelRunner();
 
- protected:
   std::vector<at::Tensor> run(
       std::vector<at::Tensor> inputs,
-      AOTInductorStreamHandle cuda_stream_handle,
-      AOTIProxyExecutorHandle proxy_executor_handle);
+      AOTInductorStreamHandle cuda_stream_handle = nullptr,
+      AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
 
   AOTIModelRunner(
       const char* model_path,
@@ -31,8 +31,7 @@ class TORCH_API AOTIModelRunner {
       bool is_cpu,
       const char* cubin_dir);
 
-  ~AOTIModelRunner();
-
+ protected:
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};

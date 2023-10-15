@@ -25,17 +25,18 @@ typedef std::function<void(const EventInfo&)> CollectiveEventCallback;
  *
  * Locking:
  *  Registration takes a subsystem specific lock.
- *  callback invocation happens when the same lock held.
+ *  callback invocation happens with the same lock held.
  *
  * Callbacks must not block or run for a long period of time.
  * They are invoked from threads are part of PyTorch's critical distributed
  * infrastrucute. The recomended pattern is for callbacks to enqueue the events
  * on some queue and have a separate thread process those events. If the
  * callback deadlocks, it will hang the whole process and stop PyTorch from
- * detecting failures. Do not call into CUDA.
+ * detecting failures. Do not call into CUDA/nccl APIs directly from a callback
+ * as it could hang.
  *
  * n.b. Currently the user needs to call ProcessGroup::enableCollectivesTiming
- *   to enable start event collection.
+ *   to start event collection.
  *
  * @param callback  callback to invoke on collective every event.
  */
@@ -44,7 +45,7 @@ TORCH_API void register_collective_callback(CollectiveEventCallback&& callback);
 
 namespace details {
 
-TORCH_API void enqueue_c10d_event(EventInfo&& evt);
+TORCH_API void call_collective_callbacks(EventInfo&& evt);
 
 } // namespace details
 } // namespace c10d

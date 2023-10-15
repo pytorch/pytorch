@@ -1,3 +1,30 @@
+"""Torch Collective Hooks
+
+This module contains a python interface to register hooks for observing start and end events for each collective operation in C10D.
+
+These hooks are built on top of another layer of C++ collective hooks, and decoupled via a thread and a queue.
+
+Overview
+--------
+
+First, python user code calls register_collective_start_hook/register_collective_end_hook.
+Under the hood, a c++ hook is registered, which populates a queue with events.
+A python thread runs a loop that pulls events from this queue via python bindings, and then calls the python callbacks.
+
+This decoupling is important, since we do not ever want to block the c++ watchdog loop.
+
+Registering your own hooks
+--------------------------
+
+You may choose to register any/all of the following python hooks:
+* collective start  - called when any collective starts
+* collective end - called when any collective finishes
+* process group - called when any process group is created or destroyed
+
+Registering any hook triggers enablement of timing event collection, as well as creating the c++ to python event queue.
+
+Hook registration is dependent on building pytorch with torch distributed support.
+"""
 import logging
 import os
 import threading
@@ -57,6 +84,11 @@ _pp_w = -1
 
 
 def _c10d_pg_hooks_loops():
+    """Python hooks main loop
+
+    This is the entrypoint for a thread that pulls events off a c++ queue and invokes the corresponding callbacks
+    in python.
+    """
     internal_failures = 0
     while True:
         # we don't care about the result, this is how we implement notification
