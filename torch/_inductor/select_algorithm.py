@@ -137,7 +137,6 @@ class TritonTemplateKernel(TritonKernel):
         named_args = self.input_nodes[
             self.prefix_args : len(self.input_nodes) - self.suffix_args
         ]
-
         assert len(argnames) == len(named_args), (
             len(argnames),
             len(named_args),
@@ -258,7 +257,6 @@ class TritonTemplateKernel(TritonKernel):
         ):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
-
         V.ops.store(  # type: ignore[attr-defined]
             self.output_node.get_name(),
             output_index,
@@ -486,7 +484,8 @@ class TritonTemplate(KernelTemplate):
             expected_args,
         )
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
+            map(sympy.expand, call_args[len(expected_args) :]),
+            fallback=config.unbacked_symint_fallback,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -507,7 +506,13 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert mod.__file__ is not None
-        grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
+        grid = self.grid(
+            *V.graph.sizevars.size_hints(
+                layout.size,
+                fallback=config.unbacked_symint_fallback,
+            ),
+            kwargs,
+        )
         bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
             module_cache_key=mod.key,
@@ -769,9 +774,18 @@ class AlgorithmSelectorCache(PersistentCache):
         example_inputs_extern = [
             torch.as_strided(
                 unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(input_node.get_size()),
-                V.graph.sizevars.size_hints(input_node.get_stride()),
-                V.graph.sizevars.size_hint(input_node.get_layout().offset),
+                V.graph.sizevars.size_hints(
+                    input_node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    input_node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hint(
+                    input_node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                ),
             )
             for input_node in input_nodes
         ]
@@ -870,7 +884,14 @@ class AlgorithmSelectorCache(PersistentCache):
             return
         sizes = ", ".join(
             [
-                "x".join(map(str, V.graph.sizevars.size_hints(n.get_size())))
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(), fallback=config.unbacked_symint_fallback
+                        ),
+                    )
+                )
                 for n in input_nodes
             ]
         )
@@ -907,8 +928,14 @@ class AlgorithmSelectorCache(PersistentCache):
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
         return rand_strided(
-            V.graph.sizevars.size_hints(node.get_size()),
-            V.graph.sizevars.size_hints(node.get_stride()),
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
             device=node.get_device(),
             dtype=node.get_dtype(),
             extra_size=node.layout.offset,
@@ -924,9 +951,18 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(node.get_size()),
-            *sizevars.size_hints(node.get_stride()),
-            sizevars.size_hint(node.get_layout().offset),
+            *sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            *sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
 
