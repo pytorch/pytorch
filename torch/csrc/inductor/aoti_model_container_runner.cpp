@@ -1,12 +1,12 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <ATen/DynamicLibrary.h>
 
-#include <torch/csrc/inductor/aoti_model_runner.h>
+#include <torch/csrc/inductor/aoti_model_container_runner.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 namespace torch::inductor {
 
-AOTIModelRunner::AOTIModelRunner(
+AOTIModelContainerRunner::AOTIModelContainerRunner(
     const char* model_path,
     size_t num_models,
     bool is_cpu,
@@ -26,13 +26,13 @@ AOTIModelRunner::AOTIModelRunner(
       create_func_(&container_handle_, num_models, is_cpu, cubin_dir));
 }
 
-AOTIModelRunner::~AOTIModelRunner() {
+AOTIModelContainerRunner::~AOTIModelContainerRunner() {
   AOTIRuntimeError result = delete_func_(container_handle_);
   TORCH_CHECK(
       result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
-std::vector<at::Tensor> AOTIModelRunner::run(
+std::vector<at::Tensor> AOTIModelContainerRunner::run(
     std::vector<at::Tensor> inputs,
     AOTInductorStreamHandle cuda_stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle) {

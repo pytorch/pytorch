@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include <torch/csrc/inductor/aoti_model_runner.h>
+#include <torch/csrc/inductor/aoti_model_container_runner.h>
 #ifdef USE_CUDA
-#include <torch/csrc/inductor/aoti_model_runner_cuda.h>
+#include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -30,7 +30,7 @@ TEST(AotInductorTest, BasicTestCpu) {
   const auto& ref_output_tensors =
       data_loader.attr("outputs_cpu").toTensorList().vec();
 
-  AOTIModelRunnerCpu runner(model_so_path.c_str());
+  AOTIModelContainerRunnerCpu runner(model_so_path.c_str());
   auto actual_output_tensors = runner.run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
@@ -50,7 +50,7 @@ TEST(AotInductorTest, BasicTestCuda) {
   const auto& ref_output_tensors =
       data_loader.attr("outputs_cuda").toTensorList().vec();
 
-  AOTIModelRunnerCuda runner(model_so_path.c_str());
+  AOTIModelContainerRunnerCuda runner(model_so_path.c_str());
   auto actual_output_tensors = runner.run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }

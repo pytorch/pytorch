@@ -11,13 +11,15 @@ struct DynamicLibrary;
 
 namespace torch::inductor {
 
-class TORCH_API AOTIModelRunner {
+class TORCH_API AOTIModelContainerRunner {
  public:
-  AOTIModelRunner() = delete;
-  AOTIModelRunner(const AOTIModelRunner& other) = delete;
-  AOTIModelRunner(AOTIModelRunner&& other) = delete;
-  AOTIModelRunner& operator=(const AOTIModelRunner& other) = delete;
-  AOTIModelRunner& operator=(AOTIModelRunner&& other) = delete;
+  AOTIModelContainerRunner() = delete;
+  AOTIModelContainerRunner(const AOTIModelContainerRunner& other) = delete;
+  AOTIModelContainerRunner(AOTIModelContainerRunner&& other) = delete;
+  AOTIModelContainerRunner& operator=(const AOTIModelContainerRunner& other) =
+      delete;
+  AOTIModelContainerRunner& operator=(AOTIModelContainerRunner&& other) =
+      delete;
 
  protected:
   std::vector<at::Tensor> run(
@@ -25,13 +27,13 @@ class TORCH_API AOTIModelRunner {
       AOTInductorStreamHandle cuda_stream_handle,
       AOTIProxyExecutorHandle proxy_executor_handle);
 
-  AOTIModelRunner(
+  AOTIModelContainerRunner(
       const char* model_path,
       size_t num_models,
       bool is_cpu,
       const char* cubin_dir);
 
-  ~AOTIModelRunner();
+  ~AOTIModelContainerRunner();
 
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};
@@ -42,15 +44,16 @@ class TORCH_API AOTIModelRunner {
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 };
 
-class TORCH_API AOTIModelRunnerCpu : public AOTIModelRunner {
+class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
  public:
-  AOTIModelRunnerCpu(const char* model_path, size_t num_models = 1)
-      : AOTIModelRunner(model_path, num_models, true, nullptr) {}
+  AOTIModelContainerRunnerCpu(const char* model_path, size_t num_models = 1)
+      : AOTIModelContainerRunner(model_path, num_models, true, nullptr) {}
 
   std::vector<at::Tensor> run(
       std::vector<at::Tensor> inputs,
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr) {
-    return AOTIModelRunner::run(inputs, nullptr, proxy_executor_handle);
+    return AOTIModelContainerRunner::run(
+        inputs, nullptr, proxy_executor_handle);
   }
 };
 
