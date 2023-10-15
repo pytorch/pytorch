@@ -13,18 +13,16 @@ and provides several parallelism styles: Rowwise and Colwise Parallelism.
 
 The entrypoint to parallelize your ``nn.Module`` using Tensor Parallelism is:
 
-.. automodule:: torch.distributed.tensor.parallel
-
 .. currentmodule:: torch.distributed.tensor.parallel
-
 .. autofunction::  parallelize_module
 
 Tensor Parallelism supports the following parallel styles:
 
-.. autoclass:: torch.distributed.tensor.parallel.style.RowwiseParallel
+.. currentmodule:: torch.distributed.tensor.parallel.style
+.. autoclass:: RowwiseParallel
   :members:
 
-.. autoclass:: torch.distributed.tensor.parallel.style.ColwiseParallel
+.. autoclass:: ColwiseParallel
   :members:
 
 Since Tensor Parallelism is built on top of DTensor, we need to specify the
