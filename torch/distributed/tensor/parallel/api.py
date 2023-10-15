@@ -75,8 +75,10 @@ def parallelize_module(  # type: ignore[return]
         >>>
 
     .. warning::
-        ``PairwiseParallel`` comes with constraints for now. If you need finer
-        granularity, you need to pass in a dict of module FQN and parallel style instead.
+        Currently, there are some constraints which makes it hard for complicated modules
+        like ``MultiheadAttention`` to work out of box for Tensor or Sequence Parallelism.
+        We recommend users to try ``ColwiseParallel`` and ``RowwiseParallel`` for each parameter
+        or submodule and there might be some code changes needed now.
     """
 
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
@@ -104,7 +106,9 @@ def parallelize_module(  # type: ignore[return]
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
         if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
-            return _parallelize_linear(module, device_mesh, parallelize_plan)
+            return _parallelize_linear_like_module(
+                module, device_mesh, parallelize_plan
+            )
         elif isinstance(parallelize_plan, PrepareModuleInput):
             module.register_forward_pre_hook(lambda _, inputs: parallelize_plan._prepare_input(inputs, device_mesh))  # type: ignore[misc, call-arg]
             return module
@@ -194,20 +198,29 @@ def _rowwise_parallelize_linear_fn(
         module.register_parameter(name, dist_param)
 
 
-def _colwise_parallelize_linear_fn(
+def _colwise_parallelize_embedding_fn(
     name: str,
     module: nn.Module,
     device_mesh: DeviceMesh,
 ) -> None:
+    _colwise_parallelize_linear_fn(name, module, device_mesh, sharding_dim=1)
+
+
+def _colwise_parallelize_linear_fn(
+    name: str,
+    module: nn.Module,
+    device_mesh: DeviceMesh,
+    sharding_dim: int = 0,
+) -> None:
     """
-    This function parallelizes the input :class:`nn.Linear` module in
-    :class:`ColwiseParallel` style.
+    This function parallelizes the input :class:`nn.Linear` or :class:`nn.Embedding`
+    module in :class:`ColwiseParallel` style.
 
     Args:
         name (str):
             Name of the input module.
         module (:class:`nn.Module`):
-            The :class:`nn.Linear` module to be parallelized.
+            The :class:`nn.Linear` or :class:`nn.Embedding` module to be parallelized.
         device_mesh (:class:`DeviceMesh`):
             Object which describes the mesh topology of devices.
 
@@ -217,12 +230,12 @@ def _colwise_parallelize_linear_fn(
 
     for name, param in module.named_parameters():
         dist_param = torch.nn.Parameter(
-            distribute_tensor(param, device_mesh, [Shard(0)])
+            distribute_tensor(param, device_mesh, [Shard(sharding_dim)])
         )
         module.register_parameter(name, dist_param)
 
 
-def _parallelize_linear(
+def _parallelize_linear_like_module(
     module: nn.Module,
     device_mesh: DeviceMesh,
     parallel_style: ParallelStyle = ColwiseParallel(),
@@ -258,14 +271,21 @@ def _parallelize_linear(
         A :class:`nn.Module` object parallelized.
     """
 
-    if not isinstance(module, nn.Linear):
+    if not isinstance(module, (nn.Linear, nn.Embedding)):
         raise RuntimeError(
-            f"Expect a torch.nn.Linear module but received {type(module)}!"
+            f"Expect a torch.nn.Linear or a torch.nn.Embedding module but received {type(module)}!"
         )
 
     if not isinstance(parallel_style, ParallelStyle):
         raise RuntimeError(
             "Expect a ParallelStyle object but received" f" {type(parallel_style)}!"
+        )
+
+    if isinstance(module, nn.Embedding) and not isinstance(
+        parallel_style, (ColwiseParallel)
+    ):
+        raise NotImplementedError(
+            "Only support ColwiseParallel when parallelizing Embedding now."
         )
 
     if device_mesh.ndim > 1:
@@ -283,7 +303,9 @@ def _parallelize_linear(
         distribute_module(
             module,
             device_mesh,
-            _colwise_parallelize_linear_fn,
+            _colwise_parallelize_embedding_fn
+            if isinstance(module, nn.Embedding)
+            else _colwise_parallelize_linear_fn,
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
