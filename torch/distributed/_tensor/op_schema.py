@@ -210,17 +210,17 @@ class OpSchema:
     def __str__(self) -> str:
         args_sharding: List[str] = []
         mesh = None
-        for spec in self.args_schema:
-            if isinstance(spec, DTensorSpec):
-                args_sharding.append(str(spec))
-                mesh = spec.mesh
-            elif isinstance(spec, OpStrategy):
-                assert len(spec.strategies) == 1
-                arg_spec = spec.strategies[0].output_spec
+        for arg in self.args_schema:
+            if isinstance(arg, DTensorSpec):
+                args_sharding.append(str(arg))
+                mesh = arg.mesh
+            elif isinstance(arg, OpStrategy):
+                assert len(arg.strategies) == 1
+                arg_spec = arg.strategies[0].output_spec
                 args_sharding.append(str(arg_spec))
                 mesh = arg_spec.mesh
             else:
-                args_sharding.append(str(spec))
+                args_sharding.append(str(arg))
         return (
             f"Op(op={self.op}, args_sharding={','.join(args_sharding)}, @ mesh:{mesh})"
         )

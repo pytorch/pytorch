@@ -431,9 +431,9 @@ class DTensorSpec:
         if self.tensor_meta is not None:
             tensor_shape = str(tuple(self.tensor_meta.shape))
         else:
-            tensor_shape = "?"
+            tensor_shape = "unknown shape"
 
-        return f"DTensorSpec({placement_str} on {tensor_shape})"
+        return f"Spec({placement_str} on {tensor_shape})"
 
     @property
     def shape(self) -> torch.Size:
