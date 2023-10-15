@@ -35,7 +35,7 @@ torch.backends.cuda
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
-    multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere_later`.
+    multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
 
 .. attribute::  allow_fp16_reduced_precision_reduction
 
@@ -97,7 +97,7 @@ torch.backends.cudnn
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls where TensorFloat-32 tensor cores may be used in cuDNN
-    convolutions on Ampere or newer GPUs. See :ref:`tf32_on_ampere_later`.
+    convolutions on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
 
 .. attribute::  deterministic
 
