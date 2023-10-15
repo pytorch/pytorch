@@ -924,6 +924,7 @@ torch::Tensor _weight_int4pack_mm_cuda(
   auto C_final = torch::empty(
       {m, n}, torch::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
   do {                                                               \
     using ACLayout = ALayout_RM<REDUCE_TYPE>;                        \
