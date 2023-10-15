@@ -231,6 +231,16 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
+  // update_constants replaces the tensors corresponding to the given name.
+  // tensors that are not included in the map provided will keep it's original
+  // value and not get updated.
+  void update_constants(ConstantMap&& constants_map) {
+    for (auto& [key, val] : constants_map) {
+      constants_->at(key) = std::move(val);
+    }
+  }
+
+  // update_constants_map replaces the mapping of model's constant as a whole.
   void update_constants_map(std::shared_ptr<ConstantMap>&& constants_map) {
     constants_ = std::move(constants_map);
   }

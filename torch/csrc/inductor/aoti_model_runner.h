@@ -20,6 +20,7 @@ class TORCH_API AOTIModelRunner {
   AOTIModelRunner& operator=(const AOTIModelRunner& other) = delete;
   AOTIModelRunner& operator=(AOTIModelRunner&& other) = delete;
 
+  void update_constants(const ConstantMap& const_map);
   void update_constants_map(const ConstantMap& const_map);
 
  protected:
@@ -34,6 +35,7 @@ class TORCH_API AOTIModelRunner {
   decltype(&AOTInductorModelDelete) delete_func_{nullptr};
   decltype(&AOTInductorModelGetNumOutputs) get_num_outputs_func_{nullptr};
   decltype(&AOTInductorModelRun) run_func_{nullptr};
+  decltype(&AOTInductorModelUpdateConstants) update_constants_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsMap) update_constants_map_func_{
       nullptr};
   AOTInductorModelHandle model_handle_ = nullptr;

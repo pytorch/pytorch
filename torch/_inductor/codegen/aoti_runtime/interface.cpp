@@ -182,6 +182,23 @@ AOTIRuntimeError AOTInductorModelDelete(
   })
 }
 
+
+AOTIRuntimeError AOTInductorModelUpdateConstants(
+    AOTInductorModelHandle model_handle,
+    AOTInductorConstantMapHandle constant_map_handle) {
+  auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      torch::aot_inductor::ConstantMap constant_map;
+      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+
+      for (auto const& kv : *input_map) {
+        constant_map.emplace(kv.first, kv.second);
+      }
+      model->update_constants(std::move(constant_map));
+  })
+}
+
+
 AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {

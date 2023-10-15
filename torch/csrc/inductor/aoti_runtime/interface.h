@@ -115,6 +115,13 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* input_handles,
     AtenTensorHandle* output_handles);
 
+// Update AOTInductorModel's constant. Constants that are not updated will
+// remain intact. To swap out all constants, use the following
+// AOTInductorModelUpdateConstantsMap instead.
+AOTIRuntimeError AOTInductorModelUpdateConstants(
+    AOTInductorModelHandle model_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
 // so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
 AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
