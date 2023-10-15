@@ -11,6 +11,7 @@ import sympy
 from sympy import Expr
 
 import torch
+import torch._dynamo.config as dynamo_config
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
@@ -238,6 +239,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState):
+        if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
+            return
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
@@ -520,7 +523,17 @@ class WrapperCodeGen(CodeGen):
                 self.write_triton_header_once()
                 self.wrapper_call.writeline("start_graph()")
 
-            if is_inference:
+            # We disable planning during training because it presently increases peak memory consumption.
+            # We also disable planning if we have fully dynamic shapes because we are not able to calculate
+            # size hints for them.
+            if (
+                is_inference
+                and config.memory_planning
+                and not (
+                    dynamo_config.capture_scalar_outputs
+                    or dynamo_config.capture_dynamic_output_shape_ops
+                )
+            ):
                 self.memory_plan()
             else:
                 self.memory_plan_reuse()
