@@ -2573,7 +2573,7 @@ Tensor compute_T18_scale_square(
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
   for (int64_t i = 0; i < section_numel; ++i) {
     for (int64_t j = 0; j < pts[i]; j++) {
-        acc = at::matmul(acc, acc);
+      acc = at::matmul(acc, acc);
     }
     output_pieces.push_back(acc.slice(0, 0, scs[i]));
     acc = acc.slice(0, scs[i]);
