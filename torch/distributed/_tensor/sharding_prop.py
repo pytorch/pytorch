@@ -1,5 +1,6 @@
 from functools import lru_cache
-from typing import Callable, cast, Dict, Optional
+from itertools import chain
+from typing import Callable, cast, Dict, List, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -169,9 +170,8 @@ class ShardingPropagator:
             op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
 
             assert isinstance(op_strategy, OpStrategy)
-            # we take the first strategy for now
-            # TODO: add a min cost selection logic
-            output_strategy = op_strategy.strategies[0]
+            output_strategy = self._select_strategy(op_strategy)
+
             needs_redistribute = False
             expected_input_specs = []
             for idx, input_spec in enumerate(op_schema.args_spec):
@@ -264,3 +264,19 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
+
+    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
+        if len(strategy.strategies) == 1:
+            # short cut with only one possible strategy
+            return strategy.strategies[0]
+
+        strategy_costs: List[float] = []
+        for strtg in strategy.strategies:
+            assert (
+                strtg.redistribute_cost is not None
+            ), "must set redistribute cost each strategy!"
+            redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
+            strategy_costs.append(redistribute_cost)
+
+        # for eager execution, we just select the one with the minimal redistribute cost
+        return strategy.strategies[strategy_costs.index(min(strategy_costs))]

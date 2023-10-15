@@ -533,3 +533,9 @@ class DTensorSpec:
                 placements[m] = Shard(i)
 
         return cls(mesh, tuple(placements), tensor_meta=tensor_meta)
+
+    def is_replicated(self):
+        """
+        return True if the current DTensorSpec replicates on all mesh dims (devices)
+        """
+        return all(placement.is_replicate() for placement in self.placements)
