@@ -190,6 +190,12 @@ aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
+// Make the tensor referred to by dst an alias for the tensor referred
+// to by src. The two tensors must still be deleted with
+// aoti_torch_delete_tensor separately (or not) as before the call.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
