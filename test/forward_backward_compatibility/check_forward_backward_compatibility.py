@@ -324,6 +324,7 @@ ALLOW_LIST = [
     ("aten::quantized_rnn_relu_cell", datetime.date(2023, 12, 31)),
     ("aten::quantized_rnn_tanh_cell", datetime.date(2023, 12, 31)),
     ("quantized::make_quantized_cell_params", datetime.date(2023, 12, 31)),
+    ("profiler::_record_function_exit", datetime.date(2023, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
