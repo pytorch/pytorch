@@ -39,13 +39,13 @@ def get_source(stacklevel: int) -> str:
     return source
 
 
-def parse_namespace(name: str) -> Tuple[str, str]:
-    splits = name.split("::")
+def parse_namespace(qualname: str) -> Tuple[str, str]:
+    splits = qualname.split("::")
     if len(splits) != 2:
         raise ValueError(
-            f"Expected `name` to be of the form "
-            f'"namespace::name", but got {name}. '
-            f"Operator names in PyTorch consist of a name "
-            f"and a namespace, e.g. aten::sin"
+            f"Expected `qualname` to be of the form "
+            f'"namespace::name", but got {qualname}. '
+            f"The qualname passed to the torch.library APIs must consist "
+            f"of a namespace and a name, e.g. aten::sin"
         )
     return splits[0], splits[1]
