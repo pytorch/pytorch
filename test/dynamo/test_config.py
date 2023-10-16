@@ -36,9 +36,14 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             pass
 
         for config in [
-            set({"a"}),
+            # Nest disallowed types in containers
+            [{"a"}],
             {fn: 1},
             {"b": b"bytestring"},
+            [MyClass()],
+            [MyClass],
+            {"m": MyModule},
+            {"m": MyModule("a_module")},
         ]:
             my_module = MyModule("my_module")
             my_module.config = config
@@ -46,11 +51,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
                 ValueError, "Config needs to be deterministically serializable"
             ):
                 torch._dynamo.config_utils.install_config_module(my_module)
-
-        with self.assertRaisesRegex(AssertionError, "Unhandled config"):
-            my_module = MyModule("my_module")
-            my_module.config = MyClass()
-            torch._dynamo.config_utils.install_config_module(my_module)
 
     @disable_cache_limit()
     def test_no_automatic_dynamic(self):

@@ -9,7 +9,7 @@ from typing import Any, Dict, Set
 from unittest import mock
 
 # Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+CONFIG_TYPES = (int, float, bool, type(None), str, list, tuple, dict)
 
 
 def install_config_module(module):
