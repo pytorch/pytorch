@@ -2332,7 +2332,7 @@ def forward(self, x):
 
         example_inputs = (copy(x), y)
         ep = torch._export._export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
             ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
