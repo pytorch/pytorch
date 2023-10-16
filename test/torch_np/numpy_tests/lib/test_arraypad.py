@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 
@@ -20,7 +21,7 @@ else:
 
 
 class TestConstant(TestCase):
-    @xfail  # (reason="tuple values")
+    @xpassIfTorchDynamo  # (reason="tuple values")
     def test_check_constant(self):
         a = np.arange(100)
         a = np.pad(a, (25, 20), "constant", constant_values=(10, 20))
@@ -368,7 +369,7 @@ class TestConstant(TestCase):
         )
         assert_allclose(test, expected)
 
-    @xfail  # (reason="tuple values")
+    @xpassIfTorchDynamo  # (reason="tuple values")
     def test_check_constant_float3(self):
         a = np.arange(100, dtype=float)
         a = np.pad(a, (25, 20), "constant", constant_values=(-1.1, -1.2))
@@ -539,7 +540,7 @@ class TestConstant(TestCase):
         )
         assert_allclose(test, expected)
 
-    @xfail  # (reason="tuple values")
+    @xpassIfTorchDynamo  # (reason="tuple values")
     def test_check_constant_pad_2d(self):
         arr = np.arange(4).reshape(2, 2)
         test = np.lib.pad(

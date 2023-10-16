@@ -698,7 +698,6 @@ class TestHistogramOptimBinNums(TestCase):
         """
         Check that weighted data raises a TypeError
         """
-        pytest.xpass(reason="passes by chance")
         estimator_list = ["fd", "scott", "rice", "sturges", "auto"]
         for estimator in estimator_list:
             assert_raises(TypeError, histogram, [1, 2, 3], estimator, weights=[1, 2, 3])
@@ -928,7 +927,7 @@ class TestHistogramdd(TestCase):
     def test_large_integers(self):
         big = 2**60  # Too large to represent with a full precision float
 
-        x = np.array([0], np.int64)
+        x = np.asarray([0], dtype=np.int64)
         x_edges = np.array([-1, +1], np.int64)
         y = big + x
         y_edges = big + x_edges

@@ -10,9 +10,12 @@ from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    subtest,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
+    xfailIfTorchDynamo,
 )
 
 
@@ -20,8 +23,8 @@ from torch.testing._internal.common_utils import (
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
-    from numpy import unique
-    from numpy.testing import assert_array_equal, assert_equal
+    from numpy import unique, in1d, isin, setdiff1d, union1d, setxor1d, intersect1d, ediff1d
+    from numpy.testing import assert_array_equal, assert_equal, assert_raises_regex
 
 else:
     import torch._numpy as np
@@ -29,7 +32,7 @@ else:
     from torch._numpy.testing import assert_array_equal, assert_equal
 
 
-@xfail  # (reason="TODO")
+@xpassIfTorchDynamo  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestSetOps(TestCase):
     def test_intersect1d(self):
@@ -154,11 +157,11 @@ class TestSetOps(TestCase):
             (np.array([1, 2, 3], dtype=np.int64), None, np.nan, "to_end"),
             # should fail because attempting
             # to downcast to int type:
-            (
+            subtest((
                 np.array([1, 2, 3], dtype=np.int64),
                 np.array([5, 7, 2], dtype=np.float32),
                 None,
-                "to_begin",
+                "to_begin",), decorators=[xfailIfTorchDynamo]
             ),
             # should fail because attempting to cast
             # two special floating point values
@@ -226,7 +229,7 @@ class TestSetOps(TestCase):
         isin_slow = np.vectorize(_isin_slow, otypes=[bool], excluded={1})
 
         def assert_isin_equal(a, b):
-            x = isin(a, b, kind=kind)
+            x = np.isin(a, b, kind=kind)
             y = isin_slow(a, b)
             assert_array_equal(x, y)
 
@@ -453,7 +456,7 @@ class TestSetOps(TestCase):
         a = np.array([0, 1, 2], dtype="timedelta64[s]")
         b = a
         # Make sure it raises a value error:
-        with pytest.raises(ValueError):
+        with assert_raises(ValueError):
             in1d(a, b, kind="table")
 
     @parametrize(
@@ -484,7 +487,7 @@ class TestSetOps(TestCase):
         )
 
         if expect_failure:
-            with pytest.raises(RuntimeError, match="exceed the maximum"):
+            with assert_raises(RuntimeError, match="exceed the maximum"):
                 in1d(ar1, ar2, kind=kind)
         else:
             assert_array_equal(in1d(ar1, ar2, kind=kind), expected)
@@ -753,7 +756,7 @@ class TestUnique(TestCase):
     #    assert_equal(a3_idx.dtype, np.intp)
     #    assert_equal(a3_inv.dtype, np.intp)
 
-    @xfail  # (reason="unique with nans")
+    @xpassIfTorchDynamo  # (reason="unique with nans")
     def test_unique_1d_2(self):
         # test for ticket 2111 - float
         a = [2.0, np.nan, 1.0, np.nan]
@@ -799,7 +802,7 @@ class TestUnique(TestCase):
         assert_array_equal(unique(inp, axis=0), unique(inp_arr, axis=0), msg)
         assert_array_equal(unique(inp, axis=1), unique(inp_arr, axis=1), msg)
 
-    @xfail  # _run_axis_tests xfails with the message
+    @xpassIfTorchDynamo  # _run_axis_tests xfails with the message
     #   torch has different unique ordering behaviour"
     def test_unique_axis(self):
         types = []
@@ -825,7 +828,7 @@ class TestUnique(TestCase):
         uniq = unique(x, axis=axis)
         assert_array_equal(uniq, [1, 2, 3, 4])
 
-    @xfail  # (reason="unique / return_index")
+    @xpassIfTorchDynamo  # (reason="unique / return_index")
     def test_unique_axis_zeros(self):
         # issue 15559
         single_zero = np.empty(shape=(2, 0), dtype=np.int8)
@@ -932,7 +935,7 @@ class TestUnique(TestCase):
         msg = "Unique's return_counts=True failed with axis=1"
         assert_array_equal(cnt, np.array([2, 1, 1]), msg)
 
-    @xfail  # (reason="unique / return_index / nans")
+    @xpassIfTorchDynamo  # (reason="unique / return_index / nans")
     def test_unique_nanequals(self):
         # issue 20326
         a = np.array([1, 1, np.nan, np.nan, np.nan])

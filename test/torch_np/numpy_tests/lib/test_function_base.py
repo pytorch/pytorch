@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 skip = functools.partial(skipif, True)
@@ -57,6 +58,7 @@ if TEST_WITH_TORCHDYNAMO:
         meshgrid,
         sinc,
         unique,
+        trim_zeros
     )
     from numpy.core.numeric import normalize_axis_tuple
     from numpy.random import rand
@@ -516,7 +518,7 @@ class TestSelect(TestCase):
         select(conditions, choices)
 
 
-@xfail  # (reason="TODO: implement")
+@xpassIfTorchDynamo  # (reason="TODO: implement")
 @instantiate_parametrized_tests
 class TestInsert(TestCase):
     def test_basic(self):
@@ -834,7 +836,7 @@ class TestDiff(TestCase):
         assert_raises(np.AxisError, diff, x, append=0, axis=3)
 
 
-@xfail  # (reason="TODO: implement")
+@xpassIfTorchDynamo  # (reason="TODO: implement")
 @instantiate_parametrized_tests
 class TestDelete(TestCase):
     def setUp(self):
@@ -2827,7 +2829,7 @@ class TestPercentile(TestCase):
         x = np.array([[1, 1, 1], [1, 1, 1], [4, 4, 3], [1, 1, 1], [1, 1, 1]])
         assert_array_equal(np.percentile(x, 50, axis=0), [1, 1, 1])
 
-    @xfail  # (reason="TODO: implement")
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     @parametrize("dtype", np.typecodes["Float"])
     def test_linear_nan_1D(self, dtype):
         # METHOD 1 of H&F
@@ -2844,7 +2846,7 @@ class TestPercentile(TestCase):
         (np.float64, np.float64),
     ]
 
-    @xfail  # (reason="TODO: implement percentile interpolations")
+    @xpassIfTorchDynamo  # (reason="TODO: implement percentile interpolations")
     @parametrize("input_dtype, expected_dtype", H_F_TYPE_CODES)
     @parametrize(
         "method, expected",
@@ -3213,7 +3215,7 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
         ],
@@ -3227,13 +3229,13 @@ class TestPercentile(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
         ],
@@ -3283,7 +3285,7 @@ class TestPercentile(TestCase):
             assert_equal(np.percentile(d, 1, out=o), o)
             assert_equal(np.percentile(d, 1, method="nearest", out=o), o)
 
-    @xfail  # (reason="np.percentile undocumented nan weirdness")
+    @xpassIfTorchDynamo  # (reason="np.percentile undocumented nan weirdness")
     def test_nan_behavior(self):
         a = np.arange(24, dtype=float)
         a[2] = np.nan
@@ -3447,50 +3449,50 @@ class TestQuantile(TestCase):
             subtest(
                 "inverted_cdf",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 "averaged_inverted_cdf",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 "closest_observation",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 "interpolated_inverted_cdf",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 "hazen",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 "weibull",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             "linear",
             subtest(
                 "median_unbiased",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 "normal_unbiased",
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             "nearest",
@@ -3667,7 +3669,7 @@ class TestMedian(TestCase):
         b[1, 2] = np.nan
         assert_equal(np.median(a, 1), b)
 
-    @xfail  # (reason="median: does not support tuple axes")
+    @xpassIfTorchDynamo  # (reason="median: does not support tuple axes")
     def test_nan_behavior_2(self):
         a = np.arange(24, dtype=float).reshape(2, 3, 4)
         a[1, 2, 3] = np.nan
@@ -3679,7 +3681,7 @@ class TestMedian(TestCase):
         b[2] = np.nan
         assert_equal(np.median(a, (0, 2)), b)
 
-    @xfail  # (reason="median: scalar vs 0-dim")
+    @xpassIfTorchDynamo  # (reason="median: scalar vs 0-dim")
     def test_nan_behavior_3(self):
         a = np.arange(24, dtype=float).reshape(2, 3, 4)
         a[1, 2, 3] = np.nan
@@ -3688,7 +3690,7 @@ class TestMedian(TestCase):
         # no axis
         assert_equal(np.median(a).ndim, 0)
 
-    @xfail  # (reason="median: torch.quantile does not handle empty tensors")
+    @xpassIfTorchDynamo  # (reason="median: torch.quantile does not handle empty tensors")
     @skipif(IS_WASM, reason="fp errors don't work correctly")
     def test_empty(self):
         # mean(empty array) emits two warnings: empty slice and divide by 0
@@ -3719,7 +3721,7 @@ class TestMedian(TestCase):
             assert_equal(np.median(a, axis=2), b)
             assert_(w[0].category is RuntimeWarning)
 
-    @xfail  # (reason="median: tuple axes not implemented")
+    @xpassIfTorchDynamo  # (reason="median: tuple axes not implemented")
     def test_extended_axis(self):
         o = np.random.normal(size=(71, 23))
         x = np.dstack([o] * 10)
@@ -3769,7 +3771,7 @@ class TestMedian(TestCase):
         d = np.ones((3, 5, 7, 11))
         assert_equal(np.median(d, axis=None, keepdims=True).shape, (1, 1, 1, 1))
 
-    @xfail  # (reason="median: tuple axis")
+    @xpassIfTorchDynamo  # (reason="median: tuple axis")
     def test_keepdims_2(self):
         d = np.ones((3, 5, 7, 11))
         assert_equal(np.median(d, axis=(0, 1), keepdims=True).shape, (1, 1, 7, 11))
@@ -3787,13 +3789,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xfail,
+                    xpassIfTorchDynamo,
                 ],
             ),
         ],
