@@ -1748,7 +1748,7 @@ def forward(self, x_1):
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_impl_device_cuda(self):
         self._test_impl_device("foo4", "default", "cuda")
-        self._test_impl_device("foo5", ["cpu"], "cuda")
+        self._test_impl_device("foo5", ["cuda"], "cuda")
         self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
 
     def test_impl_device_function(self):
