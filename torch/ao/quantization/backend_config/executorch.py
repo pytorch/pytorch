@@ -345,6 +345,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         executorch_default_op_quint8_dtype_config,
     ]
     share_qparams_ops = [
+        torch.nn.Flatten,
         F.adaptive_avg_pool2d,
         F.elu,
         F.hardtanh,

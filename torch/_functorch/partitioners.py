@@ -304,24 +304,7 @@ def _prod(x):
     return s
 
 def _tensor_nbytes(numel, dtype):
-    sizes = {
-        torch.complex64: 8,
-        torch.complex128: 16,
-        torch.float16: 2,
-        torch.bfloat16: 2,
-        torch.float32: 4,
-        torch.float64: 8,
-        torch.int8: 1,
-        torch.int16: 2,
-        torch.int32: 4,
-        torch.int64: 8,
-        torch.uint8: 1,
-        torch.bool: 1,
-    }
-    if dtype not in sizes:
-        raise NotImplementedError("Don't know the size of dtype ", dtype)
-
-    return numel * sizes[dtype]
+    return numel * dtype.itemsize
 
 def _size_of(node: fx.Node) -> int:
     if 'val' in node.meta:
@@ -515,6 +498,29 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
                 random_nodes[node.name] = node
         return random_nodes
 
+    def get_device(node):
+        """
+        Check the example value of the node outputs to find the device type.
+        """
+        if "val" not in node.meta:
+            return None
+
+        candidates = node.meta["val"]
+        if not isinstance(candidates, tuple):
+            candidates = (candidates,)
+
+        for candidate in candidates:
+            if isinstance(candidate, torch.Tensor):
+                if candidate.device.type == "cuda":
+                    return "cuda"
+
+        return "cpu"
+
+    def get_sample_rng_state(device):
+        if device == "cuda":
+            return torch.cuda.get_rng_state()
+        return torch.get_rng_state()
+
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
@@ -538,6 +544,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
         if node.op == "placeholder" and "tangent" in node.name:
             bw_tangent_start_node = node
             break
+
 
     fw_rng_state_outputs = []
     for base_node, node_pair in recomputable_rng_ops_map.items():
@@ -564,7 +571,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
         with bw_graph.inserting_before(bw_tangent_start_node):
             state_name = f"rng_state_output_{next(uid)}"
             bw_rng_state_node = bw_graph.placeholder(state_name)
-            bw_rng_state_node.meta["val"] = torch.cuda.get_rng_state()
+            bw_rng_state_node.meta["val"] = get_sample_rng_state(get_device(fw_node))
 
         with bw_graph.inserting_before(bw_node):
             rng_output = bw_graph.create_node(
@@ -617,7 +624,7 @@ def min_cut_rematerialization_partition(
 
     To create the fwd and bwd graph, we copy the joint graph, manually set the
     outputs to just original forward or backward outputs. And then we run the
-    resulting graphs through dead code elimintation.
+    resulting graphs through dead code elimination.
 
     .. warning::
         This API is experimental and likely to change.
@@ -795,6 +802,10 @@ def min_cut_rematerialization_partition(
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
+        # We can perform "memory fusion" into a cat, but cat cannot be a
+        # producer to a fusion
+        if get_aten_target(b) == aten.cat:
+            return True
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
@@ -834,7 +845,7 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
 
@@ -900,7 +911,14 @@ def min_cut_rematerialization_partition(
     return fw_module, bw_module
 
 
-def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
+def draw_graph(
+    traced: torch.fx.GraphModule,
+    fname: str,
+    figname: str = "fx_graph",
+    clear_meta: bool = True,
+    prog: str = None,
+    parse_stack_trace: bool = False,
+) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)
@@ -910,9 +928,14 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     if not ext:
         ext = ".svg"
     print(f"Writing FX graph to file: {base}{ext}")
-    g = graph_drawer.FxGraphDrawer(traced, figname)
+    g = graph_drawer.FxGraphDrawer(traced, figname, parse_stack_trace=parse_stack_trace)
     x = g.get_main_dot_graph()
-    getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
+    write_method = getattr(x, "write_" + ext.lstrip("."))
+    fname = f"{base}{ext}"
+    if prog is None:
+        write_method(fname)
+    else:
+        write_method(fname, prog=prog)
 
 
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):

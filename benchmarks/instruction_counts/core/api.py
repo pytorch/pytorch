@@ -401,7 +401,7 @@ class GroupedBenchmark:
 
         # NB:
         #   In python we invoke __call__, however C++ doesn't have an analogous
-        #   method so we invoke `forward` instead. This means that that Python
+        #   method so we invoke `forward` instead. This means that Python
         #   is doing extra work (e.g. checking hooks) compared to C++; however
         #   because this is the default user experience that's acceptable.
         py_invocation = f"{py_prefix}{model_name}({', '.join(signature_args)})"

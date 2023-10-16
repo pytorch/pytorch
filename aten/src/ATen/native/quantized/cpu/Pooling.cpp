@@ -16,6 +16,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/quantized_max_pool1d.h>
 #include <ATen/ops/quantized_max_pool1d_native.h>
@@ -254,67 +255,92 @@ Tensor q_maxpool_2d(
     // In this case, we can preserve the data layout in memory
     // as well as use a loop nest that is more amenable to
     // vectorization.
-    Tensor qy = at::_empty_affine_quantized(
+    Tensor qy;
+    if constexpr(std::is_same_v<Q, uint8_t>) {
+      qy = at::empty(
         oSizes,
         qx.options()
-          .dtype(toQIntType(qx.scalar_type()))
-          .memory_format(qx.suggest_memory_format()),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        c10::nullopt);
+          .device(c10::kCPU)
+          .dtype(qx.scalar_type())
+          .memory_format(c10::MemoryFormat::ChannelsLast));
+    } else {
+      qy = at::_empty_affine_quantized(
+          oSizes,
+          qx.options()
+            .dtype(toQIntType(qx.scalar_type()))
+            .memory_format(qx.suggest_memory_format()),
+          qx.q_scale(),
+          qx.q_zero_point(),
+          c10::nullopt);
+    }
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
   } else {
-    Tensor qy = at::_empty_affine_quantized(
-        oSizes,
-        qx.options().dtype(toQIntType(qx.scalar_type())),
-        qx.q_scale(),
-        qx.q_zero_point());
-    auto qx_contig = qx.contiguous();
-    auto qxd = qx_contig.data_ptr<Q>();
-    auto qyd = qy.data_ptr<Q>();
-    if (ndim == 3 || nbatch == 1) {
-      auto* iData = qxd;
-      auto* oData = qyd;
-      spatial_dilated_max_pooling<Q>(
-          iData,
-          iC,
-          iH,
-          iW,
-          oH,
-          oW,
-          kH,
-          kW,
-          sH,
-          sW,
-          pH,
-          pW,
-          dH,
-          dW,
-          oData);
+    Tensor qy;
+    if constexpr(!std::is_same_v<Q, uint8_t>) {
+      qy = at::_empty_affine_quantized(
+              oSizes,
+              qx.options().dtype(toQIntType(qx.scalar_type())),
+              qx.q_scale(),
+              qx.q_zero_point());
+      auto qx_contig = qx.contiguous();
+      auto qxd = qx_contig.data_ptr<Q>();
+      auto qyd = qy.data_ptr<Q>();
+      if (ndim == 3 || nbatch == 1) {
+        auto* iData = qxd;
+        auto* oData = qyd;
+        spatial_dilated_max_pooling<Q>(
+            iData,
+            iC,
+            iH,
+            iW,
+            oH,
+            oW,
+            kH,
+            kW,
+            sH,
+            sW,
+            pH,
+            pW,
+            dH,
+            dW,
+            oData);
+      } else {
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (const auto p : c10::irange(start, end)) {
+            auto* iData = qxd + p * iC * iW * iH;
+            auto* oData = qyd + p * oC * oW * oH;
+            spatial_dilated_max_pooling<Q>(
+                iData,
+                iC,
+                iH,
+                iW,
+                oH,
+                oW,
+                kH,
+                kW,
+                sH,
+                sW,
+                pH,
+                pW,
+                dH,
+                dW,
+                oData);
+          }
+        });
+      }
     } else {
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (const auto p : c10::irange(start, end)) {
-          auto* iData = qxd + p * iC * iW * iH;
-          auto* oData = qyd + p * oC * oW * oH;
-          spatial_dilated_max_pooling<Q>(
-              iData,
-              iC,
-              iH,
-              iW,
-              oH,
-              oW,
-              kH,
-              kW,
-              sH,
-              sW,
-              pH,
-              pW,
-              dH,
-              dW,
-              oData);
-        }
-      });
+      // If qx is uint8 and contiguous memory format,
+      // Use the channels_last implementation and convert qy back to contiguous.
+      qy = at::empty(
+        oSizes,
+        qx.options()
+          .device(c10::kCPU)
+          .dtype(qx.scalar_type())
+          .memory_format(c10::MemoryFormat::ChannelsLast));
+      auto qx_nhwc = qx.contiguous(c10::MemoryFormat::ChannelsLast);
+      qmaxpool_2d_nhwc_stub(qx_nhwc.device().type(), qx_nhwc, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+      qy = qy.contiguous();
     }
     return qy;
   }
@@ -611,7 +637,7 @@ Tensor quantized_max_pool2d(
   }
 #endif
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
+  AT_DISPATCH_QINT_TYPES_AND(ScalarType::Byte, qx.scalar_type(), "max_pool2d", [&]() {
     qy = q_maxpool_2d<scalar_t>(
         qx,
         kernel_size[0],
@@ -706,6 +732,10 @@ class QMaxPool_arr_args final {
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       bool ceil_mode) {
+    if (!qx.is_quantized() && kSpatialDim == 2 && qx.scalar_type() == c10::ScalarType::Byte){
+      return at::native::quantized_max_pool2d(qx, kernel_size, stride, padding,
+                                      dilation, ceil_mode);
+    }
     if (kSpatialDim == 1) {
       return at::quantized_max_pool1d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
@@ -719,6 +749,10 @@ class QMaxPool_arr_args final {
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool1d"), TORCH_FN(QMaxPool_arr_args<1>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool2d"), TORCH_FN(QMaxPool_arr_args<2>::run));
+}
+
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool2d"), TORCH_FN(QMaxPool_arr_args<2>::run));
 }
 

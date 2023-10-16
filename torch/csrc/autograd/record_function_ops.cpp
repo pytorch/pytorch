@@ -45,16 +45,15 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   // Profiling callback that ends the associated record_function
   // and returns the value of the passed in future.
-  std::function<c10::IValue(c10::ivalue::Future&)> futureProfilingFunc =
-      [record](c10::ivalue::Future& fut) {
-        record->record.end();
-        // Note: this future is returned to the user to ensure that a call to
-        // wait() ensures that profiling callbacks have ran. To ensure that this
-        // is transparent, we must make this future propagate the value of the
-        // RPC future. Use value() here instead of constValue() to ensure we
-        // propagate errors.
-        return fut.value();
-      };
+  auto futureProfilingFunc = [record](c10::ivalue::Future& fut) {
+    record->record.end();
+    // Note: this future is returned to the user to ensure that a call to
+    // wait() ensures that profiling callbacks have ran. To ensure that this
+    // is transparent, we must make this future propagate the value of the
+    // RPC future. Use value() here instead of constValue() to ensure we
+    // propagate errors.
+    return fut.value();
+  };
   // Define a future that completes after the profiling callbacks are run.
   auto profiledFut = fut->then(
       at::wrapPropagateTLSState(std::move(futureProfilingFunc)),

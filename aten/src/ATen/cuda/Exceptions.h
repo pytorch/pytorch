@@ -69,6 +69,13 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 
 namespace at::cuda::solver {
 C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
+
+constexpr const char* _cusolver_backend_suggestion =            \
+  "If you keep seeing this error, you may use "                 \
+  "`torch.backends.cuda.preferred_linalg_library()` to try "    \
+  "linear algebra operators with other supported backends. "    \
+  "See https://pytorch.org/docs/stable/backends.html#torch.backends.cuda.preferred_linalg_library";
+
 } // namespace at::cuda::solver
 
 // When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
@@ -85,13 +92,15 @@ C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
           "cusolver error: ",                                           \
           at::cuda::solver::cusolverGetErrorMessage(__err),             \
           ", when calling `" #EXPR "`",                                 \
-          ". This error may appear if the input matrix contains NaN."); \
+          ". This error may appear if the input matrix contains NaN. ", \
+          at::cuda::solver::_cusolver_backend_suggestion);              \
     } else {                                                            \
       TORCH_CHECK(                                                      \
           __err == CUSOLVER_STATUS_SUCCESS,                             \
           "cusolver error: ",                                           \
           at::cuda::solver::cusolverGetErrorMessage(__err),             \
-          ", when calling `" #EXPR "`");                                \
+          ", when calling `" #EXPR "`. ",                               \
+          at::cuda::solver::_cusolver_backend_suggestion);              \
     }                                                                   \
   } while (0)
 
