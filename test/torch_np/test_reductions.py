@@ -315,6 +315,8 @@ fails_out_arg = {
     np.count_nonzero,
 }
 
+restricts_dtype_casts = {np.var, np.std}
+
 
 @instantiate_parametrized_tests
 class TestGenericReductions(TestCase):
@@ -428,6 +430,8 @@ class TestGenericReductions(TestCase):
             raise SkipTest(f"{func.__name__} does not have out= arg.")
         if func in fails_axes_tuples:
             raise SkipTest(f"{func.__name__} does not hangle tuple axis.")
+        if func in restricts_dtype_casts:
+            raise SkipTest(f"{func.__name__}: test implies float->int casts")
 
         a = np.arange(2 * 3 * 4).reshape((2, 3, 4))
         result = func(a, axis=axis, keepdims=keepdims).astype(dtype)

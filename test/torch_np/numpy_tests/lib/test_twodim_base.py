@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 
@@ -132,7 +133,7 @@ class TestEye(TestCase):
     def test_bool(self):
         assert_equal(eye(2, 2, dtype=bool), [[True, False], [False, True]])
 
-    @xfail  # (reason="TODO: implement order=non-default")
+    @xpassIfTorchDynamo  # (reason="TODO: implement order=non-default")
     def test_order(self):
         mat_c = eye(4, 3, k=-1)
         mat_f = eye(4, 3, k=-1, order="F")
@@ -174,7 +175,7 @@ class TestDiag(TestCase):
             b[k] = vals[k + 2, k]
         assert_equal(diag(vals, -2), b[:3])
 
-    @xfail  # (reason="TODO implement orders")
+    @xpassIfTorchDynamo  # (reason="TODO implement orders")
     def test_fortran_order(self):
         vals = array((100 * get_mat(5) + 1), order="F", dtype="l")
         self.check_matrix(vals)
@@ -283,7 +284,7 @@ class TestHistogram2d(TestCase):
         # assert_array_max_ulp(a, np.zeros((4, 4)))
         assert_allclose(a, np.zeros((4, 4)), atol=1e-15)
 
-    @xfail  # (reason="pytorch does not support bins = [int, array]")
+    @xpassIfTorchDynamo  # (reason="pytorch does not support bins = [int, array]")
     def test_binparameter_combination(self):
         x = array([0, 0.09207008, 0.64575234, 0.12875982, 0.47390599, 0.59944483, 1])
         y = array([0, 0.14344267, 0.48988575, 0.30558665, 0.44700682, 0.15886423, 1])
@@ -400,7 +401,7 @@ class TestTri(TestCase):
         iu1 = mask_indices(3, np.triu, 1)
         assert_array_equal(a[iu1], array([1, 2, 5]))
 
-    @xfail  # (reason="np.tril_indices == our tuple(tril_indices)")
+    @xpassIfTorchDynamo  # (reason="np.tril_indices == our tuple(tril_indices)")
     def test_tril_indices(self):
         # indices without and with offset
         il1 = tril_indices(4)
@@ -460,7 +461,7 @@ class TestTri(TestCase):
         )
 
 
-@xfail  # (reason="np.triu_indices == our tuple(triu_indices)")
+@xpassIfTorchDynamo  # (reason="np.triu_indices == our tuple(triu_indices)")
 class TestTriuIndices(TestCase):
     def test_triu_indices(self):
         iu1 = triu_indices(4)
