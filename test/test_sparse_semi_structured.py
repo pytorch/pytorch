@@ -26,7 +26,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     subtest,
     TestCase,
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM,
+    IS_WINDOWS,
 )
 
 from torch.utils._triton import has_triton
@@ -274,7 +275,7 @@ class TestSparseSemiStructured(TestCase):
         """
         if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             SparseSemiStructuredTensor._FORCE_CUTLASS = False
-            A = rand_sparse_semi_structured_mask(128, 256, dtype=torch.int8)
+            A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
             A_sparse = to_sparse_semi_structured(A)
 
             B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
@@ -341,6 +342,7 @@ class TestSparseSemiStructured(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     def test_mlp_contiguous_relu_compile(self, dense_input_shape, backend, device):
