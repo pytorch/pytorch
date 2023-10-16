@@ -913,7 +913,7 @@ class TestControlFlowTraced(TestCase):
         i = 0
         for m in gm.modules():
             for node in m.graph.nodes:
-                if node.op == "call_function" and node.target == torch.ops.map_impl:
+                if node.op == "call_function" and node.target == torch.ops.higher_order.map_impl:
                     i += 1
         self.assertEqual(i, op_count)
 
@@ -1069,7 +1069,7 @@ class TestControlFlowTraced(TestCase):
             c = 0
             for node in gm.graph.nodes:
                 if node.op == "call_function":
-                    if node.target == torch.ops.map_impl:
+                    if node.target == torch.ops.higher_order.map_impl:
                         c += count_mutable(getattr(gm, str(node.args[0])))
                     elif schema := getattr(node.target, "_schema", None):
                         c += int(schema.is_mutable)
@@ -1494,7 +1494,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         exp_graph = """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, 1, x_1, pred_1);\
   body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
     return getitem
