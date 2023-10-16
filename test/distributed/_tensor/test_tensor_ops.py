@@ -95,7 +95,7 @@ class DistTensorOpsTest(DTensorTestBase):
         partial_grad = DTensor.from_local(torch.randn(12, 3), mesh, partial_spec)
         res = dt_to_inplace_add.add_(partial_grad)
         self.assertTrue(res is dt_to_inplace_add)
-        self.assertTrue(res.placements == shard_spec)
+        self.assertTrue(res.placements == tuple(shard_spec))
 
     @with_comms
     def test_op_out_variant(self):
@@ -115,7 +115,7 @@ class DistTensorOpsTest(DTensorTestBase):
         expected_dt = replicate_out.clone() + 3
         res = torch.add(sharded_dt_input, 3, out=replicate_out)
         self.assertTrue(res is replicate_out)
-        self.assertTrue(res.placements == replica_spec)
+        self.assertTrue(res.placements == tuple(replica_spec))
         self.assertEqual(replicate_out.to_local(), expected_dt.to_local())
 
     @with_comms
@@ -379,6 +379,18 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randint(2, (8, 1)),
                 torch.randint(5, (12, 8, 12)),
             )
+
+    @with_comms
+    def test_where_type_promotion(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+
+        specs = [[Shard(0)], [Replicate()]]
+        for spec in specs:
+            global_tensor = torch.randn(12, 8)
+            mat = distribute_tensor(global_tensor, mesh, spec)
+            res = torch.where(mat > 0, 1, 0)
+            ref = torch.where(global_tensor > 0, 1, 0)
+            self.assertEqual(res.redistribute(placements=[Replicate()]).to_local(), ref)
 
 
 if __name__ == "__main__":

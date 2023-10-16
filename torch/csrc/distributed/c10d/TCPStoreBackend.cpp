@@ -1,4 +1,3 @@
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 
 #include <c10/util/irange.h>
 #include <fcntl.h>
@@ -15,6 +14,8 @@
 #include <poll.h>
 #include <unistd.h>
 #endif
+
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 
 #ifdef _WIN32
 #include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
@@ -55,7 +56,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   ~TCPStoreMasterDaemon() override;
 
-  std::uint16_t port() const override;
+  uint16_t port() const override;
 
  protected:
   void run() override;
@@ -67,6 +68,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
+
   void clearSocketWaitState(int socket);
 
   // The master runs on a single thread so only
@@ -163,7 +165,21 @@ void TCPStoreMasterDaemon::closeStopSignal() {
 
 void TCPStoreMasterDaemon::stop() {
   if (controlPipeFd_[1] != -1) {
-    ::write(controlPipeFd_[1], "\0", 1);
+    ssize_t written_bytes = -1;
+    while (true) {
+      written_bytes = ::write(controlPipeFd_[1], "\0", 1);
+      if (written_bytes < 0) {
+        if (errno == EAGAIN) {
+          continue;
+        }
+        TORCH_CHECK(false, "Failed to write the control pipe:", errno);
+      }
+      break;
+    }
+    if (written_bytes == 0) {
+      TORCH_CHECK(false, "Failed to write the control pipe");
+    }
+
     // close the write end of the pipe
     ::close(controlPipeFd_[1]);
     controlPipeFd_[1] = -1;
@@ -471,9 +487,8 @@ void TCPStoreMasterDaemon::run() {
     // accept new connections.
     if (fds[0].revents != 0) {
       if (!(fds[0].revents & POLLIN)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
@@ -513,9 +528,8 @@ void TCPStoreMasterDaemon::run() {
     // accept new connections.
     if (fds[0].revents != 0) {
       if (fds[0].revents ^ POLLIN) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
@@ -530,9 +544,8 @@ void TCPStoreMasterDaemon::run() {
       // The main thread will write a byte to the pipe then close it before
       // joining the background thread
       if (fds[1].revents & ~(POLLIN | POLLHUP)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the control pipe's reading fd: " +
                 std::to_string(fds[1].revents));
       }

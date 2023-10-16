@@ -19,6 +19,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_div_native.h>
@@ -52,6 +53,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
@@ -316,6 +318,17 @@ FOREACH_BINARY_OP_LIST(div);
 FOREACH_BINARY_OP_LIST(clamp_min);
 FOREACH_BINARY_OP_LIST(clamp_max);
 FOREACH_BINARY_OP_LIST(pow);
+// _foreach_copy_
+void foreach_tensor_copy_list_kernel_slow_(
+    TensorList self,
+    TensorList src,
+    const bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
+
+  for (const auto i : c10::irange(self.size())) {
+    self[i].copy_(src[i], non_blocking);
+  }
+}
 
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);

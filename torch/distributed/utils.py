@@ -107,7 +107,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                 with device_mod.stream(stream):
                     output = obj.to(target_device)
                 # synchronize with the copy stream
-                with torch.cuda.device(target_device.index):
+                with device_mod.device(target_device.index):
                     current_stream = device_mod.current_stream()
                     # Sync the current stream with the copy stream
                     current_stream.wait_stream(stream)
@@ -147,7 +147,7 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
             raise AssertionError(s)
 
 
-def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
+def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
     """
     Allocate storage for ``tensor`` with the given size.
 
@@ -164,10 +164,10 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
                 f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
             )
             tensor._typed_storage()._resize_(size.numel())
-        return not already_allocated
 
 
-def _free_storage(tensor: torch.Tensor) -> bool:
+
+def _free_storage(tensor: torch.Tensor) -> None:
     """
     Frees the underlying storage of ``tensor``.
 
@@ -186,7 +186,6 @@ def _free_storage(tensor: torch.Tensor) -> bool:
                 f"tensor shape: {tensor.shape}",
             )
             tensor._typed_storage()._resize_(0)
-        return not already_freed
 
 
 Q = TypeVar("Q")

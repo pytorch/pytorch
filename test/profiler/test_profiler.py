@@ -1429,6 +1429,34 @@ class TestProfiler(TestCase):
         if kineto_available():
             self._test_profiler_tracing(True)
 
+    def test_profiler_op_event_args(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        with _profile(record_shapes=True) as prof:
+            a = torch.ones((64, 32), dtype=torch.float32)
+            c = torch.cat([a, a]).sin()
+        with TemporaryFileName(mode="w+") as fname:
+
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                events = j["traceEvents"]
+                for e in events:
+                    if e["name"] == "aten::ones":
+                        args = e["args"]
+                        self.assertEqual(
+                            args["Input type"],
+                            ["ScalarList", "Scalar", "", "", "Scalar"],
+                        )
+                        self.assertEqual(
+                            args["Concrete Inputs"], ["[64, 32]", "6", "", "", "False"]
+                        )
+
+                    if e["name"] == "aten::cat":
+                        args = e["args"]
+                        self.assertEqual(args["Input Dims"], [[[64, 32], [64, 32]], []])
+                        self.assertEqual(args["Input type"], ["TensorList", "Scalar"])
+
+
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -1687,6 +1715,75 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(found, "Expected to find aten::as_strided but did not")
         finally:
             torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+
+    def test_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile() as p:
+            for _ in range(4):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf1"):
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf1"]), 4)
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2")
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf2"]), 4)
+
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3")
+            for _ in range(4):
+                try:
+                    with cm:
+                        x.add(y)
+                        raise ValueError()
+                        x.relu()
+                except ValueError:
+                    pass
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf3"]), 4)
+        self.assertFalse(any((e.name and "relu" in e.name) for e in p.events()))
+
+        with profile() as p:
+            for _ in range(4):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf4"):
+                    x.add(y)
+                    with torch._C._profiler._RecordFunctionFast("add_test_fast_rf5"):
+                        x.relu()
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf4"]), 4)
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf5"]), 4)
+
+    def test_is_profiler_enabled(self):
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with torch.autograd.profiler.profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+    def test_guarded_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("guarded_rff")
+            for _ in range(4):
+                if torch.autograd.profiler._is_profiler_enabled:
+                    with cm:
+                        x.add(y)
+                else:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
 
 
 def find_node_with_name(nodes, name):

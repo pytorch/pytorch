@@ -447,7 +447,7 @@ TEST(DictTest, givenIterator_whenWritingToValue_thenChangesValue) {
   EXPECT_EQ("new_value_2", dict.begin()->value());
 }
 
-TEST(ListTest_IValueBasedList, givenIterator_whenWritingToValueFromIterator_thenChangesValue) {
+TEST(ListTestIValueBasedList, givenIterator_whenWritingToValueFromIterator_thenChangesValue) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");

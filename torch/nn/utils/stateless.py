@@ -191,7 +191,7 @@ def functional_call(
             >>> mod(torch.zeros(()))  # tensor(2.)
             >>> functional_call(mod, a, torch.zeros(()))  # tensor(0.) since it will change self.foo_tied too
             >>> functional_call(mod, a, torch.zeros(()), tie_weights=False)  # tensor(1.)--self.foo_tied is not updated
-            >>> new_a = {'foo', torch.zeros(()), 'foo_tied': torch.zeros(())}
+            >>> new_a = {'foo': torch.zeros(()), 'foo_tied': torch.zeros(())}
             >>> functional_call(mod, new_a, torch.zeros()) # tensor(0.)
 
     Args:
@@ -250,6 +250,10 @@ def _functional_call(
         )
     ):
         raise RuntimeError("The stateless API can't be used with Jitted modules")
+    if isinstance(module, torch.nn.DataParallel):
+        raise RuntimeError(
+            "The stateless API can't be used with nn.DataParallel module"
+        )
     if kwargs is None:
         kwargs = {}
     if not isinstance(args, tuple):

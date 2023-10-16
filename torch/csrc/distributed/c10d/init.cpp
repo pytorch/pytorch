@@ -32,6 +32,7 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -289,6 +290,63 @@ void _register_builtin_comm_hook(
     ::c10d::Reducer& reducer,
     ::c10d::BuiltinCommHookType comm_hook_type) {
   reducer.register_builtin_comm_hook(comm_hook_type);
+}
+
+std::atomic<bool> event_queue_enabled = false;
+int sync_pipe;
+std::mutex event_queue_lock;
+std::deque<::c10d::EventInfo> event_queue;
+// we start dropping events after this
+const size_t MAX_QUEUE_SIZE = 512;
+
+void enqueue_event_for_python(const ::c10d::EventInfo& evt) {
+  if (!event_queue_enabled.load())
+    return;
+
+  std::unique_lock<std::mutex> lock(event_queue_lock);
+  if (event_queue.size() >= MAX_QUEUE_SIZE) {
+    event_queue.back().drop_count++;
+  } else {
+    event_queue.push_back(std::move(evt));
+    char m = 'x';
+    write(sync_pipe, &m, 1);
+  }
+}
+
+void enable_python_event_collection(int pipe) {
+  sync_pipe = pipe;
+  event_queue_enabled.store(true);
+  ::c10d::register_collective_callback(enqueue_event_for_python);
+}
+
+bool dequeue_c10d_event(::c10d::EventInfo& evt) {
+  std::unique_lock<std::mutex> lock(event_queue_lock);
+  if (event_queue.size() == 0) {
+    return false;
+  }
+  evt = event_queue.front();
+  event_queue.pop_front();
+  return true;
+}
+
+py::object c10d_dequeue_python_event() {
+  ::c10d::EventInfo evt;
+  if (!dequeue_c10d_event(evt)) {
+    return py::none();
+  }
+
+  py::dict data;
+  data["event_kind"] = (int)evt.event_kind;
+
+  data["pg_name"] = evt.pg_name;
+  data["backend"] = evt.backend;
+  data["sequence_number"] = evt.sequence_number;
+  data["operation"] = evt.operation;
+  data["timestamp"] = evt.timestamp;
+  data["duration"] = evt.duration_ms.value_or(-1);
+  data["drop_count"] = evt.drop_count;
+
+  return std::move(data);
 }
 
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
@@ -640,6 +698,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
+  py::enum_<::c10d::EventKind>(module, "EventKind", R"(
+An enum for collective hooks event types.)")
+      .value("START", ::c10d::EventKind::CollectiveStart)
+      .value("END", ::c10d::EventKind::CollectiveEnd);
+
   py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
       An enum whose values correspond to different debug levels of the
       torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
@@ -663,7 +726,16 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "set_debug_level_from_env",
           ::c10d::setDebugLevelFromEnvironment,
           R"(Sets the debug level of the torch.distributed package from the
-          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
+      .def(
+          "_enable_event_collection",
+          &enable_python_event_collection,
+          "(Enables events collection).",
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_dequeue_c10d_event",
+          &c10d_dequeue_python_event,
+          "(Blocks until a c10d event is available and return it as a python dictionary).");
 
   // TODO(crcrpar): Hardening `ReduceOp`.
   //    While keeping most op types as enum value,
@@ -1333,6 +1405,10 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "collect_client_counters",
+          &::c10d::TCPStore::collectClientCounters,
+          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1341,7 +1417,11 @@ Example::
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
-          R"(Gets the port number on which the store listens for requests.)");
+          R"(Gets the port number on which the store listens for requests.)")
+      .def_property_readonly(
+          "libuvBackend",
+          &::c10d::TCPStore::isLibUvBackend,
+          R"(Returns True if it's using the libuv backend.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -1692,7 +1772,77 @@ Arguments:
                 return self->getBackend(device.type());
               },
               py::arg("device"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_register_on_completion_hook",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 py::object hook) {
+                // We need to wrap a py::object hook with a wrapper to hold
+                // GIL before dereferencing the py::object.
+                // This needs to happen here instead of in ProcessGroup
+                // backend implementations and the latter cannot depend on
+                // python-related libs.
+                self->registerOnCompletionHook(
+                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
+                         hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
+                      hookWrapper(workInfo);
+                    });
+              },
+              py::arg("hook"),
+              // Intentionally holding GIL as we move hook py::object. This
+              // should be OK as register a hook is cheap.
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+Register a hook function which is fired on every ``ProcessGroup::Work`` completion.
+The hook must have the following signature:
+
+>>> def hook(work_info: torch._C._distributed_c10d.WorkInfo) -> None:
+>>>     # custom code
+>>>     # work_info.op_type: type of collective of this work
+>>>     # work_info.time_started: system time when user code called this collective
+>>>     # work_info.time_finished: system time when the watchdog thread detected
+>>>     #     completion of this work. Note that, there can be delays between the
+>>>     #     actual completion time and the detection time.
+>>>     # work_info.active_duration: duration of this collective measured by CUDAEvents
+>>>     #     which can accurately represent the duration between when the collective
+>>>     #     is launched and when the collective completes.
+
+.. warning ::
+    This only works for NCCL backend for now. All hooks are fired on the cpp watch dog
+    thread. Firing the Python hook and acquiring GIL requires Python interpreter to be
+    alive. Therefore, users need to make sure calling ``destroy_process_group(pg)`` on
+    every active ProcessGroup ``pg`` before exiting.
+
+.. warning ::
+    Note that ``Work`` object passed to the hook is a partially copied version without
+    the output objects. So accessing the output tensors from ``Work`` will not work.
+
+
+Arguments:
+    hook (Callable): hook function.
+              )")
+          .def(
+              "_wait_for_pending_works",
+              &::c10d::ProcessGroup::waitForPendingWorks,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_has_hooks",
+              &::c10d::ProcessGroup::hasHooks,
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_enable_collectives_timing",
+              &::c10d::ProcessGroup::enableCollectivesTiming,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Enable timing of collectives by all backends. This might incur in additional overhead.")
+          .def(
+              "_set_group_name",
+              &::c10d::ProcessGroup::setGroupName,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Sets the process group name. This is an internal C10D method, do not use.")
+          .def_property_readonly(
+              "group_name",
+              &::c10d::ProcessGroup::getGroupName,
+              "(Gets this process group name. It's cluster unique)");
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
@@ -2156,7 +2306,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_abort",
@@ -2279,6 +2429,35 @@ Example::
               py::call_guard<py::gil_scoped_release>());
 #endif
 
+  py::enum_<::c10d::OpType>(module, "OpType")
+      .value("BROADCAST", ::c10d::OpType::BROADCAST)
+      .value("ALLREDUCE", ::c10d::OpType::ALLREDUCE)
+      .value("ALLREDUCE_COALESCED", ::c10d::OpType::ALLREDUCE_COALESCED)
+      .value("REDUCE", ::c10d::OpType::REDUCE)
+      .value("ALLGATHER", ::c10d::OpType::ALLGATHER)
+      .value("_ALLGATHER_BASE", ::c10d::OpType::_ALLGATHER_BASE)
+      .value("ALLGATHER_COALESCED", ::c10d::OpType::ALLGATHER_COALESCED)
+      .value("GATHER", ::c10d::OpType::GATHER)
+      .value("SCATTER", ::c10d::OpType::SCATTER)
+      .value("REDUCE_SCATTER", ::c10d::OpType::REDUCE_SCATTER)
+      .value("ALLTOALL_BASE", ::c10d::OpType::ALLTOALL_BASE)
+      .value("ALLTOALL", ::c10d::OpType::ALLTOALL)
+      .value("SEND", ::c10d::OpType::SEND)
+      .value("RECV", ::c10d::OpType::RECV)
+      .value("RECVANYSOURCE", ::c10d::OpType::RECVANYSOURCE)
+      .value("BARRIER", ::c10d::OpType::BARRIER)
+      .value("_REDUCE_SCATTER_BASE", ::c10d::OpType::_REDUCE_SCATTER_BASE)
+      .value("COALESCED", ::c10d::OpType::COALESCED)
+      .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
+      .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
+
+  py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
+      module, "WorkInfo")
+      .def_readonly("op_type", &::c10d::WorkInfo::opType)
+      .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
+      .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
+      .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
+
   py::class_<
       ::c10d::Work,
       c10::intrusive_ptr<::c10d::Work>,
@@ -2367,7 +2546,24 @@ Example::
                     3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
                        true when tensors have arrived on respective nodes, but not yet necessarily synched on
                        respective GPUs (similarly to GPU work).
-           )");
+           )")
+      .def(
+          "_get_op_type",
+          [](::c10d::Work& work) -> int {
+            return static_cast<int>(work.retrieveOpType());
+          })
+      .def(
+          "_get_duration",
+          &::c10d::Work::getDuration,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+              Returns:
+                  Duration of the corresponding collective communication.
+
+              .. warning ::
+                  This API only works for NCCL backend for now and must set
+                  NCCL_ENABLE_TIMING environment variable.
+            )");
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
@@ -2496,6 +2692,19 @@ Example::
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
+
+  module.def(
+      "_set_global_rank",
+      [](int64_t rank) { c10::SetGlobalRank(rank); },
+      py::arg("rank"),
+      R"(
+        Arguments:
+          rank(int): The rank of the default process group
+        Informs the C++ runtime what the default process group (a strictly Python
+        notion) is.  This mostly ensures that C++ log messages are prefixed with
+        rank information.  This is not meant to be called manually; it is
+        called by _update_default_pg.
+      )");
 
   module.def(
       "_create_work_from_future",

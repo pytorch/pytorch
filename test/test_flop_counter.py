@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 import torch.utils.flop_counter
 import torch.nn.functional as F
 import unittest
@@ -155,13 +155,24 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
+        def count(*args, out):
+            return out.numel()
+        count._get_raw = True
+
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})
+        with mode:
+            a = T(4, 5)
+            a + a
+
+        self.assertExpectedInline(get_total_flops(mode), """20""")
+
     def test_noop(self):
         mode = FlopCounterMode()
         with mode:
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_sdpa(self):
         batch_size = 4
         n_heads = 8

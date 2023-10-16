@@ -6,7 +6,7 @@
 
 using namespace ::testing;
 
-TEST(irange_test, range_test) {
+TEST(irangeTest, range_test) {
   std::vector<int> test_vec;
   for (const auto i : c10::irange(4, 11)) {
     test_vec.push_back(i);
@@ -15,7 +15,7 @@ TEST(irange_test, range_test) {
   ASSERT_EQ(test_vec, correct);
 }
 
-TEST(irange_test, end_test) {
+TEST(irangeTest, end_test) {
   std::vector<int> test_vec;
   for (const auto i : c10::irange(5)) {
     test_vec.push_back(i);
@@ -24,7 +24,7 @@ TEST(irange_test, end_test) {
   ASSERT_EQ(test_vec, correct);
 }
 
-TEST(irange_test, neg_range_test) {
+TEST(irangeTest, neg_range_test) {
   std::vector<int> test_vec;
   for (const auto i : c10::irange(-2, 3)) {
     test_vec.push_back(i);

@@ -817,7 +817,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   uint32_t numThreads = output.numel();
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
     id<MTLComputePipelineState> gatherPSO = getPipelineState(MPSDevice::getInstance()->device(),
@@ -883,7 +883,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   uint32_t numThreads = src.numel();
   int64_t outputStorageOffset = output.storage_offset() * output.element_size();
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string functionName =

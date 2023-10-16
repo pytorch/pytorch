@@ -217,6 +217,7 @@ class AutocastTestLists:
             ("multi_margin_loss", mat0_fp16 + (torch.ones((n,), device=dev, dtype=torch.long),)),
         ]
         self.linalg_fp16 = [
+            ("linalg_vecdot", mat0_fp32 + mat0_fp32),
             ("linalg_multi_dot", (mat0_fp32 + mat1_fp32 + mat2_fp32,)),
         ]
         self.methods_fp16 = [
