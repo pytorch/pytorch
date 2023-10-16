@@ -10,8 +10,8 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SGD, SparseAdam
-from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rprop
+# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SparseAdam
+from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rprop, SGD
 
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
@@ -176,7 +176,7 @@ class CompiledOptimizerTests(TestCase):
     test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
     test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
     test_asgd_foreach = make_test(ASGD, kernel_count=2, lr=0.1, foreach=True)
-    # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
+    test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
@@ -194,7 +194,7 @@ class CompiledOptimizerTests(TestCase):
     test_asgd_recompile_foreach = make_recompile_test(
         ASGD, kernel_count=2, lr=0.01, foreach=True
     )
-    # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
+    test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
 
     @requires_cuda()
     def test_static_address_finalizer(self):
