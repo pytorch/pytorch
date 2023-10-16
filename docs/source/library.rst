@@ -5,15 +5,20 @@ torch.library
 
 torch.library is a collection of APIs for extending PyTorch's core library
 of operators. It contains utilities for creating new custom operators as
-well as extending existing C++ operators (e.g. aten ops).
+well as extending operators defined with PyTorch's C++ operator
+registration APIs (e.g. aten operators).
+
+For a detailed guide on effectively using these APIs, please see
+`this gdoc <https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit>`_
 
 Higher level APIs
 -----------------
 
-Use :func:`define` to define new custom operators. Use the impl methods, such
-as :func:`impl_backend` and func:`impl_abstract`, to add implementations
-for any operators (they may have been created using define or via PyTorch's C++
-operator registration APIs).
+Use :func:`torch.library.define` to define new custom operators. Use the
+impl methods, such as :func:`torch.library.impl_device` and
+func:`torch.library.impl_abstract`, to add implementations
+for any operators (they may have been created using :func:`torch.library.define` or
+via PyTorch's C++ operator registration APIs).
 
 .. autofunction:: define
 .. autofunction:: impl_device
