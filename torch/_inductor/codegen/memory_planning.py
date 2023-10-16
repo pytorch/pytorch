@@ -554,7 +554,9 @@ class BufferGroup:
         assert not self.allocation, "multiple allocations"
         assert isinstance(self.live_range.begin, int), "live ranges not computed"
         nbytes = self.sym_nbytes()
-        size_hint = V.graph.sizevars.size_hint(nbytes)
+        # For now, fallback value will be used if we encounter an unbacked SymInt. The longer-term plan is to have
+        # size_hint() use better heuristics for unbackeds, at which point the fallback value will be ignored.
+        size_hint = V.graph.sizevars.size_hint(nbytes, fallback=64)
         self.allocation = Allocation(
             self.node,
             self.live_range,

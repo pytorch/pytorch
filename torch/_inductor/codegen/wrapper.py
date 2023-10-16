@@ -11,7 +11,6 @@ import sympy
 from sympy import Expr
 
 import torch
-import torch._dynamo.config as dynamo_config
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
@@ -527,16 +526,7 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline("start_graph()")
 
             # We disable planning during training because it presently increases peak memory consumption.
-            # We also disable planning if we have fully dynamic shapes because we are not able to calculate
-            # size hints for them.
-            if (
-                is_inference
-                and config.memory_planning
-                and not (
-                    dynamo_config.capture_scalar_outputs
-                    or dynamo_config.capture_dynamic_output_shape_ops
-                )
-            ):
+            if is_inference and config.memory_planning:
                 self.memory_plan()
             else:
                 self.memory_plan_reuse()
@@ -1666,9 +1656,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             buffer.get_dtype(),
             buffer.get_size(),
             buffer.get_stride(),
+            self.can_cache_buffer_in_thread_local(buffer),
         )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
+    def make_allocation(
+        self, name, device, dtype, shape, stride, can_cache_buffer_in_thread_local=False
+    ):
         device = self.codegen_device(device)
         dtype = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
@@ -1691,8 +1684,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
                 )
 
-            if self.can_cache_buffer_in_thread_local(buffer):
-                self.cached_thread_locals.add(buffer.get_name())
+            if can_cache_buffer_in_thread_local:
+                self.cached_thread_locals.add(name)
                 self.wrapper_call.writeline(
                     f"thread_local RAIIAtenTensorHandle {name}_handle = ([&] {{"
                 )
@@ -1770,7 +1763,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             args = [
                 f"{data.get_name()}",
-                str(len(shape)),
+                str(len(size_list)),
                 self.codegen_int_array_var(size, writer),
                 self.codegen_int_array_var(stride, writer),
                 offset,

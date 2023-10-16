@@ -8,7 +8,7 @@ namespace c10d {
 
 namespace {
 void commonEventinit(
-    ::c10d::EventInfo& evt,
+    details::EventInfo& evt,
     const Backend& backend,
     const Work& work) {
   evt.timestamp =
@@ -33,7 +33,7 @@ void Backend::init() {
 }
 
 void Backend::emitCollectiveStart(const Work& work) {
-  EventInfo evt;
+  details::EventInfo evt;
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveStart;
@@ -41,7 +41,7 @@ void Backend::emitCollectiveStart(const Work& work) {
 }
 
 void Backend::emitCollectiveEnd(const Work& work) {
-  EventInfo evt;
+  details::EventInfo evt;
   commonEventinit(evt, *this, work);
 
   evt.event_kind = ::c10d::EventKind::CollectiveEnd;
