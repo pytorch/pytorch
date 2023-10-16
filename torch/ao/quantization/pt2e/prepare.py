@@ -28,6 +28,11 @@ from torch.ao.quantization.quantizer import (
 )
 from torch.ao.quantization import ObserverOrFakeQuantize
 
+# TODO: make pt2e folder private?
+__all__ = [
+    "prepare",
+]
+
 def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
     """Find the root node for the sharing tree
     Args:
