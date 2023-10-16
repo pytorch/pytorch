@@ -77,6 +77,10 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             ):
                 torch._dynamo.config_utils.install_config_module(my_module)
 
+    def test_able_to_import_constant_functions(self):
+        for fn_name in torch._dynamo.config.constant_functions:
+            fn = torch._dynamo.variables.torch.get_function_from_string(fn_name)
+
     @disable_cache_limit()
     def test_no_automatic_dynamic(self):
         def fn(a, b):
