@@ -2042,7 +2042,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
-        with tracing(self.output.tracing_context):
+        with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
             self.mutated_closure_cell_contents = mutated_closure_cell_contents
@@ -2067,6 +2067,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             )
+            if export:
+                # export gets super confused if we never realize unused inputs
+                # in export mode just eagerly realize everything
+                self.symbolic_locals = VariableTracker.apply(
+                    lambda x: x.realize(), self.symbolic_locals
+                )
 
             self.init_local_index_guards_hack()
 

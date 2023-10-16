@@ -36,12 +36,15 @@ class LazyVariableTracker(VariableTracker):
 
     def unwrap(self):
         """Return the real VariableTracker if it already exists"""
-        if self.mutable_local.vt is not None:
+        if self.is_realized():
             return self.mutable_local.vt
         return self
 
+    def is_realized(self):
+        return self.mutable_local.vt is not None
+
     def __str__(self):
-        if self.mutable_local.vt is not None:
+        if self.is_realized():
             return str(self.mutable_local.vt)
         return super().__str__()
 
