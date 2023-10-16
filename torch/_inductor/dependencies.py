@@ -360,7 +360,7 @@ def extract_read_writes(
 
 
 def extract_input_node_reduction_ranges(  # noqa: F722
-    input_node: ".ir.TensorBox",  # noqa: F722
+    input_node: ".ir.TensorBox",  # type: ignore[valid-type] # noqa: F722
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.

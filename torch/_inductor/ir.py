@@ -622,7 +622,7 @@ class Reduction(Loops):
         reduction_ranges,
         reduction_type,
         reduction_numel,
-        input_node: IRNode = None,
+        input_node: Optional[IRNode] = None,
     ):
         def _is_static(x):
             return isinstance(x, (int, sympy.Integer))
@@ -869,7 +869,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-        input_node: IRNode = None,
+        input_node: Optional[IRNode] = None,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -956,9 +956,12 @@ class Reduction(Loops):
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
         if split == -1:
+            assert input_node is not None
             new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                 input_node
             )
+            assert new_ranges is not None
+            assert new_reduction_ranges is not None
             return cls.create_multilayer_existing_ranges(
                 device,
                 dst_dtype,
@@ -1149,14 +1152,14 @@ class Reduction(Loops):
             split, numel_hint, reduction_hint
         )
 
-        assert original_ranges == new_ranges[:len(original_ranges)]
+        assert original_ranges == new_ranges[: len(original_ranges)]
         return TensorBox.create(
             Reduction(
                 device,
                 dst_dtype,
                 intermediate_fn,
                 original_ranges,
-                new_ranges[len(original_ranges):],
+                new_ranges[len(original_ranges) :],
                 reduction_type,
                 src_dtype,
                 reduction_hint,
