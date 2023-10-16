@@ -172,7 +172,7 @@ _keep_alive = []
 
 
 @functools.singledispatch
-def define(name, schema, *, lib=None):
+def define(qualname, schema, *, lib=None):
     r"""Defines a new operator.
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
@@ -185,8 +185,9 @@ def define(name, schema, *, lib=None):
     ``impl_*`` APIs.
 
     Args:
-        name (str): Should be a string that looks like
-            "namespace::operator_name". Operators in PyTorch need a namespace to
+        qualname (str): The qualified name for the operator. Should be
+            a string that looks like "namespace::name", e.g. "aten::sin".
+            Operators in PyTorch need a namespace to
             avoid name collisions; a given operator may only be created once.
             If you are writing a Python library, we recommend the namespace to
             be the name of your top-level module.
@@ -213,11 +214,11 @@ def define(name, schema, *, lib=None):
         >>> assert torch.allclose(y, x)
 
     """
-    if not isinstance(name, str):
+    if not isinstance(qualname, str):
         raise ValueError(
-            f"define(name, schema): expected name to be instance of str, "
-            f"got {type(name)}")
-    namespace, name = torch._library.utils.parse_namespace(name)
+            f"define(qualname, schema): expected qualname "
+            f"to be instance of str, got {type(qualname)}")
+    namespace, name = torch._library.utils.parse_namespace(qualname)
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
@@ -237,7 +238,7 @@ def _(lib: Library, schema, alias_analysis=""):
 
 
 @functools.singledispatch
-def impl(name, dispatch_key, func=None, *, lib=None):
+def impl(qualname, dispatch_key, func=None, *, lib=None):
     """Register an implementation for a DispatchKey for this operator.
 
     torch.library.impl is a low-level API to directly register
@@ -250,7 +251,7 @@ def impl(name, dispatch_key, func=None, *, lib=None):
     This API may be used as a function or a decorator (see examples)
 
     Args:
-        name (str): Should be a string that looks like "namespace::operator_name".
+        qualname (str): Should be a string that looks like "namespace::operator_name".
         dispatch_key (str): The DispatchKey to register an impl for
         lib (Optional[Library]): If provided, the lifetime of this registration
             will be tied to the lifetime of the Library object.
@@ -273,13 +274,13 @@ def impl(name, dispatch_key, func=None, *, lib=None):
     """
 
     def register(func):
-        namespace, _ = torch._library.utils.parse_namespace(name)
+        namespace, _ = torch._library.utils.parse_namespace(qualname)
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib.impl(name, func, dispatch_key)
+        use_lib.impl(qualname, func, dispatch_key)
 
     if func is None:
         return register
@@ -298,7 +299,7 @@ def _device_type_to_key(device_type: str) -> str:
 
 
 def impl_device(
-        name: str,
+        qualname: str,
         types: Union[str, Sequence[str]],
         func=None,
         *,
@@ -311,7 +312,7 @@ def impl_device(
     for example, this is true if it is a composition of built-in PyTorch operators.
 
     Args:
-        name (str): Should be a string that looks like "namespace::operator_name".
+        qualname (str): Should be a string that looks like "namespace::operator_name".
         types (str | Sequence[str]): The device types to register an impl to.
         lib (Optional[Library]): If provided, the lifetime of this registration
             will be tied to the lifetime of the Library object.
@@ -325,14 +326,14 @@ def impl_device(
         keys.add(_device_type_to_key(typ))
 
     def register(func):
-        namespace, _ = torch._library.utils.parse_namespace(name)
+        namespace, _ = torch._library.utils.parse_namespace(qualname)
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
         for key in keys:
-            use_lib.impl(name, func, key)
+            use_lib.impl(qualname, func, key)
 
     if func is None:
         return register
