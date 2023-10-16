@@ -2543,6 +2543,7 @@ Tensor compute_T18_scale_square(
   // With above example, `sorted_s` is [0, 1, 1, 4], we also will need the index
   // info, so we can use it to compose the result back.
   std::tie(sorted_s, sorted_s_inds) = at::sort(s, /*dim=*/0);
+  sorted_s = sorted_s.to(at::kLong);
   // Then we call `unique_consecutive` and we will use it to split `sorted_s`,
   // with above example, `split_counts` is [1, 2, 1].
   auto split_counts = std::get<2>(at::unique_consecutive(sorted_s, true, /*return_counts=*/true));
@@ -2552,7 +2553,7 @@ Tensor compute_T18_scale_square(
   // use the cumulative matrix multiplication.
   // With about example, `mul_times` will be [0, 1, 3].
   auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
-  auto unique_s = sorted_s.index_select(0, split_edges).to(at::kLong).clamp(/*min=*/0);
+  auto unique_s = sorted_s.index_select(0, split_edges).clamp(/*min=*/0);
   auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1}));
 
   // Square
