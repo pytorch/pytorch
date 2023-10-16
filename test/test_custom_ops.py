@@ -1675,14 +1675,14 @@ def forward(self, x_1):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
-    def test_define(self):
+    def test_define_and_impl(self):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
 
+        @torch.library.impl(f"{self.test_ns}::foo", "CPU", lib=lib)
         def f(x):
             return torch.from_numpy(np.sin(x.numpy()))
 
-        lib.impl("foo", f, "CPU")
         x = torch.randn(3)
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
@@ -1695,6 +1695,30 @@ def forward(self, x_1):
         lib = self.lib()
 
         @torch.library.define(lib, "foo(Tensor x) -> Tensor")
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_impl_function(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        torch.library.impl(f"{self.test_ns}::foo", "CPU", f, lib=lib)
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_legacy_impl(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        @torch.library.impl(lib, "foo", "CPU")
         def f(x):
             return torch.from_numpy(np.sin(x.numpy()))
 
