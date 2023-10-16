@@ -2691,10 +2691,15 @@
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: floor_divide
 
 - func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: floor_divide_
+  autogen: floor_divide.Scalar_out
 
 - func: frac(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -8029,6 +8034,8 @@
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: bitwise_and_
   tags: pointwise
 
 - func: bitwise_and_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -8073,6 +8080,8 @@
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  dispatch:
+    CompositeExplicitAutograd: bitwise_or
   tags: [core, pointwise]
 
 - func: bitwise_or.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
@@ -8092,6 +8101,8 @@
 - func: bitwise_or_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: bitwise_or_
   tags: pointwise
 
 - func: bitwise_or_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -8136,6 +8147,8 @@
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  dispatch:
+    CompositeExplicitAutograd: bitwise_xor
   tags: [core, pointwise]
 
 - func: bitwise_xor.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
@@ -8155,6 +8168,8 @@
 - func: bitwise_xor_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: bitwise_xor_
   tags: pointwise
 
 - func: bitwise_xor_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -14522,12 +14537,16 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_t
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_t
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14544,6 +14563,8 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_t.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_t_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14565,12 +14586,16 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_u
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_u
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14587,6 +14612,8 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_u.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_u_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14608,12 +14635,16 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_v
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_v
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14630,6 +14661,8 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_v.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_v_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14651,12 +14684,16 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_w
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_w
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14673,6 +14710,8 @@
   tags: pointwise
 
 - func: special_chebyshev_polynomial_w.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_w_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14694,12 +14733,16 @@
   tags: pointwise
 
 - func: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_hermite_polynomial_h
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_hermite_polynomial_h
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14716,6 +14759,8 @@
   tags: pointwise
 
 - func: special_hermite_polynomial_h.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_hermite_polynomial_h_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14737,12 +14782,16 @@
   tags: pointwise
 
 - func: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_hermite_polynomial_he
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_hermite_polynomial_he
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14759,6 +14808,8 @@
   tags: pointwise
 
 - func: special_hermite_polynomial_he.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_hermite_polynomial_he_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14780,12 +14831,16 @@
   tags: pointwise
 
 - func: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_laguerre_polynomial_l
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_laguerre_polynomial_l
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14802,6 +14857,8 @@
   tags: pointwise
 
 - func: special_laguerre_polynomial_l.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_laguerre_polynomial_l_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14823,12 +14880,16 @@
   tags: pointwise
 
 - func: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_legendre_polynomial_p
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_legendre_polynomial_p
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14845,6 +14906,8 @@
   tags: pointwise
 
 - func: special_legendre_polynomial_p.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_legendre_polynomial_p_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14956,12 +15019,16 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_t
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_t
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14978,6 +15045,8 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_t_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -14999,12 +15068,16 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_u
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_u
   device_check: NoCheck
   python_module: special
   variants: function
@@ -15021,6 +15094,8 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_u_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -15042,12 +15117,16 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_v
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_v
   device_check: NoCheck
   python_module: special
   variants: function
@@ -15064,6 +15143,8 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_v_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -15085,12 +15166,16 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_w
   device_check: NoCheck
   python_module: special
   variants: function
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_w
   device_check: NoCheck
   python_module: special
   variants: function
@@ -15107,6 +15192,8 @@
   tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_w_out
   device_check: NoCheck
   python_module: special
   variants: function
