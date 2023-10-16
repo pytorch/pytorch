@@ -265,7 +265,6 @@ exclude_patterns = [
     'torch/csrc/autograd/functions/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/autograd/profiler_legacy.cpp',
-    'torch/csrc/CudaIPCTypes.cpp',
     'torch/csrc/cuda/**',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
