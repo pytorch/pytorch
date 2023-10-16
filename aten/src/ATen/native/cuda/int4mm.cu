@@ -250,12 +250,13 @@ enum class KReductionType {
 // the C matrix in 16-bit standard m x n row major layout:
 //
 // size [m][k]
-template <int KTilesPerWarp, KReductionType ReduceType = KReductionType::None>
+template <KReductionType ReduceType>
 struct ALayout_RM {
   static constexpr int32_t kMTileSize = 16;
   static constexpr int32_t kNTileSize = 8;
   static constexpr int32_t kKTileSize = 16;
 
+  template <int KTilesToLoad>
   static __device__ void load(
       const void* A,
       int32_t m,
@@ -265,7 +266,7 @@ struct ALayout_RM {
       int32_t kTiles,
       int32_t kTileStart,
       int32_t laneId,
-      bf16x2x4_u32 out[KTilesPerWarp]) {
+      bf16x2x4_u32 out[KTilesToLoad]) {
     auto mLane = mTile * kMTileSize + (laneId / 4);
     auto kLane = kTileStart * kKTileSize + (laneId % 4) * 2;
 
@@ -280,7 +281,7 @@ struct ALayout_RM {
     bool m1InBounds = (mLane + 8) < m;
 
 #pragma unroll
-    for (int i = 0; i < KTilesPerWarp; ++i) {
+    for (int i = 0; i < KTilesToLoad; ++i) {
       out[i].vals[0] = m0InBounds
           ? *reinterpret_cast<const uint32_t*>(aPtr + i * kKTileSize)
           : uint32_t(0);
@@ -336,22 +337,23 @@ struct ALayout_RM {
   }
 };
 
-template <int KTilesPerWarp, int InnerKTiles, int QGroupSize>
+template <int InnerKTiles, int QGroupSize>
 struct BLayout_TC_int4 {
   static constexpr int32_t kInnerKTiles = InnerKTiles;
   static constexpr int32_t kMTileSize = 16;
   static constexpr int32_t kNTileSize = 8;
   static constexpr int32_t kKTileSize = 16;
 
+  template <int KTilesToLoad>
   static __device__ void load(
       // type uint32, size [n / 8][k / (InnerKTiles * 16)][32][InnerKTiles / 2]
       // n / 8: n-tiles (n8)
       // k / (InnerKTiles * 16): TC size per k-tile is 16 (m16n8k16)
       // 32: value per warp lane
       // (InnerKTiles / 2): B layout has 4 values per lane (16 bits) per k-tile.
-      // 2 k-tiles packed is a uint32 (hence InnerKTiles == 2 is our smallest value)
-      // 4 k-tiles packed is a uint32x2 (64 bits)
-      // 8 k-tiles packed is a uint32x4 (128 bits)
+      // 2 k-tiles packed is a uint32 (hence InnerKTiles == 2 is our smallest
+      // value) 4 k-tiles packed is a uint32x2 (64 bits) 8 k-tiles packed is a
+      // uint32x4 (128 bits)
       const void* __restrict__ B,
       // size [k / qGroupSize][n][2]
       // Contains the scale and zero point of each of the quantized int4 values
@@ -365,7 +367,7 @@ struct BLayout_TC_int4 {
       int32_t kTiles,
       int32_t kTileStart,
       int32_t laneId,
-      bf16x2x4_u32 out[KTilesPerWarp / InnerKTiles][InnerKTiles / 2]) {
+      bf16x2x4_u32 out[KTilesToLoad / InnerKTiles][InnerKTiles / 2]) {
     // offset [nTile][kTileStart / InnerKTiles][laneId][0]
     auto bPtr = reinterpret_cast<const int32_t*>(B) +
         (((nTile * (kTiles / InnerKTiles) + (kTileStart / InnerKTiles)) *
@@ -373,10 +375,10 @@ struct BLayout_TC_int4 {
          laneId) *
             (InnerKTiles / 2);
 
-    int32_t b_int4[KTilesPerWarp / InnerKTiles][InnerKTiles / 2];
+    int32_t b_int4[KTilesToLoad / InnerKTiles][InnerKTiles / 2];
 
 #pragma unroll
-    for (int i = 0; i < KTilesPerWarp / InnerKTiles; ++i) {
+    for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
       auto bPtrCur = bPtr + i * kWarpSize * (InnerKTiles / 2);
 
       if constexpr (InnerKTiles == 2) {
@@ -384,7 +386,6 @@ struct BLayout_TC_int4 {
       }
 
       if constexpr (InnerKTiles == 4) {
-
         // asm volatile("ld.global.cs.v2.u32 {%0, %1}, [%2];\n"
         //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1])
         //              : "l"(bPtrCur));
@@ -395,10 +396,9 @@ struct BLayout_TC_int4 {
       }
 
       if constexpr (InnerKTiles == 8) {
-
         // asm volatile("ld.global.cs.v4.u32 {%0, %1, %2, %3}, [%4];\n"
-        //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1]), "=r"(b_int4[i][2]), "=r"(b_int4[i][3])
-        //              : "l"(bPtrCur));
+        //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1]),
+        //              "=r"(b_int4[i][2]), "=r"(b_int4[i][3]) : "l"(bPtrCur));
 
         int4 load16 = reinterpret_cast<const int4*>(bPtrCur)[0];
         b_int4[i][0] = load16.x;
@@ -416,9 +416,9 @@ struct BLayout_TC_int4 {
     static_assert(QGroupSize >= kKTileSize * 2, "");
     constexpr int kKTilesPerQGroup = (QGroupSize / kKTileSize);
     // a q-group could be larger than what we are handling in a single warp
-    constexpr int kNumQGroups = (KTilesPerWarp / kKTilesPerQGroup) < 1
+    constexpr int kNumQGroups = (KTilesToLoad / kKTilesPerQGroup) < 1
         ? 1
-        : (KTilesPerWarp / kKTilesPerQGroup);
+        : (KTilesToLoad / kKTilesPerQGroup);
 
     __nv_bfloat162 qScaleAndZero[kNumQGroups];
     {
@@ -455,7 +455,7 @@ struct BLayout_TC_int4 {
       }
 
 #pragma unroll
-      for (int i = 0; i < KTilesPerWarp / InnerKTiles; ++i) {
+      for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
 #pragma unroll
         for (int j = 0; j < InnerKTiles / 2; ++j) {
           bf16x2x4 v = convert_i4x8_to_bf16x2x4(b_int4[i][j]);
@@ -473,8 +473,8 @@ struct BLayout_TC_int4 {
             v.vals[k] = __hfma2(v.vals[k], qScale[curQGroup], qZero[curQGroup]);
           }
 
-          // type pun, the __nv_bfloat162 value in bf16x2x4 is a struct and can't
-          // be used as a 32-bit asm register argument for `mma`
+          // type pun, the __nv_bfloat162 value in bf16x2x4 is a struct and
+          // can't be used as a 32-bit asm register argument for `mma`
           static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]), "");
           std::memcpy(&out[i][j], &v, sizeof(bf16x2x4_u32));
         }
@@ -488,8 +488,9 @@ template <
     typename BLayout,
     typename CLayout,
     int Warps,
-    int KTilesPerWarp>
-__global__ __launch_bounds__(Warps * kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
+    int KTilesPerIteration>
+__global__
+__launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     // Data for the A matrix, loaded as per ALayout
     const void* __restrict__ A,
 
@@ -537,7 +538,10 @@ __global__ __launch_bounds__(Warps * kWarpSize) void tinygemm_m16n8k16_chunk_ker
       kInnerKTiles == 2 || kInnerKTiles == 4 || kInnerKTiles == 8, "");
 
   // We always process at least kInnerKTiles k-tiles back to back in a warp
-  static_assert(KTilesPerWarp >= kInnerKTiles && isEvenDivisor(KTilesPerWarp, kInnerKTiles), "");
+  static_assert(
+      KTilesPerIteration >= kInnerKTiles &&
+          isEvenDivisor(KTilesPerIteration, kInnerKTiles),
+      "");
 
   auto warpId = threadIdx.y;
   auto laneId = threadIdx.x;
@@ -547,32 +551,36 @@ __global__ __launch_bounds__(Warps * kWarpSize) void tinygemm_m16n8k16_chunk_ker
 
   float4 c{0.0f, 0.0f, 0.0f, 0.0f};
 
-  // Requirement: kTiles must be an even multiple of Warps * KTilesPerWarp
-  for (int32_t kTileBase = (blockIdx.x * Warps + warpId) * KTilesPerWarp;
-       kTileBase < kTiles;
-       kTileBase += Warps * KTilesPerWarp) {
+  // First, handle whole multiples of KTilesPerIteration
+  auto kTilesLimit = roundDown(kTiles, KTilesPerIteration);
+
+  // Each warp handles a set of KTilesPerIteration under the above limit
+  for (int32_t kTileBase = (blockIdx.x * Warps + warpId) * KTilesPerIteration;
+       kTileBase < kTilesLimit;
+       kTileBase += Warps * KTilesPerIteration) {
     //
     // Load data from A
     //
-    bf16x2x4_u32 a[KTilesPerWarp];
-    ALayout::load(A, m, k, mTiles, mTile, kTiles, kTileBase, laneId, a);
+    bf16x2x4_u32 a[KTilesPerIteration];
+    ALayout::template load<KTilesPerIteration>(
+        A, m, k, mTiles, mTile, kTiles, kTileBase, laneId, a);
 
     //
     // Load data from B and de-quantize as needed
     // Each k-tile is bf16x2x2
     //
-    bf16x2x4_u32 b[KTilesPerWarp / kInnerKTiles][kInnerKTiles / 2];
-    BLayout::load(
-      B,
-      B_quantizationInfo,
-      n,
-      k,
-      nTiles,
-      nTile,
-      kTiles,
-      kTileBase,
-      laneId,
-      b);
+    bf16x2x4_u32 b[KTilesPerIteration / kInnerKTiles][kInnerKTiles / 2];
+    BLayout::template load<KTilesPerIteration>(
+        B,
+        B_quantizationInfo,
+        n,
+        k,
+        nTiles,
+        nTile,
+        kTiles,
+        kTileBase,
+        laneId,
+        b);
 
     //
     // Now, perform the matrix multiplication
@@ -580,7 +588,7 @@ __global__ __launch_bounds__(Warps * kWarpSize) void tinygemm_m16n8k16_chunk_ker
 
     // We accumulate across k-tiles here
 #pragma unroll
-    for (int i = 0; i < KTilesPerWarp / kInnerKTiles; ++i) {
+    for (int i = 0; i < KTilesPerIteration / kInnerKTiles; ++i) {
       static_assert(isEvenDivisor(kInnerKTiles, 2) && kInnerKTiles >= 2, "");
 #pragma unroll
       for (int j = 0; j < kInnerKTiles / 2; ++j) {
@@ -597,19 +605,22 @@ __global__ __launch_bounds__(Warps * kWarpSize) void tinygemm_m16n8k16_chunk_ker
 #pragma unroll
         for (int k = 0; k < 2; ++k) {
           asm volatile(
-            "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
-            "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
-            : "=f"(cTmp[k].x), "=f"(cTmp[k].y), "=f"(cTmp[k].z), "=f"(cTmp[k].w)
-            : "r"(a[i * kInnerKTiles + j * 2 + k].vals[0]),
-              "r"(a[i * kInnerKTiles + j * 2 + k].vals[1]),
-              "r"(a[i * kInnerKTiles + j * 2 + k].vals[2]),
-              "r"(a[i * kInnerKTiles + j * 2 + k].vals[3]),
-              "r"(b[i][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 0]),
-              "r"(b[i][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 1]),
-              "f"(cTmp[k].x),
-              "f"(cTmp[k].y),
-              "f"(cTmp[k].z),
-              "f"(cTmp[k].w));
+              "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+              "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
+              : "=f"(cTmp[k].x),
+                "=f"(cTmp[k].y),
+                "=f"(cTmp[k].z),
+                "=f"(cTmp[k].w)
+              : "r"(a[i * kInnerKTiles + j * 2 + k].vals[0]),
+                "r"(a[i * kInnerKTiles + j * 2 + k].vals[1]),
+                "r"(a[i * kInnerKTiles + j * 2 + k].vals[2]),
+                "r"(a[i * kInnerKTiles + j * 2 + k].vals[3]),
+                "r"(b[i][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 0]),
+                "r"(b[i][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 1]),
+                "f"(cTmp[k].x),
+                "f"(cTmp[k].y),
+                "f"(cTmp[k].z),
+                "f"(cTmp[k].w));
         }
 
 #pragma unroll
@@ -621,13 +632,84 @@ __global__ __launch_bounds__(Warps * kWarpSize) void tinygemm_m16n8k16_chunk_ker
         }
       }
     }
-  } // for all kTiles
+  } // for all tiles under kTilesLimit
+
+  // Now, there could be a remainder of 1 to KTilesPerIteration - 1 k-tiles
+  // remaining. We guarantee that the number of warps is >= KTilesPerIteration /
+  // kInnerKTiles, so that each warp can simply load kInnerKTiles and do its
+  // thing without needing more warps
+  static_assert(Warps >= KTilesPerIteration / kInnerKTiles, "");
+
+  auto kTileBaseRemaining = kTilesLimit + warpId * kInnerKTiles;
+
+  // If we have any remainder k-tiles, some warps will handle them, processing
+  // kInnerKTiles k-tiles at a time
+  if (kTileBaseRemaining < kTiles) {
+    bf16x2x4_u32 a[kInnerKTiles];
+    ALayout::template load<kInnerKTiles>(
+        A, m, k, mTiles, mTile, kTiles, kTileBaseRemaining, laneId, a);
+
+    bf16x2x4_u32 b[1][kInnerKTiles / 2];
+    BLayout::template load<kInnerKTiles>(
+        B,
+        B_quantizationInfo,
+        n,
+        k,
+        nTiles,
+        nTile,
+        kTiles,
+        kTileBaseRemaining,
+        laneId,
+        b);
+
+#pragma unroll
+    for (int j = 0; j < kInnerKTiles / 2; ++j) {
+      // We don't simply accumulate into `c` as this creates a too-strong
+      // execution dependency. Instead, we only periodically accumulate into
+      // `c`
+      float4 cTmp[2];
+
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        cTmp[k] = float4{0.0f, 0.0f, 0.0f, 0.0f};
+      }
+
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        asm volatile(
+            "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+            "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
+            : "=f"(cTmp[k].x), "=f"(cTmp[k].y), "=f"(cTmp[k].z), "=f"(cTmp[k].w)
+            : "r"(a[j * 2 + k].vals[0]),
+              "r"(a[j * 2 + k].vals[1]),
+              "r"(a[j * 2 + k].vals[2]),
+              "r"(a[j * 2 + k].vals[3]),
+              "r"(b[0][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 0]),
+              "r"(b[0][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 1]),
+              "f"(cTmp[k].x),
+              "f"(cTmp[k].y),
+              "f"(cTmp[k].z),
+              "f"(cTmp[k].w));
+      }
+
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        c.x += cTmp[k].x;
+        c.y += cTmp[k].y;
+        c.z += cTmp[k].z;
+        c.w += cTmp[k].w;
+      }
+    }
+  }
 
   //
   // Reduce independent k-tiles (same m/n) across warps
   //
   __shared__ float4 smem_sum[Warps][kWarpSize];
 
+  // FIXME: this likely doesn't need to be a true reduction tree, can just be a
+  // serial sum, maybe (unless nvcc/ptxas goes back to its old ways)
+  // smem_sum[warpId][laneId] = TreeReduce4<KTilesPerIteration>::reduce(c);
   smem_sum[warpId][laneId] = c;
 
   __syncthreads();
@@ -679,12 +761,14 @@ void launch_tinygemm_kernel(
     int32_t n,
     int32_t k,
     cudaStream_t stream) {
+  // The chunking kernel requires that kTiles is a multiple of kInnerKTiles
   TORCH_CHECK(
-      kTiles >= (Warps * KTilesPerWarp) &&
-      isEvenDivisor(kTiles, Warps * KTilesPerWarp));
+      kTiles >= BLayout::kInnerKTiles &&
+      isEvenDivisor(kTiles, BLayout::kInnerKTiles));
 
   TORCH_CHECK(
-      KTilesPerWarp >= BLayout::kInnerKTiles && isPowerOf2(KTilesPerWarp));
+      KTilesPerWarp >= BLayout::kInnerKTiles &&
+      isEvenDivisor(KTilesPerWarp, BLayout::kInnerKTiles));
 
   // After intra-block reduction across the k dimension, we are left with this
   // many tiles
@@ -823,96 +907,102 @@ torch::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(B.size(2) == kWarpSize);
 
   // Validate the scale and zero point tensor for dequantization
+  // These are the only versions handled at the moment
+  TORCH_CHECK(
+      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
+      qGroupSize == 256);
+
   TORCH_CHECK(qScaleAndZeros.dim() == 3);
   auto numQGroups = qScaleAndZeros.size(0);
-  TORCH_CHECK(k / numQGroups == qGroupSize);
+  TORCH_CHECK(
+      kTiles * kKTileSize >= qGroupSize &&
+      isEvenDivisor(kTiles * kKTileSize, qGroupSize));
   TORCH_CHECK(qScaleAndZeros.size(1) == n);
   TORCH_CHECK(qScaleAndZeros.size(2) == 2);
 
   // Output is a standard row-major matrix
   auto C_final = torch::empty(
-      {m, n},
-      torch::TensorOptions().dtype(at::kBFloat16).device(A.device()));
+      {m, n}, torch::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
-#define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE)          \
-  do {                                                                        \
-    using ACLayout = ALayout_RM<K_TILES_PER_WARP, REDUCE_TYPE>;               \
-                                                                              \
-    TORCH_CHECK(                                                              \
-        K_TILES_PER_WARP >= B_innerKTiles &&                                  \
-        isEvenDivisor(K_TILES_PER_WARP, B_innerKTiles));                      \
-                                                                              \
-    switch (B_innerKTiles) {                                                  \
-      case 2:                                                                 \
-        if constexpr (K_TILES_PER_WARP >= 2) {                                \
-          using BLayout = BLayout_TC_int4<K_TILES_PER_WARP, 2, Q_GROUP_SIZE>; \
-          launch_tinygemm_kernel<                                             \
-              ACLayout,                                                       \
-              BLayout,                                                        \
-              ACLayout,                                                       \
-              WARPS,                                                          \
-              K_TILES_PER_WARP>(                                              \
-              A,                                                              \
-              B,                                                              \
-              &qScaleAndZeros,                                                \
-              C_final,                                                        \
-              mTiles,                                                         \
-              nTiles,                                                         \
-              kTiles,                                                         \
-              m,                                                              \
-              n,                                                              \
-              k,                                                              \
-              stream);                                                        \
-        }                                                                     \
-        break;                                                                \
-      case 4:                                                                 \
-        if constexpr (K_TILES_PER_WARP >= 4) {                                \
-          using BLayout = BLayout_TC_int4<K_TILES_PER_WARP, 4, Q_GROUP_SIZE>; \
-          launch_tinygemm_kernel<                                             \
-              ACLayout,                                                       \
-              BLayout,                                                        \
-              ACLayout,                                                       \
-              WARPS,                                                          \
-              K_TILES_PER_WARP>(                                              \
-              A,                                                              \
-              B,                                                              \
-              &qScaleAndZeros,                                                \
-              C_final,                                                        \
-              mTiles,                                                         \
-              nTiles,                                                         \
-              kTiles,                                                         \
-              m,                                                              \
-              n,                                                              \
-              k,                                                              \
-              stream);                                                        \
-        }                                                                     \
-        break;                                                                \
-      case 8:                                                                 \
-        if constexpr (K_TILES_PER_WARP >= 8) {                                \
-          using BLayout = BLayout_TC_int4<K_TILES_PER_WARP, 8, Q_GROUP_SIZE>; \
-          launch_tinygemm_kernel<                                             \
-              ACLayout,                                                       \
-              BLayout,                                                        \
-              ACLayout,                                                       \
-              WARPS,                                                          \
-              K_TILES_PER_WARP>(                                              \
-              A,                                                              \
-              B,                                                              \
-              &qScaleAndZeros,                                                \
-              C_final,                                                        \
-              mTiles,                                                         \
-              nTiles,                                                         \
-              kTiles,                                                         \
-              m,                                                              \
-              n,                                                              \
-              k,                                                              \
-              stream);                                                        \
-        }                                                                     \
-        break;                                                                \
-      default:                                                                \
-        break;                                                                \
-    }                                                                         \
+#define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
+  do {                                                               \
+    using ACLayout = ALayout_RM<REDUCE_TYPE>;                        \
+                                                                     \
+    TORCH_CHECK(                                                     \
+        K_TILES_PER_WARP >= B_innerKTiles &&                         \
+        isEvenDivisor(K_TILES_PER_WARP, B_innerKTiles));             \
+                                                                     \
+    switch (B_innerKTiles) {                                         \
+      case 2:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 2) {                       \
+          using BLayout = BLayout_TC_int4<2, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      case 4:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 4) {                       \
+          using BLayout = BLayout_TC_int4<4, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      case 8:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 8) {                       \
+          using BLayout = BLayout_TC_int4<8, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      default:                                                       \
+        break;                                                       \
+    }                                                                \
   } while (false)
 
 #define HANDLE_Q_GROUP(WARPS, K_TILES_PER_WARP, REDUCE_TYPE) \
@@ -933,21 +1023,9 @@ torch::Tensor _weight_int4pack_mm_cuda(
     }                                                        \
   } while (false)
 
-  // These are the only versions handled at the moment
-  TORCH_CHECK(k == 32 || k == 64 || isEvenDivisor(k, 1024));
-  TORCH_CHECK(
-      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
-      qGroupSize == 256);
+  HANDLE_Q_GROUP(8, 8, KReductionType::None);
 
-  if (k == 32) {
-    HANDLE_Q_GROUP(1, 2, KReductionType::None);
-  } else if (k == 64) {
-    HANDLE_Q_GROUP(1, 4, KReductionType::None);
-  } else {
-    // Handle k = 1024 (8 * 8 * kKTileSize) at a time
-    HANDLE_Q_GROUP(8, 8, KReductionType::None);
-  }
-
+#undef HANDLE_Q_GROUP
 #undef RUN_GEMM
 
   return C_final;

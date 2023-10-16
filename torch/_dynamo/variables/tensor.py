@@ -308,7 +308,7 @@ class TensorVariable(VariableTracker):
         return self.ndim > 0
 
     def unpack_var_sequence(self, tx, idxes=None):
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy_cls
 
         options = VariableTracker.propagate(self)
         if idxes is None:
@@ -326,7 +326,12 @@ class TensorVariable(VariableTracker):
                 else:
                     length = dyn_length.value
             idxes = range(length)
-        return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
+        return [
+            wrap_fx_proxy_cls(
+                target_cls=type(self), tx=tx, proxy=self.as_proxy()[i], **options
+            )
+            for i in idxes
+        ]
 
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
