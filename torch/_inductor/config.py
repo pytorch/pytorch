@@ -554,10 +554,10 @@ class trace:
     upload_tar = None
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
 
 
 from .._dynamo.config_utils import install_config_module

@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+from collections import namedtuple
+from types import ModuleType
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -9,6 +12,45 @@ from torch._dynamo.utils import disable_cache_limit
 
 
 class ConfigTests(torch._dynamo.test_case.TestCase):
+    def test_allowed_config_types(self):
+        class MyModule(ModuleType):
+            pass
+
+        my_module = MyModule("my_module")
+
+        my_module.config_1 = ["a", 1, 1.0, True]
+        my_module.config_2 = namedtuple("Name", "x y")(1, 2), None
+        my_module.config_3 = {"k": 1, 1: True, 2.0: "a"}
+
+        torch._dynamo.config_utils.install_config_module(my_module)
+        assert all(f"config_{i+1}" in my_module._config for i in range(3))
+
+    def test_disallowed_configs(self):
+        def fn(x):
+            return x + 1
+
+        class MyClass:
+            pass
+
+        class MyModule(ModuleType):
+            pass
+
+        for config in [
+            set({"a"}),
+            {fn: 1},
+        ]:
+            my_module = MyModule("my_module")
+            my_module.config = config
+            with self.assertRaisesRegex(
+                ValueError, "Config needs to be deterministically serializable"
+            ):
+                torch._dynamo.config_utils.install_config_module(my_module)
+
+        with self.assertRaisesRegex(AssertionError, "Unhandled config"):
+            my_module = MyModule("my_module")
+            my_module.config = MyClass()
+            torch._dynamo.config_utils.install_config_module(my_module)
+
     @disable_cache_limit()
     def test_no_automatic_dynamic(self):
         def fn(a, b):

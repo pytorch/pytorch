@@ -1,4 +1,5 @@
 import collections
+import importlib
 import logging
 
 import math
@@ -127,6 +128,19 @@ tensor_dunder_fns_remap = {
 }
 
 
+def get_function_from_string(func_string):
+    module_name, fn_name = func_string.rsplit(".", 1)
+    m = importlib.import_module(module_name)
+    fn = getattr(m, fn_name)
+    if not callable(fn):
+        raise TypeError(
+            f"fn {module_name}.{fn_name} needs to be function, got type: {type(fn)}"
+        )
+    return fn
+
+
+constant_functions = [get_function_from_string(f) for f in config.constant_functions]
+
 try:
     # Wed need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
@@ -247,11 +261,9 @@ class TorchVariable(VariableTracker):
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
-        elif (full_name := get_full_name(self.value)) in config.constant_functions:
+        elif value in constant_functions:
             assert not args and not kwargs
-            return ConstantVariable.create(
-                config.constant_functions[full_name], **options
-            )
+            return ConstantVariable.create(constant_functions[full_name], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
             op = TorchHigherOrderOperatorVariable.make(
                 self.value,

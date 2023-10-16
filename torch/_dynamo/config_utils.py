@@ -1,6 +1,7 @@
 import contextlib
 
 import copy
+import json
 import pickle
 import unittest
 from types import FunctionType, ModuleType
@@ -32,7 +33,9 @@ def install_config_module(module):
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
-                assert value.__module__ == module.__name__
+                assert (
+                    value.__module__ == module.__name__
+                ), f"{value.__module__}, {module.__name__}"
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
@@ -44,9 +47,22 @@ def install_config_module(module):
     default = dict()
     visit(module, module, "")
     module._config = config
+    _check_deterministically_serializable(module._config)
     module._default = default
     module._allowed_keys = set(config.keys())
     module.__class__ = ConfigModuleInstance
+
+
+def _check_deterministically_serializable(inp: Any):
+    try:
+        dumped = json.dumps(inp)
+    except TypeError as e:
+        raise ValueError(
+            "Config needs to be deterministically serializable. Please do not use sets, "
+            "python classes and objects, or functions. Instead of sets, use lists. "
+            "Instead of functions or classes, use strings representing the function "
+            "(e.g. 'torch._utils.is_compiling')."
+        ) from e
 
 
 class ConfigModule(ModuleType):
