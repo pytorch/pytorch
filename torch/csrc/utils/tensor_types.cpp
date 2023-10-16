@@ -137,9 +137,9 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   // NOTE: Do not add more types here. This list controls the creation
   // of legacy tensor types e.g. torch.cuda.FloatTensor which are
   // maintained for backwards-compatibility only.
-  std::vector<Backend> backends = {
+  auto backends = {
       Backend::CPU, Backend::CUDA, Backend::SparseCPU, Backend::SparseCUDA};
-  std::vector<ScalarType> scalar_types = {
+  auto scalar_types = {
       ScalarType::Byte,
       ScalarType::Char,
       ScalarType::Double,

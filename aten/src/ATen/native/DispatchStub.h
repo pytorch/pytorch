@@ -301,12 +301,15 @@ struct RegisterPRIVATEUSE1Dispatch {
 // NB: this macro must be used from a 'mm' file in order to dispatch a MPS kernel
 #define REGISTER_DISPATCH(name, fn) REGISTER_MPS_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
+// REGISTER_DISPATCH now dispatches an AVX512 kernel to nullptr but registers other dispatches.
+// ALSO_REGISTER_AVX512_DISPATCH should be used for ensuring AVX512 dispatch, among others.
+#ifdef CPU_CAPABILITY_AVX512
+#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, nullptr)
+#else
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
-#define REGISTER_NO_AVX512_DISPATCH(name)       \
-  REGISTER_AVX512_DISPATCH(name, nullptr)
 #endif
-
-
+#define ALSO_REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#endif
 } // namespace at::native
 
 C10_CLANG_DIAGNOSTIC_POP()

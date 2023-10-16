@@ -793,19 +793,19 @@ Tensor fft_ifftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
 
 // We call the following methods via CUDA hooks because they are really only
 // valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
-int64_t _cufft_get_plan_cache_max_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_max_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize(device_index);
 }
 
-void _cufft_set_plan_cache_max_size(int64_t device_index, int64_t max_size) {
+void _cufft_set_plan_cache_max_size(DeviceIndex device_index, int64_t max_size) {
   detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(device_index, max_size);
 }
 
-int64_t _cufft_get_plan_cache_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheSize(device_index);
 }
 
-void _cufft_clear_plan_cache(int64_t device_index) {
+void _cufft_clear_plan_cache(DeviceIndex device_index) {
   detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
@@ -831,6 +831,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied,"
+        "which is known to cause spectral leakage. "
+        "Other windows such as torch.hann_window or torch.hamming_window "
+        "can are recommended to reduce spectral leakage."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -1007,6 +1018,16 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied."
+        "Please provide the same window used by stft to make the inversion "
+        "lossless."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \

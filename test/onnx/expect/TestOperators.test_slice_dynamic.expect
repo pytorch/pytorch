@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Slice_12"
-    name: "Constant_0"
+    name: "Constant_5"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -18,7 +18,7 @@ graph {
   }
   node {
     output: "onnx::Slice_13"
-    name: "Constant_1"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -32,7 +32,7 @@ graph {
   }
   node {
     output: "onnx::Slice_14"
-    name: "Constant_2"
+    name: "Constant_7"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -46,7 +46,7 @@ graph {
   }
   node {
     output: "onnx::Slice_15"
-    name: "Constant_3"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -65,12 +65,12 @@ graph {
     input: "onnx::Slice_12"
     input: "onnx::Slice_15"
     output: "onnx::Gather_9"
-    name: "Slice_4"
+    name: "Slice_9"
     op_type: "Slice"
   }
   node {
     output: "onnx::Gather_10"
-    name: "Constant_5"
+    name: "Constant_10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -85,7 +85,7 @@ graph {
     input: "onnx::Gather_9"
     input: "onnx::Gather_10"
     output: "11"
-    name: "Gather_6"
+    name: "Gather_11"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -93,7 +93,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Slice_0"
     type {

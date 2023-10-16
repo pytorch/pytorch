@@ -8,14 +8,14 @@ import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_ARM64
+from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
 import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
-TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
 
 def remove_build_path():

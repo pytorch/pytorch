@@ -154,7 +154,6 @@ TensorTypePtr TorchTensorTypeFromONNX(
 ListTypePtr TorchListTypeFromONNX(
     const onnx::TypeProto_Sequence& onnx_sequence_type,
     SymbolDimMap& symbol_dim_map) {
-  c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
     const auto& onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
@@ -2344,8 +2343,8 @@ size_t ONNXAssignOutputShape(
     // Support for dict data type is limited to fixed size dictionaries in
     // ONNX.
     // Dictionary values are unrolled and keys are not preserved.
-    auto unrolled_dict =
-        py::reinterpret_borrow<py::list>(PyDict_Items(output_obj));
+    auto* items = PyDict_Items(output_obj);
+    auto unrolled_dict = py::reinterpret_borrow<py::list>(items);
     TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
     for (const auto i : c10::irange(unrolled_dict.size())) {
       outputs_index = ONNXAssignOutputShape(
@@ -2356,6 +2355,7 @@ size_t ONNXAssignOutputShape(
           is_script,
           opset_version);
     }
+    Py_DECREF(items);
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
   } else if (PyNone_Check(output_obj)) {
