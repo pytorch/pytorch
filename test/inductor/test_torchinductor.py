@@ -4027,14 +4027,18 @@ class CommonTemplate:
         )
 
     def test_reflection_pad2d(self):
-        def fn(a):
+        def fn(a, pad):
             return (
                 aten.reflection_pad2d(a, [1, 1, 1, 1]),
-                aten.reflection_pad2d(a, [1, 2, 3, 4]),
+                aten.reflection_pad2d(a, pad),
             )
 
         self.common(
-            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+            fn,
+            (
+                torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),
+                [5, 2, 3, 4],
+            ),
         )
 
     def test_reflection_pad2d_backward(self):
