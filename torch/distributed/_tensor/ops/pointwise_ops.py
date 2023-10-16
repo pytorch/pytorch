@@ -1,13 +1,29 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import List
 
 import torch
-from torch.distributed._tensor.op_schema import RuntimeSchemaInfo
+from torch.distributed._tensor.device_mesh import DeviceMesh
 
-from torch.distributed._tensor.ops.common_rules import (
-    linear_pointwise_rule,
-    pointwise_rule,
+from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
+    OpSchema,
+    OpStrategy,
+    PlacementStrategy,
+    RuntimeSchemaInfo,
+    StrategyType,
 )
-from torch.distributed._tensor.ops.utils import register_prop_rule
+
+from torch.distributed._tensor.ops.common_rules import linear_pointwise_rule
+from torch.distributed._tensor.ops.utils import (
+    generate_redistribute_costs,
+    infer_broadcast_dims_map,
+    map_placements_after_broadcast,
+    normalize_dim,
+    register_op_strategy,
+    register_prop_rule,
+)
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Shard
 
 
 aten = torch.ops.aten
@@ -38,6 +54,8 @@ linear_pointwise_ops = [
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.abs.default,
+    aten.abs.out,
+    aten.abs_.default,
     aten.acos.default,
     aten.acos.out,
     aten.acos_.default,
@@ -376,11 +394,108 @@ pointwise_ops = [
 ]
 
 
+def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    max_shards_strategy_index = -1
+    max_shards = -1
+    # handle broadcasting
+    common_shape = torch.broadcast_shapes(
+        *[
+            arg.output_shape
+            for arg in op_schema.args_schema
+            if isinstance(arg, OpStrategy)
+        ]
+    )
+
+    if _is_inplace_op(op_schema.op):
+        # inplace op should follow the first arg strategy
+        followed_strategy = op_schema.args_schema[0]
+    elif _is_out_variant_op(op_schema.op):
+        # out variant op should follow the out kwarg strategy
+        followed_strategy = op_schema.kwargs_schema["out"]
+    else:
+        # normal pointwise op, we choose to follow the arg with
+        # the max shards in case operands needs reshard
+        for idx, arg_strategy in enumerate(op_schema.args_schema):
+            if not isinstance(arg_strategy, OpStrategy):
+                continue
+
+            arg_max_shards = arg_strategy.max_num_shards()
+            if arg_max_shards > max_shards:
+                max_shards_strategy_index = idx
+                max_shards = arg_max_shards
+
+        followed_strategy = op_schema.args_schema[max_shards_strategy_index]
+        assert isinstance(followed_strategy, OpStrategy)
+        follow_operand_dims_map = infer_broadcast_dims_map(
+            common_shape, followed_strategy.output_shape
+        )
+
+    assert isinstance(
+        followed_strategy, OpStrategy
+    ), f"no strategy to follow for {op_schema}!"
+    pointwise_strategy = OpStrategy([])
+
+    for placement_strategy in followed_strategy.strategies:
+        spec_to_follow = placement_strategy.output_spec
+        out_placements: List[Placement] = []
+
+        for placement in spec_to_follow.placements:
+            if isinstance(placement, Shard):
+                shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
+                common_ndim = len(common_shape)
+                new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
+                out_placements.append(Shard(new_shard_dim))
+            else:
+                out_placements.append(placement)
+
+        input_specs = []
+        redistribute_costs: List[List[float]] = []
+        for idx, input_arg in enumerate(op_schema.args_schema):
+            if isinstance(input_arg, OpStrategy):
+                if idx == max_shards_strategy_index:
+                    # the current input arg is the one we want to follow
+                    input_specs.append(spec_to_follow)
+                    redistribute_costs.append([0] * len(input_arg.strategies))
+                    continue
+
+                # every arg follow the out_placements, but need to handle broadcasting
+                input_arg_spec = input_arg.strategies[0].output_spec
+                input_arg_dims_map = infer_broadcast_dims_map(
+                    common_shape, input_arg_spec.shape
+                )
+                input_target_placements = map_placements_after_broadcast(
+                    tuple(out_placements),
+                    common_shape,
+                    input_arg_dims_map,
+                )
+                input_arg_target_spec = DTensorSpec(
+                    mesh=mesh,
+                    placements=input_target_placements,
+                    tensor_meta=input_arg_spec.tensor_meta,
+                )
+                input_specs.append(input_arg_target_spec)
+                redistribute_costs.append(
+                    generate_redistribute_costs(input_arg, input_arg_target_spec)
+                )
+
+        pointwise_strategy.strategies.append(
+            PlacementStrategy(
+                output_spec=DTensorSpec(
+                    mesh=mesh,
+                    placements=tuple(out_placements),
+                ),
+                input_specs=input_specs,
+                redistribute_cost=redistribute_costs,
+            )
+        )
+    return pointwise_strategy
+
+
 for op in linear_pointwise_ops:
     register_prop_rule(op)(linear_pointwise_rule)
 
 
 for op in pointwise_ops:
-    register_prop_rule(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        pointwise_rule
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_strategy
     )
