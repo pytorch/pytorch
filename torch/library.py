@@ -180,7 +180,7 @@ _keep_alive = []
 
 
 @functools.singledispatch
-def define(name, schema, *, lib=None):
+def define(qualname, schema, *, lib=None):
     r"""Defines a new operator.
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
@@ -193,8 +193,9 @@ def define(name, schema, *, lib=None):
     ``impl_*`` APIs.
 
     Args:
-        name (str): Should be a string that looks like
-            "namespace::operator_name". Operators in PyTorch need a namespace to
+        qualname (str): The qualified name for the operator. Should be
+            a string that looks like "namespace::name", e.g. "aten::sin".
+            Operators in PyTorch need a namespace to
             avoid name collisions; a given operator may only be created once.
             If you are writing a Python library, we recommend the namespace to
             be the name of your top-level module.
@@ -222,11 +223,11 @@ def define(name, schema, *, lib=None):
         >>> assert torch.allclose(y, x)
 
     """
-    if not isinstance(name, str):
+    if not isinstance(qualname, str):
         raise ValueError(
-            f"define(name, schema): expected name to be instance of str, "
-            f"got {type(name)}")
-    namespace, name = torch._library.utils.parse_namespace(name)
+            f"define(qualname, schema): expected qualname "
+            f"to be instance of str, got {type(qualname)}")
+    namespace, name = torch._library.utils.parse_namespace(qualname)
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
