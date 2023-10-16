@@ -3929,14 +3929,16 @@ Got grad_output types: {str(grad_output_types)}"""
 
             if CompiledFunction.maybe_subclass_metadata is not None:
                 # Get the number of tangents after unwrapping
-                len_tangents = len(unwrap_tensor_subclasses(all_args[tangents_start_idx: tangents_end_idx], is_joint_structure=False))
+                len_tangents = len(unwrap_tensor_subclasses(
+                    all_args[tangents_start_idx: tangents_end_idx], is_joint_structure=False
+                ))
                 all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
                 tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
 
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous() if tangents_start_idx <= i < tangents_end_idx else t
+                t.contiguous() if isinstance(t, torch.Tensor) and tangents_start_idx <= i < tangents_end_idx else t
                 for i, t in enumerate(all_args)
             ]
 
