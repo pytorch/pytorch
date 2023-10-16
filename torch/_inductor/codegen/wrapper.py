@@ -1599,9 +1599,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             buffer.get_dtype(),
             buffer.get_size(),
             buffer.get_stride(),
+            self.can_cache_buffer_in_thread_local(buffer),
         )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
+    def make_allocation(
+        self, name, device, dtype, shape, stride, can_cache_buffer_in_thread_local=False
+    ):
         device = self.codegen_device(device)
         dtype = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
@@ -1624,8 +1627,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
                 )
 
-            if self.can_cache_buffer_in_thread_local(buffer):
-                self.cached_thread_locals.add(buffer.get_name())
+            if can_cache_buffer_in_thread_local:
+                self.cached_thread_locals.add(name)
                 self.wrapper_call.writeline(
                     f"thread_local RAIIAtenTensorHandle {name}_handle = ([&] {{"
                 )
