@@ -21,7 +21,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._streambase import EventBase, StreamBase
+from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -628,7 +628,7 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, StreamBase):
+        elif isinstance(value, _StreamBase):
             return StreamVariable(
                 None,
                 value,
@@ -636,7 +636,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif isinstance(value, EventBase):
+        elif isinstance(value, _EventBase):
             return EventVariable(
                 None,
                 value,
@@ -1520,7 +1520,8 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif (
-        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, StreamBase)
+        inspect.isclass(proxy.node.target)
+        and issubclass(proxy.node.target, _StreamBase)
     ) or proxy.node.target in [
         interface_elem.current_stream for interface_elem in device_interfaces.values()
     ]:
@@ -1529,7 +1530,7 @@ def wrap_fx_proxy_cls(
             proxy, example_value, example_value.device.type, **options
         )
     elif (
-        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, EventBase)
+        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
     ) or proxy.node.target in [
         interface_elem.Event for interface_elem in device_interfaces.values()
     ]:
@@ -1540,7 +1541,7 @@ def wrap_fx_proxy_cls(
         return ConstantVariable(example_value, **options)
     elif (
         example_value is not None
-        and isinstance(example_value, EventBase)
+        and isinstance(example_value, _EventBase)
         and proxy.node.target == "record_event"
         and proxy.node.op == "call_method"
     ):

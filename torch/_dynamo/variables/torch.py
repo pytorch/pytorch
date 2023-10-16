@@ -7,7 +7,7 @@ import re
 import types
 from typing import Dict, List
 
-from torch._streambase import StreamBase
+from torch._streambase import _StreamBase
 
 try:
     import numpy as np
@@ -23,7 +23,7 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..device_interface import device_interfaces, get_interface_for_device
+from ..device_interface import device_interfaces
 from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
@@ -365,13 +365,9 @@ class TorchVariable(VariableTracker):
                 interface_elem.stream for interface_elem in device_interfaces.values()
             ]
         ):
-            log.warning(
-                str(get_interface_for_device(args[0].device).stream),
-                "not fully supported, streams may be ignored",
-            )
             assert len(args) == 1
             return StreamContextVariable.create(tx, args[0], **options)
-        elif inspect.isclass(self.value) and issubclass(self.value, StreamBase):
+        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
             return wrap_fx_proxy_cls(
                 StreamVariable,
                 tx,
