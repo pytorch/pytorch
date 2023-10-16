@@ -113,7 +113,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   // For the purpose of computing inequalities, we consider the coefficient of
   // the SingletonInt to be a positive integer.
   //
-  // Thus, no modificaitons are needed to the logic since
+  // Thus, no modifications are needed to the logic since
   // j0 >= k implies coeff * j0 >= k
   //
   c10::SymNode eq(const c10::SymNode& other) override;
