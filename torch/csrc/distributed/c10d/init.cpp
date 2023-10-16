@@ -2269,7 +2269,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_abort",

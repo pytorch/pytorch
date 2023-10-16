@@ -13,7 +13,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
-from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -77,10 +76,12 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
             ep(torch.zeros(2, 7, 3))
 
-        self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
+        self.assertTrue(
+            torch.allclose(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
+        )
 
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
@@ -100,10 +101,10 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
+        with self.assertRaisesRegex(RuntimeError, "input arg1_1"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -124,12 +125,12 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, r"expected input arg1_1.shape\[0\] to be equal to 5, but got 2"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -153,12 +154,12 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, r"expected input arg1_1.shape\[0\] to be equal to 5, but got 2"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -225,7 +226,7 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.item()
-                constrain_as_value(b, min=2, max=5)
+                torch._constrain_as_value(b, min=2, max=5)
                 return b
 
         x = torch.tensor([2])
@@ -245,7 +246,7 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.nonzero()
-                torch.export.constrain_as_value(b.shape[0], min=3, max=5)
+                torch._constrain_as_value(b.shape[0], min=3, max=5)
                 return b
 
         x = torch.tensor([2, 1, 2, 3, 5, 0])
@@ -284,12 +285,12 @@ class TestPasses(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    constrain_as_value(b, min=2, max=5)
+                    torch._constrain_as_value(b, min=2, max=5)
                     return x - b
 
                 def false_fn(x, y):
                     c = y.item()
-                    constrain_as_value(c, min=2, max=5)
+                    torch._constrain_as_value(c, min=2, max=5)
                     return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
@@ -323,7 +324,7 @@ class TestPasses(TestCase):
         x = torch.rand(3, 5)
         y = torch.rand(3, 6)
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
+            RuntimeError, r"expected input arg1_1.shape\[1\] to be equal to 5, but got 6"
         ):
             exported(x, y)
 
@@ -335,7 +336,7 @@ class TestPasses(TestCase):
     def test_functionalize_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
-            constrain_as_value(a, 4, 7)
+            torch._constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         ep = torch._export.export(f, (torch.tensor([7]),))

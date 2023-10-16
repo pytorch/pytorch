@@ -3431,7 +3431,7 @@ class ShapeEnv:
             expr = self.simplify(guard.expr)
 
             # Avoid re-issueing the same guard.
-            if guard.expr in issued:
+            if expr in issued:
                 return
 
             issued.add(expr)
@@ -4006,7 +4006,8 @@ class ShapeEnv:
                     ''.join(traceback.format_list(user_tb))
                 )
             self.log.info(
-                "eval %s [guard added]%s (%s)%s",
+                "%s %s [guard added]%s (%s)%s",
+                prefix,
                 g,
                 maybe_user_loc,
                 format_frame(fsummary),
