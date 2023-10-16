@@ -133,8 +133,8 @@ class SequenceParallel(PairwiseParallel):
             "SequenceParallel", "Use ColwiseParallel and RowwiseParallel instead."
         )
         super().__init__(  # type: ignore[misc]
-            _prepare_input,
-            _prepare_output,
+            make_input_reshard_replicate,
+            make_output_reshard_tensor,
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
