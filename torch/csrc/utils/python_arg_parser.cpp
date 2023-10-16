@@ -922,7 +922,8 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
-      if (torch::is_symfloat(py::handle(obj))) {
+      if (torch::is_symfloat(py::handle(obj)) ||
+          torch::is_symint(py::handle(obj))) {
         // This will induce a guard
         return true;
       }
