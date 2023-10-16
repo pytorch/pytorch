@@ -139,7 +139,9 @@ def get_function_from_string(func_string):
     return fn
 
 
-constant_functions = [get_function_from_string(f) for f in config.constant_functions]
+constant_functions = {
+    get_function_from_string(f): v for f, v in config.constant_functions.items()
+}
 
 try:
     # Wed need to monkeypatch transformers here, sadly.
@@ -263,7 +265,7 @@ class TorchVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
         elif self.value in constant_functions:
             assert not args and not kwargs
-            return ConstantVariable.create(constant_functions[full_name], **options)
+            return ConstantVariable.create(constant_functions[self.value], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
             op = TorchHigherOrderOperatorVariable.make(
                 self.value,
