@@ -402,18 +402,13 @@ def meta_index_reduce_(
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
+@out_wrapper()
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
     result_size = list(self.size())
     if self.dim() > 0:
         result_size[dim] = index.numel()
     return self.new_empty(result_size)
-
-
-@register_meta(aten.index_select.out)
-def meta_index_select_out(self, dim, index, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(torch.index_select(self, dim, index))
 
 
 @register_meta(aten.segment_reduce.default)
