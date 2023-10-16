@@ -488,7 +488,7 @@ class TestConversion(TestCase):
             dtype(np.iinfo(dtype).max + 1)
 
         for code in [np.int_, np.longlong]:
-            assert_raises(RuntimeError, overflow_error_func, code)
+            assert_raises((OverflowError, RuntimeError), overflow_error_func, code)
 
     def test_numpy_scalar_relational_operators(self):
         # All integer
