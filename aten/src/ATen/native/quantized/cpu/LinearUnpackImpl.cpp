@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
