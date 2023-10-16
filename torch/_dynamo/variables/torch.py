@@ -261,7 +261,7 @@ class TorchVariable(VariableTracker):
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
-        elif value in constant_functions:
+        elif self.value in constant_functions:
             assert not args and not kwargs
             return ConstantVariable.create(constant_functions[full_name], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
