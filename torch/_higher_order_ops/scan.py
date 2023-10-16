@@ -163,11 +163,6 @@ def scan_wrapper(f, init, xs):
         ys (torch.Tensor): The final output when the function f has been scanned over the leading axis of xs
 
     """
-    #import pdb
-    #pdb.set_trace()
-    
-    #if torch._dynamo.is_compiling():
-    #    return cond_op(pred, true_fn, false_fn, operands)
     
     flat_init, init_spec = pytree.tree_flatten(init)
     if not all(isinstance(t, torch.Tensor) for t in flat_init):
@@ -208,25 +203,77 @@ def scan_wrapper(f, init, xs):
         out_spec = tmp_out_spec
         return *flat_carry_out, *flat_out
     
-    flat_carry_out, flat_out = scan_impl(flat_fn, flat_init, flat_xs, return_all_carries=False, reverse=False)  # (ys, carry)
+    flat_carry_out, flat_out = scan_impl(flat_fn, flat_init, flat_xs, reverse=False)  # (carry, ys)
     return pytree.tree_unflatten(flat_carry_out, carry_out_spec), pytree.tree_unflatten(flat_out, out_spec)
 
 class ScanAutogradOp(torch.autograd.Function):
+    # Note: The scan operation when executed forward produces
+    # scan_impl(f, init, xs, reverse=False) -> carry, ys
+    #
+    # When executed backward, the scan_impl is reused, but the inputs have a different meaning.
+    # In particular, the init should be initialized as the carry gradient
+    # the xs should contain the list of gradients of ys, i.e., the output gradients. 
+    # scan_impl(f, grad_carry, grad_ys, reverse=True) -> grad_init, grad_xs
+    # Essentially, the scan_impl then works its way back through time 
+    # and computes the gradients for the init and the xs
+    # 
+    # Example for a single iteration:
+    # In the forward pass: 
+    # init \in \RR^{1, 2}
+    # xs \in \RR^{1, 2}
+    # scan_impl(f, init, xs, reverse=False) -> carry, ys
+    # carry \in \RR^{1, 2}
+    # ys \in \RR^{1, 2}
+    #
+    # In the backwards pass:
+    # Compute gradients of carry and/or ys based on a loss function
+    # E = MSE(target, ys) + carry -> grad_carry, grad_ys
+    # grad_carry \in \RR^{1, 2}
+    # grad_ys \in \RR^{1, 2}
+    # scan_impl(f, grad_carry, grad_ys, reverse=True) -> grad_init, grad_xs
+    # grad_init \in \RR^{1, 2}
+    # grad_xs \in \RR^{1, 2}
+    # 
+    # Example for n iterations:
+    # In the forward pass: 
+    # init \in \RR^{1, 2}
+    # xs \in \RR^{n, 2}
+    # scan_impl(f, init, xs, reverse=False) -> carry, ys
+    # carry \in \RR^{1, 2}
+    # ys \in \RR^{n, 2}
+    #
+    # In the backwards pass:
+    # Compute gradients of carry and/or ys based on a loss function
+    # E = MSE(target, ys) + carry -> grad_carry, grad_ys
+    # grad_carry \in \RR^{1, 2}
+    # grad_ys \in \RR^{n, 2}
+    # scan_impl(f, grad_carry, grad_ys, reverse=True) -> grad_init, grad_xs
+    # grad_init \in \RR^{1, 2}
+    # grad_xs \in \RR^{n, 2}
+    
     @staticmethod
     def forward(ctx, fw_graph, joint_graph, num_init_args, *flat_args):
         ctx._joint_graph = joint_graph
         ctx._num_input_args = len(flat_args)
         ctx._num_init_args = num_init_args
         with torch._C._AutoDispatchBelowAutograd():
-            flat_carry_out, flat_out, carries = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:], return_all_carries=True, reverse=False)
+            flat_carries, flat_out = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:], reverse=False)
+            leading_dim = flat_carries[0].shape[0]
+            flat_carries = _unstack_pytree(flat_carries)
+            
             # needs to flat the carries nested list
             # second call to save_for_backward will override whatever that is saved earlier
             # therefore, need to save everything that is needed at once
-            flat_carries = [carry_entry for carry in carries for carry_entry in carry]
+            flat_carries = [carry_entry for carry in flat_carries for carry_entry in carry]
+            
+            flat_carries_chunk = flat_carries[:-len(flat_carries)//leading_dim]
+            flat_carries_out_chunk = flat_carries[-len(flat_carries)//leading_dim:]
+            
             # TODO: we don't need to actually store the init args, just need the xs args
-            ctx.save_for_backward(*flat_args, *flat_carries)
+            flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
+            ctx.save_for_backward(*flat_args, *flat_carries_chunk)
             ctx._num_out_args = len(flat_out)
-            return (*flat_carry_out, *flat_out, *flat_carries)
+            return (*flat_carries_out_chunk, *flat_out)
 
     @staticmethod
     def backward(ctx, *flat_grads):
@@ -242,10 +289,10 @@ class ScanAutogradOp(torch.autograd.Function):
         # and should be empty
         ys_grad = flat_grads[ctx._num_init_args:ctx._num_init_args + ctx._num_out_args]
         with torch._C._AutoDispatchBelowAutograd():
-            flat_carry_out_grads, flat_out_grads = scan_impl(ctx._joint_graph, final_carry_grad, (*ys_grad, carries, *flat_xs), return_all_carries=False, reverse=True)
-            return None, None, None, *flat_carry_out_grads, *flat_out_grads
+            flat_carry_out_grads, flat_out_grads = scan_impl(ctx._joint_graph, final_carry_grad, (*ys_grad, carries, *flat_xs), reverse=True)
+            return None, None, None, *[grad[0] for grad in flat_carry_out_grads], *flat_out_grads
 
-def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
     xs = flat_xs
     leading_dim_size = xs[0].shape[0]
 
@@ -261,10 +308,7 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, return_all_carr
             if isinstance(t, torch.Tensor):
                 return t.expand(leading_dim_size, *t.shape)
             return t
-        if return_all_carries:
-            expanded_outs = (example_outs[:len(flat_init)], pytree.tree_map(expand_tensor, example_outs[len(flat_init):]), [flat_init] * leading_dim_size)
-        else:
-            expanded_outs = (example_outs[:len(flat_init)], pytree.tree_map(expand_tensor, example_outs[len(flat_init):]))
+        expanded_outs = ([example_outs[:len(flat_init)]] * leading_dim_size, pytree.tree_map(expand_tensor, example_outs[len(flat_init):]))
 
     next_name = None
     i = 0
@@ -278,7 +322,7 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, return_all_carr
     proxy_mode.tracer.root.register_module(next_name, body_graph)
     node_args = (body_graph, flat_init, flat_xs)
     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
-    out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {"return_all_carries": return_all_carries, "reverse": reverse},
+    out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {"reverse": reverse},
                                                name="scan_impl")
     return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -321,6 +365,7 @@ def _unstack_and_flatten_tensors_or_lists(flat_xs):
         unstacked_results.append(flat_entry)
     return unstacked_results
 
+#TODO: this can function can be shared with the torch._higher_order_ops.map._unstack_pytree from main
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)
     if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
@@ -335,6 +380,7 @@ def _unstack_pytree(xs):
         pytrees.append(pytree.tree_unflatten(tuple, inspec))
     return pytrees
 
+#TODO: this can function can be shared with the torch._higher_order_ops.map._stack_pytree from main
 def _stack_pytree(pytrees):
     flat_out = []
     out_spec = None
@@ -356,13 +402,11 @@ def _stack_pytree(pytrees):
     return pytree.tree_unflatten(stacked_out, out_spec)
 
 @scan_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_dense(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+def scan_dense(f, flat_init, flat_xs, reverse=False):
     '''
         The scan_dense implementation is reused for executing both forward and backward graph.
         When executing forward graph, f is the fwd_graph, and flat_init, flat_xs are the typical flattened
         init and xs lists, reverse should be False (not exposing reverse argument at the top level yet).
-        Note that the return_all_carries argument will control whether we return all the intermediate carries as the third
-        output (except the final output carry, which is returned as the first output)
 
         When executing backward graph, f is the bwd_graph, and flat_init should be the initial output carry gradient,
         flat_xs should be a concatenated list of ys_grad (the output gradient), carries(the list of all the intermediate carries generated during
@@ -383,37 +427,32 @@ def scan_dense(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
         # flattened_out_includes carry and output
         out_pytrees.append(flattened_out[carry_length:])
         carry = flattened_out[:carry_length]
+    out_carries.append(carry)
     ys = _stack_pytree(out_pytrees[::direction])
-    if return_all_carries:
-        return carry, ys, out_carries
-    return carry, ys
+    return _stack_pytree(out_carries[::direction]), ys
 
 @scan_impl.py_impl(DispatchKey.Autograd)
-def scan_autograd(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+def scan_autograd(f, flat_init, flat_xs, reverse=False):
     fw_graph, bw_graph = create_fw_bw_graph(f, flat_init, flat_xs)
     flat_all_out = ScanAutogradOp.apply(fw_graph, bw_graph, len(flat_init), *flat_init, *flat_xs)
     num_carry_out = len(flat_init)
-    num_carries_out = num_carry_out * flat_xs[0].shape[0]  # flat_xs.shape[0] is the batch dimension size
-    num_flat_ys = len(flat_all_out) - num_carry_out - num_carries_out
-    if return_all_carries:
-        flat_carries = flat_all_out[-num_carries_out:]
-        carries = [flat_carries[i*num_carry_out:(i+1)*num_carry_out] for i in range(len(flat_carries)//num_carry_out)]
-        return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:num_carry_out + num_flat_ys], carries
-    return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:num_carry_out + num_flat_ys]
+    # flat_xs.shape[0] is the leading dimension over which the scan is executed
+    num_carries_out = num_carry_out * flat_xs[0].shape[0]
+    return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:]
 
 @scan_impl.py_impl(ProxyTorchDispatchMode)
-def map_proxy_torch_dispatch_mode(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+def map_proxy_torch_dispatch_mode(f, flat_init, flat_xs, reverse=False):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
         if mode.enable_tracing:
-            return trace_scan(mode, scan_impl, f, flat_init, flat_xs, return_all_carries=return_all_carries, reverse=reverse)
+            return trace_scan(mode, scan_impl, f, flat_init, flat_xs, reverse=reverse)
         else:
-            return scan_impl(f, flat_init, flat_xs, return_all_carries=return_all_carries, reverse=reverse)
+            return scan_impl(f, flat_init, flat_xs, reverse=reverse)
 
 @scan_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
-    return scan_dense(f, flat_init, flat_xs, return_all_carries=return_all_carries, reverse=reverse)
+def map_fake_tensor_mode(f, flat_init, flat_xs, reverse=False):
+    return scan_dense(f, flat_init, flat_xs, reverse=reverse)
 
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm

@@ -204,7 +204,6 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2)
         xs = torch.rand(10, 2)
-        #carry_out, ys = control_flow.scan(f, init, xs)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -216,7 +215,6 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2, requires_grad=True)
         xs = torch.rand(10, 2, requires_grad=True)
-        #carry_out, ys = control_flow.scan(f, init, xs)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -233,7 +231,6 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2, requires_grad=True)
         xs = torch.rand(10, 2, requires_grad=False)
-        #carry_out, ys = control_flow.scan(f, init, xs)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -250,7 +247,6 @@ class TestControlFlow(TestCase):
 
         init = torch.rand(1, 2, requires_grad=True)
         xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
-        #carry_out, ys = control_flow.scan(f, init, xs)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -259,6 +255,22 @@ class TestControlFlow(TestCase):
         grad_ys = torch.ones_like(ys[0])
         grads = torch.autograd.grad((carry_out, ys[0]), (xs[0],), (grad_carry_out, grad_ys))
         expected_grads = torch.autograd.grad((expected_carry_out, expected_ys[0]), (xs[0],), (grad_carry_out, grad_ys))
+        self.assertEqual(expected_grads, grads)
+        
+    def test_scan_autograd_nested_lists(self):
+        def f(carry, x):
+            return (carry[0]+1, carry[1]+2), (x[0]*carry[0], carry[1])
+
+        init = [torch.rand(1, 2, requires_grad=True), torch.rand(1, 2, requires_grad=True)]
+        xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        carry_out, ys = scan(f, init, xs)
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+        grad_carry_out = torch.ones_like(carry_out[0])
+        grad_ys = torch.ones_like(ys[0])
+        grads = torch.autograd.grad((carry_out[0], ys[0]), (xs[0],), (grad_carry_out, grad_ys))
+        expected_grads = torch.autograd.grad((expected_carry_out[0], expected_ys[0]), (xs[0],), (grad_carry_out, grad_ys))
         self.assertEqual(expected_grads, grads)
 
 
