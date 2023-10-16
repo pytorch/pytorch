@@ -6458,6 +6458,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
 
+        class DiagonalModelWithNegativeDims(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=0, dim1=-2, dim2=-1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(
+            DiagonalModelWithNegativeDims(),
+            x,
+            additional_test_inputs=[another_x],
+            input_names=["input_1"],
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
+        )
+
         class DiagonalModelOffsetOverrun(torch.nn.Module):
             def forward(self, x):
                 return torch.diagonal(x, offset=-2), torch.diagonal(x, offset=5)

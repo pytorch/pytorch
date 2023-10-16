@@ -1,7 +1,5 @@
 #include <ATen/core/operator_name.h>
 
-#include <sstream>
-
 namespace c10 {
 
 std::string toString(const OperatorName& opName) {
