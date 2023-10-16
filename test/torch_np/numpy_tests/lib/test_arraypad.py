@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import skipIf as skipif
 
 from torch.testing._internal.common_utils import (
     run_tests,

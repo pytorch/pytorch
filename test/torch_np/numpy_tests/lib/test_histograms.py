@@ -5,7 +5,6 @@ import functools
 
 from unittest import expectedFailure as xfail, skipIf
 
-import pytest
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy import histogram, histogramdd

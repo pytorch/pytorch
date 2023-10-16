@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 # If we are going to trace through these, we should use NumPy
@@ -272,6 +273,7 @@ class TestFlag(TestCase):
         assert a.__array_interface__["data"][1] is not writeable
         assert np.asarray(MyArr()).flags.writeable is writeable
 
+    @xpassIfTorchDynamo
     def test_otherflags(self):
         assert_equal(self.a.flags.carray, True)
         assert_equal(self.a.flags["C"], True)
@@ -6761,7 +6763,7 @@ class TestWritebackIfCopy(TestCase):
         np.choose(a, choices, out=out, mode="raise")
         assert_equal(out, np.array([[10, -10, 10], [-10, 10, -10], [10, -10, 10]]))
 
-    @xfail  # (reason="XXX: ndarray.flat")
+    @xpassIfTorchDynamo  # (reason="XXX: ndarray.flat")
     def test_flatiter__array__(self):
         a = np.arange(9).reshape(3, 3)
         b = a.T.flat

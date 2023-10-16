@@ -3,19 +3,18 @@
 """Test functions for 1D array set operations.
 
 """
-from unittest import expectedFailure as xfail
 
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    subtest,
     run_tests,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
     xfailIfTorchDynamo,
+    xpassIfTorchDynamo,
 )
 
 
@@ -23,7 +22,7 @@ from torch.testing._internal.common_utils import (
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
-    from numpy import unique, in1d, isin, setdiff1d, union1d, setxor1d, intersect1d, ediff1d
+    from numpy import ediff1d, in1d, intersect1d, setdiff1d, setxor1d, union1d, unique
     from numpy.testing import assert_array_equal, assert_equal, assert_raises_regex
 
 else:
@@ -157,11 +156,14 @@ class TestSetOps(TestCase):
             (np.array([1, 2, 3], dtype=np.int64), None, np.nan, "to_end"),
             # should fail because attempting
             # to downcast to int type:
-            subtest((
-                np.array([1, 2, 3], dtype=np.int64),
-                np.array([5, 7, 2], dtype=np.float32),
-                None,
-                "to_begin",), decorators=[xfailIfTorchDynamo]
+            subtest(
+                (
+                    np.array([1, 2, 3], dtype=np.int64),
+                    np.array([5, 7, 2], dtype=np.float32),
+                    None,
+                    "to_begin",
+                ),
+                decorators=[xfailIfTorchDynamo],
             ),
             # should fail because attempting to cast
             # two special floating point values

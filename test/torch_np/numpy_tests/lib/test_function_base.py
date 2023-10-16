@@ -57,8 +57,8 @@ if TEST_WITH_TORCHDYNAMO:
         kaiser,
         meshgrid,
         sinc,
+        trim_zeros,
         unique,
-        trim_zeros
     )
     from numpy.core.numeric import normalize_axis_tuple
     from numpy.random import rand

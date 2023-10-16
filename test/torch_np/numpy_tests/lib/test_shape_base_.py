@@ -13,8 +13,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
     xfailIfTorchDynamo,
+    xpassIfTorchDynamo,
 )
 
 
