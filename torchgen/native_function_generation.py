@@ -371,8 +371,8 @@ def add_generated_native_functions(
     rs: List[NativeFunction],
     indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
 ) -> None:
-    # The main code for gnerating new NativeFunctions
-    # First we group of NaitveFunctions by schema kind,
+    # The main code for generating new NativeFunctions
+    # First we group of NativeFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for d in pre_grouped_native_functions.values():
