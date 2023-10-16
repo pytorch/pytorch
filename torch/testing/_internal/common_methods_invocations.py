@@ -13740,14 +13740,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
-                         dtypes=(torch.bfloat16,), device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
-                         dtypes=(torch.bfloat16,), device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                         dtypes=(torch.bfloat16,), device_type="cuda"),
-        ),
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
