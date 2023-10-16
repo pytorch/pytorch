@@ -172,8 +172,8 @@ struct ExtraFields<EventType::Backend> {
   at::RecordScope scope_;
   std::string name_;
   std::string backend_;
-  jit_stack_t jit_stack_;
-  jit_modules_t jit_modules_;
+  jit_stack_t jit_stack_{};
+  jit_modules_t jit_modules_{};
 };
 
 template <>

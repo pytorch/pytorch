@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <cstdint>
 #include <vector>
 
 namespace torch {
