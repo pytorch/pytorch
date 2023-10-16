@@ -9,6 +9,9 @@ from typing import Any, Dict, Set
 from unittest import mock
 
 # Types saved/loaded in configs
+# In 1-to-1 correspondance with JSON serializable types:
+# https://docs.python.org/3/library/json.html#json.JSONEncoder
+# Any derived Enum types are also allowed.
 CONFIG_TYPES = (int, float, bool, type(None), str, list, tuple, dict)
 
 
@@ -55,7 +58,7 @@ def install_config_module(module):
 
 def _check_deterministically_serializable(inp: Any):
     try:
-        dumped = json.dumps(inp)
+        _ = json.dumps(inp)
     except TypeError as e:
         raise ValueError(
             "Config needs to be deterministically serializable. Please do not use sets, python objects, "

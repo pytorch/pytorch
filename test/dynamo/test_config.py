@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 from collections import namedtuple
+from enum import Enum
 from types import ModuleType
 
 import torch
@@ -11,11 +12,12 @@ from torch._dynamo.utils import disable_cache_limit
 # NB: do NOT include this test class in test_dynamic_shapes.py
 
 
+class MyModule(ModuleType):
+    pass
+
+
 class ConfigTests(torch._dynamo.test_case.TestCase):
     def test_allowed_config_types(self):
-        class MyModule(ModuleType):
-            pass
-
         my_module = MyModule("my_module")
 
         my_module.config_1 = ["a", 1, 1.0, True]
@@ -25,14 +27,37 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.config_utils.install_config_module(my_module)
         assert all(f"config_{i+1}" in my_module._config for i in range(3))
 
+    def test_allowed_but_not_officially_supported(self):
+        class IntEnum(int, Enum):
+            RED = 1
+            GREEN = 2
+
+        class FloatEnum(float, Enum):
+            RED = 1  # serialized to 1.0
+            GREEN = 2
+
+        class StringEnum(str, Enum):
+            RED = 1  # serialized to "1"
+            GREEN = "GREEN"
+
+        class ListEnum(list, Enum):
+            RED = [1]
+            GREEN = "GREEN"  # serialized to ["G", "R", "E", "E", "N"]
+
+        my_module = MyModule("my_module")
+        my_module.config_1 = [
+            IntEnum.RED,
+            FloatEnum.GREEN,
+            StringEnum.RED,
+            ListEnum.GREEN,
+        ]
+        torch._dynamo.config_utils.install_config_module(my_module)
+
     def test_disallowed_configs(self):
         def fn(x):
             return x + 1
 
         class MyClass:
-            pass
-
-        class MyModule(ModuleType):
             pass
 
         for config in [
