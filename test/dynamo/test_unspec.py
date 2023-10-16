@@ -334,6 +334,15 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         opt_fn(x)
 
+    def test_sum_dimlist_spec(self):
+        def fn(inputs, dim):
+            return torch.sum(inputs, dim)
+
+        inputs = torch.randn(128, 5, 24, 24)
+        dim = (-1, 1, 0, 2)
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
+        self.assertEqual(compl_fn(inputs, dim), fn(inputs, dim))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
