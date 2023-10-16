@@ -1043,6 +1043,10 @@ inline double PythonArgs::toDouble(int i) {
     return py::cast<c10::SymFloat>(py::handle(args[i]))
         .guard_float(__FILE__, __LINE__);
   }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return static_cast<double>(py::cast<c10::SymInt>(py::handle(args[i]))
+                                   .guard_int(__FILE__, __LINE__));
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 
