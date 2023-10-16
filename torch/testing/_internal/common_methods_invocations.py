@@ -6446,7 +6446,7 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad, **kwargs):
                                       requires_grad=requires_grad),
                           *arguments)
 
-def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=False, **kwargs):
+def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=False, no_drop_remainder=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if list_args:
@@ -6459,8 +6459,12 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
         cases = (  # type: ignore[assignment]
             ((S, S, S), (2,)),
             ((S, S, S), (S, 1)),
-            ((S, S, S), (int(S / 2), 0, True)),
         )
+        # Gradient doesn't work if elements are dropped:
+        # Function SplitBackward0 returned an invalid gradient at index 0 - got [4, 5, 5]
+        #   but expected shape compatible with [5, 5, 5]
+        if not no_drop_remainder and not requires_grad:
+            cases = cases + (((S, S, S), (int(S / 2), 0, True)),)
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
@@ -14761,7 +14765,7 @@ op_db: List[OpInfo] = [
     # `unsafe_split` supports only `int` for split_size argument
     OpInfo('unsafe_split',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool, torch.chalf),
-           sample_inputs_func=partial(sample_inputs_split, list_args=False),
+           sample_inputs_func=partial(sample_inputs_split, list_args=False, no_drop_remainder=True),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,

@@ -2915,7 +2915,13 @@ def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
 
-def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
+def chunk(
+    a: TensorLikeType,
+    chunks: int,
+    dim: int = 0,
+    redistribute: bool = False,
+    drop_remainder: bool = False,
+) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = f"Expected at least one chunk, but got {chunks}!"
         raise ValueError(msg)
@@ -2925,13 +2931,31 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
     chunk_size = math.ceil(length / chunks)
     full_chunks = math.floor(length / chunk_size)
     tail_chunk_size = length % chunk_size
+    if drop_remainder and tail_chunk_size != 0:
+        full_chunks += 1
+        chunk_size -= 1
+        tail_chunk_size = 0
 
     result = []
-    for i in range(full_chunks):
-        result.append(narrow(a, dim, i * chunk_size, chunk_size))
+    if not redistribute or tail_chunk_size == 0:
+        for i in range(full_chunks):
+            result.append(narrow(a, dim, i * chunk_size, chunk_size))
 
-    if tail_chunk_size != 0:
-        result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
+        if tail_chunk_size != 0:
+            result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
+    else:
+        full_chunks += 1
+        chunk_size -= 1
+        extra = length - (full_chunks * chunk_size)
+        for i in range(full_chunks):
+            result.append(
+                narrow(
+                    a,
+                    dim,
+                    i * chunk_size + min(i, extra),
+                    chunk_size + (1 if i < extra else 0),
+                )
+            )
 
     return tuple(result)
 

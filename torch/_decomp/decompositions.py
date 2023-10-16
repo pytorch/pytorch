@@ -1261,7 +1261,9 @@ def unsafe_split_with_sizes(
 
 
 @register_decomposition(aten.split.Tensor)
-def split(self: Tensor, split_size: int, dim: int = 0, drop_remainder: bool = False) -> Tuple[Tensor, ...]:
+def split(
+    self: Tensor, split_size: int, dim: int = 0, drop_remainder: bool = False
+) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
     if split_size == 0:

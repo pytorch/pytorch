@@ -342,7 +342,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail_torchlib_forward_compatibility(
-        "chunk", reason="https://github.com/pytorch/pytorch/issues/110131"
+        "chunk", github_issue="110131", reason="bool redistribute, bool drop_remainder were added"
     ),
     xfail(
         "clamp",
