@@ -195,7 +195,7 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 //     - None <: Optional[T] for all T
 //     - Optional[T] == Union[T, None] for all T
 struct TORCH_API OptionalType : public UnionType {
-  static OptionalTypePtr create(TypePtr contained);
+  static OptionalTypePtr create(const TypePtr& contained);
 
   static const TypeKind Kind = TypeKind::OptionalType;
 
@@ -220,7 +220,7 @@ struct TORCH_API OptionalType : public UnionType {
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     AT_ASSERT(contained_types.size() == 1);
-    return create(std::move(contained_types[0]));
+    return create(contained_types[0]);
   }
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
@@ -236,7 +236,7 @@ struct TORCH_API OptionalType : public UnionType {
   static TypePtr get(TypePtr inner);
 
  private:
-  explicit OptionalType(TypePtr contained);
+  explicit OptionalType(const TypePtr& contained);
 
   TypePtr contained_;
 
@@ -1793,13 +1793,13 @@ TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
     bool default_to_union = false,
-    TypePtr type_hint = nullptr);
+    const TypePtr& type_hint = nullptr);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
     bool default_to_union = false,
-    TypePtr type_hint = nullptr);
+    const TypePtr& type_hint = nullptr);
 
 namespace detail {
 template <typename T>
