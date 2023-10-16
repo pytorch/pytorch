@@ -12,12 +12,12 @@ environment variable.
 
 import enum
 import functools
+import inspect
 import io
 import logging
 import sys
 import textwrap
 import traceback
-import inspect
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
 
