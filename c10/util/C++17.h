@@ -233,50 +233,6 @@ struct function_takes_identity_argument<
 #endif
 } // namespace detail
 
-// GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's
-// define it.
-namespace detail {
-class DummyClassForToString final {};
-} // namespace detail
-} // namespace guts
-} // namespace c10
-namespace std {
-// We use SFINAE to detect if std::to_string exists for a type, but that only
-// works if the function name is defined. So let's define a std::to_string for a
-// dummy type. If you're getting an error here saying that this overload doesn't
-// match your std::to_string() call, then you're calling std::to_string() but
-// should be calling c10::guts::to_string().
-inline std::string to_string(c10::guts::detail::DummyClassForToString) {
-  return "";
-}
-
-} // namespace std
-namespace c10 {
-namespace guts {
-namespace detail {
-
-template <class T, class Enable = void>
-struct to_string_ final {
-  static std::string call(T value) {
-    std::ostringstream str;
-    str << value;
-    return str.str();
-  }
-};
-// If a std::to_string exists, use that instead
-template <class T>
-struct to_string_<T, void_t<decltype(std::to_string(std::declval<T>()))>>
-    final {
-  static std::string call(T value) {
-    return std::to_string(value);
-  }
-};
-} // namespace detail
-template <class T>
-inline std::string to_string(T value) {
-  return detail::to_string_<T>::call(value);
-}
-
 } // namespace guts
 } // namespace c10
 

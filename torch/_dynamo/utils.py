@@ -17,49 +17,48 @@ import math
 import operator
 import os
 import pstats
+import subprocess
 import sys
 import textwrap
+import threading
 import time
 import types
 import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
-
-import torch._logging
-from torch._guards import detect_fake_mode  # noqa: F401
-from . import config
 
 try:
     import numpy as np
-
-    HAS_NUMPY = True
 except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
+    np = None
 
 try:
-    import torch_np
+    import torch._logging
+    import torch._numpy as tnp
+    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._logging import LazyString
+    from . import config
 
-    HAS_NUMPY_TORCH_INTEROP = True
-except ModuleNotFoundError:
-    torch_np = None
-    HAS_NUMPY_TORCH_INTEROP = False
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+    if np:
+        NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random) if HAS_NUMPY else tuple()
+        NP_TO_TNP_MODULE = {
+            np: tnp,
+            np.fft: tnp.fft,
+            np.linalg: tnp.linalg,
+            np.random: tnp.random,
+        }
+    else:
+        NP_SUPPORTED_MODULES = {}
 
-NP_TO_TORCH_NP_MODULE = (
-    {
-        np: torch_np,
-        np.fft: torch_np.fft,
-        np.linalg: torch_np.linalg,
-        np.random: torch_np.random,
-    }
-    if HAS_NUMPY_TORCH_INTEROP
-    else {}
-)
+        NP_TO_TNP_MODULE = {}
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+except ImportError:
+    pass
 
 import importlib
 
@@ -68,7 +67,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
@@ -79,8 +78,11 @@ nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
-# profiling compilation time
-compilation_metrics = collections.OrderedDict()
+# profiling compilation time by function
+compilation_time_metrics = collections.OrderedDict()
+
+# profiling compilation time by frame phase
+frame_phase_timing = collections.OrderedDict()
 
 timer_counter = itertools.count()
 
@@ -96,28 +98,47 @@ def tabulate(rows, headers):
         )
 
 
-def dynamo_profiled(func):
+def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
-        datafn = (
-            func.__name__ + f"{next(timer_counter)}.profile"
-        )  # Name the data file sensibly
+        profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
         prof = cProfile.Profile()
         prof.enable()
         retval = prof.runcall(func, *args, **kwargs)
         prof.disable()
         print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
         ps = pstats.Stats(prof)
-        ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
-        ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
-        prof.dump_stats(datafn)
+        prof.dump_stats(profile_path)
+        svg_path = profile_path.with_suffix(".svg")
+        try:
+            gprof2dot_process = subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    str(profile_path),
+                ],
+                stdout=subprocess.PIPE,
+            )
+            subprocess.run(
+                ["dot", "-Tsvg", "-o", str(svg_path)], stdin=gprof2dot_process.stdout
+            )
+            print(f"Generated SVG from profile at {str(svg_path)}")
+        except FileNotFoundError:
+            print(
+                "Failed to generate SVG from profile -- dumping stats instead."
+                "Try installing gprof2dot and dot for a better visualization"
+            )
+            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
         return retval
 
     return profile_wrapper
 
-
-frame_phase_timing = collections.OrderedDict()
 
 curr_frame = 0
 
@@ -132,6 +153,7 @@ def increment_frame():
 def reset_frame_count():
     global curr_frame
     frame_phase_timing.clear()
+    compilation_time_metrics.clear()
     curr_frame = 0
 
 
@@ -167,7 +189,7 @@ def print_time_report():
 
 
 # dynamo_timed API works as a function decorator
-# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
 # For example:
 #
@@ -182,19 +204,23 @@ def print_time_report():
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+
+
 def dynamo_timed(original_function=None, phase_name=None):
     def dynamo_timed_inner(func):
+        if config.cprofile:
+            return func
+
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
-            if key not in compilation_metrics:
-                compilation_metrics[key] = []
+            if key not in compilation_time_metrics:
+                compilation_time_metrics[key] = []
             with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
-            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-            compilation_metrics[key].append(time_spent)
+            compilation_time_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
@@ -233,8 +259,8 @@ def compile_times(repr="str", aggregate=False):
 
     if repr == "str":
         rows = [
-            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
-            for k in compilation_metrics
+            (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_time_metrics
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
@@ -242,9 +268,9 @@ def compile_times(repr="str", aggregate=False):
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
-            for v in compilation_metrics.values()
+            for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_metrics.keys())
+        headers = list(compilation_time_metrics.keys())
         return headers, values
 
 
@@ -411,59 +437,61 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    if sys.version_info < (3, 9):
-        return isinstance(value, typing._GenericAlias)
-    else:
-        return isinstance(
-            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
-        )
+    # _Final catches most of typing classes:
+    #   - Any
+    #   - Callable
+    #   - Union
+    #   ...
+    #
+    # NB: we intentionally ignore classes that inherit from Generic, since they
+    # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    return isinstance(value, typing._Final) or value is typing.Generic
 
 
 def is_numpy_int_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
-        )
-    else:
+    if not np:
         return False
+
+    return istype(
+        value,
+        (
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    )
 
 
 def is_numpy_float_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.float16,
-                np.float32,
-                np.float64,
-            ),
-        )
-    else:
+    if not np:
         return False
+
+    return istype(
+        value,
+        (
+            np.float16,
+            np.float32,
+            np.float64,
+        ),
+    )
 
 
 def is_numpy_ndarray(value):
-    if HAS_NUMPY:
-        return istype(value, np.ndarray)
-    else:
+    if not np:
         return False
+
+    return istype(value, np.ndarray)
 
 
 def istensor(obj):
     """Check of obj is a tensor"""
     tensor_list = (
         torch.Tensor,
-        torch.nn.Buffer,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
@@ -503,6 +531,23 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         ) from e
+
+
+@dataclasses.dataclass
+class CompilationMetrics:
+    frame_key: str
+    co_name: str
+    co_filename: str
+    co_firstlineno: int
+    cache_size: int
+    accumulated_cache_size: int
+    guard_count: Optional[int]
+    graph_op_count: Optional[int]
+    graph_node_count: Optional[int]
+    graph_input_count: Optional[int]
+    entire_frame_compile_time_s: Optional[float]
+    backend_compile_time_s: Optional[float]
+    fail_reason: Optional[str]
 
 
 @dataclasses.dataclass
@@ -547,7 +592,7 @@ def clone_tensor(x):
 def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
-    if isinstance(x, torch._subclasses.FakeTensor):
+    if is_fake(x):
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
@@ -983,9 +1028,14 @@ def same(
                 log_error("Accuracy failed for key name %s", k)
                 return False
         return True
-    elif isinstance(ref, torch.Tensor):
+    elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
+
+        def to_tensor(t):
+            return t if isinstance(t, torch.Tensor) else torch.tensor(t)
+
+        ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
 
         if ref.is_sparse:
             assert res.is_sparse
@@ -1033,8 +1083,20 @@ def same(
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
+                # ref unable to produce this with stable numerics in this precision, ignore
+                if math.isnan(ref_error):
+                    log.warning(
+                        "Found nan in reference. Consider running in higher precision."
+                    )
+
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 2.0
+
+                # In the case of using AMP (Automatic Mixed Precision), certain models have
+                # failed the benchmark's correctness check. However, the end-to-end model's
+                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                # Thus, it's possible that the correctness check failures for these models are
+                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
+                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
                 if (
                     fp64_ref.numel() < 1000
@@ -1069,13 +1131,6 @@ def same(
         r = ref == res
         if not r:
             log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
-        return r
-    elif isinstance(ref, float):
-        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
-        if not r:
-            log_error(
-                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
-            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality and not (
@@ -1354,17 +1409,41 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            unimplemented("guard on data-dependent symbolic int/float")
+            raise UserError(
+                UserErrorType.CONSTRAINT_VIOLATION,
+                "Tried to use data-dependent value in the subsequent computation. "
+                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
+                "You will need to explicitly give hint to the compiler. Please take a look at "
+                "constrain_as_value OR constrain_as_size APIs",
+                case_name="constrain_as_size_example",
+            )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
-            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+
+
+_current_node = threading.local()
+
+
+def get_current_node():
+    return getattr(_current_node, "value", None)
+
+
+@contextmanager
+def set_current_node(node):
+    old = get_current_node()
+    _current_node.value = node
+    try:
+        yield
+    finally:
+        _current_node.value = old
 
 
 def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
 
-    Behavior is dicatated by a node's op.
+    Behavior is dictated by a node's op.
 
     run_node is useful for extracting real values out of nodes.
     See get_real_value for more info on common usage.
@@ -1376,22 +1455,32 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise an AssertionError.
     """
     op = node.op
-    try:
-        if op == "call_function":
-            return node.target(*args, **kwargs)
-        elif op == "call_method":
-            return getattr(args[0], node.target)(*args[1:], **kwargs)
-        elif op == "call_module":
-            assert nnmodule is not None
-            return nnmodule(*args, **kwargs)
-        elif op == "get_attr":
-            return tracer.get_submodule(node.target)
-        elif op == "placeholder":
-            assert "example_value" in node.meta
-            return node.meta["example_value"]
-    except Exception as e:
-        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+
+    with set_current_node(node):
+        try:
+            if op == "call_function":
+                return node.target(*args, **kwargs)
+            elif op == "call_method":
+                return getattr(args[0], node.target)(*args[1:], **kwargs)
+            elif op == "call_module":
+                assert nnmodule is not None
+                return nnmodule(*args, **kwargs)
+            elif op == "get_attr":
+                return tracer.get_submodule(node.target)
+            elif op == "placeholder":
+                assert "example_value" in node.meta
+                return node.meta["example_value"]
+        except NotImplementedError as e:
+            # NB: mimic how wrap_fake_exception does it
+            from .exc import unimplemented
+
+            raise unimplemented(
+                f"running {op} {node.target}(*{args}, **{kwargs})"
+            ) from e
+
+        except Exception as e:
+            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
 
     raise AssertionError(op)
 
@@ -1523,7 +1612,7 @@ def tensor_always_has_static_shape(
 
     Args:
     tensor - the real tensor to evaluate, parameters force a static shape.
-    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    is_tensor - internal dynamo check, essentially "is_tensor": target_cls is TensorVariable,
     tensors not in a TensorVariable for whatever reason are forced static.
 
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
@@ -1536,16 +1625,6 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
-
-
-class LazyString:
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
 
 
 def lazy_format_graph_code(name, gm, maybe_id=None):
@@ -1657,11 +1736,11 @@ def nnmodule_has_hooks(
 
 
 def to_numpy_helper(value):
-    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.cpu().numpy()
+        return value.numpy(force=True)
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1669,8 +1748,10 @@ def to_numpy_helper(value):
 
 
 def numpy_to_tensor(value):
-    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, np.ndarray):
+        return torch.as_tensor(value)
+    if isinstance(value, tnp.ndarray):
         return value.tensor
     elif isinstance(value, (tuple, list)):
         return type(value)(numpy_to_tensor(obj) for obj in value)
@@ -1692,16 +1773,16 @@ class numpy_to_tensor_wrapper:
 
 
 def numpy_attr_wrapper(obj, name):
-    if isinstance(obj, torch_np.ndarray):
+    if isinstance(obj, tnp.ndarray):
         out = getattr(obj, name)
         return numpy_to_tensor(out)
     elif isinstance(obj, torch.Tensor):
-        out = getattr(torch_np.ndarray(obj), name)
+        out = getattr(tnp.ndarray(obj), name)
         return numpy_to_tensor(out)
 
 
 class numpy_method_wrapper:
-    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+    """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
     def __init__(self, method: str):
         self.method = method
@@ -1713,9 +1794,29 @@ class numpy_method_wrapper:
     def __call__(self, *args, **kwargs):
         obj = args[0]
         if isinstance(obj, torch.Tensor):
-            obj = torch_np.ndarray(obj)
+            obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
+class numpy_operator_wrapper:
+    """Implements dunder methods for tnp.ndarray via functions from the operator library"""
+
+    def __init__(self, op: str):
+        self.op = op
+        self.__name__ = f"wrapped_{op.__name__}"
+
+    def __repr__(self):
+        return f"<Wrapped operator <original {self.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        assert not kwargs
+
+        args = (
+            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+        )
+        out = self.op(*args)
         return numpy_to_tensor(out)
 
 
@@ -1750,7 +1851,7 @@ def defake(x):
 
 
 def is_utils_checkpoint(obj):
-    # Lazy import to avoid circular dependenices
+    # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
@@ -1760,8 +1861,8 @@ def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
-    # TODO - This is a temporary sitaution where we have two versions of
-    # checkpointing implemetation. We will converge on one and remove the other.
+    # TODO - This is a temporary situation where we have two versions of
+    # checkpointing implementation. We will converge on one and remove the other.
     activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
@@ -1779,7 +1880,7 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
+        from torch.utils._triton import has_triton
 
         compile_supported = has_triton()
     else:
@@ -2045,4 +2146,35 @@ def is_guard_failure_reporting_enabled():
     return (
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
+    )
+
+
+def get_static_address_type(t):
+    if isinstance(t, torch.Tensor):
+        return getattr(t, "_dynamo_static_input_type", None)
+
+    return None
+
+
+def is_rng_state_getter_or_setter(value):
+    getters = (
+        torch.default_generator.get_state,
+        torch.get_rng_state,
+        torch.cuda.get_rng_state,
+    )
+    setters = (
+        torch.default_generator.set_state,
+        torch.set_rng_state,
+        torch.cuda.set_rng_state,
+    )
+    return value in (*setters, *getters)
+
+
+def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables.tensor import TensorWithTFOverrideVariable
+
+    return isinstance(vt, TensorWithTFOverrideVariable) or (
+        isinstance(vt, UserDefinedObjectVariable)
+        and hasattr(vt.value, "__torch_function__")
     )

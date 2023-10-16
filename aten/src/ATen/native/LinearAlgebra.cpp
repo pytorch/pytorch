@@ -20,7 +20,7 @@
 #include <ATen/native/mkldnn/Matmul.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10/util/variant.h>
+#include <variant>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -133,6 +133,9 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#if !defined(__s390x__)
+#include <cpuinfo.h>
+#endif
 
 namespace at {
 
@@ -1313,14 +1316,60 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(      \
-            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(      \
+            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, \
             TYPE, NAME, __VA_ARGS__)
 #endif
+
+
+static inline int64_t get_mkldnn_matmul_min_dim() {
+  static auto value = [&] {
+    const int64_t default_min_dim = [&] {
+      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      // By default, it's only enabled on Neoverse V1.
+#if !defined(__s390x__)
+      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
+        return 8;
+      }
+#endif
+      return 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
+  }();
+  return value;
+}
+
+
+static inline int64_t get_mkldnn_matmul_min_size() {
+  static auto value = [&] {
+    const int64_t default_min_size = [&] {
+      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // By default, it's only enabled on Neoverse V1.
+#if !defined(__s390x__)
+      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
+        return 8 * 1024;
+      }
+#endif
+      return 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
+  }();
+  return value;
+}
+
+
+static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
+  const int64_t min_dim = get_mkldnn_matmul_min_dim();
+  const int64_t min_size = get_mkldnn_matmul_min_size();
+  return m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+}
+
 
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
@@ -1440,11 +1489,14 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
-      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
-      // We have dispatched to ACL GEMM for single precision float
-      // so do not need to dispatch to BLAS GEMM below
-      dispatched = true;
+  if (transpose_c) {
+    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+        mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+        // We have dispatched to ACL GEMM for single precision float
+        // so do not need to dispatch to BLAS GEMM below
+        dispatched = true;
+    }
   }
 #endif
 
@@ -1685,27 +1737,30 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     const auto sizes = t.sizes();
     const auto strides = t.strides();
-    return (strides[2] == 1 && strides[1] >= sizes[2])
-            || (strides[1] == 1 && strides[2] >= sizes[1]);
+    // we do not care dimension's stride if its size equals to 1
+    return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
+        (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
-  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
-    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
-    return;
+  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
+  if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
+      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+      return;
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
   } else if (at::hasMKL() && ((
             self_or_result.scalar_type() != kBFloat16 &&
+            self_or_result.scalar_type() != kHalf &&
             at::native::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)
@@ -2961,13 +3016,13 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-static Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
+static Tensor _linalg_cond_helper(const Tensor& self, std::variant<Scalar, c10::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
   inverse.masked_fill_(info > 0, INFINITY);
 
-  return c10::visit([&](auto&& ord) {
+  return std::visit([&](auto&& ord) {
     Tensor norm_self = at::linalg_matrix_norm(self, ord);
     Tensor norm_inverse = at::linalg_matrix_norm(inverse, ord);
     Tensor result = norm_self * norm_inverse;
@@ -2984,14 +3039,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
   return at::zeros(result_shape, options);
 }
 
-static void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
+static void _linalg_cond_check_ord(std::variant<Scalar, c10::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
-    Scalar* ord = c10::get_if<Scalar>(&ord_variant);
+    Scalar* ord = std::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
-    c10::string_view* ord = c10::get_if<c10::string_view>(&ord_variant);
+    c10::string_view* ord = std::get_if<c10::string_view>(&ord_variant);
     TORCH_CHECK(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
@@ -3007,7 +3062,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
 
-  c10::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -3055,7 +3110,7 @@ Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Ten
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
   squareCheckInputs(self, ("linalg.cond(ord=" + std::string(ord) + ")").c_str());
-  c10::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input

@@ -9,6 +9,7 @@ from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
+from typing_extensions import Self
 
 __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
 
@@ -148,15 +149,14 @@ class Sequential(Module):
             return ret
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
         del self[key]
         return v
 
-    def __iadd__(self, other) -> 'Sequential':
+    def __iadd__(self, other) -> Self:
         if isinstance(other, Sequential):
             offset = len(self)
             for i, module in enumerate(other):
@@ -164,8 +164,7 @@ class Sequential(Module):
             return self
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def __mul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):
@@ -184,7 +183,7 @@ class Sequential(Module):
     def __rmul__(self, other: int) -> 'Sequential':
         return self.__mul__(other)
 
-    def __imul__(self, other: int) -> 'Sequential':
+    def __imul__(self, other: int) -> Self:
         if not isinstance(other, int):
             raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
         elif (other <= 0):
@@ -316,7 +315,7 @@ class ModuleList(Module):
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
+    def __iadd__(self, modules: Iterable[Module]) -> Self:
         return self.extend(modules)
 
     def __add__(self, other: Iterable[Module]) -> 'ModuleList':
@@ -388,7 +387,7 @@ class ModuleList(Module):
         del self[key]
         return v
 
-    def extend(self, modules: Iterable[Module]) -> 'ModuleList':
+    def extend(self, modules: Iterable[Module]) -> Self:
         r"""Appends modules from a Python iterable to the end of the list.
 
         Args:
@@ -628,7 +627,7 @@ class ParameterList(Module):
     def __iter__(self) -> Iterator[Any]:
         return iter(self[i] for i in range(len(self)))
 
-    def __iadd__(self, parameters: Iterable[Any]) -> 'ParameterList':
+    def __iadd__(self, parameters: Iterable[Any]) -> Self:
         return self.extend(parameters)
 
     def __dir__(self):
@@ -647,7 +646,7 @@ class ParameterList(Module):
         self[new_idx] = value
         return self
 
-    def extend(self, values: Iterable[Any]) -> 'ParameterList':
+    def extend(self, values: Iterable[Any]) -> Self:
         """Appends values from a Python iterable to the end of the list.
 
         Args:
@@ -919,6 +918,6 @@ class ParameterDict(Module):
         copy.update(self)
         return copy
 
-    def __ior__(self, other : 'ParameterDict') -> 'ParameterDict':
+    def __ior__(self, other : 'ParameterDict') -> Self:
         self.update(other)
         return self

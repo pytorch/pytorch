@@ -77,8 +77,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(op ## _); \
   VMAP_SUPPORT(op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
-  UNARY_POINTWISE(imag);
-  UNARY_POINTWISE(real);
   UNARY_POINTWISE(view_as_real);
   VMAP_SUPPORT(view_as_complex, view_as_complex_batch_rule);
   VMAP_SUPPORT(clone, clone_batch_rule);
@@ -110,12 +108,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(expm1);
   UNARY_POINTWISE_ALL(floor);
   UNARY_POINTWISE_ALL(frac);
-  UNARY_POINTWISE(isfinite);
   UNARY_POINTWISE(isnan);
   UNARY_POINTWISE(isinf);
   UNARY_POINTWISE(isposinf);
   UNARY_POINTWISE(isneginf);
-  UNARY_POINTWISE(isreal);
   UNARY_POINTWISE_ALL(lgamma);
   UNARY_POINTWISE_ALL(log);
   UNARY_POINTWISE_ALL(log10);
@@ -175,7 +171,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(hardtanh);
   UNARY_POINTWISE_ALL(hardswish);
   UNARY_POINTWISE_ALL(leaky_relu);
-  UNARY_POINTWISE(log_sigmoid);
   UNARY_POINTWISE_ALL(relu);
   UNARY_POINTWISE_ALL(celu);
   UNARY_POINTWISE(gelu);

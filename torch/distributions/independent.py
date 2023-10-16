@@ -45,9 +45,7 @@ class Independent(Distribution):
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
             raise ValueError(
                 "Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "
-                "actual {} vs {}".format(
-                    reinterpreted_batch_ndims, len(base_distribution.batch_shape)
-                )
+                f"actual {reinterpreted_batch_ndims} vs {len(base_distribution.batch_shape)}"
             )
         shape = base_distribution.batch_shape + base_distribution.event_shape
         event_dim = reinterpreted_batch_ndims + len(base_distribution.event_shape)

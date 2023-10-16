@@ -115,7 +115,7 @@ class CheckpointWrapper(ActivationWrapper):
     def __init__(
         self,
         mod: torch.nn.Module,
-        checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+        checkpoint_impl: CheckpointImpl = CheckpointImpl.NO_REENTRANT,
         checkpoint_fn=None,
         **checkpoint_fn_kwargs,
     ):
@@ -189,7 +189,7 @@ def offload_wrapper(module: torch.nn.Module) -> torch.nn.Module:
 
 def checkpoint_wrapper(
     module: torch.nn.Module,
-    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+    checkpoint_impl: CheckpointImpl = CheckpointImpl.NO_REENTRANT,
     checkpoint_fn=None,
     **checkpoint_fn_kwargs,
 ) -> torch.nn.Module:

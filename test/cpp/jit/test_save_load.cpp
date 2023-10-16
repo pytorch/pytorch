@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/script.h>
 #include <torch/torch.h>
 
 #include "caffe2/serialize/istream_adapter.h"
@@ -316,6 +317,16 @@ TEST(TestSaveLoad, LoadWithoutDebugInfo) { // NOLINT (use =delete in gtest)
   )";
   Module m3 = torch::jit::load(ss, c10::nullopt, false);
   ASSERT_THROWS_WITH_MESSAGE(m3.run_method("exception"), error2);
+}
+
+TEST(SerializationTest, TestPickleAppend) {
+  auto data = std::vector<char>({'\x80', char(2), ']', 'K', char(2), 'a', '.'});
+
+  torch::IValue actual = torch::jit::unpickle(data.data(), data.size());
+
+  torch::IValue expected = c10::impl::GenericList(at::AnyType::get());
+  expected.toList().push_back(2);
+  ASSERT_EQ(expected, actual);
 }
 
 } // namespace jit

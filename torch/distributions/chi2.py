@@ -11,7 +11,7 @@ class Chi2(Gamma):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Chi2(torch.tensor([1.0]))
         >>> m.sample()  # Chi2 distributed with shape df=1
         tensor([ 0.1046])

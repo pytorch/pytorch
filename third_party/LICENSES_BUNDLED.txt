@@ -1,4 +1,4 @@
-The Pytorch repository and source distributions bundle several libraries that are 
+The Pytorch repository and source distributions bundle several libraries that are
 compatibly licensed.  We list these here.
 
 Name: DCGM
@@ -113,11 +113,6 @@ Name: eigen
 License: BSD-3-Clause
 Files: third_party/eigen
   For details, see: third_party/eigen/COPYING.BSD
-
-Name: enum
-License: BSD-3-Clause
-Files: third_party/python-enum/enum
-  For details, see: third_party/python-enum/enum/LICENSE
 
 Name: fbgemm
 License: BSD-3-Clause
@@ -317,11 +312,6 @@ Name: python-peachpy
 License: BSD-2-Clause
 Files: third_party/python-peachpy
   For details, see: third_party/python-peachpy/LICENSE.rst
-
-Name: python-six
-License: MIT
-Files: third_party/python-six
-  For details, see: third_party/python-six/LICENSE
 
 Name: sleef
 License: BSL-1.0

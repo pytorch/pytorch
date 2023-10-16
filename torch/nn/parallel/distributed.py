@@ -456,9 +456,12 @@ class DistributedDataParallel(Module, Joinable):
 
     .. note::
         DistributedDataParallel currently offers limited support for gradient
-        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
-        expected when there are no unused parameters in the model and each layer
-        is checkpointed at most once (make sure you are not passing
+        checkpointing with :meth:`torch.utils.checkpoint`.
+        If the checkpoint is done with use_reentrant=False (recommended), DDP
+        will work as expected without any limitations.
+        If, however, the checkpoint is done with use_reentrant=True (the default),
+        DDP will work as expected when there are no unused parameters in the model
+        and each layer is checkpointed at most once (make sure you are not passing
         `find_unused_parameters=True` to DDP). We currently do not support the
         case where a layer is checkpointed multiple times, or when there unused
         parameters in the checkpointed model.
@@ -697,9 +700,7 @@ class DistributedDataParallel(Module, Joinable):
             self._log_and_throw(
                 ValueError,
                 "DistributedDataParallel's input module must be on "
-                "the same type of devices, but input module parameters locate in {}.".format(
-                    distinct_device_types
-                ),
+                f"the same type of devices, but input module parameters locate in {distinct_device_types}.",
             )
 
         self.device_type = list(distinct_device_types)[0]
@@ -926,6 +927,7 @@ class DistributedDataParallel(Module, Joinable):
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
         if any(hasattr(p, "_in_backward_optimizers") for p in self._module_parameters):
+            torch._C._log_api_usage_once("ddp.optimizer_in_backward")
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
