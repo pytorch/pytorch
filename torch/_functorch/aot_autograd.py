@@ -3909,7 +3909,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # properly handle this case instead of erroring: we would need to retrace the backward graph,
             # since we might produce an entirely different trace if our grad_outputs are subclass or not.
             assert len(CompiledFunction.metadata.output_types) == num_flat_bw_args_with_grads
-            grad_output_types = [type(x) for x in all_args[-num_flat_bw_args_with_grads - len(rng_args):]]
+            grad_output_types = [type(x) for x in all_args[-num_flat_bw_args_with_grads:]]
             # In general, we can add more asserts/guards here for when we partitioned
             # with incorrect assumptions about the grad_outputs.
             # Normalize FakeTensor -> torch.Tensor
@@ -3924,12 +3924,17 @@ Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
 Got grad_output types: {str(grad_output_types)}"""
 
             # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
-            if CompiledFunction.maybe_subclass_metadata is not None:
-                all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
-
-            # We must do this after subclass desugaring because inputs to inductor have to be contiguous
             tangents_start_idx = len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
             tangents_end_idx = len(all_args) - len(rng_args)
+
+            if CompiledFunction.maybe_subclass_metadata is not None:
+                # Get the number of tangents after unwrapping
+                len_tangents = len(unwrap_tensor_subclasses(all_args[tangents_start_idx: tangents_end_idx], is_joint_structure=False))
+                all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
+                tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
+
+            # Make the tangents contiguous. Note that we must do this after subclass desugaring
+            # because inputs to inductor have to be contiguous
             all_args = [
                 t.contiguous() if tangents_start_idx <= i < tangents_end_idx else t
                 for i, t in enumerate(all_args)
