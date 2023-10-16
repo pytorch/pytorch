@@ -367,6 +367,7 @@ bool RemoveTensorMutation(
 
 static const std::unordered_set<Symbol> activation_ops = []() {
   std::unordered_set<Symbol> target_ops;
+  target_ops.reserve(activation_type_promotion_mapping.size());
   for (const auto& iter : activation_type_promotion_mapping) {
     std::string name = std::string(iter.first.toQualString()) + "_";
     target_ops.insert(Symbol::fromQualString(name));

@@ -17,8 +17,9 @@ TEST(irangeTest, range_test) {
 
 TEST(irangeTest, end_test) {
   std::vector<int> test_vec;
-  test_vec.reserve(5);
-  for (const auto i : c10::irange(5)) {
+  constexpr unsigned short SIZE = 5;
+  test_vec.reserve(SIZE);
+  for (const auto i : c10::irange(SIZE)) {
     test_vec.push_back(i);
   }
   const std::vector<int> correct = {{0, 1, 2, 3, 4}};

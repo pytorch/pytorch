@@ -370,6 +370,7 @@ std::string format_invalid_args(
   error_msg += " received an invalid combination of arguments - ";
 
   Py_ssize_t num_args = PyTuple_Size(given_args);
+  args.reserve(num_args);
   for (const auto i : c10::irange(num_args)) {
     PyObject* arg = PyTuple_GET_ITEM(given_args, i);
     args.push_back(arg);

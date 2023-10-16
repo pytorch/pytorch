@@ -56,6 +56,7 @@ TEST(VmapTest, TestBatchedTensor) {
 // returns {{lvl=0,dim=0}, {lvl=1,dim=1}, ..., {lvl=kVmapNumLevels-1,dim=kVmapNumLevels-1}};
 static BatchDims maxBatchDimsAtFront() {
   BatchDims result;
+  result.reserve(kVmapNumLevels);
   for (const auto lvl : c10::irange(kVmapNumLevels)) {
     result.emplace_back(lvl, /*dim=*/lvl);
   }

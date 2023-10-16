@@ -746,7 +746,7 @@ BlockState::BlockState(Block* block)
 SegmentState::SegmentState(Block* head) {
   TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
   is_small = head->pool->is_small;
-  blocks.reserve(head->event_count);constexpr
+  blocks.reserve(head->event_count);
 
   for (Block* curr = head; curr != nullptr; curr = curr->next) {
     blocks.emplace_back(curr);

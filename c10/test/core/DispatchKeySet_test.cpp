@@ -388,9 +388,9 @@ TEST(DispatchKeySet, FailAtEndIterator) {
 
 TEST(DispatchKeySet, TestBackendComponentToString) {
   std::unordered_set<std::string> seen_strings;
-  for (int64_t i = 0;
-       i <= static_cast<int64_t>(BackendComponent::EndOfBackendKeys);
-       i++) {
+  const int64_t SIZE = static_cast<int64_t>(BackendComponent::EndOfBackendKeys);
+  seen_strings.reserve(SIZE + 1);
+  for (int64_t i = 0; i <= SIZE; i++) {
     auto k = static_cast<BackendComponent>(i);
     auto res = std::string(toString(k));
     ASSERT_FALSE(res == "UNKNOWN_BACKEND_BIT");
@@ -409,7 +409,9 @@ TEST(DispatchKeySet, TestEndOfRuntimeBackendKeysAccurate) {
 
 TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
   std::unordered_set<std::string> seen_strings;
-  for (int i = 0; i <= static_cast<int>(DispatchKey::EndOfAliasKeys); i++) {
+  const int64_t SIZE = static_cast<int>(DispatchKey::EndOfAliasKeys);
+  seen_strings.reserve(SIZE + 1);
+  for (int i = 0; i <= SIZE; i++) {
     auto k = static_cast<DispatchKey>(i);
     // These synthetic keys never actually get used and don't need
     // to be printed

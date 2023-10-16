@@ -210,6 +210,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // don't completely alias would break the assumptions of the uniqueness check
   // in Module::named_parameters().
   std::unordered_set<void*> unique_data_ptrs;
+  unique_data_ptrs.reserve(flat_weights_.size());
   for (const auto& p : flat_weights_) {
     unique_data_ptrs.emplace(p.data_ptr());
   }

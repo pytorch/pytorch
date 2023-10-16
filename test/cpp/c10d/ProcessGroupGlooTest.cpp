@@ -516,7 +516,7 @@ void testBarrier(const std::string& path) {
 }
 
 void testMonitoredBarrier(const std::string& path) {
-  const auto size = 2;
+  constexpr unsigned short size = 2;
   auto tests = CollectiveTest::initialize(path, size);
   // Non-failure case: all ranks pass the blocking monitored barrier.
   auto runMonitoredBarrier = [&](int i) {
@@ -563,6 +563,7 @@ void testSequenceNumInit(const std::string& path) {
   }
 
   std::unordered_set<uint64_t> nums;
+  nums.reserve(size);
   for (const auto i : c10::irange(size)) {
     auto seqNum = tests[i].getProcessGroup().getSequenceNumberForGroup();
     nums.insert(seqNum);

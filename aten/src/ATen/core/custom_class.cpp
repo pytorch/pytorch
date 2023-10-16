@@ -88,6 +88,7 @@ at::ClassTypePtr getCustomClass(const std::string& class_name) {
 
 const std::unordered_set<std::string> getAllCustomClassesNames() {
   std::unordered_set<std::string> ret;
+  ret.reserve(customClasses().size());
   for (const auto& kv : customClasses()) {
     ret.insert(kv.first);
   }

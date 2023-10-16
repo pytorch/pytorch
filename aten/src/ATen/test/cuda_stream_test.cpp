@@ -172,13 +172,16 @@ TEST(TestStream, CUDAGuardTest) {
 // Streampool Round Robin
 TEST(TestStream, StreamPoolTest) {
   if (!at::cuda::is_available()) return;
+  constexpr unsigned short SIZE = 200;
   std::vector<at::cuda::CUDAStream> streams{};
-  for (const auto i : c10::irange(200)) {
+  streams.reserve(SIZE);
+  for (const auto i : c10::irange(SIZE)) {
     (void)i;
     streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
+  stream_set.reserve(streams.size());
   bool hasDuplicates = false;
   for (const auto i: c10::irange(streams.size())) {
     cudaStream_t cuda_stream = streams[i];

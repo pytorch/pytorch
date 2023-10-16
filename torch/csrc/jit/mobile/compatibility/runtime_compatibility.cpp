@@ -77,6 +77,7 @@ RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
 
 std::unordered_set<std::string> _get_mobile_supported_types() {
   std::unordered_set<std::string> supported_types;
+  supported_types.reserve(c10::DynamicTypeFactory::basePythonTypes().size() + 2);
   for (const auto& it : c10::DynamicTypeFactory::basePythonTypes()) {
     supported_types.insert(it.first);
   }
