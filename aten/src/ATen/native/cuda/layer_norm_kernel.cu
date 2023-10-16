@@ -416,10 +416,12 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T* dX_i = dX + bIdx * N;
 
   using vec_t = aligned_vector<T, vec_size>;
-  const vec_t* X_i_vec = reinterpret_cast<const vec_t*>(X_i);
-  const vec_t* dY_i_vec = reinterpret_cast<const vec_t*>(dY_i);
-  const vec_t* gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
-  vec_t gamma_vec_reg;
+  const vec_t* X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
+  const vec_t* dY_i_vec_ptr = reinterpret_cast<const vec_t*>(dY_i);
+  const vec_t* gamma_vec_ptr = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+  vec_t* dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
+
+  vec_t X_i_vec_reg, dY_i_vec_reg, gamma_vec_reg, dX_i_vec_reg;
   for (int k = 0; k < vec_size; ++k) {
     gamma_vec_reg.val[k] = T(1);
   }
@@ -429,13 +431,16 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   unsigned int n_vec_to_read = N / blockDim.x / vec_size;
   for (unsigned int i = 0; i < n_vec_to_read; ++i) {
     if (gamma != nullptr) {
-      gamma_vec_reg = gamma_vec[l];
+      gamma_vec_reg = gamma_vec_ptr[l];
     }
+
+    X_i_vec_reg = X_i_vec_ptr[l];
+    dY_i_vec_reg = dY_i_vec_ptr[l];
 
     for (int k = 0; k < vec_size; ++k) {
       const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      const T_ACC c_h = static_cast<T_ACC>(X_i_vec[l].val[k]);
-      const T_ACC c_loss = static_cast<T_ACC>(dY_i_vec[l].val[k]);
+      const T_ACC c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const T_ACC c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
       stats_x1 += c_loss * gamma_val;
       stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
@@ -466,19 +471,20 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   T_ACC fH = N;
   T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
-  vec_t* dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
-  vec_t dX_i_vec_reg;
 
   l = threadIdx.x;
   for (unsigned int i = 0; i < n_vec_to_read; ++i) {
     if (gamma != nullptr) {
-      gamma_vec_reg = gamma_vec[l];
+      gamma_vec_reg = gamma_vec_ptr[l];
     }
+
+    X_i_vec_reg = X_i_vec_ptr[l];
+    dY_i_vec_reg = dY_i_vec_ptr[l];
 
     for (int k = 0; k < vec_size; ++k) {
       const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      const T_ACC x = static_cast<T_ACC>(X_i_vec[l].val[k]);
-      const T_ACC dy = static_cast<T_ACC>(dY_i_vec[l].val[k]);
+      const T_ACC x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const T_ACC dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
 
       T_ACC f_grad_input = fH * gamma_val * dy;
       f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
