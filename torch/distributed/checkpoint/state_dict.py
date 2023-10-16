@@ -630,8 +630,9 @@ def _unflatten_model_state_dict(
         return {}
 
     if isinstance(next(iter(state_dict.keys())), nn.Module):
+        cast_state_dict = cast(Dict[nn.Module, Dict[str, ValueType]], state_dict)
         new_state_dict: Dict[str, ValueType] = {}
-        for submodule, sub_state_dict in state_dict.items():
+        for submodule, sub_state_dict in cast_state_dict.items():
             for name, m in model.named_modules():
                 if m != submodule:
                     continue
