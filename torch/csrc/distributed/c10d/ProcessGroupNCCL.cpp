@@ -878,7 +878,7 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
 }
 
-ProcessGroupNCCL::~ProcessGroupNCCL() {
+void ProcessGroupNCCL::close() {
   terminateProcessGroup_.store(true);
 
   workMetaListCV_.notify_one();
@@ -892,6 +892,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // Abort all NCCL Communicators on Process Group Destruction
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+}
+
+ProcessGroupNCCL::~ProcessGroupNCCL() {
+  close();
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {

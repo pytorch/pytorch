@@ -1170,6 +1170,24 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
             thread.join()
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_close_pg(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        t = torch.rand(10, 10, device=device)
+        # First allreduce to initialize state.
+        dist.all_reduce(t)
+
+        # Close the process group.
+        c10d.distributed_c10d._get_default_group()._get_backend(torch.device(device))._close()
+
+        # Try another collective.
+        with self.assertRaises(dist.DistBackendError):
+            dist.all_reduce(t)
+
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
