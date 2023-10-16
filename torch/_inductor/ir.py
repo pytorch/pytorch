@@ -5869,6 +5869,8 @@ class Wait(ExternKernelAlloc):
         return False
 
     def codegen(self, wrapper):
+        from .codegen.wrapper import ReuseLine
+
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
@@ -5879,7 +5881,7 @@ class Wait(ExternKernelAlloc):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(f"{self.get_name()} = {input_collective}")
+        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self))
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
