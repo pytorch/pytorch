@@ -1747,9 +1747,9 @@ def forward(self, x_1):
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_impl_device_cuda(self):
-        self._test_impl_device("foo1", "default", "cuda")
-        self._test_impl_device("foo2", ["cpu"], "cuda")
-        self._test_impl_device("foo3", ["cpu", "cuda"], "cuda")
+        self._test_impl_device("foo4", "default", "cuda")
+        self._test_impl_device("foo5", ["cpu"], "cuda")
+        self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
 
     def test_impl_device_function(self):
         lib = self.lib()
@@ -1760,7 +1760,7 @@ def forward(self, x_1):
             y = torch.from_numpy(np.sin(x_np))
             return y.to(device=x.device)
 
-        torch.library.impl_device(f"{self.test_ns}::foo", "default", f)
+        torch.library.impl_device(f"{self.test_ns}::foo", "default", f, lib=lib)
         x = torch.randn(3)
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
