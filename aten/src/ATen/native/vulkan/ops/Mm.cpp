@@ -18,6 +18,16 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
     return convert(weight_arg);
   }
 
+  bool quantized = false;
+  switch (weight_arg.scalar_type()) {
+    case at::kQInt8:
+    case at::kQUInt8:
+      quantized = true;
+      break;
+    default:
+      break;
+  }
+
   api::Context* const context = api::context();
 
   const Tensor weight = weight_arg.contiguous();
@@ -28,7 +38,6 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
         "Vulkan Linear not usable! "
         "Reason: Unable to perform weight packing with batch; the input tensor of a batch of matrices should contain 3 dimensions: batch, height, width.");
   }
-  const float* const src_weight_ptr = weight.data_ptr<float>();
 
   /* Source */
   const int64_t src_kb_sz =
@@ -37,14 +46,11 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
                                       : w_sizes[Layout::Parameter::width];
   const int64_t src_kh_sz = use_batch ? w_sizes[Layout::BatchMatrices::height]
                                       : w_sizes[Layout::Parameter::height];
-  const int64_t src_matrix_sz = src_kw_sz * src_kh_sz;
 
   /* Destination */
   const int64_t dst_kb_sz = src_kb_sz;
   const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
   const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
-  const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
-  const int64_t dst_matrix_sz = dst_plane_sz * 4;
 
   vTensor v_weight{
       context,
@@ -56,31 +62,33 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
       },
       weight_arg.scalar_type(),
   };
-
-  api::StorageBuffer staging(context, at::kFloat, v_weight.gpu_numel());
-  {
-    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
-
-    float* dst_weight_ptr = mapping.template data<float>();
-
-    memset(dst_weight_ptr, 0, v_weight.nbytes());
-
-    for (const auto src_b : c10::irange(src_kb_sz)) {
-      for (const auto src_h : c10::irange(src_kh_sz)) {
-        for (const auto src_w : c10::irange(src_kw_sz)) {
-          int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
-          int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
-          memcpy(
-              dst_weight_ptr + src_b * dst_matrix_sz +
-                  dst_plane * dst_plane_sz + dst_index,
-              src_weight_ptr + src_b * src_matrix_sz + src_h * src_kw_sz +
-                  src_w,
-              sizeof(float));
-        }
-      }
-    }
+  if (quantized) {
+    v_weight.set_is_quantized();
+    v_weight.set_scale(weight_arg.q_scale());
+    v_weight.set_zero_point(weight_arg.q_zero_point());
   }
-  utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
+
+  if (quantized) {
+    stage_pack_weights<int8_t>(
+        context,
+        v_weight,
+        weight,
+        src_kb_sz,
+        src_kh_sz,
+        src_kw_sz,
+        dst_kh_sz,
+        dst_kw_sz);
+  } else {
+    stage_pack_weights<float>(
+        context,
+        v_weight,
+        weight,
+        src_kb_sz,
+        src_kh_sz,
+        src_kw_sz,
+        dst_kh_sz,
+        dst_kw_sz);
+  }
   return v_weight;
 }
 
@@ -274,13 +282,14 @@ bool available(
       (weight.size(Layout::Parameter::width) > 0) &&
       ((weight.device().is_cpu()) ||
        (c10::DeviceType::Vulkan == weight.device().type())) &&
-      (kFloat == weight.scalar_type()) && !weight.requires_grad();
+      (kFloat == weight.scalar_type() || kQInt8 == weight.scalar_type()) &&
+      !weight.requires_grad();
   if (!weight_available) {
     return false;
   }
 
   const bool bias_available =
-      ((bias && bias->defined())
+      ((bias && bias.has_value() && bias->defined())
            ? ((bias->ndimension() > 0) &&
               ((bias->device().is_cpu()) ||
                (c10::DeviceType::Vulkan == bias->device().type())) &&
@@ -314,9 +323,12 @@ bool usable(
   if (use_batch) {
     return usable_check_with_batch(input, unpacked_weight_sizes);
   }
+  const auto v_input = convert(input);
   return (2 == input.ndimension()) &&
       (c10::DeviceType::Vulkan == input.device().type()) &&
-      (kFloat == input.scalar_type()) &&
+      ((kFloat == input.scalar_type()) ||
+       (v_input.is_quantized() &&
+        (kQUInt8 == input.scalar_type() || kQInt8 == input.scalar_type()))) &&
       (input.size(Layout::Parameter::width) ==
        unpacked_weight_sizes[Layout::Parameter::height]) &&
       !input.requires_grad() && true;
@@ -336,7 +348,10 @@ Tensor run_addmm_context(
     const Tensor& input_arg,
     const float alpha,
     const float beta,
-    const c10::intrusive_ptr<LinearPackedContext>& linear_context) {
+    const c10::intrusive_ptr<LinearPackedContext>& linear_context,
+    bool quantized,
+    double output_scale,
+    int64_t output_zero_point) {
   api::Context* const context = api::context();
 
   const Tensor input_arg_2d =
@@ -363,6 +378,11 @@ Tensor run_addmm_context(
       "combination with the provided weight and bias tensors are unsupported by "
       "Vulkan impl.");
 
+  TORCH_CHECK(
+      (!quantized ||
+       (packed_v_weight.is_quantized() && v_input.is_quantized())),
+      "run_addmm_context called for quantized version with unquantized input");
+
   vTensor v_output{
       context,
       {
@@ -372,31 +392,91 @@ Tensor run_addmm_context(
       input_arg.scalar_type(),
   };
 
-  if (bias_defined) {
-    const struct {
-      uvec3 size;
-      int32_t K;
-      uvec3 bias_size;
-      int32_t _;
-      vec2 multiplier;
-    } block{
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
-        packed_v_bias.extents(),
-        0,
-        {
-            alpha,
-            beta,
-        },
-    };
+  if (quantized) {
+    v_output.set_is_quantized();
+    v_output.set_scale(output_scale);
+    v_output.set_zero_point(output_zero_point);
+  }
 
-    api::UniformParamsBuffer params(context, block);
+  if (bias_defined) {
+    api::UniformParamsBuffer params;
+    api::ShaderInfo compute_shader;
+
+    if (quantized) {
+      compute_shader = (kQInt8 == input_arg.scalar_type())
+          ? VK_KERNEL(quantized_addmm_qint8)
+          : VK_KERNEL(quantized_addmm_quint8);
+      const struct {
+        uvec3 size;
+        int32_t K;
+        uvec3 um1_size;
+        int32_t K1;
+        uvec3 um2_size;
+        int32_t K2;
+        uvec3 ut_size;
+        int32_t K3;
+        vec2 multiplier;
+        vec2 input_scales;
+        float out_scale;
+        float _1;
+        ivec2 input_zero_points;
+        int32_t out_zero_point;
+        int32_t _2;
+      } block{
+          v_output.extents(),
+          safe_downcast<int32_t>(
+              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          v_input.extents(),
+          0u,
+          packed_v_weight.extents(),
+          0u,
+          packed_v_bias.extents(),
+          0u,
+          {
+              alpha,
+              beta,
+          },
+          {
+              safe_downcast<float>(v_input.get_scale()),
+              safe_downcast<float>(packed_v_weight.get_scale()),
+          },
+          safe_downcast<float>(output_scale),
+          0.0f,
+          {
+              safe_downcast<int32_t>(v_input.get_zero_point()),
+              safe_downcast<int32_t>(packed_v_weight.get_zero_point()),
+          },
+          safe_downcast<int32_t>(output_zero_point),
+          0u,
+      };
+      params = api::UniformParamsBuffer(context, block);
+    } else {
+      compute_shader = VK_KERNEL(addmm);
+      const struct {
+        uvec3 size;
+        int32_t K;
+        uvec3 bias_size;
+        int32_t _;
+        vec2 multiplier;
+      } block{
+          v_output.extents(),
+          safe_downcast<int32_t>(
+              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          packed_v_bias.extents(),
+          0,
+          {
+              alpha,
+              beta,
+          },
+      };
+      params = api::UniformParamsBuffer(context, block);
+    }
+
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
         // shader descriptor
-        VK_KERNEL(addmm),
+        compute_shader,
         // pipeline barrier
         pipeline_barrier,
         // global work group size
@@ -422,21 +502,65 @@ Tensor run_addmm_context(
         // params buffer
         params.buffer());
   } else {
-    const struct {
-      uvec3 size;
-      int32_t K;
-    } block_no_bias{
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
-    };
+    api::UniformParamsBuffer params;
+    api::ShaderInfo compute_shader;
+    if (quantized) {
+      const struct {
+        uvec3 size;
+        int32_t K;
+        uvec3 um1_size;
+        int32_t K1;
+        uvec3 um2_size;
+        int32_t K2;
+        vec2 input_scales;
+        float out_scale;
+        float _1;
+        ivec2 input_zero_points;
+        int32_t out_zero_point;
+        int32_t _2;
+      } block_no_bias{
+          v_output.extents(),
+          safe_downcast<int32_t>(
+              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          v_input.extents(),
+          0u,
+          packed_v_weight.extents(),
+          0u,
+          {
+              safe_downcast<float>(v_input.get_scale()),
+              safe_downcast<float>(packed_v_weight.get_scale()),
+          },
+          safe_downcast<float>(output_scale),
+          0.0f,
+          {
+              safe_downcast<int32_t>(v_input.get_zero_point()),
+              safe_downcast<int32_t>(packed_v_weight.get_zero_point()),
+          },
+          safe_downcast<int32_t>(output_zero_point),
+          0u,
+      };
+      params = api::UniformParamsBuffer(context, block_no_bias);
+      compute_shader = (kQInt8 == input_arg.scalar_type())
+          ? VK_KERNEL(quantized_mm_qint8)
+          : VK_KERNEL(quantized_mm_quint8);
+    } else {
+      const struct {
+        uvec3 size;
+        int32_t K;
+      } block_no_bias{
+          v_output.extents(),
+          safe_downcast<int32_t>(
+              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+      };
+      params = api::UniformParamsBuffer(context, block_no_bias);
+      compute_shader = VK_KERNEL(mm);
+    }
 
-    api::UniformParamsBuffer params(context, block_no_bias);
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
         // shader descriptor
-        VK_KERNEL(mm),
+        compute_shader,
         // pipeline barrier
         pipeline_barrier,
         // global work group size
@@ -632,7 +756,10 @@ Tensor addmm(
       alpha.to<float>(),
       beta.to<float>(),
       c10::make_intrusive<LinearPackedContext>(
-          LinearPackedContext(weight, bias)));
+          LinearPackedContext(weight, bias)),
+      false,
+      0,
+      0);
 }
 
 Tensor mm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
@@ -641,7 +768,10 @@ Tensor mm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
       1.0f,
       1.0f,
       c10::make_intrusive<LinearPackedContext>(
-          LinearPackedContext(mat2_arg, c10::optional<Tensor>())));
+          LinearPackedContext(mat2_arg, c10::optional<Tensor>())),
+      false,
+      0,
+      0);
 }
 
 Tensor bmm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
@@ -720,7 +850,22 @@ c10::intrusive_ptr<LinearPackedContext> create_linear_context(
 Tensor run_linear_context(
     const Tensor& input,
     const c10::intrusive_ptr<LinearPackedContext>& linear_context) {
-  return run_addmm_context(input, 1.0f, 1.0f, linear_context);
+  return run_addmm_context(input, 1.0f, 1.0f, linear_context, false, 0, 0);
+}
+
+Tensor run_qlinear_context(
+    const Tensor& input_arg,
+    double output_scale,
+    int64_t output_zero_point,
+    const c10::intrusive_ptr<LinearPackedContext>& linear_context) {
+  return run_addmm_context(
+      input_arg,
+      1.0f,
+      1.0f,
+      linear_context,
+      true,
+      output_scale,
+      output_zero_point);
 }
 
 } // namespace ops

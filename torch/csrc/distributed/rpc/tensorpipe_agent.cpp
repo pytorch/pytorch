@@ -7,7 +7,9 @@
 #include <utility>
 
 #include <fmt/format.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
+C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
