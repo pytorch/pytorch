@@ -27,6 +27,7 @@ import functools
 import types
 import warnings
 from typing import Dict, Set, List, Any, Callable, Iterable, Type, Tuple
+from functools import wraps
 import contextlib
 
 import torch
@@ -47,10 +48,40 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
-    "get_buffer",
 ]
 
+
+def _disable_user_warnings(
+        func: Callable, regex: str = '.*is deprecated, please use.*', module: str = 'torch') -> Callable:
+    """
+    Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
+    given ``regex`` pattern.
+
+    Arguments
+    ---------
+    func : function
+        Function to disable the warnings for.
+    regex : str
+        A regex pattern compilable by ``re.compile``. This is used to match the ``UserWarning`` message.
+    module : str
+        The python module to which the filtering should be restricted.
+
+    Returns
+    -------
+    function
+        The wrapped function.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message=regex, module=module)
+            return func(*args, **kwargs)
+    return wrapper
+
+
 @functools.lru_cache(None)
+@_disable_user_warnings
 def get_ignored_functions() -> Set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
@@ -147,6 +178,11 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
+        torch.export.dynamic_dim,
+        torch.export.export,
+        torch.export.load,
+        torch.export.register_dataclass,
+        torch.export.save,
         torch.eye,
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
@@ -186,6 +222,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_min,
         torch.sym_not,
         torch.sym_constrain_range,
+        torch.sym_constrain_range_for_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -258,6 +295,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_vital,
         torch.read_vitals,
         torch.vmap,
+        torch.cond,
         torch.frombuffer,
         torch.asarray,
         torch._functional_sym_constrain_range,
@@ -347,6 +385,7 @@ def get_default_nowrap_functions() -> Set[Callable]:
 
 
 @functools.lru_cache(None)
+@_disable_user_warnings
 def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
@@ -1095,6 +1134,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
+        torch.unravel_index: lambda indices, shape: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
         torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -1183,6 +1223,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.mT.__get__: lambda self: -1,
         Tensor.mH.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
+        Tensor._post_accumulate_grad_hooks.__get__: lambda self: -1,
         Tensor._base.__get__: lambda self: -1,
         Tensor._cdata.__get__: lambda self: -1,
         Tensor.grad.__get__: lambda self: -1,
@@ -1204,6 +1245,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
         Tensor.is_mps.__get__: lambda self: -1,
+        Tensor.is_mtia.__get__: lambda self: -1,
         Tensor.is_nested.__get__: lambda self: -1,
         Tensor.is_ort.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
@@ -1260,6 +1302,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.dense_dim: lambda self: -1,
         Tensor.diagonal_scatter: lambda self, src, offset=0, dim1=0, dim2=1: -1,
         Tensor.dim: lambda self: -1,
+        Tensor.dim_order: lambda self: -1,
         Tensor.double: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cdouble: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.element_size: lambda self: -1,
@@ -1306,6 +1349,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.record_stream: lambda self, stream: -1,
         Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
+        Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,
         Tensor.rename: lambda self, name: -1,
         Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
@@ -1555,9 +1599,9 @@ def handle_torch_function(
 
     func_name = f'{public_api.__module__}.{public_api.__name__}'
     msg = (
-        "no implementation found for '{}' on types that implement "
-        '__torch_function__: {}'
-    ).format(func_name, [type(arg) for arg in overloaded_args])
+        f"no implementation found for '{func_name}' on types that implement "
+        f'__torch_function__: {[type(arg) for arg in overloaded_args]}'
+    )
     if _is_torch_function_mode_enabled():
         msg += f" nor in mode {_get_current_function_mode()}"
     raise TypeError(msg)
@@ -1686,6 +1730,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
             overridable_funcs[namespace].append(func)
     return overridable_funcs, index
 
+@_disable_user_warnings
 def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
@@ -1697,6 +1742,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """
     return _get_overridable_functions()[0]
 
+@_disable_user_warnings
 def resolve_name(f):
     """Get a human readable string name for a function passed to
     __torch_function__
@@ -1723,6 +1769,7 @@ def _get_tensor_methods() -> Set[Callable]:
     methods = set(overridable_funcs[torch.Tensor])
     return methods
 
+@_disable_user_warnings
 def is_tensor_method_or_property(func: Callable) -> bool:
     """
     Returns True if the function passed in is a handler for a
@@ -1781,7 +1828,7 @@ def is_tensor_like(inp):
     >>> is_tensor_like(TensorLike())
     True
     """
-    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")
 
 class TorchFunctionMode:
     """
@@ -1883,13 +1930,3 @@ def enable_reentrant_dispatch():
             yield
         finally:
             pass
-
-def get_buffer(tensor_subclass, data, prefix):
-    import ctypes
-    assert prefix in {"stride", "size", "sym_size"}
-    buffer_name = f"_{prefix}_buffer"
-    if not hasattr(tensor_subclass, buffer_name):
-        SizeType = ctypes.c_longlong * len(data)
-        setattr(tensor_subclass, buffer_name, SizeType(*data))
-    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
-    return (ptr, len(data))

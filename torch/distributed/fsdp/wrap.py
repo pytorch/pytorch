@@ -209,6 +209,12 @@ class ModuleWrapPolicy(_Policy):
                 target_module_to_kwargs[module] = copy.copy(root_kwargs)
         return target_module_to_kwargs
 
+    def __call__(self, module, recurse, *args, **kwargs):
+        # nonwrapped_numel is not used.
+        return _module_wrap_policy(
+            module, recurse, nonwrapped_numel=-1, module_classes=self._module_classes
+        )
+
     def __repr__(self) -> str:
         return super().__repr__() + f"({self._module_classes_str})"
 

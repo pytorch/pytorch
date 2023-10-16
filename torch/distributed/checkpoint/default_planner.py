@@ -11,7 +11,6 @@ from typing import List, Tuple, Dict, Any, Union, cast
 import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 
 
@@ -52,7 +51,7 @@ from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.checkpoint._traverse import set_element
 
-logger: logging.Logger = logging.getLogger(__file__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -294,7 +293,7 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (ShardedTensor)) or is_coordinator:
+        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)

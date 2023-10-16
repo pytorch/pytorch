@@ -288,9 +288,7 @@ class PruningContainer(BasePruningMethod):
         elif method is not None and self._tensor_name != method._tensor_name:
             raise ValueError(
                 "Can only add pruning methods acting on "
-                "the parameter named '{}' to PruningContainer {}.".format(
-                    self._tensor_name, self
-                )
+                f"the parameter named '{self._tensor_name}' to PruningContainer {self}."
                 + f" Found '{method._tensor_name}'"
             )
         # if all checks passed, add to _pruning_methods tuple
@@ -1092,9 +1090,7 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
     if method.PRUNING_TYPE != "unstructured":
         raise TypeError(
             'Only "unstructured" PRUNING_TYPE supported for '
-            "the `pruning_method`. Found method {} of type {}".format(
-                pruning_method, method.PRUNING_TYPE
-            )
+            f"the `pruning_method`. Found method {pruning_method} of type {method.PRUNING_TYPE}"
         )
 
     container.add_pruning_method(method)
@@ -1280,7 +1276,7 @@ def _validate_structured_pruning(t):
         raise ValueError(
             "Structured pruning can only be applied to "
             "multidimensional tensors. Found tensor of shape "
-            "{} with {} dims".format(shape, len(shape))
+            f"{shape} with {len(shape)} dims"
         )
 
 

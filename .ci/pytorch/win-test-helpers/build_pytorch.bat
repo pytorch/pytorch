@@ -128,6 +128,7 @@ python -c "import os, glob; os.system('python -mpip install --no-index --no-deps
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
     python tools/stats/export_test_times.py
     copy /Y ".pytorch-test-times.json" "%PYTORCH_FINAL_PACKAGE_DIR%"
+    copy /Y ".pytorch-test-file-ratings.json" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
     :: Also save build/.ninja_log as an artifact
     copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"

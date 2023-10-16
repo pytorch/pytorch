@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include <iostream>
+#include <ostream>
 
 enum {
   A_UNDEFINED = 0x0,
