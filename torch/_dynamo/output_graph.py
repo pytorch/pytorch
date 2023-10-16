@@ -56,6 +56,7 @@ from .current_scope_id import enter_new_scope
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
+    SkipFrame,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -1048,6 +1049,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
+        except SkipFrame as e:
+            # The backend compiler has requested that we skip the frame, instead of
+            # aborting execution.
+            raise e
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__

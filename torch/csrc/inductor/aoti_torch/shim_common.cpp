@@ -183,12 +183,18 @@ AOTITorchError aoti_torch_empty_strided(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
-    c10::Device device = c10_device(device_type, device_index);
-    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
-        static_cast<c10::ScalarType>(dtype));
-    at::Tensor* new_tensor =
-        new at::Tensor(at::empty_strided(sizes, strides, options));
-    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+    if (c10::DeviceType(device_type) == c10::DeviceType::CPU) {
+      *ret_new_tensor = tensor_pointer_to_tensor_handle(
+          new at::Tensor(at::detail::empty_strided_cpu(
+              sizes, strides, static_cast<c10::ScalarType>(dtype))));
+    } else {
+      c10::Device device = c10_device(device_type, device_index);
+      c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+          static_cast<c10::ScalarType>(dtype));
+      at::Tensor* new_tensor =
+          new at::Tensor(at::empty_strided(sizes, strides, options));
+      *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+    }
   });
 }
 
@@ -288,6 +294,16 @@ AOTITorchError aoti_torch_tensor_copy_(
     at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
     at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
     dst_tensor->copy_(*src_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_assign_tensors(
+    AtenTensorHandle src,
+    AtenTensorHandle dst) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
+    *dst_tensor = *src_tensor;
   });
 }
 
