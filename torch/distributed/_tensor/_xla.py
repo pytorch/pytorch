@@ -1,4 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import os
 from functools import wraps
@@ -52,6 +51,20 @@ def with_xla(func: Callable) -> Callable:
 
 @with_xla
 def convert_to_xla_mesh(dt_mesh: DeviceMesh) -> "Mesh":
+    """
+    Convert DTensor `dt_mesh` to XLAShardedTensor `partition_spec`.
+
+    Example (1x4 logical device mesh topology):
+      ```
+      dt_mesh = DeviceMesh("xla", [[1, 2, 3, 4]])
+      dt_mesh.mesh.shape
+      >> torch.Size([1, 4])
+
+      mesh = convert_to_xla_mesh(dt_mesh)
+      mesh_shape
+      >> [1, 4]
+      ```
+    """
     assert dt_mesh.size() == xr.global_runtime_device_count()
     return Mesh(
         dt_mesh.mesh.flatten(), list(dt_mesh.mesh.size()), dt_mesh.mesh_dim_names
@@ -60,22 +73,37 @@ def convert_to_xla_mesh(dt_mesh: DeviceMesh) -> "Mesh":
 
 @with_xla
 def convert_to_xla_partition_spec(
-    tensor: torch.Tensor, placement_spec: Sequence[Placement]
+    tensor: torch.Tensor, placements: Sequence[Placement]
 ) -> Tuple[Union[Tuple, int, None]]:
     """
-    Transform DTensor `placement_spec` into XLAShardedTensor `partitoin_spec`.
-    This supports Placement type Shard and Replicate, and Partial type is restricted
-    as it is only applicable to the intermediary results for aggregation. Note that
-    this notion is different from PyTorch/XLA SPMD's partial replication scheme.
+    Convert DTensor `placements` to XLAShardedTensor `partitoin_spec`.
+    This supports Shard and Replicate Placement types.
+
+    Example:
+      ```
+      # Mesh partitioning, 1/4-th of the input with replicated overlaps.
+      # The first input tensor dimension is sharded across the second mesh
+      # dimension, and the rest is replicated over the first mesh dimension.
+      t = torch.randn(4, 8, 8)
+      dt_mesh = DeviceMesh("xla", torch.arange(8).reshape(2,4))
+      placements = [Replicate(), Shard(0)]
+      my_dtensor = distribute_tensor(t, dt_mesh, placements)
+
+      # `placements = [Replicate(), Shard(0)]` describes sharding per mesh dim,
+      # and this is equivalent to `partition_spec = (1, None, None)` which is
+      # sharding per input tensor dimension.
+      partition_spec = convert_to_xla_partition_spec(t, placements)
+      >> (1, None, None)
+      ```
     """
     # per tensor dimension sharding
     sharding_spec = [None] * len(tensor.shape)
-    for mesh_idx, spec in enumerate(placement_spec):
-        if spec.is_shard:  # type:ignore[truthy-function]
+    for mesh_idx, spec in enumerate(placements):
+        if spec.is_shard():  # type:ignore[truthy-function]
             # mesh_idx to tensor_idx (spec.dim)
             tensor_idx = spec.dim  # type:ignore[attr-defined]
             sharding_spec[tensor_idx] = mesh_idx  # type:ignore[call-overload]
-        elif spec.is_replicate:
+        elif spec.is_replicate():
             # spec.dim is already set to None by default
             continue
         else:
@@ -109,6 +137,13 @@ def xla_distribute_tensor(
 
     Returns:
         A :class:`XLAShardedTensor` object
+
+    .. note:: We return a XLAShardedTensor with a global view and access to local shards.
+    The successive ops would be programmed as if on a single-device and without calling
+    any explicit collective ops. This is different from returning a DTensor with
+    local shard. The actual sharded computation on the sharding annotated tensor
+    happens lazily, is transparent to the user. In the future, we will introduce
+    a new DTensor type for this kind of programming-mode (single-controller) and return.
     """
     # get default device mesh if there's nothing specified
     dt_mesh = device_mesh or mesh_resources.get_current_mesh()
