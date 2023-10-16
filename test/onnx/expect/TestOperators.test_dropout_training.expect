@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Dropout_1"
-    name: "Constant_0"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -17,7 +17,7 @@ graph {
   }
   node {
     output: "onnx::Dropout_2"
-    name: "Constant_1"
+    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -34,13 +34,13 @@ graph {
     input: "onnx::Dropout_2"
     output: "onnx::ReduceMax_3"
     output: "4"
-    name: "Dropout_2"
+    name: "Dropout_4"
     op_type: "Dropout"
   }
   node {
     input: "onnx::ReduceMax_3"
     output: "5"
-    name: "ReduceMax_3"
+    name: "ReduceMax_5"
     op_type: "ReduceMax"
     attribute {
       name: "keepdims"

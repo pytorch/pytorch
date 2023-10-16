@@ -95,6 +95,17 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     return True
 
 
+def _maybe_get_pytype(t):
+    if t is torch.SymFloat:
+        return float
+    elif t is torch.SymInt:
+        return int
+    elif t is torch.SymBool:
+        return bool
+    else:
+        return t
+
+
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
 def compare_tensor_meta(
@@ -1003,9 +1014,10 @@ def get_higher_type(a: type, b: type) -> type:
 
     The types are ordered bool -> int -> float -> complex.
     """
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
     # Type checking
-    assert a in _ordered_types
-    assert b in _ordered_types
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
 
     if a is b:
         return a
@@ -1104,17 +1116,13 @@ def is_weakly_lesser_type(a: type, b: type) -> bool:
 
     The comparison is determined by the following type ordering: bool, int, float, complex.
     """
-    ordered_types = (
-        bool,
-        int,
-        float,
-        complex,
-    )
 
-    assert a in ordered_types
-    assert b in ordered_types
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
 
-    for typ in ordered_types:
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
+
+    for typ in _ordered_types:
         if a == typ:
             return True
         if b == typ:

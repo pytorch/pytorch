@@ -72,8 +72,10 @@ class GroupLinearFusion(GroupFusion):
             and len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
-            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
-            for shape in input_shape + weight_shape
+            and all(
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                for shape in input_shape + weight_shape
+            )
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
@@ -83,8 +85,10 @@ class GroupLinearFusion(GroupFusion):
             len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
-            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
-            for shape in input_shape + weight_shape
+            and all(
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                for shape in input_shape + weight_shape
+            )
         )
 
     def match(self, node: torch.fx.Node) -> Optional[Tuple[str, bool]]:
