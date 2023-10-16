@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Slice_13"
-    name: "Constant_0"
+    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -18,7 +18,7 @@ graph {
   }
   node {
     output: "onnx::Slice_14"
-    name: "Constant_1"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -32,7 +32,7 @@ graph {
   }
   node {
     output: "onnx::Slice_15"
-    name: "Constant_2"
+    name: "Constant_5"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -50,7 +50,7 @@ graph {
     input: "onnx::Slice_15"
     input: "onnx::Slice_13"
     output: "11"
-    name: "Slice_3"
+    name: "Slice_6"
     op_type: "Slice"
   }
   name: "main_graph"
