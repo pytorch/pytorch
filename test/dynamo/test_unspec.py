@@ -343,6 +343,16 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, dim), fn(inputs, dim))
 
+    def test_exponential(self):
+        def fn(inputs, op_inputs_dict):
+            res = inputs.exponential_(**op_inputs_dict)
+            return res
+
+        inputs = torch.randn(2, 3, 4)
+        op_inputs_dict = {"lambd": 10, "generator": None}
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
+        self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
