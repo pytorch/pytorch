@@ -1,10 +1,11 @@
 import contextlib
 import dataclasses
 import functools
-import itertools
 import logging
 import sys
+import time
 import warnings
+from itertools import count
 
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
@@ -22,7 +23,7 @@ from torch._dynamo import (
 )
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
-from torch._inductor.codecache import code_hash, CompiledFxGraph
+from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._ops import OpOverload
@@ -323,6 +324,8 @@ def compile_fx_inner(
         cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     # Inputs to fx_codegen_and_compile
+    # Anything that affects codegen should go here, so if the signature
+    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
     graph_args = [gm, example_inputs]
     graph_kwargs = {
         "cudagraphs": cudagraphs,
@@ -337,13 +340,18 @@ def compile_fx_inner(
         "extern_node_serializer": extern_node_serializer,
     }
 
-    compiled_graph = fx_codegen_and_compile(
-        *graph_args, **graph_kwargs  # type: ignore[arg-type]
-    )
+    start = time.time()
 
-    # isinstance is redundant since we also check aot_mode, but it is needed to make linter happy
-    if aot_mode or isinstance(compiled_graph, str):
-        return compiled_graph
+    if config.fx_graph_cache and not aot_mode:
+        compiled_graph = FxGraphCache.load(
+            fx_codegen_and_compile, graph_args, graph_kwargs
+        )
+    else:
+        compiled_graph = fx_codegen_and_compile(
+            *graph_args, **graph_kwargs  # type: ignore[arg-type]
+        )
+
+    log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     if cudagraphs:
         # output args are tuple of first argument
@@ -548,6 +556,7 @@ def fx_codegen_and_compile(
                         )
                     else:
                         context.output_strides.append(None)
+
             compiled_fn = graph.compile_to_fn()
 
             if V.aot_compilation is True:
@@ -565,6 +574,7 @@ def fx_codegen_and_compile(
                 device_idxs=graph.device_idxs,
                 mutated_inputs=graph.mutated_inputs,
                 mutated_input_idxs=set(graph.mutated_input_idxs),
+                constants=graph.constants,
             )
     return compiled_graph
 
@@ -864,7 +874,7 @@ def compile_fx_aot(
         return compiled_lib_path
 
 
-_graph_counter = itertools.count(0)
+_graph_counter = count(0)
 
 
 def fw_compiler_freezing(
@@ -979,6 +989,14 @@ def compile_fx(
                     if node.op == "placeholder"
                 ]
                 if all(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi.device != i.device:
+                            raise ValueError(
+                                f"Device mismatch between fake input and example input at position #{idx}: "
+                                f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                "make sure torch.export() and torch.aot_compile() run on the same device."
+                            )
                     inputs_ = fake_inputs
             return compile_fx(
                 model_,

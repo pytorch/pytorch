@@ -10,17 +10,17 @@ static void deleteTHManagedMapAllocator(void* ptr) {
   delete static_cast<THManagedMapAllocator*>(ptr);
 }
 
-c10::DataPtr THManagedMapAllocator::makeDataPtr(
+at::DataPtr THManagedMapAllocator::makeDataPtr(
     const char* manager_handle,
     const char* filename,
     int flags,
     size_t size) {
   auto* context =
       new THManagedMapAllocator(manager_handle, filename, flags, size);
-  return {context->data(), context, &deleteTHManagedMapAllocator, c10::kCPU};
+  return {context->data(), context, &deleteTHManagedMapAllocator, at::kCPU};
 }
 
 THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(
-    const c10::DataPtr& dptr) {
+    const at::DataPtr& dptr) {
   return dptr.cast_context<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
 }

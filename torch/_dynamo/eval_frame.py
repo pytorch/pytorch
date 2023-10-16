@@ -389,6 +389,15 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
+            if torch.jit.is_tracing():
+                if config.error_on_nested_jit_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to torch.jit.trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn(*args, **kwargs)
+
             on_enter()
             prior = set_eval_frame(callback)
             backend_cache_manager = backend_cache_wrapper(self.callback)
