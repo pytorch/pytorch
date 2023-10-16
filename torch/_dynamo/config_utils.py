@@ -58,9 +58,9 @@ def _check_deterministically_serializable(inp: Any):
         dumped = json.dumps(inp)
     except TypeError as e:
         raise ValueError(
-            "Config needs to be deterministically serializable. Please do not use sets, "
-            "python objects, or functions. Instead of sets, use lists. "
-            "Instead of functions, use strings representing the function."
+            "Config needs to be deterministically serializable. Please do not use sets, python objects, "
+            "or functions. Further, bytestrings and complex numbers are also forbidden. "
+            "Instead of sets, use lists. Instead of functions, use strings representing the function."
             "(e.g. 'torch._utils.is_compiling')."
         ) from e
 
