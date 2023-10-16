@@ -1311,9 +1311,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
+            cst_names = V.graph.constants.keys()
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
-                    if output in self.cached_thread_locals:
+                    if output in self.cached_thread_locals or output in cst_names:
                         self.wrapper_call.writeline(
                             f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
                         )
