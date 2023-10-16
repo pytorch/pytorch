@@ -617,20 +617,20 @@ class PrepareModuleInput(ParallelStyle):
             None.
 
         Example::
-        >>> # xdoctest: +SKIP(failing)
-        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
-        >>> ...
-        >>> parallelize_plan = {
-        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor
-        >>>                                     # and and redistributed to Replicated DTensor.
-        >>>     ...
-        >>> }
-        >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan=parallelize_plan,
-        >>> )
-        >>> ...
+            >>> # xdoctest: +SKIP(failing)
+            >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+            >>> ...
+            >>> parallelize_plan = {
+            >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor
+            >>>                                     # and and redistributed to Replicated DTensor.
+            >>>     ...
+            >>> }
+            >>> parallelize_module(
+            >>>     module=block, # this can be a submodule or module
+            >>>     ...,
+            >>>     parallelize_plan=parallelize_plan,
+            >>> )
+            >>> ...
         """
         super().__init__(
             input_layouts=input_layouts,
@@ -656,20 +656,20 @@ class PrepareModuleOutput(ParallelStyle):
     a no-op. Otherwise, it will throw an error.
 
     Example::
-    >>> # xdoctest: +SKIP(failing)
-    >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
-    >>> ...
-    >>> parallelize_plan = {
-    >>>     "submodule": PrepareModuleOutput(),   # The output of submodule will be converted to Replicated DTensor
-    >>>                                           # if it's not a DTensor, then redistributed to Sharded local tensor
-    >>>     ...
-    >>> }
-    >>> parallelize_module(
-    >>>     module=block, # this can be a submodule or module
-    >>>     ...,
-    >>>     parallelize_plan=parallelize_plan,
-    >>> )
-    >>> ...
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
+        >>> ...
+        >>> parallelize_plan = {
+        >>>     "submodule": PrepareModuleOutput(),   # The output of submodule will be converted to Replicated DTensor
+        >>>                                           # if it's not a DTensor, then redistributed to Sharded local tensor
+        >>>     ...
+        >>> }
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan=parallelize_plan,
+        >>> )
+        >>> ...
     """
 
     def __init__(
