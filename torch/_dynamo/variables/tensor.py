@@ -1075,7 +1075,7 @@ class NumpyNdarrayVariable(TensorVariable):
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         from ..utils import numpy_method_wrapper
 
-        if name in ["__len__", "size"]:
+        if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
         proxy = tx.output.create_proxy(
