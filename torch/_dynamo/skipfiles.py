@@ -185,11 +185,15 @@ FILE_INLINELIST = {
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
+    "torch.distributions",
+    "torch.fx._pytree",
     "torch.nn.modules.container",
     "torch.optim._functional",
     "torch.random",
     "torch.utils._content_store",
+    "torch.utils._contextlib",
     "torch.utils._foreach_utils",
+    "torch.utils._pytree",
 }
 
 
@@ -303,8 +307,7 @@ class SkipResult:
     reason: Optional[str]
 
 
-# TODO(ybliang): This is a temp function, we should consolidate this with check_file.
-def _check_file_inner(filename, allow_torch=False):
+def check_file(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -313,11 +316,10 @@ def _check_file_inner(filename, allow_torch=False):
             False,
             "inlined according skipfiles.FILE_INLINELIST",
         )
-    # TODO(ybliang): the is_torch check should be consolidate with is_torch_inline_allowed
-    if allow_torch and is_torch(filename):
+    if allow_torch and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
-            "inlined according skipfiles.is_torch",
+            "inlined according skipfiles.SUBMODULE_INLINELIST",
         )
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
         return SkipResult(
@@ -328,17 +330,6 @@ def _check_file_inner(filename, allow_torch=False):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
-
-
-def check_file(filename, allow_torch=False, extra_check=False):
-    result = _check_file_inner(filename, allow_torch)
-    if extra_check and result.skipped and is_torch_inline_allowed(filename):
-        return SkipResult(
-            False,
-            "inlined according skipfiles.is_torch_inline_allowed returning True",
-        )
-    else:
-        return result
 
 
 """
@@ -369,7 +360,7 @@ There are mainly three call sites of check/check_verbose:
 """
 
 
-def check_verbose(obj, allow_torch=False, extra_check=False):
+def check_verbose(obj, allow_torch=False):
     if isinstance(
         obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
@@ -387,11 +378,11 @@ def check_verbose(obj, allow_torch=False, extra_check=False):
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
         )
-    return check_file(filename, allow_torch, extra_check)
+    return check_file(filename, allow_torch)
 
 
-def check(obj, allow_torch=False, extra_check=False):
-    return check_verbose(obj, allow_torch, extra_check).skipped
+def check(obj, allow_torch=False):
+    return check_verbose(obj, allow_torch).skipped
 
 
 # skip common third party libs
