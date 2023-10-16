@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import logging
+import os
 import sys
 import time
 import warnings
@@ -352,6 +353,9 @@ def compile_fx_inner(
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    if aot_mode:
+        return compiled_graph
 
     if cudagraphs:
         # output args are tuple of first argument
@@ -868,9 +872,9 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
-        assert isinstance(
-            compiled_lib_path, str
-        ), "AOTInductor compilation result should be the path to the generated shared library"
+        assert os.path.exists(
+            compiled_lib_path
+        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
         return compiled_lib_path
 
 
