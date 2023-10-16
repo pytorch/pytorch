@@ -16,3 +16,8 @@ def index(iterator, item, start=0, end=-1):
             return i
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")
+
+
+def repeat(item, count):
+    for i in range(count):
+        yield item

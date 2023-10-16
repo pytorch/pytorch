@@ -551,7 +551,9 @@ def _traceable_collectives_source(fn):
     assert fn in valid_values
     inner_name = fn.__name__
     path_source = AttrSource(
-        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
+        base=AttrSource(
+            base=GlobalSource(global_name="__import_torch"), member="distributed"
+        ),
         member="_functional_collectives",
     )
     return AttrSource(path_source, inner_name)
@@ -634,10 +636,17 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.original:
             return self.original
         else:
+
+            def get_val(v):
+                if isinstance(v, variables.UserDefinedObjectVariable):
+                    return v.value
+                else:
+                    return v.as_python_constant()
+
             return functools.partial(
                 self.func.fn,
-                *[arg.as_python_constant for arg in self.args],
-                **{k: v.as_python_constant() for k, v in self.keywords.items()},
+                *[get_val(arg) for arg in self.args],
+                **{k: get_val(v) for k, v in self.keywords.items()},
             )
 
 

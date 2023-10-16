@@ -2,8 +2,8 @@
 from typing import Dict, Union
 
 import torch
-import torch.nn as nn
 import torch.distributed._tensor.random as random
+import torch.nn as nn
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,
@@ -15,11 +15,13 @@ from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh, _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
     ParallelStyle,
+    PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
 )
 
@@ -80,13 +82,14 @@ def parallelize_module(  # type: ignore[return]
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     # instantiate a TP RNG state tracker if it's not there
-    if (
-        is_rng_supported_mesh(device_mesh) and
-        not isinstance(random._rng_tracker, TensorParallelRNGTracker)
+    if is_rng_supported_mesh(device_mesh) and not isinstance(
+        random._rng_tracker, TensorParallelRNGTracker
     ):
         random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
         # TODO: we should allow user to pass in the default seed from a config
-        random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
+        random._rng_tracker._manual_seed(
+            device_mesh, base_seed=1234, tp_dim=tp_mesh_dim
+        )
         # By default we execute random ops in non-tensor-parallel region. If users want
         # to execute in tensor-parallel region, they can manually set this field to True
         # after parallelizing the model.
@@ -94,11 +97,20 @@ def parallelize_module(  # type: ignore[return]
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
+    else:
+        _validate_tp_mesh_dim(device_mesh)
+
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
         if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
+        elif isinstance(parallelize_plan, PrepareModuleInput):
+            module.register_forward_pre_hook(lambda _, inputs: parallelize_plan._prepare_input(inputs, device_mesh))  # type: ignore[misc, call-arg]
+            return module
+        elif isinstance(parallelize_plan, PrepareModuleOutput):
+            module.register_forward_hook(lambda _, _inputs, outputs: parallelize_plan._prepare_output(outputs, device_mesh))  # type: ignore[misc, call-arg]
+            return module
         # PairwiseParallel
         if _is_mlp_for_pairwise_parallel(module):
             return _parallelize_mlp(module, device_mesh, parallelize_plan)

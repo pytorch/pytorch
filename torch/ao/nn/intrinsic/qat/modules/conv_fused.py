@@ -338,6 +338,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
         if cls._FLOAT_BN_MODULE:  # type: ignore[attr-defined]
             # fuse bn into conv
+            assert self.bn.running_var is not None and self.bn.running_mean is not None
             conv.weight, conv.bias = fuse_conv_bn_weights(
                 conv.weight,
                 conv.bias,

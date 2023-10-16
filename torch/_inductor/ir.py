@@ -45,6 +45,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
@@ -1717,6 +1718,13 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
+        unbacked_symbols_in_sizes = False
+        if (
+            len(free_unbacked_symbols(old_size)) > 0
+            or len(free_unbacked_symbols(new_size)) > 0
+        ):
+            unbacked_symbols_in_sizes = True
+
         if 0 in new_size:
 
             def fake_reindex(index):
@@ -1724,7 +1732,11 @@ class View(GenericView):
 
             return cls(x, list(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x):
+        elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
+            if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
+                # realize x; otherwise, the dynamic_reshape_indexer below will fail
+                # due to the size_hint's inability to process unbacked SymInts
+                x.realize()
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -1889,7 +1901,7 @@ class ReinterpretView(BaseView):
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
         return V.graph.wrapper_code.codegen_reinterpret_view(
-            self.get_name(),
+            self.data,
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
@@ -3385,21 +3397,22 @@ class ExternKernel(InputsKernel):
         )
 
     def codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            if V.graph.cpp_wrapper:
-                # TODO: use native_functions.yaml as the ground truth
+        if V.graph.cpp_wrapper:
+            # FIXME: we should unconditionally fill self.kwargs with missing default values
+            # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
+            if self.kwargs:
                 assert (
                     self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel has to be provided"
-                for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    v = self.get_kwargs_value(arg_name)
-                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
-            else:
-                kwargs = [
-                    f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
-                    for k, v in self.kwargs.items()
-                ]
+                ), "ordered_kwargs_for_cpp_kernel is missing"
+            kwargs = []
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                v = self.get_kwargs_value(arg_name)
+                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+        else:
+            kwargs = [
+                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
+                for k, v in self.kwargs.items()
+            ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -3801,10 +3814,12 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
         assert isinstance(
             kernel,
             (
                 torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
                 torch._ops.HigherOrderOperator,
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
@@ -3816,17 +3831,19 @@ class FallbackKernel(ExternKernelAlloc):
                 else kernel.__name__
             )
             if V.graph.cpp_wrapper:
-                assert isinstance(kernel, torch._ops.OpOverload)
-                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                self.kernel = (
-                    f"at::{op_base_name}"
-                    if kernel._overloadname == "default"
-                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                )
-                schema = kernel._schema
+                if isinstance(kernel, torch._ops.OpOverload):
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.kernel = (
+                        f"at::_ops::{kernel.__name__.replace('.default', '')}::call"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+                else:
+                    self.kernel = f"at::{op_base_name}"
             else:
                 self.kernel = f"aten.{op_base_name}"
 
@@ -3947,6 +3964,18 @@ class FallbackKernel(ExternKernelAlloc):
             return devices[0]
         return None
 
+    def has_side_effects(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return get_schema_info(self.op_overload).is_mutable()
+
+    def has_aliasing(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return torch._inductor.utils.is_view(self.op_overload)
+
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
     # and run it with a host side proxy executor to address the ABI problem
@@ -3960,7 +3989,7 @@ class FallbackKernel(ExternKernelAlloc):
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
 
-        serializer = GraphModuleSerializer(None, None, None)
+        serializer = GraphModuleSerializer(None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
@@ -4057,6 +4086,15 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
+
+        def tensor_to_layout(output: torch.Tensor):
+            return FixedLayout(
+                output.device,
+                output.dtype,
+                convert_shape_to_inductor(output.size()),
+                convert_shape_to_inductor(output.stride()),
+            )
+
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -4074,12 +4112,7 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
-                    FixedLayout(
-                        output.device,
-                        output.dtype,
-                        convert_shape_to_inductor(output.size()),
-                        convert_shape_to_inductor(output.stride()),
-                    ),
+                    tensor_to_layout(output),
                     packed,
                     indices,
                 )
@@ -4146,6 +4179,12 @@ class MultiOutput(ExternKernel):
 
     def should_allocate(self):
         return False
+
+    def has_aliasing(self):
+        return any(
+            isinstance(inp, FallbackKernel) and inp.has_aliasing()
+            for inp in self.inputs
+        )
 
 
 def _prepare_convolution_fusion_create(
