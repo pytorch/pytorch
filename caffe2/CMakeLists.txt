@@ -864,6 +864,8 @@ if(USE_PRECOMPILED_HEADERS)
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   # Exclude some files from using PCH
   set_source_files_properties(
+      # Not built with OpenMP, so PCH is invalid
+      ${Torch_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
       # Builds with incompatible compiler flags
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}
@@ -1685,6 +1687,14 @@ if(BUILD_TEST)
           target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
+          endif()
+          if(USE_ASAN)
+            if(TARGET Sanitizer::address)
+              target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::address)
+            endif()
+            if(TARGET Sanitizer::undefined)
+              target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
+            endif()
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")

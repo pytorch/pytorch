@@ -297,6 +297,9 @@ class GraphEncoder {
   unsigned long long int GetGraphProtoSize(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
+      bool add_node_names,
+      bool use_external_data_format,
+      const std::string& onnx_file_path,
       const std::map<std::string, at::Tensor>& initializers =
           std::map<std::string, at::Tensor>());
 
@@ -525,8 +528,13 @@ GraphEncoder::GraphEncoder(
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
   if (!use_external_data_format &&
-      GetGraphProtoSize(model_proto_->mutable_graph(), graph, initializers) >
-          INT_MAX) {
+      GetGraphProtoSize(
+          model_proto_->mutable_graph(),
+          graph,
+          add_node_names,
+          use_external_data_format,
+          onnx_file_path,
+          initializers) > INT_MAX) {
     GRAPH_DEBUG(
         "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
     use_external_data_format = true;
@@ -844,7 +852,13 @@ void GraphEncoder::AddInitializersIntoGraphProto(
 unsigned long long int GraphEncoder::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
+    bool add_node_names,
+    bool use_external_data_format,
+    const std::string& onnx_file_path,
     const std::map<std::string, at::Tensor>& initializers) {
+  // Model size = sum(size(initializers)) + sum(size(onnx_constant_nodes))
+
+  // Add up all Initializers
   onnx::GraphProto graph_proto_copy = onnx::GraphProto(*graph_proto);
   unsigned long long int size = graph_proto_copy.ByteSizeLong();
   for (auto input : graph->inputs()) {
@@ -863,6 +877,30 @@ unsigned long long int GraphEncoder::GetGraphProtoSize(
     // All we actually need is its size.
     size += tensor_proto->ByteSizeLong();
     size += tensor.element_size() * tensor.numel();
+  }
+
+  // Add up all onnx::Constant nodes that are Tensors
+  for (const auto& node : graph->nodes()) {
+    if (node->kind() == ::c10::onnx::Constant &&
+        node->hasAttribute(attr::value) &&
+        node->kindOf(attr::value) == AttributeKind::t) {
+      at::Tensor tensor = node->t(attr::value);
+
+      // Don't actually copy the buffer into n_proto since that is expensive.
+      // All we actually need is its size.
+      auto* n_proto = graph_proto_copy.add_node();
+      EncodeNode(
+          &graph_proto_copy,
+          n_proto,
+          node,
+          add_node_names,
+          use_external_data_format,
+          onnx_file_path);
+
+      // Calculate the size of the tensor in bytes
+      size += n_proto->ByteSizeLong();
+      size += tensor.element_size() * tensor.numel();
+    }
   }
   return size;
 }

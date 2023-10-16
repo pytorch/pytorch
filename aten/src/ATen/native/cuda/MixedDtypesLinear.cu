@@ -64,7 +64,7 @@ mixed_dtypes_linear_cutlass(
   constexpr auto ElementsPerAccessA = 128 / cutlass::sizeof_bits<ElementInputA>::value;
   constexpr auto ElementsPerAccessB = 128 / cutlass::sizeof_bits<ElementInputB>::value;
   constexpr auto ElementsPerAccessC = ElementsPerAccessA;
-  constexpr auto Stages = 4;
+  constexpr auto Stages = 3;
   constexpr auto SplitKFactor = 1; // Wrong outputs if !=1, even if
                                    // GemmFpAIntB instantiated with
                                    // SplitKSerial set to false.
