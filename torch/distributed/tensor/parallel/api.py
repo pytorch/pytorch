@@ -71,7 +71,7 @@ def parallelize_module(  # type: ignore[return]
         >>>
         >>> # Define the module.
         >>> m = Model(...)
-        >>> m = parallelize_module(m, PairwiseParallel())
+        >>> m = parallelize_module(m, ColwiseParallel())
         >>>
 
     .. warning::
