@@ -355,3 +355,22 @@ class TestStateDict(FSDPTest):
             return orig_model, orig_optim, copy_optim, model_copy, optim_copy
 
         self._test_save_load(init_model_optim)
+
+    @skip_if_lt_x_gpu(1)
+    def test_strict(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        model_state_dict, _ = state_dict(model)
+        key = next(iter(model_state_dict.keys()))
+        model_state_dict["abc"] = torch.zeros(10)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
+            load_state_dict(model, model_state_dict=model_state_dict)
+        model_state_dict.pop("abc")
+        model_state_dict.pop(key)
+        load_state_dict(
+            model,
+            model_state_dict=model_state_dict,
+            options=StateDictOptions(strict=False),
+        )
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            load_state_dict(model, model_state_dict=model_state_dict)
