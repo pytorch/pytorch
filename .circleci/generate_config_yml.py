@@ -10,8 +10,6 @@ import shutil
 import sys
 from collections import namedtuple
 
-import cimodel.data.simple.anaconda_prune_defintions
-
 import cimodel.data.simple.docker_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_ios
@@ -144,7 +142,6 @@ def gen_build_workflows_tree():
     build_workflows_functions = [
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
-        cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
     build_jobs.extend(

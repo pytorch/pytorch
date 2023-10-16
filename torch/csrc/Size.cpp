@@ -38,7 +38,7 @@ PyObject* THPSize_New(const torch::autograd::Variable& var) {
   return self.release();
 }
 
-PyObject* THPSize_NewFromSizes(int dim, const int64_t* sizes) {
+PyObject* THPSize_NewFromSizes(int64_t dim, const int64_t* sizes) {
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
   if (!self)
     throw python_error();
@@ -49,23 +49,17 @@ PyObject* THPSize_NewFromSizes(int dim, const int64_t* sizes) {
 PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
   auto sym_sizes = self_.sym_sizes();
 
-  auto ret = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, sym_sizes.size()));
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(
+      &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
   if (!ret)
     throw python_error();
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto si = sym_sizes[i];
-    if (auto m = si.maybe_as_int()) {
-      if (torch::jit::tracer::isTracing()) {
-        PyObject* py_size_tensor =
-            THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
-        if (!py_size_tensor)
-          throw python_error();
-        PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
-      } else {
-        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*m));
-      }
-    } else {
+    if (si.is_symbolic()) {
+      // First check for actual symbolic values.
+      // Reason: so that we don't replace it by its integer replacement
+      // implicitly.
       TORCH_CHECK(
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
@@ -73,6 +67,18 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       if (!py_symint)
         throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    } else {
+      // Otherwise, we know that it is an actual integer value.
+      auto m = si.maybe_as_int();
+      if (torch::jit::tracer::isTracing()) {
+        PyObject* py_size_tensor = THPVariable_Wrap(
+            torch::jit::tracer::getSizeOf(self_, static_cast<int64_t>(i)));
+        if (!py_size_tensor)
+          throw python_error();
+        PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
+      } else {
+        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*m));
+      }
     }
   }
   return ret.release();

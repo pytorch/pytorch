@@ -44,7 +44,7 @@ struct TORCH_API NotImplemented : public Error {
 // Identity in forward, Error in backward. Used to implement
 // @once_differentiable
 struct TORCH_API DelayedError : public Node {
-  DelayedError(std::string msg, int num_inputs) : msg(std::move(msg)) {
+  DelayedError(std::string msg, int64_t num_inputs) : msg(std::move(msg)) {
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (const auto i : c10::irange(num_inputs)) {
       (void)i; // Suppress unused variable warning

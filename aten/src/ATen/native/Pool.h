@@ -26,6 +26,12 @@ using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel);
 
+using max_pool3d_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input,
+    int kW, int kH, int kD, int dW, int dH, int dD, int pW, int pH, int pD, int dilationW, int dilationH, int dilationD);
+using max_pool3d_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+
+DECLARE_DISPATCH(max_pool3d_fn, max_pool3d_kernel);
+DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel);
 namespace {
 
 template <typename dest_t, typename src_t>

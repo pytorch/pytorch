@@ -14,7 +14,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing
+from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -42,6 +42,7 @@ def handlers():
         TrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "div",
+        Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
         Pow: "pow",
@@ -56,6 +57,8 @@ def handlers():
         sympy.Min: "minimum",
         sympy.Max: "maximum",
         ModularIndexing: "modular_indexing",
+        sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
+        sympy.Piecewise: "piecewise",
     }
     return HANDLERS
 

@@ -324,6 +324,27 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   return output;
 }
 
+Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
+  const auto weight_contig =
+      weight.expect_contiguous(weight.suggest_memory_format());
+  TORCH_CHECK(
+      weight.scalar_type() == at::ScalarType::Float ||
+          weight.scalar_type() == at::ScalarType::Half,
+      "'embedding_bag_byte_prepack' only support float32 or float16.");
+  const auto weight_sizes = weight.sizes();
+  const auto cols_dim = weight_sizes.size() - 1;
+  const int32_t embedding_cols = weight_sizes[cols_dim];
+  // Add 8 bytes per column to store FP32 scale and zero_point per row.
+  const int32_t output_columns = embedding_cols + 2 * sizeof(float);
+
+  // Adjust output dimensions to account for FP32 scale and zero_points.
+  std::vector<int64_t> output_shape = weight_sizes.vec();
+  output_shape[cols_dim] = output_columns;
+  at::SymDimVector output_shape_vec(output_shape);
+
+  return at::empty_symint(output_shape_vec, weight.options().dtype(weight.scalar_type()), weight.suggest_memory_format());
+}
+
 namespace {
 
 // TODO: Extend support to N-D batched embeddings, similar to
@@ -529,6 +550,13 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_prepack"),
       TORCH_FN(QEmbeddingPackWeights::run));
+}
+
+
+TORCH_LIBRARY_IMPL(quantized, Meta, m) {
+  m.impl(
+      "quantized::embedding_bag_byte_prepack",
+      qembeddingbag_byte_prepack_meta);
 }
 
 } // namespace

@@ -117,7 +117,7 @@ class DetectorBase(ABC):
     Concrete detectors should follow the same general API, which includes:
     - A method to calculate and return observer insertion points
         - Should return both the fqns and the Observer class to insert
-    - A method to return a report based on the the detector
+    - A method to return a report based on the detector
         - Should return a str-based report and dict info in Tuple[str,Dict] format
     """
 
