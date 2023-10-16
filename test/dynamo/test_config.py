@@ -20,7 +20,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
 
         my_module.config_1 = ["a", 1, 1.0, True]
         my_module.config_2 = namedtuple("Name", "x y")(1, 2), None
-        my_module.config_3 = {"k": 1, 1: True, 2.0: "a"}
+        my_module.config_3 = {"k": 1, 1: True, 2.0: "a"}, b"bytestring".hex()
 
         torch._dynamo.config_utils.install_config_module(my_module)
         assert all(f"config_{i+1}" in my_module._config for i in range(3))
@@ -38,6 +38,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         for config in [
             set({"a"}),
             {fn: 1},
+            {"b": b"bytestring"},
         ]:
             my_module = MyModule("my_module")
             my_module.config = config
