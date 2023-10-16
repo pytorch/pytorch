@@ -907,6 +907,12 @@ def register_replacement(
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
+    if trace_fn is training_graph:
+        # If inference mode is enabled during compilation, assume that we don't
+        # want to match on any training graph patterns
+        if torch.is_inference_mode_enabled():
+            return False
+
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
         argnames = [*inspect.signature(search_fn).parameters.keys()]
