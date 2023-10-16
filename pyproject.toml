@@ -29,8 +29,7 @@ ignore = [
     "B007", "B008", "B017",
     "B018", # Useless expression
     "B019",
-    "B023", "B026",
-    "B028", # No explicit `stacklevel` keyword argument found
+    "B023",
     "B904",
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax

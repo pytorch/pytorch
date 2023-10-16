@@ -4716,7 +4716,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
-        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
+        functional_call, *args, **kwargs, num_params_buffers=num_params_buffers
     )
 
     class AOTModule(nn.Module):
