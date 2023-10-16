@@ -2663,3 +2663,17 @@ init_command = [
     'ruff==0.0.291',
 ]
 is_formatter = true
+
+# This linter prevents merge conlicts in csv files in pytorch by enforcing
+# three lines of whitespace between entries such that unless people are modifying
+# the same line, merge conflicts should not arise in git or hg
+[[linter]]
+code = 'MERGE_CONFLICTLESS_CSV'
+include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
+command = [
+    'python3',
+    'tools/linter/adapters/no_merge_conflict_csv_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+is_formatter = true

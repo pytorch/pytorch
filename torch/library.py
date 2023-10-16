@@ -257,14 +257,14 @@ def impl(name, dispatch_key, func=None, *, lib=None):
         >>> # Define the operator
         >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for DispatchKey::CPUj
+        >>> # Add implementations for DispatchKey::CPU
         >>> @torch.library.impl("mylibrary::sin", "CPU")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> x = torch.randn(3)
         >>> y = torch.ops.mylibrary.sin(x)
-        >>> assert torch.allclose(y, x)
+        >>> assert torch.allclose(y, x.sin())
     """
 
     def register(func):
