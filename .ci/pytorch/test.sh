@@ -114,9 +114,6 @@ if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_CUDA_MEM_LEAK_CHECK=1
 fi
 
-# DEBUG: REMOVING ME
-export PYTORCH_TEST_CUDA_MEM_LEAK_CHECK=1
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu

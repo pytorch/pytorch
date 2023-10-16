@@ -58,7 +58,8 @@ def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
 SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[Optional[str]], bool]] = {
     # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
     "mem_leak_check": is_cuda_or_rocm_job,
-    "rerun_disabled_tests": lambda job_name: True,
+    # TODO: UNCOMMENT ME
+    # "rerun_disabled_tests": lambda job_name: True,
 }
 
 # The link to the published list of disabled jobs
@@ -555,10 +556,11 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
-    if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-        # we don't want to run the mem leak check or disabled tests on normal
-        # periodically scheduled jobs, only the ones at this time
-        filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
+    # TODO: UNCOMMENT ME
+    # if args.event_name == "schedule" and args.schedule == "29 8 * * *":
+    # we don't want to run the mem leak check or disabled tests on normal
+    # periodically scheduled jobs, only the ones at this time
+    filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
     if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
