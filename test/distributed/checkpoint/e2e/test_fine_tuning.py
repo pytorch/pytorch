@@ -5,7 +5,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     get_state_dict,
     set_state_dict,
@@ -110,7 +109,7 @@ class TestFineTuning(FSDPTest):
             pretrain_state_dict, _ = get_state_dict(
                 model,
                 submodules={model.pretrain},
-                options=StateDictOptions(keep_submodule_prefixes=False)
+                options=StateDictOptions(keep_submodule_prefixes=False),
             )
             dist_cp.load_state_dict(
                 {"model": pretrain_state_dict},
@@ -143,7 +142,7 @@ class TestFineTuning(FSDPTest):
             except KeyError:
                 # If this is the first round of the fine tuning, then nothing is saved.
                 # If this is the restart of the fine tuning, then checkpoint should exit.
-                self.assertEquals(i, 0)
+                self.assertEqual(i, 0)
 
             # Trainining
             for j in range(3):
