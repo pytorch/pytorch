@@ -38,7 +38,7 @@ from torchgen.utils import assert_never
 # API have been fixed.
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # NB: For now, mutable doesn't do anything; but it could if we make
 # some more nominal types
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
