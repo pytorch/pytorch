@@ -9,8 +9,9 @@ using namespace c10;
 
 static std::vector<at::Tensor> get_tensor_vector() {
   std::vector<at::Tensor> tensors;
-  const size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE; i++) {
+  constexpr unsigned short SIZE = 5;
+  tensors.reserve(SIZE);
+  for (unsigned short i = 0; i < SIZE; i++) {
     tensors.emplace_back(at::empty({0}));
   }
   return tensors;
@@ -18,8 +19,9 @@ static std::vector<at::Tensor> get_tensor_vector() {
 
 static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
   std::vector<optional<at::Tensor>> optional_tensors;
-  const size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE * 2; i++) {
+  constexpr unsigned short SIZE = 5;
+  optional_tensors.reserve(SIZE*2);
+  for (unsigned short i = 0; i < SIZE * 2; i++) {
     auto opt_tensor = (i % 2 == 0) ? optional<at::Tensor>(at::empty({0})) : nullopt;
     optional_tensors.emplace_back(opt_tensor);
   }
@@ -29,8 +31,10 @@ static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
 static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
   static std::vector<at::Tensor> tensors;
   std::vector<at::OptionalTensorRef> optional_tensors;
-  constexpr size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE; i++) {
+  constexpr unsigned short SIZE = 5;
+  optional_tensors.reserve(SIZE*2);
+  tensors.reserve(SIZE);
+  for (unsigned short i = 0; i < SIZE; i++) {
     tensors.push_back(at::empty({0}));
     optional_tensors.emplace_back(tensors[i]);
     optional_tensors.emplace_back();

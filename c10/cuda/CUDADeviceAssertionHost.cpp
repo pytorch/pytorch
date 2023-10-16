@@ -254,6 +254,7 @@ CUDAKernelLaunchRegistry::snapshot() const {
   const std::lock_guard<std::mutex> lock(read_write_mutex);
 
   std::vector<DeviceAssertionsData> device_assertions_data;
+  device_assertions_data.reserve(uvm_assertions.size());
   for (const auto& x : uvm_assertions) {
     if (x) {
       device_assertions_data.push_back(*x);

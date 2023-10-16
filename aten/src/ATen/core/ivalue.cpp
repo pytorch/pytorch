@@ -901,6 +901,7 @@ IValue IValue::deepcopy(
     } break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
+      copied_tuple.reserve(toTupleRef().elements().size());
       for (const auto& e : toTupleRef().elements()) {
         copied_tuple.emplace_back(e.deepcopy(memo, device));
       }
@@ -1091,7 +1092,7 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
         num_storages += 1;
       }
     }
-    weakStorageImpls.reserve(num_storages);
+    weakStorageImpls.reserve(tensors.size());
     for (const at::Tensor& tensor : tensors) {
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors

@@ -382,6 +382,7 @@ ivalue::TupleTypeFactory<TupleType>::fallback(C10_UNUSED const Type& type) {
   const auto& dyn = type.expectRef<DynamicType>();
   std::vector<c10::string_view> fields;
   std::vector<TypePtr> types;
+  types.reserve(dyn.arguments().elems.size());
 
   for (const auto& elem : dyn.arguments().elems) {
     types.emplace_back(elem.ty);

@@ -746,6 +746,7 @@ BlockState::BlockState(Block* block)
 SegmentState::SegmentState(Block* head) {
   TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
   is_small = head->pool->is_small;
+  blocks.reserve(head->event_count);constexpr
 
   for (Block* curr = head; curr != nullptr; curr = curr->next) {
     blocks.emplace_back(curr);
@@ -814,7 +815,7 @@ static std::string reportProcessMemoryInfo(int device) {
           pci_id, &nvml_device));
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
-  unsigned int size = procs.size();
+  auto size = procs.size();
   nvmlReturn_t r;
   while ((r = DriverAPI::get()->nvmlDeviceGetComputeRunningProcesses_(
               nvml_device, &size, procs.data())) ==

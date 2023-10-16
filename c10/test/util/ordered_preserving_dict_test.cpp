@@ -174,6 +174,7 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
   // check values
   const int nb_values = 1000;
   std::vector<std::pair<int, int>> values;
+  values.reserve(nb_values);
   for (const auto i : c10::irange(nb_values)) {
     values.emplace_back(i, i + 1);
   }

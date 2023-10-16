@@ -43,6 +43,7 @@
     c10::IValue bundled_inputs = module.run_method("get_all_bundled_inputs");
     c10::List<at::IValue> all_inputs = bundled_inputs.toList();
     std::vector<std::vector<at::IValue>> inputs;
+    inputs.reserve(all_inputs.size());
     for (at::IValue input : all_inputs) {
       inputs.push_back(input.toTupleRef().elements());
     }

@@ -56,9 +56,11 @@ static int iter = 10;
                    "Input dims and type should have the same number of items.");
 
   std::vector<c10::IValue> inputs;
+  inputs.reserve(input_dims_list.size());
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
     auto input_dims_str = caffe2::split(',', input_dims_list[i]);
     std::vector<int64_t> input_dims;
+    input_dims.reserve(input_dims_str.length() + 1);
     for (const auto& s : input_dims_str) {
       input_dims.push_back(std::stoi(s));
     }

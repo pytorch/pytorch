@@ -52,7 +52,8 @@ void cuda_device_assertions_multiple_writes_from_blocks_and_threads() {
 
   // Spin up a bunch of busy-looping threads
   std::vector<std::thread> threads;
-  for (int i = 0; i < 10; i++) {
+  threads.reserve(10);
+  for (unsigned short i = 0; i < 10; i++) {
     threads.emplace_back(launch_the_kernel);
   }
 
