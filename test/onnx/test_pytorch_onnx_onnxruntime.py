@@ -6512,6 +6512,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_zeros_with_dtype(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(50, 64)
+
+            def forward(self, x):
+                inp = x.new_zeros(x.shape)
+                return self.emb(inp)
+
+        model = MyModel()
+        x = torch.Tensor([[2, 5, 6], [3, 2, 5]]).to(torch.int64)
+        self.run_test(model, x, input_names=["x"], dynamic_axes={"x": [0, 1]})
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_ones(self):
         class OnesModel(torch.nn.Module):
             def forward(self, x):
