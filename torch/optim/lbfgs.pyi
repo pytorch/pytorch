@@ -1,11 +1,11 @@
 from typing import Optional
 
-from .optimizer import Optimizer, params_t
+from .optimizer import Optimizer, ParamsT
 
 class LBFGS(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: ParamsT,
         lr: float = ...,
         max_iter: int = ...,
         max_eval: Optional[int] = ...,

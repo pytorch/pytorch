@@ -194,6 +194,43 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     raise RuntimeError(mismatch_error_msg)
 
 
+def jagged_torch_function(func, *args, **kwargs):
+    # Handle SDPA specially since it's CompositeImplicit. We don't want
+    # the nestedness of the inputs to affect the kernel choice, so unwrap
+    # the NTs here before passing to SDPA -> rewrap the output as NT.
+    if func is torch._C._nn.scaled_dot_product_attention:
+        t_args = [t._values if isinstance(t, NestedTensor) else t for t in args]
+        t_kwargs = {
+            k: v._values if isinstance(v, NestedTensor) else v
+            for k, v in kwargs.items()
+        }
+
+        output = func(*t_args, **t_kwargs)
+        return NestedTensor(output, **extract_kwargs(args[0]))
+
+    # Handle flatten() here because it's CompositeImplicit.
+    if func.__name__ == "flatten":
+
+        def _flatten_sig(input, start_dim=0, end_dim=-1):
+            pass
+
+        _, new_kwargs = normalize_function(
+            _flatten_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+
+        inp = new_kwargs.pop("input")
+        new_kwargs["start_dim"] = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["start_dim"], "flatten"
+        )
+        new_kwargs["end_dim"] = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["end_dim"], "flatten"
+        )
+
+        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+    raise NotImplementedError(func)
+
+
 @register_jagged_func(
     [
         torch.ops.aten.is_non_overlapping_and_dense.default,
@@ -498,25 +535,6 @@ def is_pinned_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     return func(inp._values, **new_kwargs)
-
-
-@register_jagged_func(
-    torch.ops.aten.flatten.using_ints, "self: jt, start_dim: any?, end_dim: any?"
-)
-def flatten_using_ints(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    new_kwargs["start_dim"] = _wrap_jagged_dim(
-        inp.dim(), new_kwargs["start_dim"], "flatten"
-    )
-    new_kwargs["end_dim"] = _wrap_jagged_dim(
-        inp.dim(), new_kwargs["end_dim"], "flatten"
-    )
-
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")

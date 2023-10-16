@@ -85,10 +85,8 @@ class NestedTensor(torch.Tensor):
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
-
-        from torch._prims_common import make_contiguous_strides_for
-
-        self._strides = make_contiguous_strides_for(self._size)
+        stride = values.stride()
+        self._strides = (ragged_size * stride[0], *stride)
         self._ragged_idx = 1
 
         if values.requires_grad:
@@ -164,22 +162,14 @@ class NestedTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        # Handle SDPA specially since it's CompositeImplicit. We don't want
-        # the nestedness of the inputs to affect the kernel choice, so unwrap
-        # the NTs here before passing to SDPA -> rewrap the output as NT.
-        if func is torch._C._nn.scaled_dot_product_attention:
-            t_args = [t._values if isinstance(t, NestedTensor) else t for t in args]
-            t_kwargs = {
-                k: v._values if isinstance(v, NestedTensor) else v
-                for k, v in kwargs.items()
-            }
 
-            from torch.nested._internal.ops import extract_kwargs
+        from .ops import jagged_torch_function
 
-            output = func(*t_args, **t_kwargs)
-            return NestedTensor(output, **extract_kwargs(args[0]))
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **kwargs)
+        try:
+            return jagged_torch_function(func, *args, **kwargs)
+        except NotImplementedError:
+            with torch._C.DisableTorchFunctionSubclass():
+                return func(*args, **kwargs)
 
 
 # Not actually a view!

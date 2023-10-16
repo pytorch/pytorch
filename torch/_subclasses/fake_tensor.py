@@ -1073,7 +1073,8 @@ class FakeTensor(torch.Tensor):
             init_cuda_context()
 
         if (
-            device.type in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]
+            device.type
+            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
             device = torch.device(

@@ -2933,7 +2933,7 @@ class TestNestedTensorSubclass(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "expected lhs and rhs to have the same exact offsets tensor",
+            "cannot call binary pointwise function .* with inputs of shapes",
             lambda: nt1 * nt2)
 
         # Correct usage: chain the calls using the same offsets tensor object
