@@ -421,6 +421,19 @@ _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
 
+class _HookState:
+    def __init__(self):
+        self.creation_hooks = []
+
+    def register_creation_hook(self, hook) -> None:
+        self.creation_hooks.append(hook)
+
+    def fire_creation_hook(self, pg, name) -> None:
+        for hook in self.creation_hooks:
+            try:
+                hook(pg, name)
+            except Exception as e:
+                logger.info("hook %s failed with %s", hook, e)
 
 class _World:
     """
@@ -434,6 +447,8 @@ class _World:
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
         self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
+        self._hook_state = _HookState()
+        self.enable_collectives_timing = False
 
     @property
     def default_pg(self):
@@ -543,6 +558,9 @@ class _World:
             )
         return config_info
 
+    @property
+    def pg_hook_state(self) -> _HookState:
+        return self._hook_state
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -1364,6 +1382,9 @@ def _new_process_group_helper(
     pg._set_group_name(group_name)
 
     _world.pg_backend_config[pg] = str(backend_config)
+    if _world.enable_collectives_timing:
+        pg._enable_collectives_timing()
+
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
         pg_tag = f"ptd:{group_name}"
@@ -1373,6 +1394,8 @@ def _new_process_group_helper(
 
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
+    _world.pg_hook_state.fire_creation_hook(pg, group_name)
+
     return pg, prefix_store
 
 def destroy_process_group(group: Optional[ProcessGroup] = None):
@@ -4315,3 +4338,11 @@ dynamo_unsupported_distributed_c10d_ops = [
     reduce_scatter_tensor,
     send,
 ]
+
+def _register_creation_hook(hook):
+    _world.pg_hook_state.register_creation_hook(hook)
+
+def _enable_collectives_timing():
+    _world.enable_collectives_timing = True
+    for pg in _world.pg_map:
+        pg._enable_collectives_timing()
