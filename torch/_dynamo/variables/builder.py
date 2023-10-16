@@ -8,6 +8,7 @@ import inspect
 import logging
 import operator
 import re
+import sys
 import types
 from typing import List, NamedTuple, Optional, Union
 
@@ -60,7 +61,6 @@ from ..utils import (
     clone_input,
     get_fake_value,
     get_static_address_type,
-    getfile,
     global_key_name,
     is_namedtuple,
     is_typing,
@@ -84,6 +84,7 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
+    PythonSysModulesVariable,
 )
 from .distributed import (
     DeviceMeshVariable,
@@ -401,7 +402,8 @@ class VariableBuilder:
                 for k in value.keys()
             }
             return ConstDictVariable(result, type(value))
-
+        elif value is sys.modules:
+            return PythonSysModulesVariable(source=self.source)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -521,6 +523,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif isinstance(value, np.generic):
+            # numpy array scalars: convert to 0D arrays
+            return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
             assert np
             return NumpyVariable(
@@ -534,12 +539,12 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(getfile(value), allow_torch=True)
+            and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
                 value,
-                skipfiles.check_verbose(getfile(value), allow_torch=True).reason,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
@@ -1116,7 +1121,15 @@ class VariableBuilder:
         assert isinstance(value, np.ndarray)
 
         source = NumpyTensorSource(self.get_source())
-        tensor_value = torch.as_tensor(value)
+
+        from torch._numpy import _util
+
+        try:
+            tensor_value = _util._try_convert_to_tensor(value)
+        except NotImplementedError as e:
+            # failed to convert to tensor, graph break
+            unimplemented(str(e))
+
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
         # that there's not another great way to do this atm.
