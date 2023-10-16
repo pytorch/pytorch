@@ -117,13 +117,6 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
-      - name: Modify list of tests
-        id: modify-test-list
-        if: ${{ github.ref_type == 'tag' && contains(github.ref, 'ciflow/trunk') }}
-        run: |
-          set -x
-          if [[ -n $TESTS_TO_INCLUDE ]]; then sed -i "s!test/run_test.py !&--include $TESTS_TO_INCLUDE !g" ${GITHUB_WORKSPACE}/.ci/pytorch/test.sh; fi
-
       - name: Test
         id: test
         env:
