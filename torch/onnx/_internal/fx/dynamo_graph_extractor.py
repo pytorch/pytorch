@@ -208,7 +208,7 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Export FX graph to ONNX ModelProto.
         self.input_adapter.append_step(
-            io_adapter.FlattenInputWithTreeSpecValidationStep()
+            io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
 
         updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)

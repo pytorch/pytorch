@@ -10,7 +10,7 @@ from typing import Any, Callable, Mapping, Optional, Sequence, Union
 import torch._dynamo
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype, exporter
+from torch.onnx._internal import _beartype, exporter, io_adapter
 
 
 class TorchExport(exporter.FXGraphExtractor):
@@ -43,7 +43,19 @@ class TorchExport(exporter.FXGraphExtractor):
         #     )
 
         # Export FX graph to ONNX ModelProto.
-        return self.pre_export_passes(options, model, model.graph_module, model_args)  # type: ignore[return-value]
+        self.input_adapter.append_step(
+            io_adapter.FlattenInputWithTreeSpecValidationInputStep()
+        )
+        self.input_adapter.append_step(
+            io_adapter.PrependParamsAndBuffersAotAutogradInputStep()
+        )
+
+        updated_model_args = self.input_adapter.apply(
+            *model_args, model=model, **model_kwargs
+        )
+
+        # Export FX graph to ONNX ModelProto.
+        return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
 
     @_beartype.beartype
     def pre_export_passes(
@@ -53,4 +65,8 @@ class TorchExport(exporter.FXGraphExtractor):
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
+        # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
+        # tensor, etc), we flatten the collection and register each element as output.
+        options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+
         return fx_module
