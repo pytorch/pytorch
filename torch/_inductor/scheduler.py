@@ -457,8 +457,9 @@ class BaseSchedulerNode:
             return 0
 
         if isinstance(self, SchedulerNode):
-            node_numel = sympy_product(self.get_ranges()[0]) * sympy_product(
-                self.get_ranges()[1]
+            node_numel = V.graph.sizevars.size_hint(
+                sympy_product(self.get_ranges()[0])
+                * sympy_product(self.get_ranges()[1])
             )
         else:
             node_numel = int(1e9)
@@ -1953,8 +1954,8 @@ class Scheduler:
                     node.get_name(),
                     node.get_estimated_runtime(),
                 )
-            except Exception:
-                log.error(
+            except Exception as e:
+                log.debug(
                     "Generating code for node %s with estimated runtime 0.0",
                     node.get_name(),
                 )

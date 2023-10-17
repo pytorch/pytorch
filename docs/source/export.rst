@@ -61,7 +61,6 @@ serialized.
             assertion_dep_token=None,
         )
         Range constraints: {}
-        Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
 following invariants. More specifications about the IR can be found
@@ -329,7 +328,6 @@ run. Such dimensions must be specified by using the
             assertion_dep_token=None,
         )
         Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
-        Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
 
 Some additional things to note:
 
@@ -337,8 +335,9 @@ Some additional things to note:
   dimension of each input to be dynamic. Looking at the inputs ``arg5_1`` and
   ``arg6_1``, they have a symbolic shape of (s0, 64) and (s0, 128), instead of
   the (32, 64) and (32, 128) shaped tensors that we passed in as example inputs.
-  ``s0`` is a symbol representing that this dimension can be a range
-  of values.
+  Here ``s0`` is a symbol representing that ``arg5_1`` dimension 0 and ``arg6_1``
+  dimension 0 can have a range
+  of values, but are required to be equal.
 
 * ``exported_program.range_constraints`` describes the ranges of each symbol
   appearing in the graph. In this case, we see that ``s0`` has the range
@@ -347,13 +346,6 @@ Some additional things to note:
   that the exported program will not work for dimensions 0 or 1. See
   `The 0/1 Specialization Problem <https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ#heading=h.ez923tomjvyk>`_
   for an in-depth discussion of this topic.
-
-* ``exported_program.equality_constraints`` describes which dimensions are
-  required to be equal. Since we specified in the constraints that the first
-  dimension of each argument is equivalent,
-  (``dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0)``),
-  we see in the equality constraints the tuple specifying that ``arg5_1``
-  dimension 0 and ``arg6_1`` dimension 0 are equal.
 
 (A legacy mechanism for specifying dynamic shapes
 involves marking and constraining dynamic dimensions with the
@@ -394,7 +386,7 @@ Input shapes
 
 As mentioned before, by default, ``torch.export`` will trace the program
 specializing on the input tensors' shapes, unless a dimension is specified as
-dynamic via the :func:`torch.export.dynamic_dim` API. This means that if there
+dynamic via the :func:`torch.export.Dim` API. This means that if there
 exists shape-dependent control flow, ``torch.export`` will specialize on the
 branch that is being taken with the given sample inputs. For example:
 
@@ -426,7 +418,7 @@ The conditional of (``x.shape[0] > 5``) does not appear in the
 shape of (10, 2). Since ``torch.export`` specializes on the inputs' static
 shapes, the else branch (``x - 1``) will never be reached. To preserve the dynamic
 branching behavior based on the shape of a tensor in the traced graph,
-:func:`torch.export.dynamic_dim` will need to be used to specify the dimension
+:func:`torch.export.Dim` will need to be used to specify the dimension
 of the input tensor (``x.shape[0]``) to be dynamic, and the source code will
 need to be :ref:`rewritten <Data/Shape-Dependent Control Flow>`.
 
