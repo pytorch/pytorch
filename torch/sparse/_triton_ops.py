@@ -412,6 +412,15 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
 def scatter_mm_meta(M, K, N, Ms, Ks,
                     GROUP_SIZE=None, TILE_M=None, TILE_N=None, SPLIT_N=None, num_warps=None, num_stages=None, **extra):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
+        # The following parameters are optimized for the performance
+        # equilibrium points of bsr-dense and dense-dense matrix
+        # multiplications when using GPU cards NVIDIA A100 and NVIDIA
+        # GeForce RTX 2060 SUPER. For points far from the performance
+        # equilibrium points as well as for other GPU cards, the
+        # optimal parameters are likely different from what specified
+        # below.
+        device_name = torch.cuda.get_device_name()
+        is_A100 = 'A100' in device_name
         if (M, K, N) == (256,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=1;TILE_M=16;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
@@ -424,43 +433,101 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=1;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=4;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=4;TILE_M=32;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=1;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=1;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=2;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=8;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=1;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=16;TILE_M=32;TILE_N=64;GROUP_SIZE=1;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=4;TILE_M=64;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=32;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=2;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=2;TILE_M=64;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                if is_A100:
+                    SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=3;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    SPLIT_N=2;TILE_M=128;TILE_N=128;GROUP_SIZE=1;num_stages=1;num_warps=8  # noqa: E225,E231,E702
+        elif (M, K, N) == (8192,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    SPLIT_N=1;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    SPLIT_N=1;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                if is_A100:
+                    SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    SPLIT_N=4;TILE_M=128;TILE_N=128;GROUP_SIZE=2;num_stages=3;num_warps=8  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (256, 256):
+                if is_A100:
+                    SPLIT_N=8;TILE_M=256;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=16  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (512, 512):
+                if is_A100:
+                    SPLIT_N=1;TILE_M=128;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=8  # noqa: E225,E231,E702
+        elif (M, K, N) == (16384,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    SPLIT_N=1;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    SPLIT_N=2;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
 
     if SPLIT_N is None:
+        # Assume NVIDIA GeForce RTX 2060 SUPER:
         # With the probality of 92% (99.9% when N > 512), the
         # performance will not be worse more than 2% from the
         # performance when using an optimal value.  Otherwise, when N

@@ -88,6 +88,7 @@ def test_bsr_scatter_mm6(x, y, **meta):
 
 if __name__ == "__main__":
     import argparse
+    import atexit
     import itertools
     import sys
 
@@ -142,6 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--repeat", default="1", type=int)
     parser.add_argument("--outfile", default="stdout", type=str)
+    parser.add_argument("--star", default=False, action="store_true")
 
     args = parser.parse_args()
 
@@ -155,6 +157,7 @@ if __name__ == "__main__":
     ops = args.ops.split(",")
 
     b = args.b
+
     m_list = args.m or [1024]
     n_list = args.n or [None]
     k_list = args.k or [None]
@@ -167,12 +170,84 @@ if __name__ == "__main__":
     num_warps_list = args.num_warps or [None]
     num_stages_list = args.num_stages or [None]
     sparsity_list = args.sparsity or [0.5]
-
     dtype = getattr(torch, args.dtype)
+
+    if args.star > 0:
+        import torch.sparse._triton_ops
+
+        assert {len(m_list), len(n_list), len(k_list), len(bm_list), len(bk_list)} == {
+            1
+        }
+        m = m_list[0]
+        n = n_list[0] or m
+        k = k_list[0] or m
+        bm = bm_list[0]
+        bk = bk_list[0] or bm
+        meta = torch.sparse._triton_ops.scatter_mm_meta(m, k, n, bm, bk)
+        assert {
+            split_n_list[0],
+            tile_m_list[0],
+            tile_n_list[0],
+            group_size_list[0],
+            num_warps_list[0],
+            num_stages_list[0],
+        }
+        if split_n_list[0] is None:
+            split_n_list = [meta["SPLIT_N"] // 2, meta["SPLIT_N"], meta["SPLIT_N"] * 2][
+                int(meta["SPLIT_N"] == 1) :
+            ]
+        elif split_n_list[0] == 0:
+            split_n_list = [meta["SPLIT_N"]]
+        if tile_m_list[0] is None:
+            tile_m_list = [meta["TILE_M"] // 2, meta["TILE_M"], meta["TILE_M"] * 2][
+                int(meta["TILE_M"] == 16) :
+            ]
+        elif tile_m_list[0] == 0:
+            tile_m_list = [meta["TILE_M"]]
+        if tile_n_list[0] is None:
+            tile_n_list = [meta["TILE_N"] // 2, meta["TILE_N"], meta["TILE_N"] * 2][
+                int(meta["TILE_N"] == 16) :
+            ]
+        elif tile_n_list[0] == 0:
+            tile_n_list = [meta["TILE_N"]]
+        if group_size_list[0] is None:
+            group_size_list = [
+                meta["GROUP_SIZE"] - 1,
+                meta["GROUP_SIZE"],
+                meta["GROUP_SIZE"] + 1,
+            ][int(meta["GROUP_SIZE"] == 1) :]
+        elif group_size_list[0] == 0:
+            group_size_list = [meta["GROUP_SIZE"]]
+        if num_warps_list[0] is None:
+            num_warps_list = [
+                meta["num_warps"] // 2,
+                meta["num_warps"],
+                meta["num_warps"] * 2,
+            ][int(meta["num_warps"] == 1) :]
+        elif num_warps_list[0] == 0:
+            num_warps_list = [meta["num_warps"]]
+        if num_stages_list[0] is None:
+            num_stages_list = [
+                meta["num_stages"] - 1,
+                meta["num_stages"],
+                meta["num_stages"] + 1,
+            ][int(meta["num_stages"] == 1) :]
+        elif num_stages_list[0] == 0:
+            num_stages_list = [meta["num_stages"]]
+
     device = args.device
     dense_dense_mm_sizes = set()
     target_performance = None
     performance_rtol = 1e-2
+
+    best_messages = []
+
+    @atexit.register
+    def show_best_messages(best_messages=best_messages):
+        print("TOP 10:")
+        for m in best_messages[-10:]:
+            print(m)
+        sys.stdout.flush()
 
     for m, k, n, bm, bk, sparsity in itertools.product(
         m_list, n_list, k_list, bm_list, bk_list, sparsity_list
@@ -283,9 +358,15 @@ if __name__ == "__main__":
                             mark += " @@@"
                     if best_tflops < performance_tflops:
                         best_tflops = performance_tflops
+                        best_message = (
+                            f"op={op}[{meta_str}]({bsr_size},x{n}) dtype={args.dtype} {sparsity=:.4f}(nnz={x._nnz()})"
+                            f" blocksize={bm}x{bk} time={time_ms:.3f} ms performance={performance_tflops:.3f} TFLOPS"
+                        )
+                        if best_message not in best_messages:
+                            best_messages.append(best_message)
                         mark += " !!!"
                     print(
-                        f"op={op}[{meta_str}]({bsr_size},{k}x{n}) dtype={args.dtype} {sparsity=:.4f}(nnz={x._nnz()})"
+                        f"op={op}[{meta_str}]({bsr_size},x{n}) dtype={args.dtype} {sparsity=:.4f}(nnz={x._nnz()})"
                         f" blocksize={bm}x{bk}"
                         f" time={time_ms:.3f} ms performance={performance_tflops:.3f} TFLOPS{mark}",
                         file=outfile,
