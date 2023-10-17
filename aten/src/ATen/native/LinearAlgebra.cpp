@@ -2181,8 +2181,7 @@ Tensor operator_1_norm(const Tensor& tensor) {
 // of shape [n_copies, a.size()]
 Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
   auto res = at::empty(
-    {n_copies, a.size(0), a.size(1), a.size(2)},
-    a.options().memory_format(at::MemoryFormat::Contiguous)
+    {n_copies, a.size(0), a.size(1), a.size(2)}
   );
 
   if (is_zero) {
@@ -2646,7 +2645,7 @@ Tensor mexp_impl(
         a_large_norm,
         large_norm_subset,
         thetas[total_n_degs - 1]
-      ).to(a.dtype());
+      );
       res.index_put_({idx_large_norm}, mexp_out);
     }
     return res;
