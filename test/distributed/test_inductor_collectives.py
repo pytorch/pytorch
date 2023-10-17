@@ -479,7 +479,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty(") \
+            .check("buf0 = pool") \
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
