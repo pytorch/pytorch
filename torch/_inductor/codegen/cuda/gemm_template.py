@@ -38,7 +38,7 @@ extern "C" {
   using coord_t = cutlass::gemm::GemmCoord::Index;
   {{instance_type}}::Arguments arguments;
   {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
-                                    X, W, Bias, Y, alpha, beta, kernel, evt_epilogue_args)}}
+                                    X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
     *workspace_size = gemm_op.get_workspace_size(arguments);
@@ -133,29 +133,10 @@ GEMM_ARGS_CUTLASS_3X = r"""
   };
 """
 
-
 GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
-    {
-      {ElementComputeEpilogue({{alpha}}), ElementComputeEpilogue({{beta}})},  // typename ThreadEpilogueOp::Params thread
-      {{template.cutlass_type_cast(Bias, kernel.ptr(Bias))}},  // ElementC const* ptr_C
-      {
-        {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}},
-        {{template.cute_int(kernel.stride(Bias, -1, 1), "stride_bias1")}},
-        {{template.cute_int(kernel.stride(Bias, -3), "batch_stride_bias")}}
-      },  // StrideC dC
-      {{template.cutlass_type_cast(Y, kernel.ptr(Y))}},  // ElementD const* ptr_D
-      {
-        {{template.cute_int(kernel.stride(Y, -2), "stride_y0")}},
-        {{template.cute_int(kernel.stride(Y, -1), "stride_y1")}},
-        {{template.cute_int(kernel.stride(Y, -3), "batch_stride_y")}}
-      },  // StrideD dD
-    },  // EpilogueArguments epilogue
-"""
-
-GEMM_ARGS_CUTLASS_3X_EVT_EPILOGUE = r"""
     // see https://tinyurl.com/4rk89z48
     {
-      {{evt_epilogue_args}},  // thread, typename FusionCallbacks::Arguments ( EVT Arguments )
+      {{epilogue_args}},  // thread, typename FusionCallbacks::Arguments ( EVT ) or ThreadEpilogueOp::Params (non-EVT )
       {{template.cutlass_type_cast(Bias, kernel.ptr(Bias))}},  // ElementC const* ptr_C
       {
         {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}},
@@ -341,9 +322,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
-        if op.gemm_kind not in {
-            cutlass_lib.GemmKind.Universal3x,
-        }:
+        if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
             return False
         if op.epilogue_schedule not in (
             cutlass_lib.EpilogueScheduleType.TmaWarpSpecialized,
@@ -580,7 +559,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         alpha: float,
         beta: float,
         kernel: CUDATemplateKernel,
-        evt_epilogue_args,
+        epilogue_args,
     ) -> str:
         options = dict(
             alpha=self.alpha,
@@ -593,7 +572,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             kernel=kernel,
             M="M",
             N="N",
-            evt_epilogue_args=evt_epilogue_args,
+            epilogue_args=epilogue_args,
         )
 
         if epilogue_template is not None:
@@ -680,7 +659,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         epilogue_template: Optional[str] = None
         should_swap_xw: bool = False
-        evt_epilogue_args = None
+        epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             if Bias is not None and self.has_tma_epilogue(op):
                 if self.should_swap_XW(Bias, self.beta):
@@ -688,14 +667,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                     op = self.swap_XW(op)
                     should_swap_xw = True
             if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-                epilogue_template = GEMM_ARGS_CUTLASS_3X_EVT_EPILOGUE
-                evt_epilogue_args = (
+                epilogue_args = (
                     CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
                         cast(str, template_output_node_name), epilogue_nodes
                     )
                 )
-            else:
-                epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
+            epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
             argument_template = GEMM_ARGS_CUTLASS_3X
         else:
             # TODO: Support split_k.
@@ -719,7 +696,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             instance_definition=instance_definition,
             instance_type=instance_type,
             input_reorder=self.input_reorder,
-            evt_epilogue_args=evt_epilogue_args,
+            epilogue_args=epilogue_args,
         )
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         return res
