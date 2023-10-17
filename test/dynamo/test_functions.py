@@ -1886,6 +1886,36 @@ def forward(self, x_1, output_1):
         # Third graph is x = tan(sin(x))
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_doubly_nested_inlined_graph_break(self):
+        def h(x):
+            x = x.cos()
+            print(x)
+            x = x.sin()
+            return x
+
+        def g(x):
+            x = x.sin()
+            print(x)
+            x = x.cos()
+            return x
+
+        def fn(x):
+            x = x.tan()
+            x = h(x)
+            x = x.tan()
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # First graph is x = sin(cos(tan(x)))
+        # Second graph is x = tan(cos(sin(x)))
+        self.assertEqual(cnts.frame_count, 2)
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
