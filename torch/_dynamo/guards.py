@@ -1368,23 +1368,17 @@ def make_dupe_guard(obj_source, dupe_source):
     return None
 
 
-def install_guard(guards, *more_guards, skip=0):
+def install_guard(*guards, skip=0):
     """
     Add dynamo guards to the current tracing context.
 
     Args:
-        guards: guard or set of guards to add
+        guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
-    if not guards:
-        return
-    if isinstance(guards, Guard):
-        guards = (guards,)
     from torch._guards import TracingContext
 
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
         add(guard, skip=skip + 1)
-    for other in more_guards:
-        install_guard(other, skip=skip + 1)

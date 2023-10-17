@@ -42,10 +42,16 @@ class LazyVariableTracker(VariableTracker):
     def is_realized(self):
         return self.mutable_local.vt is not None
 
+    def clone(self, **kwargs):
+        if (
+            kwargs.get("source", self.source) is not self.source
+            or kwargs.get("_value", self._value) is not self._value
+        ):
+            self.realize()
+        return VariableTracker.clone(self.unwrap(), **kwargs)
+
     def __str__(self):
-        if self.is_realized():
-            return str(self.mutable_local.vt)
-        return super().__str__()
+        return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item):
         vt = self.realize()
@@ -57,7 +63,6 @@ class LazyVariableTracker(VariableTracker):
     add_options = VariableTracker.add_options
     _aggregate_mutables = VariableTracker._aggregate_mutables
     apply = VariableTracker.apply
-    clone = VariableTracker.clone
     copy = VariableTracker.copy
     __post_init__ = VariableTracker.__post_init__
     propagate = VariableTracker.propagate

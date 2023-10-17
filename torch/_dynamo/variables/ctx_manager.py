@@ -126,7 +126,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)}
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
     def create(tx, target_value, **kwargs):
@@ -214,7 +214,7 @@ class InferenceModeVariable(ContextWrappingVariable):
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
 
     @staticmethod
     def create(tx, **kwargs):
@@ -246,9 +246,9 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
-    _guards_singleton = {
-        Guard(GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
-    }
+    _guards_singleton = Guard(
+        GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS
+    )
 
     @staticmethod
     def create(tx, target_value, **kwargs):
