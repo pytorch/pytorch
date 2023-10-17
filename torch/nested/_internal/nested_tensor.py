@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
+from torch.fx.experimental.symbolic_shapes import is_symbolic
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -141,6 +142,37 @@ class NestedTensor(torch.Tensor):
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
 
+        # NOTE [ Storing symbolic values as plain attributes on subclasses ]
+        #
+        # When a subclass like NestedTensor stores a "size-like" value (which
+        # can either be Symintified or not) into meta, it's responsible for:
+        #
+        #   (1) Propagating that symint during torch dispatch when performing
+        #       operations, i.e. torch dispatch plays the role of a meta kernel.
+        #
+        #   (2) Facilitating the behavior around symbolic -> non-symbolic
+        #       conversions and vice versa, see below.
+        #
+        # [ non-symbolic -> symbolic (fakification in meta_utils) ]
+        #
+        # __tensor_unflatten__ is passed symbolic dense tensors and meta from
+        # non-symbolic subclasses. In this case, the subclass is responsible for
+        # intercepting meta["ragged_size"] for example and replacing it with the
+        # symintified version.
+        #
+        # [ symbolic -> non-symbolic ]
+        #
+        # __tensor_unflatten__ is passed non-symbolic dense tensors and with
+        # meta extracted from fake subclasses. In this case the subclass gets
+        # propagated the meta["ragged_size"] which is still a symint and the
+        # subclass is responsible for making sure that the symint doesn't leak.
+        #
+        if not any(any(is_symbolic(s) for s in x.shape) for x in (values, offsets)):
+            # Note that we cannot simply check if is_fake(values) because
+            # during aot autograd, FunctionalTensors are not fake but hold
+            # symbolic sizes.
+            meta["ragged_size"] = None
+
         return NestedTensor(
             values,
             offsets=offsets,
@@ -167,12 +199,15 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
+        ctx.kwargs = {
+            "ragged_size": x._size[x._ragged_idx],
+        }
         return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return NestedTensor(gO, offsets=offsets)
+        return NestedTensor(gO, offsets=offsets, **ctx.kwargs)
 
 
 # Not actually a view!
