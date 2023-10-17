@@ -240,6 +240,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState):
+        if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
+            return self
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
@@ -928,12 +930,6 @@ class WrapperCodeGen(CodeGen):
 
         if not self.can_reuse(buffer):
             return
-        self.freed.add(name)
-
-        layout = buffer.get_layout()
-        if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            self.writeline(self.make_buffer_free(buffer))
-            return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
@@ -1530,6 +1526,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def make_buffer_free(self, buffer):
+        name = buffer.get_name()
+        if name in self.freed:
+            return ""
+        self.freed.add(name)
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
