@@ -2399,7 +2399,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug("FAILED INLINING %s", code)
             raise
         except NestedGraphBreak:
-            pass
+            log.debug("GRAPH BREAK WHILE INLINING %s", code)
         func.export_freevars(parent, tracer)
 
         if tracer.f_globals is parent.f_globals:
