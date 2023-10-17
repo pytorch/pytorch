@@ -407,6 +407,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 #     x.copy_(x_updated)
 #     return out
 
+
 # Note [AOT Autograd: Views to avoid tangents aliasing inputs]
 #
 # We view every forward output when creating out tangent tensors to handle the problematic
@@ -436,7 +437,8 @@ def setup_stacktrace_preservation_hooks(roots: List):
 # To work around this, we view every forward output when creating out tangent
 # tensors so that tangents can never be the same as forward inputs even if
 # forward inputs alias forward outputs.
-
+#
+#
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -3543,6 +3545,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
         # Note [Detaching inputs that never need gradients]
@@ -3660,7 +3663,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             forward_saved_for_backwards_strides = None
             if fwd_output_strides is not None:
-                inner_meta.num_symints_saved_for_bw = fw_metadata.num_symints_saved_for_bw
                 forward_saved_for_backwards_strides = fwd_output_strides[inner_meta.tensors_saved_for_backwards_slice]
 
             # saved activations can have different stride to eager if
@@ -3914,6 +3916,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             del flat_bw_args_with_grads
 
+            tangents_start_idx = len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
+            tangents_end_idx = len(all_args) - len(rng_args)
+
             # Note: [AOTAutograd Backward Guards]
             # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
             # Doing so requires us to "guess" about some of the metadata of our grad_outputs.
@@ -3952,9 +3957,6 @@ Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
 Got grad_output types: {str(grad_output_types)}"""
 
             # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
-            tangents_start_idx = len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
-            tangents_end_idx = len(all_args) - len(rng_args)
-
             if CompiledFunction.maybe_subclass_metadata is not None:
                 # Get the number of tangents after unwrapping
                 len_tangents = len(unwrap_tensor_subclasses(
@@ -3967,7 +3969,7 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous() if isinstance(t, torch.Tensor) and tangents_start_idx <= i < tangents_end_idx else t
+                t.contiguous() if tangents_start_idx <= i < tangents_end_idx else t
                 for i, t in enumerate(all_args)
             ]
 
