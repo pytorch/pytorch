@@ -1359,9 +1359,9 @@ def _sym_ite(pred, then_val, else_val):
     pred_node = pred.node
     then_node = to_node(pred_node, then_val)
     else_node = to_node(pred_node, else_val)
-    assert isinstance(then_node, SymNode), isinstance(else_node, SymNode) and then_node.pytype == else_node.pytype
     if then_node is NotImplemented or else_node is NotImplemented:
         return NotImplemented
+    assert isinstance(then_node, SymNode) and isinstance(else_node, SymNode) and then_node.pytype == else_node.pytype
 
     def _sym_node_ite(pred_node, then_node, else_node):
         out_hint = then_node.hint if pred_node.hint else else_node.hint
