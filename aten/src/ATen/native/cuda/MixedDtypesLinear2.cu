@@ -6,12 +6,9 @@
 #ifndef USE_ROCM
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
-#include <cutlass/layout/layout.h>
-#include <cutlass/tensor_ref.h>
 #include <cutlass/gemm/device/gemm_universal.h>
-#include <cutlass/gemm/device/gemm_universal_base.h>
-#include <cutlass/gemm/device/gemm_universal_with_broadcast.h>
 #include <cutlass/gemm/device/gemm_universal_streamk_with_broadcast.h>
+#include <cutlass/epilogue/thread/activation.h>
 #include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
 #include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
 #endif
@@ -24,14 +21,17 @@
   }
 #endif
 
+namespace {
+  enum class Activation{NONE, RELU, SILU};
+}
+
 namespace at {
 namespace native {
 
 #ifndef USE_ROCM
 template<typename ElementInputA, typename ElementInputB, bool use_scale,
-        bool use_bias>
-Tensor
-mixed_dtypes_linear_cutlass(
+        bool use_bias, Activation activation = Activation::NONE>
+Tensor mixed_dtypes_linear_cutlass(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
     const Tensor& bias) {
   // Weight matrix is transposed implicitly, by considering that its
@@ -113,7 +113,6 @@ mixed_dtypes_linear_cutlass(
       cutlass::multiplies, ElementEpilogue, ElementEpilogue,
       cutlass::FloatRoundStyle::round_to_nearest
   >;
-
   using EVTApplyScale = cutlass::epilogue::threadblock::Sm80EVT<
       ApplyScale,
       Accum,
@@ -130,14 +129,37 @@ mixed_dtypes_linear_cutlass(
   using BiasArguments = typename Bias::Arguments;
 
   using ApplyBias = cutlass::epilogue::threadblock::VisitorCompute<
-      cutlass::plus, ElementOutput, ElementEpilogue,
+      cutlass::plus, ElementEpilogue, ElementEpilogue,
       cutlass::FloatRoundStyle::round_to_nearest
   >;
-
   using EVTApplyBias = cutlass::epilogue::threadblock::Sm80EVT<
       ApplyBias,
       EVTApplyScale,
       Bias>;
+
+  using ApplyActivationNone = cutlass::epilogue::threadblock::VisitorCompute<
+      cutlass::epilogue::thread::Identity, ElementEpilogue, ElementEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest
+  >;
+  using ApplyActivationReLu = cutlass::epilogue::threadblock::VisitorCompute<
+      cutlass::epilogue::thread::ReLu, ElementEpilogue, ElementEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest
+  >;
+  using ApplyActivationSiLu = cutlass::epilogue::threadblock::VisitorCompute<
+      cutlass::epilogue::thread::SiLu, ElementEpilogue, ElementEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest
+  >;
+  using ApplyActivation =
+      std::conditional_t<
+          activation == Activation::NONE,
+          ApplyActivationNone,
+          std::conditional_t<
+              activation == Activation::RELU,
+              ApplyActivationReLu,
+              ApplyActivationSiLu>>;
+  using EVTApplyActivation = cutlass::epilogue::threadblock::Sm80EVT<
+      ApplyActivation,
+      EVTApplyBias>;
 
   using Output = cutlass::epilogue::threadblock::VisitorAuxStore<
       OutputTileThreadMap, ElementOutput, cutlass::FloatRoundStyle::round_to_nearest,
@@ -146,7 +168,7 @@ mixed_dtypes_linear_cutlass(
 
   using EVTOutput = cutlass::epilogue::threadblock::Sm80EVT<
       Output,
-      EVTApplyBias>;
+      EVTApplyActivation>;
 
   using EVTKernel =
       typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
@@ -203,13 +225,16 @@ mixed_dtypes_linear_cutlass(
   typename EVTOutput::Arguments callback_arguments{
     {
       {
-        {},                  // Accum
-        scale_arguments,     // Scale
-        {}                   // ApplyScale
-      },                     // EVTApplyScale
-      bias_arguments,        // Bias
-      {}                     // ApplyBias
-    },                       // EVTApplyBias
+        {
+          {},                // Accum
+          scale_arguments,   // Scale
+          {}                 // ApplyScale
+        },                   // EVTApplyScale
+        bias_arguments,      // Bias
+        {}                   // ApplyBias
+      },                     // EVTApplyBias
+      {}                     // ApplyActivation
+    },                       // EVTApplyActivation
     output_arguments,        // Output
   };                         // EVTOutput
   constexpr auto AvailSms = -1;
@@ -261,41 +286,64 @@ mixed_dtypes_linear_cutlass(
 }
 #endif
 
-template<typename ElementInputA, typename ElementInputB>
-Tensor
-mixed_dtypes_linear_cutlass_dispatch_scale_bias(
+template<typename ElementInputA, typename ElementInputB, bool use_scale,
+        bool use_bias>
+Tensor mixed_dtypes_linear_cutlass_dispatch_activation(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
-    const Tensor& bias) {
+    const Tensor& bias, const c10::string_view& activation) {
+  if (activation == "none") {
+    return mixed_dtypes_linear_cutlass<
+        ElementInputA, ElementInputB, use_scale, use_bias, Activation::NONE>(
+            input, weight, scale, bias);
+  } else if (activation == "relu") {
+    return mixed_dtypes_linear_cutlass<
+        ElementInputA, ElementInputB, use_scale, use_bias, Activation::RELU>(
+            input, weight, scale, bias);
+  } else if (activation == "silu") {
+    return mixed_dtypes_linear_cutlass<
+        ElementInputA, ElementInputB, use_scale, use_bias, Activation::SILU>(
+            input, weight, scale, bias);
+  }
+
+  AT_ERROR("mixed_dtypes_linear_cutlass_dispatch_activation: Activation \"",
+           activation, "\" is not supported");
+  return Tensor{};
+}
+
+template<typename ElementInputA, typename ElementInputB>
+Tensor mixed_dtypes_linear_cutlass_dispatch_scale_bias(
+    const Tensor& input, const Tensor& weight, const Tensor& scale,
+    const Tensor& bias, const c10::string_view& activation) {
     if (scale.numel() > 0) {
         if (bias.numel() > 0) {
-            return mixed_dtypes_linear_cutlass<
+            return mixed_dtypes_linear_cutlass_dispatch_activation<
                        ElementInputA,
                        ElementInputB,
                        true,
-                       true>(input, weight, scale, bias);
+                       true>(input, weight, scale, bias, activation);
         }
         else {
-            return mixed_dtypes_linear_cutlass<
+            return mixed_dtypes_linear_cutlass_dispatch_activation<
                        ElementInputA,
                        ElementInputB,
                        true,
-                       false>(input, weight, scale, bias);
+                       false>(input, weight, scale, bias, activation);
         }
     }
     else {
         if (bias.numel() > 0) {
-            return mixed_dtypes_linear_cutlass<
+            return mixed_dtypes_linear_cutlass_dispatch_activation<
                        ElementInputA,
                        ElementInputB,
                        false,
-                       true>(input, weight, scale, bias);
+                       true>(input, weight, scale, bias, activation);
         }
         else {
-            return mixed_dtypes_linear_cutlass<
+            return mixed_dtypes_linear_cutlass_dispatch_activation<
                        ElementInputA,
                        ElementInputB,
                        false,
-                       false>(input, weight, scale, bias);
+                       false>(input, weight, scale, bias, activation);
         }
     }
 }
@@ -303,10 +351,12 @@ mixed_dtypes_linear_cutlass_dispatch_scale_bias(
 Tensor
 _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                       const c10::optional<Tensor>& scale_opt,
-                      const c10::optional<Tensor>& bias_opt) {
+                      const c10::optional<Tensor>& bias_opt,
+                      const c10::optional<c10::string_view> activation_opt) {
 #ifndef USE_ROCM
   const auto scale = scale_opt.has_value() ? *scale_opt : Tensor{};
   const auto bias = bias_opt.has_value() ? *bias_opt : Tensor{};
+  const auto activation = activation_opt.has_value() ? *activation_opt : "none";
 
   // For now, only CC 8.x devices are supported.
   const auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -419,7 +469,8 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                       output =
                           mixed_dtypes_linear_cutlass_dispatch_scale_bias<
                               cutlass::half_t,
-                              int8_t>(input_2d, weight, scale, bias);
+                              int8_t>(input_2d, weight, scale, bias,
+                                      activation);
                       return;
                     })
                 AT_DISPATCH_CASE(
@@ -428,7 +479,8 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                       output =
                           mixed_dtypes_linear_cutlass_dispatch_scale_bias<
                               cutlass::half_t,
-                              uint8_t>(input_2d, weight, scale, bias);
+                              uint8_t>(input_2d, weight, scale, bias,
+                                       activation);
                       return;
                     }));
           }));

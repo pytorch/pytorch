@@ -3277,7 +3277,7 @@
   dispatch:
     CUDA: _mixed_dtypes_linear
 
-- func: _mixed_dtypes_new_linear(Tensor input, Tensor weight, *, Tensor? scale=None, Tensor? bias=None) -> Tensor
+- func: _mixed_dtypes_new_linear(Tensor input, Tensor weight, *, Tensor? scale=None, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
     CUDA: _mixed_dtypes_linear2
 

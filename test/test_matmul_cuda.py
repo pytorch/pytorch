@@ -426,6 +426,9 @@ class TestMixedDtypesNewLinearCuda(TestCase):
             k,
             dtype,
             dtypeq,
+            use_scale,
+            use_bias,
+            activation,
             device,
             rtol,
             atol,
@@ -459,7 +462,14 @@ class TestMixedDtypesNewLinearCuda(TestCase):
                 weight_ref *= scale.view(n, 1).expand(n, k)
 
             output_ref = torch.nn.functional.linear(input_ref, weight_ref, bias).reshape(*input.shape[:-1], n)
-            output = torch.ops.aten._mixed_dtypes_new_linear(input, weight, scale=scale, bias=bias)
+            if activation == "relu":
+                relu = torch.nn.ReLU()
+                output_ref = relu(output_ref)
+            elif activation == "silu":
+                silu = torch.nn.SiLU()
+                output_ref = silu(output_ref)
+
+            output = torch.ops.aten._mixed_dtypes_new_linear(input, weight, scale=scale, bias=bias, activation=activation)
 
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
@@ -475,11 +485,12 @@ class TestMixedDtypesNewLinearCuda(TestCase):
             [16, 64, 128],
             [16, 128, 128],
         ]
+        activations = [None, "relu", "silu"]
         rtol, atol = 1e-3, 1e-3
         if dtype == torch.bfloat16:
             rtol, atol = 1e-2, 1e-3
-        for dtypeq, batch_shape, (m, n, k), use_scale, use_bias in product(
-            dtypeqs, batch_shapes, shapes, (False, True), (False, True)
+        for dtypeq, batch_shape, (m, n, k), use_scale, use_bias, activation in product(
+                dtypeqs, batch_shapes, shapes, (False, True), (False, True), activations
         ):
             run_test(
                 batch_shape,
@@ -488,6 +499,9 @@ class TestMixedDtypesNewLinearCuda(TestCase):
                 k,
                 dtype,
                 dtypeq,
+                use_scale,
+                use_bias,
+                activation,
                 device,
                 rtol,
                 atol,
