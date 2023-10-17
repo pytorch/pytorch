@@ -3556,6 +3556,11 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
                          error_regex='pad should be at most half of kernel size')
 
+        # error inputs when pad > ((kernel_size - 1) * dilation + 1) / 2, when dilation is not default
+        yield ErrorInput(SampleInput(x,
+                         kwargs={'kernel_size': 3, 'dilation': 2, 'stride': 1, 'padding': 3, 'return_indices': True}),
+                         error_regex='pad should be at most half of kernel size')
+
         # error inputs for input tensor
         error_msg = r'Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input'
         yield ErrorInput(SampleInput(make_arg((), requires_grad=requires_grad), kwargs={'kernel_size': 1}),
