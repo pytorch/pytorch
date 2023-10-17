@@ -23,8 +23,7 @@ class TestLeafNode : public Node {
   }
 
   explicit TestLeafNode(size_t param)
-      : Node(ClassOpKind(), /* num_outputs */ 1),
-        hash_(Hash(param)) {}
+      : Node(ClassOpKind(), /* num_outputs */ 1), hash_(Hash(param)) {}
   ~TestLeafNode() override = default;
 
   const std::vector<Output>& operands() const override {
