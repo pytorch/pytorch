@@ -434,7 +434,7 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                if isinstance(excp, NestedGraphBreak):
+                if isinstance(excp, NestedGraphBreak)
                     return
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
@@ -697,7 +697,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.lineno = inst.starts_line
             self.log_starts_line()
 
-        if len(self.stack) == 0 and self.should_compile_partial_graph():
+        if (
+            len(self.stack) == 0
+            and self.should_compile_partial_graph()
+            # Inliner should not try to restore from checkpoint
+            and not isinstance(self, InliningInstructionTranslator)
+        ):
             self.checkpoint = inst, self.copy_graphstate()
 
         log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
@@ -1393,8 +1398,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
-        cg.extend_output([create_instruction("RETURN_VALUE")])
-
+        cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
     def should_compile_partial_graph(self):
