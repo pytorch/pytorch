@@ -1278,8 +1278,7 @@ struct TORCH_API NumberType : public Type {
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return "number"; // technically not a valid python type, but
                      // we need to use it when parsing back in annotations
                      // for implicit conversions
@@ -1306,8 +1305,7 @@ struct TORCH_API FloatType : public NumberType {
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return "float";
   }
 };
@@ -1332,8 +1330,7 @@ struct TORCH_API ComplexType : public NumberType {
 
  private:
   ComplexType() : NumberType(TypeKind::ComplexType) {}
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return "complex";
   }
 };
@@ -1422,8 +1419,7 @@ struct TORCH_API IntType : public NumberType {
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return "int";
   }
 };
@@ -1457,8 +1453,7 @@ struct TORCH_API StringType : public Type {
     // we only use "str" (not "string") in both FunctionSchema and script
     return annotation_str();
   }
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -1478,8 +1473,7 @@ struct TORCH_API StorageType : public Type {
   std::string str() const override {
     return annotation_str();
   }
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return "Storage";
   }
   static const TypeKind Kind = TypeKind::StorageType;
@@ -1514,8 +1508,7 @@ struct TORCH_API FunctionType : public NamedType {
 
  private:
   FunctionType(torch::jit::Function* function);
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -2206,8 +2199,7 @@ struct TORCH_API InterfaceType : public NamedType {
       const InterfaceType& rhs,
       std::ostream* why_not);
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
     return name()->qualifiedName();
   }
 
