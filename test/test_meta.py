@@ -1575,6 +1575,16 @@ class TestMeta(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res.untyped_storage().data_ptr(), 0)
 
+    def test_index_select_out(self):
+        def f():
+            input = torch.randn([8, 16], device='meta')
+            index = torch.tensor([2, 1, 6, 7, 3, 1, 7, 5, 6, 7], device='meta')
+            out = torch.empty([10, 16], device='meta')
+            return torch.index_select(input=input, dim=0, index=index, out=out)
+        with enable_python_dispatcher():
+            out = f()
+            self.assertEqual(out.shape, [10, 16])
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):
