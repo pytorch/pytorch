@@ -9,11 +9,17 @@ from sympy import Expr
 
 import torch
 import torch._inductor as inductor
+from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from .. import config, ir, pattern_matcher
-from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..fx_utils import (
+    FakeTensorUpdater,
+    get_fake,
+    get_fake_args_kwargs,
+    get_node_storage,
+)
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -49,6 +55,8 @@ pass_patterns = [
 ]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
+# patterns for triton mutation, applied at the end
+triton_patterns = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -80,6 +88,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             patterns.apply(gm.graph)
         if is_inference:
             inference_patterns.apply(gm.graph)
+        triton_patterns.apply(gm.graph)
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
@@ -267,6 +276,45 @@ def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
     return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional,
+        kernel_idx=KeywordArg("kernel_idx"),
+        grid=KeywordArg("grid"),
+        kwargs=KeywordArg("kwargs"),
+    ),
+    pass_dict=triton_patterns,
+)
+def triton_kernel_wrap(match: Match, *, kernel_idx, grid, kwargs):
+    # It might be better to move this decomposition into lowering after some
+    # sort of clone removal pass at IR level is implemented. For the time being,
+    # decomposition is done at this level in order take advantage of
+    # existing clone removal.
+    assert len(match.nodes) == 1
+    node = match.nodes[0]
+    graph = match.graph
+
+    with graph.inserting_before(node):
+        cloned_kwargs = {
+            k: (
+                graph.call_function(aten.clone, (v,))
+                if isinstance(get_fake(v), Tensor)
+                else v
+            )
+            for k, v in kwargs.items()
+        }
+
+    with graph.inserting_after(node):
+        mutation_node = graph.call_function(
+            torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_mutation,
+            args=(),
+            kwargs={"kernel_idx": kernel_idx, "grid": grid, "kwargs": cloned_kwargs},
+        )
+    node.replace_all_uses_with(mutation_node)
+    mutation_node.meta.update(node.meta)
+    graph.erase_node(node)
 
 
 @register_graph_pattern(

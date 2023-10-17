@@ -2004,12 +2004,14 @@ def _worker_compile(
     device_interface = get_interface_for_device(device.type)
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
-    kernel.precompile(warm_cache_only_with_cc=cc)
+    if hasattr(kernel, "precompile"):
+        kernel.precompile(warm_cache_only_with_cc=cc)
 
 
 def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
     kernel = TritonCodeCache.load(kernel_name, source_code)
-    kernel.precompile()
+    if hasattr(kernel, "precompile"):
+        kernel.precompile()
     return kernel
 
 

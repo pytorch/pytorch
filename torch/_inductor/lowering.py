@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 
@@ -252,7 +252,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...]] = list(args)
+        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -4838,6 +4838,14 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+@register_lowering(
+    torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_mutation
+)
+def triton_kernel_wrap(*, kernel_idx, grid, kwargs):
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
 @register_lowering(torch.ops.inductor.accumulate_grad_)

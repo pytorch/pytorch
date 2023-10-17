@@ -1640,7 +1640,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_views(self, backend):
         def call_triton_take_view(x: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1674,7 +1674,7 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_grad_option(self, grad_fn, backend):
         def call_triton(x: torch.Tensor):
             with grad_fn():
@@ -1690,7 +1690,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_inner_triton_function(self, backend):
         def f(x: torch.Tensor):
             @triton.jit
@@ -1723,8 +1723,14 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, backend):
+        if backend == "inductor" and grad is True:
+            # TODO(oulgen): somehow functionalization over fake tensors
+            # is broken, fix it
+            return
+
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
         ):

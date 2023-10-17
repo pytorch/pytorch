@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import inspect
 import os
 import re
 from itertools import count
@@ -17,6 +18,7 @@ from torch.fx.node import _get_qualified_name
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
+from ..ir import ComputedBuffer
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -470,6 +472,9 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
+    def generate_user_defined_triton_kernel(self, kernel_name, args):
+        self.writeline(f"{kernel_name}.run({', '.join(args)})")
+
     def generate_scatter_fallback(
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
@@ -734,6 +739,30 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
+    def define_user_defined_triton_kernel(self, kernel):
+        code = inspect.getsource(kernel.fn)
+        name = kernel.__name__
+
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
+
+        compile_wrapper.splice(
+            """
+            import triton
+            import triton.language as tl
+            """
+        )
+        compile_wrapper.splice(code, strip=True)
+        compile_wrapper.writeline("''')")
+        _, lineno = inspect.getsourcelines(kernel.fn)
+        srcfile = inspect.getsourcefile(kernel.fn)
+        metadata = f"# Original path: {srcfile}:{lineno}"
+        self.define_kernel(
+            name,
+            compile_wrapper.getvalue(),
+            metadata,
+        )
+
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if expr not in self.kenel_numel_expr:
@@ -822,6 +851,8 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
+        elif isinstance(s, ComputedBuffer):
+            return s.codegen_reference()
         else:
             return repr(s)
 
@@ -1467,6 +1498,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
+    def generate_user_defined_triton_kernel(self, kernel_name, args):
+        raise AssertionError(
+            "User defined triton kernels are not supported in CPP mode"
+        )
+
     def generate_scatter_fallback(
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
@@ -1993,6 +2029,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
+        elif isinstance(val, ComputedBuffer):
+            return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):

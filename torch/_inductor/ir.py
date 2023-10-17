@@ -114,6 +114,9 @@ def validate_ir(node_or_nodes):
         if isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
+        elif isinstance(nodes, dict):
+            for node in nodes.values():
+                _check_tensorbox(node)
         else:
             assert isinstance(
                 nodes,
@@ -3397,6 +3400,8 @@ class ExternKernel(InputsKernel):
         )
 
     def codegen_kwargs(self):
+        if not self.kwargs:
+            return []
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
@@ -3570,6 +3575,58 @@ class ExternKernelAlloc(ExternKernel):
 
     def apply_constraint(self):
         raise NotImplementedError
+
+
+class UserDefinedTritonKernel(ExternKernel):
+    def codegen(self, wrapper):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        kernel = kernel_side_table.get_kernel(self.kernel_idx)
+
+        self.codegen_comment(wrapper)
+        wrapper.generate_user_defined_triton_kernel(
+            kernel.__name__,
+            self.codegen_kwargs(),
+        )
+        wrapper.define_user_defined_triton_kernel(kernel)
+
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        # UserDefinedTritonKernel does not return anything, but rather
+        # modifies input in place, do not let it get DCEd
+        return True
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
+    def __init__(self, *, kernel_idx, grid, kernel_args):
+        inputs = []
+        kwargs = dict()
+        constant_args = []
+        device = None
+        for k, v in kernel_args.items():
+            if isinstance(v, TensorBox):
+                device = v.get_device()
+                t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
+                inputs.append(t)
+                kwargs[k] = t
+            else:
+                constant_args.append(v)
+                kwargs[k] = v
+        kwargs["grid"] = grid
+
+        assert device is not None
+        super().__init__(
+            None,
+            NoneLayout(),  # type: ignore[arg-type]
+            inputs,
+            tuple(constant_args),
+            kwargs,
+        )
+        self.name = V.graph.register_buffer(self)
+        self.kernel_idx = kernel_idx
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -4137,6 +4194,11 @@ class FallbackKernel(ExternKernelAlloc):
                     generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
                 )
+            elif isinstance(output, dict):
+                return {
+                    key: generate_output(val, indices + [(type(output), key)])
+                    for key, val in output.items()
+                }
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
                     tensor_to_layout(output),
@@ -4154,8 +4216,8 @@ class FallbackKernel(ExternKernelAlloc):
                 return None
 
         outputs = generate_output(example_output, [])
-        if isinstance(outputs, (list, tuple)):
-            packed.outputs = outputs
+        if isinstance(outputs, (list, tuple, dict)):
+            packed.outputs = outputs  # type: ignore[assignment]
         else:
             packed.outputs = [outputs]
         return outputs
@@ -4184,6 +4246,8 @@ class MultiOutput(ExternKernel):
                     basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
+            elif itype == dict:
+                return self.codegen_list_tuple_access(f"{basename}['{i}']", indices[1:])
             else:
                 raise AssertionError("non supported index type")
         else:
