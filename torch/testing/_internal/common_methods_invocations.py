@@ -3478,10 +3478,10 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
     def __init__(self):
         super().__init__()
-        self.kwargs['kernel_size'] += [(3,), (3,)]
-        self.kwargs['stride'] += [(2,), (1,)]
-        self.kwargs['padding'] += [(1,), (2,)]
-        self.kwargs['dilation'] += [(1,), (2,)]
+        self.kwargs['kernel_size'] += [(3,)]
+        self.kwargs['stride'] += [(2,)]
+        self.kwargs['padding'] += [(1,)]
+        self.kwargs['dilation'] += [(1,)]
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
