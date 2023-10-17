@@ -638,6 +638,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             assert result is None
             resume_at_insts, push = resume_at_insts
             new_co_names = list(self.output.global_scope)
+
+            # if sys.version_info >= (3, 11):
+            #     # stack effect for PRECALL + CALL is split between the two instructions
+            #     stack_effect = dis.stack_effect(
+            #         dis.opmap["PRECALL"], inst.arg
+            #     ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
+            # else:
+            #     stack_effect = dis.stack_effect(inst.opcode, inst.arg)
+            # self.popn(push - stack_effect)
+
             for _ in range(push):
                 self.push(UnknownVariable())
             resume_at = self.create_call_resume_at(
@@ -650,8 +660,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.resume_at_insts = resume_at
                 raise NestedGraphBreak()
         except Exception as e:
-            if not isinstance(e, NestedGraphBreak):
-                self.restore_graphstate(state)
+            self.restore_graphstate(state)
             raise
 
     def get_line_of_code_header(self, lineno=None):
