@@ -9,7 +9,7 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
-from .. import config, variables
+from .. import config, polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -494,7 +494,10 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        if name == "backward":
+        if name == "apply":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return self.call_apply(tx, args, kwargs).add_options(options)
+        elif name == "backward":
             with tx.strict_translation_mode():
                 if isinstance(self.fn_cls.backward, types.FunctionType):
                     backward = UserFunctionVariable(self.fn_cls.backward)
@@ -642,8 +645,6 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
-            return self.obj.call_apply(tx, args, kwargs).add_options(self)
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
 
     def call_method(
@@ -817,20 +818,37 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
-        elif self.value is itertools.accumulate and not kwargs:
+        elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
+
+            if any(key not in ["initial", "func"] for key in kwargs.keys()):
+                unimplemented(
+                    "Unsupported kwargs for itertools.accumulate: "
+                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}"
+                )
+
+            acc = kwargs.get("initial")
 
             if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-                if len(args) == 1:
-                    func = BuiltinVariable(operator.add).call_function
+
+                if "func" in kwargs and len(args) == 1:
+                    func = kwargs["func"].call_function
                 elif len(args) == 2:
                     func = args[1].call_function
+                elif len(args) == 1:
+                    # Default to operator.add
+                    func = BuiltinVariable(operator.add).call_function
+                else:
+                    unimplemented(
+                        "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
+                    )
             else:
-                raise unimplemented("Unsupported arguments for itertools.accumulate")
+                unimplemented("Unsupported arguments for itertools.accumulate")
 
             items = []
-            acc = None
+            if acc is not None:
+                items.append(acc)
             for item in seq:
                 if acc is None:
                     acc = item
@@ -895,6 +913,17 @@ class SkipFilesVariable(VariableTracker):
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs, **options
+            )
+        elif self.value is itertools.repeat:
+            from .builder import SourcelessBuilder
+
+            if len(args) < 2:
+                # We cannot risk infinite generator being consumed to exhaustion by dynamo
+                # (i.e. infinite loop)
+                unimplemented("Infinite repeat is not supported")
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
             )
         else:
             try:
