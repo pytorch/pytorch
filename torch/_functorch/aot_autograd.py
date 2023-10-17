@@ -1080,7 +1080,7 @@ def run_functionalized_fw_and_collect_metadata(
         out_tensor_alias_counts = collections.defaultdict(int)
         # This tells us, for a given group of outputs that alias each other,
         # whether they e.g. all came from an unbind call
-        are_aliased_tensors_all_multi_output_views = collections.defaultdict(bool)
+        num_aliased_tensors_that_are_multi_output_views = collections.defaultdict(int)
         out_storage_to_tensors = collections.defaultdict(set)
         for o in flat_f_outs:
             if isinstance(o, torch.Tensor):
@@ -1095,7 +1095,7 @@ def run_functionalized_fw_and_collect_metadata(
                 #     intermediate = x.mul(2)
                 #     # x and intermediate here require grad
                 #     o1, o2, ... o10 = intermediate.unbind(-1)
-                #     return o1, o2, ... o10
+                #     return intermediate, o1, o2, ... o10
                 # Now, the "intermediate base" handling in AOTAutograd implies that we must do the following:
                 #   (1) return "intermediate as an extra output of the compiled graph
                 #   (2) regenerate each aliased output off of "intermediate", **outside** of the autograd.Function.
@@ -1111,7 +1111,8 @@ def run_functionalized_fw_and_collect_metadata(
                 #
                 # For a set of outputs of the graph that alias each other, o_1...o_k, consider:
                 # (1) They came from the same multi-outout view op, e.g. o_1, ..., o_k = intermediate.unbind(0)
-                # (2) No other aliases of o_1 through o_k escape from the graph (e.g. there is not some other graph input/output
+                # (2) If there are any other aliases of o_1 through o_k (in the example above, intermediate),
+                #     **at most** 1 can escape from the graph (e.g. there is not some other graph input/output
                 #     o_other, that aliases these outputs)
                 # (3) o_1...o_k all require_grad, they all share the same ._base, and their ._base requires grad.
                 #     This condition is important because it's what causes slowness in the intermediate_base
@@ -1127,15 +1128,19 @@ def run_functionalized_fw_and_collect_metadata(
                 #     "RuntimeError: Output 0 of UnbindBackward0 is a view and is being modified inplace. This view is
                 #      the output of a function that returns multiple views. Such functions do not allow the output
                 #      views to be modified inplace. You should replace the inplace operation by an out-of-place one."
-                # (b) What if we take a view of one of the aliased outputs, and mutate that?
+                # (b) What if we take a view of o_k and mutate it, o_k.view(o_k.shape).mul_(2)?
                 #     Autograd raises the same error- the "multi-output-view"ness of an alias propagates to future views.
-                # (c) What if we mutate one of the outputs under no_grad?
+                # (c) What if we mutate o_k under no_grad?
                 #     Autograd raises the same error
                 # (d) What if we detach and mutate, e.g. o_k.detach().mul_(2)?
                 #     Autograd allows this, *but* autograd updates all alias's grad_fn's to be error functions when accessed.
                 #     Autograd raises the same error
                 # (e) What if we try to mutate another alias of o_1...o_k, that was **not** created from a multi-output view?
-                #     We can't, since we promised that o_1...o_k are the only aliases that are visible to the user.
+                #     We promised that there is at most **one** such alias, e.g. intermediate in the example above.
+                #     You can mutate intermediate, but in eager mode this will change the grad_fn of o_1...o_k
+                #     to be error fn's.
+                #     Since intermediate was the *only* non-multi-output-alias, there are no other aliases
+                #     of `intermediate` around that were produced by the compiled fn and have a valid grad_fn.
                 #
                 # Coming back to this optimization:
                 # Given that it is not possible for mutating one of these aliases to affect the autograd metadata of another alias
@@ -1148,10 +1153,8 @@ def run_functionalized_fw_and_collect_metadata(
                 # then this optimization will probably matter less and might be ok to remove.
                 is_cur_tensor_multi_out_view = isinstance(o, FunctionalTensor) \
                     and torch._functionalize_is_multi_output_view(o.elem)
-                if curr_storage not in are_aliased_tensors_all_multi_output_views:
-                    are_aliased_tensors_all_multi_output_views[curr_storage] = is_cur_tensor_multi_out_view
-                else:
-                    are_aliased_tensors_all_multi_output_views[curr_storage] &= is_cur_tensor_multi_out_view
+                if is_cur_tensor_multi_out_view:
+                    num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
                 out_storage_to_tensors[curr_storage].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
@@ -1194,8 +1197,11 @@ def run_functionalized_fw_and_collect_metadata(
                 and o.requires_grad
                 and o._base.requires_grad
             ):
+                num_aliased_outs = out_tensor_alias_counts[curr_storage]
+                num_multi_output_view_outs = num_aliased_tensors_that_are_multi_output_views[curr_storage]
+                num_aliased_outs_that_are_not_multi_output_views = num_aliased_outs - num_multi_output_view_outs
                 # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
-                if out_tensor_alias_counts[curr_storage] == 1 or are_aliased_tensors_all_multi_output_views[curr_storage]:
+                if out_tensor_alias_counts[curr_storage] == 1 or num_aliased_outs_that_are_not_multi_output_views <= 1:
                     # Note [Intermediate Bases Optimization]
                     # Normally if we have an output that aliases an intermediate,
                     # we need to add the extra "intermediate base" logic further down
