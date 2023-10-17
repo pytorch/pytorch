@@ -10,6 +10,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/_cummax_helper_native.h>
+#include <ATen/ops/_cummin_helper_native.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
@@ -64,6 +66,7 @@ enum class MPSCumulativeOpType : uint8_t {
 namespace mps {
 
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
+typedef NSArray<MPSGraphTensor*>* (^UnaryToBinaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 using is_noop_p = std::function<bool(const Tensor&)>;
 
 static bool is_empty_tensor(const Tensor& self) {
@@ -119,6 +122,70 @@ static void unary_op(const Tensor& self,
         @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+  }
+}
+
+static void unary_to_binary_op(const Tensor& self,
+                               const Tensor& output1,
+                               const Tensor& output2,
+                               std::string op_name,
+                               UnaryToBinaryOpBlock unaryToBinaryBlock,
+                               is_noop_p is_noop = is_empty_tensor) {
+  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
+              "MPS support unary op with uint8 natively starting from macOS 13.0");
+  if (!output1.is_same_size(self)) {
+    output1.resize_(self.sizes());
+  }
+  if (!output2.is_same_size(self)) {
+    output2.resize_(self.sizes());
+  }
+  if (is_noop(self)) {
+    output1.copy_(self);
+    output2.copy_(self);
+    return;
+  }
+  @autoreleasepool {
+    string key = op_name + getTensorsStringKey({self, output1, output2});
+    auto cachedGraph =
+        LookUpOrCreateCachedGraph<MPSUnaryToBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* castTensor = newCachedGraph->inputTensor_;
+          // Integer input must be cast to float if output is float
+          if (isIntegralType(self.scalar_type(), true) && isFloatingType(output1.scalar_type())) {
+            castTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, output1.scalar_type());
+          }
+          NSArray<MPSGraphTensor*>* outputTensors = unaryToBinaryBlock(mpsGraph, castTensor);
+          newCachedGraph->output1Tensor_ = outputTensors[0];
+          newCachedGraph->output2Tensor_ = outputTensors[1];
+        });
+
+    // If self is non-densely mapped in storage, create a dense output-like representation
+    at::Tensor self_;
+    if (!is_dense_in_storage(self)) {
+      self_ = at::empty_like(output1, self.scalar_type());
+      mps::mps_copy_(self_, self, false);
+    } else {
+      self_ = self;
+    }
+
+    bool gatherTensorData = true;
+    // NS: This check is wrong and needs to be fixed, as it would produce wrong results for transposed outputs
+    // See https://github.com/pytorch/pytorch/issues/100764
+
+    if (!output1.is_contiguous() || output1.is_view()) {
+      gatherTensorData = false;
+    }
+
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self_, /*mpsShape=*/nullptr, gatherTensorData);
+    auto output1Placeholder = Placeholder(cachedGraph->output1Tensor_, output1, /*mpsShape=*/nullptr, false);
+    auto output2Placeholder = Placeholder(cachedGraph->output2Tensor_, output2, /*mpsShape=*/nullptr, false);
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
+        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      output1Placeholder.getMPSGraphTensor() : output1Placeholder.getMPSGraphTensorData(),
+      output2Placeholder.getMPSGraphTensor() : output2Placeholder.getMPSGraphTensorData()
+    };
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
 }
@@ -482,6 +549,42 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   };
 
   mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
+}
+
+void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+  auto cumsum_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> NSArray<MPSGraphTensor*>* {
+    MPSGraphTensor* one = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt64];
+    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64];
+    MPSGraphTensor* values = [mpsGraph cumulativeMaximumWithTensor:inputTensor axis:dim name:nil];
+    MPSGraphTensor* rawIndices = [mpsGraph cumulativeSumWithTensor:one axis:dim exclusive:true reverse:false name:nil];
+    MPSGraphTensor* boolEqualToValue = [mpsGraph equalWithPrimaryTensor:inputTensor secondaryTensor:values name:nil];
+    MPSGraphTensor* sparseIndices = [mpsGraph selectWithPredicateTensor:boolEqualToValue
+                                                    truePredicateTensor:rawIndices
+                                                   falsePredicateTensor:zero
+                                                                   name:nil];
+    MPSGraphTensor* indices = [mpsGraph cumulativeMaximumWithTensor:sparseIndices axis:dim name:nil];
+    return @[ values, indices ];
+  };
+
+  mps::unary_to_binary_op(self, values, indices, "cummax_helper_mps", cumsum_op);
+}
+
+void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+  auto cummin_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> NSArray<MPSGraphTensor*>* {
+    MPSGraphTensor* one = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt64];
+    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64];
+    MPSGraphTensor* values = [mpsGraph cumulativeMinimumWithTensor:inputTensor axis:dim name:nil];
+    MPSGraphTensor* rawIndices = [mpsGraph cumulativeSumWithTensor:one axis:dim exclusive:true reverse:false name:nil];
+    MPSGraphTensor* boolEqualToValue = [mpsGraph equalWithPrimaryTensor:inputTensor secondaryTensor:values name:nil];
+    MPSGraphTensor* sparseIndices = [mpsGraph selectWithPredicateTensor:boolEqualToValue
+                                                    truePredicateTensor:rawIndices
+                                                   falsePredicateTensor:zero
+                                                                   name:nil];
+    MPSGraphTensor* indices = [mpsGraph cumulativeMaximumWithTensor:sparseIndices axis:dim name:nil];
+    return @[ values, indices ];
+  };
+
+  mps::unary_to_binary_op(self, values, indices, "cummin_helper_mps", cummin_op);
 }
 
 } // namespace at::native

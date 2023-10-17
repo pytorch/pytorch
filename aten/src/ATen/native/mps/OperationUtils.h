@@ -168,6 +168,14 @@ struct MPSUnaryGradCachedGraph : public MPSCachedGraph
   MPSGraphTensor *gradInputTensor_ = nil;
 };
 
+struct MPSUnaryToBinaryCachedGraph : public MPSCachedGraph
+{
+  MPSUnaryToBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *output1Tensor_ = nil;
+  MPSGraphTensor *output2Tensor_ = nil;
+};
+
 struct MPSBinaryCachedGraph : public MPSCachedGraph
 {
   MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
