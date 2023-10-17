@@ -41,7 +41,7 @@ from ..allowed_functions import (
     is_user_defined_allowed,
 )
 from ..exc import unimplemented
-from ..guards import GuardBuilder, make_dupe_guard
+from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
@@ -227,9 +227,7 @@ class VariableBuilder:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
-                side_effect_result = side_effect_result.add_guards(
-                    self.make_guards(dup_guard)
-                )
+                self.install_guards(dup_guard)
             return side_effect_result
         vt = self._wrap(value).clone(**self.options())
         if self._can_lift_attrs_to_inputs(vt):
@@ -268,14 +266,15 @@ class VariableBuilder:
     def options(self):
         return {"source": self.get_source()}
 
-    def make_guards(self, *guards):
+    def install_guards(self, *guards):
         source = self.get_source()
         if (
             isinstance(source, ConstantSource)
             or source.guard_source() == GuardSource.CONSTANT
         ):
             return None
-        return {source.make_guard(guard) for guard in guards}
+        install_guard([source.make_guard(guard) for guard in guards], skip=1)
+        return {}
 
     @classmethod
     @functools.lru_cache(None)
@@ -326,7 +325,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     InspectSignatureVariable.create,
                     source=self.source,
-                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
             ),
             (comptime, lambda self, value: ComptimeVariable()),
@@ -335,7 +334,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
                     source=self.source,
-                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
             ),
             (
@@ -343,7 +342,7 @@ class VariableBuilder:
                 lambda self, value: TorchVariable(
                     value,
                     source=self.source,
-                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
             ),
         ]
@@ -366,8 +365,6 @@ class VariableBuilder:
 
             class JITFunction:
                 pass
-
-        make_guards = self.make_guards
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -392,13 +389,13 @@ class VariableBuilder:
             return self.wrap_listlike(value)
 
         elif value is torch.utils._pytree.SUPPORTED_NODES:
+            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
+            # under the assumption that the values themselves don't change.
+            self.install_guards(GuardBuilder.DICT_VERSION)
             result = {
                 k: UserDefinedObjectVariable(
                     value[k],
                     source=GetItemSource(self.get_source(), k),
-                    # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-                    # under the assumption that the values themselves don't change.
-                    guards=self.make_guards(GuardBuilder.DICT_VERSION),
                 )
                 for k in value.keys()
             }
@@ -421,9 +418,9 @@ class VariableBuilder:
                 # Why is this OK for (specialized) nnmodules? We set up a setattr hook
                 # to check for module property mutations, which does a reasonable,
                 # but not completely secure job ensuring a property wasn't changed.
-                guards = self.make_guards(GuardBuilder.BOOL_FALSE)
+                self.install_guards(GuardBuilder.BOOL_FALSE)
             else:
-                guards = self.make_guards(GuardBuilder.DICT_KEYS)
+                self.install_guards(GuardBuilder.DICT_KEYS)
 
             # store key variables in global location for reconstruction
             for key in value.keys():
@@ -440,7 +437,7 @@ class VariableBuilder:
                 k: LazyVariableTracker(
                     value[k],
                     source=GetItemSource(self.get_source(), index_source(k)),
-                ).add_guards(guards)
+                )
                 for k in value.keys()
             }
 
@@ -449,10 +446,9 @@ class VariableBuilder:
                     result,
                     type(value),
                     self._wrap(value.default_factory),
-                    guards=guards,
                 )
             else:
-                result = ConstDictVariable(result, type(value), guards=guards)
+                result = ConstDictVariable(result, type(value))
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
@@ -464,33 +460,21 @@ class VariableBuilder:
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
-            return ConstantVariable.create(
-                value=value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
-            )
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
         elif isinstance(value, enum.Enum):
-            return EnumVariable(
-                value=value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
-            )
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return EnumVariable(value=value, source=self.source)
         elif is_builtin_callable(value):
-            return BuiltinVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.BUILTIN_MATCH),
-            )
+            self.install_guards(GuardBuilder.BUILTIN_MATCH)
+            return BuiltinVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
-            return TorchVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return TorchVariable(value, source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -509,84 +493,66 @@ class VariableBuilder:
                     self.tx, GetItemSource(keywords_source, k)
                 )(v)
 
-            guards = {
+            install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS),
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
-            }
-
-            return FunctoolsPartialVariable(
-                func_obj, args, keywords, original=value, guards=guards
             )
+            return FunctoolsPartialVariable(func_obj, args, keywords, original=value)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
-            return TypingVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
-            )
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return TypingVariable(value, source=self.source)
         elif is_numpy(value):
             assert np
-            return NumpyVariable(
-                value,
-                source=self.source,
-                guards=make_guards(
-                    GuardBuilder.FUNCTION_MATCH
-                    if callable(value)
-                    else GuardBuilder.TYPE_MATCH
-                ),
+            self.install_guards(
+                GuardBuilder.FUNCTION_MATCH
+                if callable(value)
+                else GuardBuilder.TYPE_MATCH
             )
+            return NumpyVariable(value, source=self.source)
         elif (
             istype(value, (type, types.FunctionType))
             and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
                 skipfiles.check_verbose(value, allow_torch=True).reason,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
             old_source = self.source
             self.source = new_source
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return CollectiveFunctionRewriteVariable(
-                new_fn,
-                orig_fn=value,
-                orig_source=old_source,
-                source=new_source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                new_fn, orig_fn=value, orig_source=old_source, source=new_source
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            return UserFunctionVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserFunctionVariable(value, source=self.source)
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            self.install_guards(GuardBuilder.PYMODULE_MATCH)
             return PythonModuleVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return AutogradFunctionVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             # The autograd.function context
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return self.tx.output.side_effects.track_object_existing(
                 self.source,
                 value,
-                AutogradFunctionContextVariable(
-                    value,
-                    source=self.source,
-                    guards=make_guards(GuardBuilder.TYPE_MATCH),
-                ),
+                AutogradFunctionContextVariable(value, source=self.source),
             )
         elif (
             isinstance(value, types.MethodType)
@@ -597,46 +563,34 @@ class VariableBuilder:
             and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
-                AutogradFunctionVariable(
-                    value.__self__,
-                    source=self.source,
-                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
+                AutogradFunctionVariable(value.__self__, source=self.source),
                 "apply",
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
-            return DataClassVariable.wrap(self, value).add_guards(
-                make_guards(GuardBuilder.TYPE_MATCH)
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return DataClassVariable.wrap(self, value)
         elif HFPretrainedConfigVariable.is_matching_object(value):
-            return HFPretrainedConfigVariable(
-                value, guards=make_guards(GuardBuilder.TYPE_MATCH)
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperatorVariable.make(
-                value,
-                source=self.source,
-                guards=self.make_guards(
-                    GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
-                ),
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
+            return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif type(value).__name__ == "builtin_function_or_method" and isinstance(
             value.__self__, torch_special_class_types
         ):
-            return TorchVariable(
-                value,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return TorchVariable(value)
         elif isinstance(value, torch.cuda.streams.Stream):
             unimplemented("CUDAStreamVariable does not currently work soundly.")
+            # self.install_guards(GuardBuilder.ID_MATCH)
             # return CUDAStreamVariable(
             #     None,
             #     value,
-            #     source=self.source,
-            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
+            #     source=self.source
             # )
         elif (
             isinstance(value, torch._C._TensorMeta)
@@ -663,82 +617,54 @@ class VariableBuilder:
             assert self_obj and isinstance(
                 self_obj, VariableTracker
             ), "Failed to produce a valid self obj"
-            return UserMethodVariable(
-                value.__func__,
-                self_obj,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserMethodVariable(value.__func__, self_obj, source=self.source)
         elif (
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
         ):
-            return NullContextVariable(
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
+            # TODO(jansel): I think this can be TYPE_MATCH
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return NullContextVariable(source=self.source)
         elif KeyedJaggedTensorVariable.is_matching_object(value):
-            result = KeyedJaggedTensorVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
         elif isinstance(value, types.GetSetDescriptorType):
-            return GetSetDescriptorVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return MethodWrapperVariable(value)
         elif isinstance(value, torch.optim.Optimizer):
-            return OptimizerVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return OptimizerVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
-            return ProcessGroupVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
-            # TODO: see if we need to add custom guard instead
-            # of a simple ID_MATCH
-            return DeviceMeshVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return DeviceMeshVariable(value, source=self.source)
         elif PlacementClassVariable.is_placement_type(value):
-            # TODO: see if we need to add custom guard instead
-            # of a simple ID_MATCH
-            return PlacementClassVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
-            )
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return PlacementClassVariable(value, source=self.source)
         elif PlacementVariable.is_placement(value):
-            # TODO: see if we need to add custom guard instead
-            # of a simple ID_MATCH
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.ID_MATCH)
             return PlacementVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserDefinedClassVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
@@ -780,19 +706,16 @@ class VariableBuilder:
                 new_symint == 1,
             )
         elif isinstance(value, JITFunction):
+            self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
                 value,
                 None,  # No kernel idx provided
                 None,  # No grid provided
                 source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         else:
-            result = UserDefinedObjectVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -832,36 +755,32 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        self.install_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
 
         output = [
-            VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
-                item
-            ).add_guards(guards)
+            VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(item)
             for i, item in enumerate(value)
         ]
         result = BaseListVariable.cls_for_instance(value)(
-            output, mutable_local=MutableLocal(), guards=guards
+            output, mutable_local=MutableLocal()
         )
         if istype(value, list):
             return self.tx.output.side_effects.track_list(self.source, value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
-        guards = self.make_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
+        self.install_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
         output = [
             VariableBuilder(self.tx, TupleIteratorGetItemSource(self.get_source(), i))(
                 tuple_iterator_getitem(value, i)
-            ).add_guards(guards)
+            )
             for i in range(tuple_iterator_len(value))
         ]
-        return TupleIteratorVariable(
-            output, mutable_local=MutableLocal(), guards=guards
-        )
+        return TupleIteratorVariable(output, mutable_local=MutableLocal())
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -871,21 +790,20 @@ class VariableBuilder:
             for k in ("start", "stop", "step")
         ]
         if isinstance(value, slice):
-            return SliceVariable(
-                items, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return SliceVariable(items)
         else:
-            return RangeVariable(
-                items, guards=self.make_guards(GuardBuilder.EQUALS_MATCH)
-            )
+            # TODO(jansel): I think this can be TYPE_MATCH
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
+            return RangeVariable(items)
 
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
         if istype(value, OptimizedModule):
-            guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             self.source = AttrSource(self.source, "_orig_mod")
-            return self.wrap_module(value._orig_mod).add_guards(guards)
+            return self.wrap_module(value._orig_mod)
 
         if (
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
@@ -894,9 +812,8 @@ class VariableBuilder:
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
         if mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
-            result = UnspecializedNNModuleVariable(
-                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = UnspecializedNNModuleVariable(value)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -906,9 +823,8 @@ class VariableBuilder:
         elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
-            return UnspecializedNNModuleVariable(
-                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return UnspecializedNNModuleVariable(value)
         elif getattr(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
@@ -935,11 +851,8 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            return FSDPManagedNNModuleVariable(
-                value,
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
-                source=self.get_source(),
-            )
+            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
+            return FSDPManagedNNModuleVariable(value, source=self.get_source())
         else:
             return self.tx.output.register_attr_or_module(
                 value,
@@ -951,12 +864,12 @@ class VariableBuilder:
     def wrap_literal(self, value):
         unspec = not config.specialize_int
         if unspec and type(value) is torch.Size:
+            self.install_guards(GuardBuilder.LIST_LENGTH)
             return SizeVariable(
                 [
                     VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
                     for i, v in enumerate(value)
-                ],
-                guards=self.make_guards(GuardBuilder.LIST_LENGTH),
+                ]
             )
         elif unspec and type(value) is int:
             # unspecializing int by default, but still
@@ -970,17 +883,13 @@ class VariableBuilder:
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
             ):
-                return ConstantVariable.create(
-                    value=value,
-                    guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
-                )
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                return ConstantVariable.create(value=value)
             else:
                 return self.wrap_unspecialized_primitive(value)
         else:
-            return ConstantVariable.create(
-                value=value,
-                guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
-            )
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value)
 
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
@@ -990,11 +899,7 @@ class VariableBuilder:
             or get_static_address_type(value) is not None
         ) and not source.guard_source().is_fsdp_module():
             return self.tx.output.register_attr_or_module(
-                value,
-                self.name,
-                source=source,
-                # Guards are done inside register_attr_or_module
-                # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                value, self.name, source=source
             )
 
         if is_constant_source(source):
@@ -1055,7 +960,7 @@ class VariableBuilder:
             # TODO(voz): Decently common pattern, refactor at some point.
             dup_guard = self._make_dupe_guard(stored_value)
             if dup_guard:
-                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
+                self.install_guards(dup_guard)
             return stored_value
 
         # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
@@ -1070,18 +975,18 @@ class VariableBuilder:
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
         )
+        self.install_guards(
+            functools.partial(
+                GuardBuilder.TENSOR_MATCH,
+                value=value
+                if isinstance(source, NumpyTensorSource)
+                else TensorWeakRef(value),
+            )
+        )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            guards=self.make_guards(
-                functools.partial(
-                    GuardBuilder.TENSOR_MATCH,
-                    value=value
-                    if isinstance(source, NumpyTensorSource)
-                    else TensorWeakRef(value),
-                )
-            ),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=source,
@@ -1125,11 +1030,11 @@ class VariableBuilder:
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
         # that there's not another great way to do this atm.
         # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
-        tensor_vt = VariableBuilder(self.tx, source)(tensor_value)
+        VariableBuilder(self.tx, source)(tensor_value).recursive_realize()
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
-        options = {"source": source, "guards": tensor_vt.guards}
+        options = {"source": source}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
@@ -1182,10 +1087,8 @@ class VariableBuilder:
                     # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
-                    return ConstantVariable.create(
-                        value=value,
-                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
-                    )
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value)
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
@@ -1217,10 +1120,8 @@ class VariableBuilder:
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
                     # for some reason it doesn't
-                    return ConstantVariable.create(
-                        value=value,
-                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
-                    )
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value)
 
                 wrapped_value = shape_env.create_unspecified_symint_and_symbol(
                     value,
@@ -1234,11 +1135,10 @@ class VariableBuilder:
             else:
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
-                options = {"guards": guards}
-            else:
-                options = {}
-            options.update({"source": self.get_source()})
+                install_guard(
+                    self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)
+                )
+            options = {"source": self.get_source()}
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
 

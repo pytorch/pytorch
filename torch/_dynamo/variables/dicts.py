@@ -13,7 +13,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
@@ -24,8 +24,6 @@ from .tensor import TensorVariable
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
-
-        self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
 
@@ -629,46 +627,40 @@ class PythonSysModulesVariable(VariableTracker):
     def _contains_helper(self, tx, key: VariableTracker):
         k = ConstDictVariable.get_key(key)
         has_key = k in sys.modules
-        guard = self.make_guard(
-            functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+        install_guard(
+            self.make_guard(
+                functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+            )
         )
-        guards = {*self.guards, guard}
-        return k, has_key, guards
+        return k, has_key
 
     def call_contains(self, tx, key: VariableTracker):
-        k, has_key, guards = self._contains_helper(tx, key)
-        return ConstantVariable.create(
-            value=has_key,
-            guards=guards,
-        )
+        k, has_key = self._contains_helper(tx, key)
+        return ConstantVariable.create(value=has_key)
 
     def call_get(
         self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
     ):
         from .builder import VariableBuilder
 
-        k, has_key, guards = self._contains_helper(tx, key)
+        k, has_key = self._contains_helper(tx, key)
 
         if has_key:
             return VariableBuilder(
                 tx,
                 GetItemSource(self.source, k),
-            )(
-                sys.modules[k]
-            ).add_guards(guards)
+            )(sys.modules[k])
 
         if default is not None:
-            return default.add_guards(guards)
+            return default
 
-        return ConstantVariable.create(value=None, guards=guards)
+        return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx, key: VariableTracker):
         from .builder import VariableBuilder
 
-        k, has_key, guards = self._contains_helper(tx, key)
+        k, has_key = self._contains_helper(tx, key)
         return VariableBuilder(
             tx,
             GetItemSource(self.source, k),
-        )(
-            sys.modules[k]
-        ).add_guards(guards)
+        )(sys.modules[k])

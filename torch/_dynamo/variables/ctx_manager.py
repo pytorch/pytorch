@@ -7,7 +7,7 @@ from torch._guards import Guard
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented, Unsupported
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
@@ -142,7 +142,7 @@ class GradModeVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
         return variables.ConstantVariable.create(
@@ -231,7 +231,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
         return variables.ConstantVariable.create(
@@ -264,7 +264,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
         return variables.ConstantVariable.create(
