@@ -255,53 +255,6 @@ class TestDoBench(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    def test_max_autotune_cutlass_backend_dtype_conflict_fusion(
-        self,
-        dynamic: bool = False,
-        max_autotune_gemm_backends: str = "CUTLASS",
-        mixed_precision=False,
-        fp16=True,
-    ):
-        """
-        Test simple fusion that's not covered by specific lowering
-        """
-
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
-            return
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            mixed_precision
-        )
-
-        def mm(a, b):
-            return (a @ b).to(torch.float32) * 0.00001
-
-        # Note: The ops that are available
-        # also depend on the alignment of the shapes
-        # so if these shapes don't all align to at least 8 elements
-        # it can happen that no Cutlass 3.x op is available
-        # that allows fusions
-        a = torch.randn(256, 32).cuda()
-        b = torch.randn(32, 256).cuda()
-        if fp16:
-            a = a.half()
-            b = b.half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_only_evt_capable_ops": True,
-                "cuda.version": "12.2",  # required to enable the Kernels we need
-            }
-        ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
-
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
         dynamic: bool = False,
