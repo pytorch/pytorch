@@ -13,6 +13,7 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.wrap import wrap
+from torch._higher_order_ops.scan import scan
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -288,6 +289,58 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 "cond_false_0.cond_true_0",
             },
         )
+        
+    def test_scan_simple(self):
+        '''
+        # Disable index propagation, so the indirect indexing isn't optimized away
+        @patch.object(config, "constant_and_index_propagation", False)
+        def test_computed_indirect_mask(self):
+            def fn(x, n):
+                tmp = torch.arange(n, device=x.device)
+                return x[tmp] + 1
+
+            x = torch.randn(8, device="cuda")
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, x, 8)
+            # load should be masked
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertEqual(fn(x, 8), fn_opt(x, 8))
+        '''
+        def f(carry, x):
+            return carry+1, x+carry
+        
+        #import pdb
+        #pdb.set_trace()
+        #init = torch.rand(1)[0]#1, 2)
+        init = torch.rand(1, 2)
+        xs = torch.rand(10, 1, 2)
+        
+        '''
+        import pdb
+        pdb.set_trace()
+        
+        def dummy(x):
+            return torch.sigmoid(x) + x
+        
+        dummy_comp = torch.compile(dummy, backend='inductor', fullgraph=True)
+        ys = dummy_comp(xs)
+        '''
+        
+        #import pdb
+        #pdb.set_trace()
+        
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        #scan_comp = torch.compile(scan, backend=cnt, fullgraph=True)
+        scan_comp = torch.compile(scan, backend='inductor', fullgraph=True)
+        #import pdb
+        #pdb.set_trace()
+        carry_out, ys = scan_comp(f, init, xs)
+        import pdb
+        pdb.set_trace()
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()

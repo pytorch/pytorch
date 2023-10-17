@@ -922,6 +922,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         # that `speculate_subgraph` does not yet support calling nn.Modules or
         # accessing attributes of nn.Modules.
         def old_speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+            #import pdb
+            #pdb.set_trace()
             if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
                 # closure vars other than 'self' are not in scope of generated code, so error early
                 # TODO(avik): we should eventually support this.
@@ -969,6 +971,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 # NB: we don't bother populating graphargs, as
                 # they won't actually get used by anything
 
+            #import pdb
+            #pdb.set_trace()
             output = f.call_function(tx, args, {})
 
             # Register output to graph
@@ -1085,6 +1089,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 except ArgsMismatchError as e:
                     raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
+            #import pdb
+            #pdb.set_trace()
             (
                 true_r,
                 true_graph,
@@ -1203,6 +1209,107 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
+        if self.value.__name__ == "scan":
+            #import pdb
+            #pdb.set_trace()
+            if len(args) != 3:
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected 3 arguments but got {len(args)}.\n"
+                    f"Usage: scan(f, init, xs)",
+                )
+            # f
+            if args[0] is not callable and not isinstance(args[0], UserFunctionVariable):
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected f to be a callable "
+                    f"item but got {str(type(args[0]))} "
+                    f"with original python type {str(args[0].python_type())}.",
+                )
+            # nested user functions not supported at the moment
+            if isinstance(args[0], NestedUserFunctionVariable):
+                unimplemented(
+                    f"NestedUserFunctions are currently not supported.",
+                )
+            # init
+            if type(args[1]) not in (torch.Tensor, ConstantVariable, TensorVariable, SymNodeVariable):
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected init to be a tensor "
+                    f"item but got {str(type(args[1]))} "
+                    f"with original python type {str(args[1].python_type())}.",
+                )
+            # xs
+            if type(args[2]) not in (torch.Tensor, ConstantVariable, TensorVariable, SymNodeVariable):
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected xs to be a tensor "
+                    f"item but got {str(type(args[2]))} "
+                    f"with original python type {str(args[2].python_type())}.",
+                )
+            #Shape check
+            if args[1].size == () or args[2].size == ():
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected init and xs to be tensors and not scalars "
+                    f"but got init shape: {str(args[1].size)} "
+                    f"and xs shape: {str(args[2].size)}.",
+                )
+            if args[1].size != args[2].size[1:]:
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected init and xs to have the same shape except for the first dimension "
+                    f"but got init shape: {str(args[1].size)} "
+                    f"and xs shape: {str(args[2].size)}.",
+                )
+            '''
+            if args[1].size[0] != 1:
+                raise UserError(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected first dimension of init to be 1 "
+                    f"but got init shape: {str(args[0].shape)}.",
+                )
+            '''
+            #import pdb
+            #pdb.set_trace()
+
+            checkpoint = tx.copy_graphstate()
+            # To get the example output from scan() we will need to prodive at least one sample to the loop body.
+            (
+                body_r,
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                args[0],
+                [
+                    #get_fake_value(args[1].as_proxy().node, tx),
+                    #get_fake_value(args[2].as_proxy().node, tx),
+                    args[1],
+                    args[2],
+                ],
+                tx.output.graph,
+                checkpoint,
+            )
+            #import pdb
+            #pdb.set_trace()
+
+            body_name = add_subgraph(
+                "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+            )
+
+            body_node = make_attr(body_name)
+            p_args = (
+                body_node,
+                *(arg.as_proxy() for arg in args[1:]),
+                *(arg for arg in body_lifted_freevars.keys()),
+            )
+            example_value = pytree.tree_map_only(
+                torch.fx.Proxy,
+                lambda a: a.node.meta["example_value"],
+                body_r.as_proxy(),
+            )
+            
         elif self.value.__name__ == "executorch_call_delegate":
             # This is operator for delegation within Executorch which calls a
             # specific function in the given lowered module with the given

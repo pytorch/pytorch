@@ -203,7 +203,7 @@ class TestControlFlow(TestCase):
             return carry+1, x+carry
 
         init = torch.rand(1, 2)
-        xs = torch.rand(10, 2)
+        xs = torch.rand(10, 1, 2)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -214,7 +214,7 @@ class TestControlFlow(TestCase):
             return carry+1, x*carry
 
         init = torch.rand(1, 2, requires_grad=True)
-        xs = torch.rand(10, 2, requires_grad=True)
+        xs = torch.rand(10, 1, 2, requires_grad=True)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -230,7 +230,7 @@ class TestControlFlow(TestCase):
             return carry+1, x*carry
 
         init = torch.rand(1, 2, requires_grad=True)
-        xs = torch.rand(10, 2, requires_grad=False)
+        xs = torch.rand(10, 1, 2, requires_grad=False)
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -243,10 +243,10 @@ class TestControlFlow(TestCase):
 
     def test_scan_autograd_nested_list(self):
         def f(carry, x):
-            return carry+1, (x[0]*carry, carry)
+            return carry+1, (x[0]*carry, x[1]+carry)
 
         init = torch.rand(1, 2, requires_grad=True)
-        xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        xs = [torch.rand(10, 1, 2, requires_grad=True), torch.rand(10, 1, 2, requires_grad=True)]
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
@@ -259,10 +259,10 @@ class TestControlFlow(TestCase):
         
     def test_scan_autograd_nested_lists(self):
         def f(carry, x):
-            return (carry[0]+1, carry[1]+2), (x[0]*carry[0], carry[1])
+            return (carry[0]+1, carry[1]+2), (x[0]*carry[0], x[1]+carry[1])
 
         init = [torch.rand(1, 2, requires_grad=True), torch.rand(1, 2, requires_grad=True)]
-        xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        xs = [torch.rand(10, 1, 2, requires_grad=True), torch.rand(10, 1, 2, requires_grad=True)]
         carry_out, ys = scan(f, init, xs)
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)
         self.assertEqual(expected_carry_out, carry_out)
