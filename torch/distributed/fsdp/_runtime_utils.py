@@ -301,7 +301,7 @@ def _init_streams(
 
 
 @no_type_check
-def _unshard(
+def _unshard_if_not_yet(
     state: _FSDPState,
     handle: FlatParamHandle,
     unshard_stream: torch.Stream,
@@ -317,6 +317,8 @@ def _unshard(
     """
     if not handle:
         return
+    if handle._unsharded:
+        return
     with state._device_handle.stream(pre_unshard_stream):
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
@@ -331,6 +333,7 @@ def _unshard(
     with state._device_handle.stream(unshard_stream):
         handle.unshard()
         handle.post_unshard()
+    handle._unsharded = True
 
 
 @no_type_check
@@ -343,6 +346,7 @@ def _reshard(
     Reshards the handle. ``free_unsharded_flat_param`` indicates whether to
     free the handle's padded unsharded flat parameter.
     """
+    _p_assert(handle._unsharded, "The handle is already sharded.")
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
@@ -352,9 +356,7 @@ def _reshard(
             free_event.record()
             state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
-    # Flat parameter freed or not, we always have to "unshard" the parameter
-    # upon next access to get its shape correct.
-    handle._prefetched = False
+    handle._unsharded = False
 
 
 def _unshard_grads(
@@ -442,10 +444,7 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handle:
         return
-    # If the handles have been prefetched, then there is no need to call
-    # `_unshard()` again
-    if not handle._prefetched:
-        _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
+    _unshard_if_not_yet(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._needs_pre_forward_unshard = False
     state._device_handle.current_stream().wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
@@ -598,7 +597,6 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
-                handle._prefetched = False
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
@@ -679,15 +677,12 @@ def _pre_backward_hook(
         handle._training_state = HandleTrainingState.BACKWARD_PRE
 
         if handle._needs_pre_backward_unshard:
-            # If the handles have been prefetched, then there is no need to
-            # call `_unshard()` again
-            if not handle._prefetched:
-                _unshard(
-                    state,
-                    handle,
-                    state._unshard_stream,
-                    state._pre_unshard_stream,
-                )
+            _unshard_if_not_yet(
+                state,
+                handle,
+                state._unshard_stream,
+                state._pre_unshard_stream,
+            )
             state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
@@ -1099,7 +1094,6 @@ def _post_backward_final_callback(
             handle._needs_pre_backward_unshard = False
             handle._post_forward_index = None
             handle._training_state = HandleTrainingState.IDLE
-            handle._prefetched = False
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False
 
@@ -1119,17 +1113,7 @@ def _catch_all_reshard(
     # error is raised
     try:
         if state._handle:
-            # TODO: This already-resharded check is brittle:
-            # https://github.com/pytorch/pytorch/issues/83956
-            already_resharded = (
-                state._handle.flat_param.data_ptr()
-                == state._handle.flat_param._local_shard.data_ptr()
-                # If FSDP skipped using sharded views, then the flat parameter
-                # still points to the sharded data, so we need to reshard to
-                # use sharded views
-                and not state._handle._skipped_use_sharded_views
-            )
-            if already_resharded:
+            if not state._handle._unsharded:
                 return
             free_unsharded_flat_param = _should_free_in_backward(state, state._handle)
             _reshard(state, state._handle, free_unsharded_flat_param)
@@ -1202,9 +1186,8 @@ def _prefetch_handle(
         raise ValueError(f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}")
     # Prefetch the next set of handles without synchronizing to allow
     # the sync to happen as late as possible to maximize overlap
-    _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
+    _unshard_if_not_yet(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._training_state = prev_training_state
-    handle._prefetched = True
 
 
 @no_type_check
@@ -1244,7 +1227,7 @@ def _get_handle_to_prefetch(
         if (
             target_handle_candidate
             and target_handle_candidate._needs_pre_backward_unshard
-            and not target_handle_candidate._prefetched
+            and not target_handle_candidate._unsharded
         ):
             target_handle = target_handle_candidate
         else:
@@ -1254,7 +1237,7 @@ def _get_handle_to_prefetch(
         if (
             target_handle_candidate
             and target_handle_candidate._needs_pre_forward_unshard
-            and not target_handle_candidate._prefetched
+            and not target_handle_candidate._unsharded
         ):
             target_handle = target_handle_candidate
         else:

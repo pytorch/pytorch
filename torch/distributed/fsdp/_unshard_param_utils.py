@@ -18,8 +18,8 @@ from torch.distributed.fsdp._runtime_utils import (
     _reset_flat_param_grad_info_if_needed,
     _reshard,
     _reshard_grads,
-    _unshard,
     _unshard_grads,
+    _unshard_if_not_yet,
 )
 from torch.distributed.utils import _p_assert
 
@@ -193,7 +193,7 @@ def _unshard_fsdp_state_params(
     # No need to call `wait_stream()` since we unshard in the computation
     # stream directly
     computation_stream = state._device_handle.current_stream()
-    _unshard(state, handle, computation_stream, computation_stream)
+    _unshard_if_not_yet(state, handle, computation_stream, computation_stream)
     if with_grads:
         _unshard_grads(handle)
 

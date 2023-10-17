@@ -179,7 +179,7 @@ class TestRuntime(FSDPTest):
             self._check_same_param_handles(c_handle, w_handle)
         num_handles = len(all_composable_handles)
 
-        orig_unshard = torch.distributed.fsdp._runtime_utils._unshard
+        orig_unshard = torch.distributed.fsdp._runtime_utils._unshard_if_not_yet
         orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
         UnshardReshardEvent = Tuple[str, FlatParamHandle]
 
@@ -205,12 +205,14 @@ class TestRuntime(FSDPTest):
 
         @contextlib.contextmanager
         def patch_unshard(_patched_unshard: Callable):
-            _orig_unshard = torch.distributed.fsdp._runtime_utils._unshard
-            torch.distributed.fsdp._runtime_utils._unshard = _patched_unshard
+            _orig_unshard = torch.distributed.fsdp._runtime_utils._unshard_if_not_yet
+            torch.distributed.fsdp._runtime_utils._unshard_if_not_yet = _patched_unshard
             try:
                 yield
             finally:
-                torch.distributed.fsdp._runtime_utils._unshard = _orig_unshard
+                torch.distributed.fsdp._runtime_utils._unshard_if_not_yet = (
+                    _orig_unshard
+                )
 
         @contextlib.contextmanager
         def patch_reshard(_patched_reshard: Callable):
@@ -219,7 +221,9 @@ class TestRuntime(FSDPTest):
             try:
                 yield
             finally:
-                torch.distributed.fsdp._runtime_utils._unshard = _orig_reshard
+                torch.distributed.fsdp._runtime_utils._unshard_if_not_yet = (
+                    _orig_reshard
+                )
 
         composable_order: List[UnshardReshardEvent] = []
         wrapped_order: List[UnshardReshardEvent] = []
