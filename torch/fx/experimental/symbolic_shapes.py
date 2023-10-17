@@ -67,7 +67,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY, sym_ite",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -1343,6 +1343,49 @@ def method_to_operator(method):
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
     int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
+
+def sym_ite(pred, then_val, else_val):
+    if isinstance(pred, SymBool):
+        if pred.node.is_constant():
+            constant_pred = guard_bool(pred)
+            return then_val if constant_pred else else_val
+        return _sym_ite(pred, then_val, else_val)
+    elif isinstance(pred, bool):
+        return then_val if pred else else_val
+    else:
+        raise NotImplementedError(f"sym_ite only supports bool or SymBool pred but got {type(pred)}.")
+
+def _sym_ite(pred, then_val, else_val):
+    assert isinstance(pred, (torch.SymBool, bool)) and type(then_val) == type(else_val)
+
+    pred_node = pred.node
+    then_node = to_node(pred_node, then_val)
+    else_node = to_node(pred_node, else_val)
+    if then_node is NotImplemented or else_node is NotImplemented:
+        return NotImplemented
+
+    def _sym_node_ite(pred_node, then_node, else_node):
+        out_hint = then_node.hint if pred_node.hint else else_node.hint
+        if SYM_FUNCTION_MODE:
+            return to_node(pred_node, _handle_sym_dispatch(sym_ite, (wrap_node(pred_node), wrap_node(then_node), wrap_node(else_node)), {}))
+
+        assert isinstance(then_node, SymNode), isinstance(else_node, SymNode)
+
+        try:
+            out = sympy.Piecewise((then_node.expr, pred_node.expr), (else_node.expr, True))
+        except Exception:
+            log.warning("failed to eval sympy.Piecewise((%s, %s), (%s, %s))", then_node.expr, pred_node.expr, else_node.expr, True)
+            raise
+
+        out = safe_expand(out)
+        assert then_node.pytype == else_node.pytype
+        pytype = then_node.pytype
+
+        fx_node, _ = pred_node.shape_env.create_fx_call_function(sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node))
+        return SymNode(out, pred_node.shape_env, pytype, out_hint, fx_node=fx_node)
+
+    ret = wrap_node(_sym_node_ite(pred_node, then_node, else_node))
+    return get_constant(ret) if ret.node.is_constant() else ret
 
 SYMPY_INTERP = {
     'Abs': operator.abs,

@@ -423,6 +423,26 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
 
+    def test_sym_ite(self):
+        shape_env = ShapeEnv()
+        t = create_symint(shape_env, 5)
+        f = create_symint(shape_env, 4)
+        b1 = True
+        r1 = torch.fx.experimental.symbolic_shapes.sym_ite(b1, t, f)
+        self.assertTrue(r1 is t)
+        b2 = False
+        r2 = torch.fx.experimental.symbolic_shapes.sym_ite(b2, t, f)
+        self.assertTrue(r2 is f)
+        b3 = t == 5
+        r3 = torch.fx.experimental.symbolic_shapes.sym_ite(b3, t, f)
+        self.assertEqual(r3, 5)
+        self.assertEqual(type(t), type(r3))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Piecewise((s0, Eq(s0, 5)), (s1, True)), 5)""")
+        b4 = f == 5
+        r4 = torch.fx.experimental.symbolic_shapes.sym_ite(b4, t, f)
+        self.assertEqual(r4, 4)
+        self.assertEqual(type(f), type(r4))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Piecewise((s0, Eq(s1, 5)), (s1, True)), 4)""")
 
     def test_int_conversion(self):
         shape_env = ShapeEnv()
