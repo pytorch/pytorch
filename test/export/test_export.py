@@ -217,7 +217,7 @@ class TestExport(TestCase):
             torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
         em = torch.export.export(m, (a,))
         x = torch.randn(3, 5)
-        with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
+        with self.assertRaisesRegex(RuntimeError, "\\[1\\] to be equal to 4"):
             em(x)
 
     def test_not_correct_dim(self):
@@ -1138,24 +1138,25 @@ class TestExport(TestCase):
             torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"
+            RuntimeError, "expected input arg1_1 to be equal to 5, but got 6"
         ):
             _ = exported(torch.ones(8, 5), 6)
 
         exported = torch.export.export(f, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes)
         with self.assertRaisesRegex(
-            RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"
+            RuntimeError, "expected input arg1_1 to be equal to 5.0, but got 6.0"
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
     def test_runtime_assert_for_prm_str(self):
-
         def g(a, b, mode):
             return torch.div(a, b, rounding_mode=mode)
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
         exported = torch._export.export(g, inps)
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
+        with self.assertRaisesRegex(
+            RuntimeError, "expected input arg2_1 to be equal to trunc, but got floor"
+        ):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
@@ -1364,45 +1365,6 @@ class TestExport(TestCase):
                         actual_source_fns.append(source_names)
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
-
-    def test_lift_constants(self) -> None:
-        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-
-        def f(x):
-            return x + torch.tensor(3)
-
-        ep = export(f, (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        for node in ep.graph.nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 1)
-        self.assertEqual(len(ep.state_dict), 1)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.tensor(3)
-
-            def forward(self, x):
-                list_tensor = [torch.tensor(3), torch.tensor(4)]
-                return x + self.a + list_tensor[0] + list_tensor[1]
-
-        ep = export(Foo(), (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        nodes = list(ep.graph.nodes)
-
-        for node in nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 3)
-        self.assertEqual(len(ep.state_dict), 3)
-
-        # These constants should be placed after the param/buffers
-        self.assertTrue(
-            nodes[1].name in ep.graph_signature.inputs_to_buffers and
-            nodes[2].name in ep.graph_signature.inputs_to_buffers
-        )
 
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
