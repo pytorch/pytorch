@@ -825,6 +825,58 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
     return [view]""")
 
+    def test_output_aliases_intermediate_multi_output_view(self):
+        def f1(a):
+            out = torch.mul(a, 3)
+            return list(out.unbind(0))
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        inp_ref = torch.ones(3, 3, requires_grad=True)
+        f1_compiled = aot_function(f1, nop)
+
+        out_ref = f1(inp_ref)
+        out_test = f1_compiled(inp)
+        # Assert that we get CompiledFunctionBackward in the backward graph,
+        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+        self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
+
+        sum(out_ref).sum().backward()
+        sum(out_test).sum().backward()
+        self.assertEqual(inp_ref.grad, inp.grad)
+
+        # Safety checks: assert that in cases where we *can*
+        # mutate the autograd metadata of a multi-output view, we still get the right result.
+
+        def f2(a):
+            out = torch.mul(a, 3)
+            # also return the graph intermediate directly,
+            # which will force AOTAutograd to do the "intermediate base" logic.
+            # (Why? The user can mutate "out", which should change the autograd metadata
+            #  of the other aliased outputs)
+            return *list(out.unbind(0)), out, out.view(out.shape)
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        inp_ref = torch.ones(3, 3, requires_grad=True)
+        f2_compiled = aot_function(f2, nop)
+
+        out_ref = f2(inp_ref)
+        out_test = f2_compiled(inp)
+        # Mutate the last output of f2 (autograd will allow this, since it is not a multi-output view,
+        # as long as *only* the non-multi-output views participate in the backward)
+        # Note: We could probably try to hide **only** the multi-output views from autograd here
+        # and only do the intermediate base logic for the last two aliases.
+        # Longer term solution of graph partitioning is probably cleaner though (see the note).
+        out_ref[-1].mul_(2)
+        out_test[-1].mul_(2)
+
+        out_ref_sum = out_ref[-1] + out_ref[-2]
+        out_test_sum = out_test[-1] + out_test[-2]
+        out_ref_sum.sum().backward()
+        out_test_sum.sum().backward()
+        self.assertEqual(inp_ref.grad, inp.grad)
+
+
     def test_output_aliases_intermediate_mutation_linear(self):
         def f(x):
             return (x + 1).view(-1)

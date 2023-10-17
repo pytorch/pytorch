@@ -1078,11 +1078,80 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Keep track of which outputs alias other outputs
         out_tensor_alias_counts = collections.defaultdict(int)
+        # This tells us, for a given group of outputs that alias each other,
+        # whether they e.g. all came from an unbind call
+        are_aliased_tensors_all_multi_output_views = collections.defaultdict(bool)
         out_storage_to_tensors = collections.defaultdict(set)
         for o in flat_f_outs:
             if isinstance(o, torch.Tensor):
                 curr_storage = StorageWeakRef(o.untyped_storage())
                 out_tensor_alias_counts[curr_storage] += 1
+                # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+                # This is an optimization on top of the "alias of intermediates" logic,
+                # which you can read more about under Note [AOT Autograd: outputs aliasing inputs or intermediates!]
+                #
+                # What is this optimization? Consider the below case:
+                # def f(x):
+                #     intermediate = x.mul(2)
+                #     # x and intermediate here require grad
+                #     o1, o2, ... o10 = intermediate.unbind(-1)
+                #     return o1, o2, ... o10
+                # Now, the "intermediate base" handling in AOTAutograd implies that we must do the following:
+                #   (1) return "intermediate as an extra output of the compiled graph
+                #   (2) regenerate each aliased output off of "intermediate", **outside** of the autograd.Function.
+                # The reason AOTAutograd ordinarily does this is for safety: the autograd engine needs to know
+                # that o1 through o10 are all aliased, and if we blindly return o1 through o10 from the autograd.Function,
+                # this information will be hidden.
+                # In particular, mutating one alias might require autograd to update autograd metadata on the other aliases
+                # (like their grad_fn, for example, when the autograd engine needs to do view-replay).
+                #
+                # However, intermediate_base logic can be bad for backward performance (we sometimes generate
+                # as_strided calls during the intermediate base logic, which can have a slow backward formula).
+                # Is it possible to find a set of conditions where it is **safe** to hide the output aliasing from autograd?
+                #
+                # For a set of outputs of the graph that alias each other, o_1...o_k, consider:
+                # (1) They came from the same multi-outout view op, e.g. o_1, ..., o_k = intermediate.unbind(0)
+                # (2) No other aliases of o_1 through o_k escape from the graph (e.g. there is not some other graph input/output
+                #     o_other, that aliases these outputs)
+                # (3) o_1...o_k all require_grad, they all share the same ._base, and their ._base requires grad.
+                #     This condition is important because it's what causes slowness in the intermediate_base
+                #     codepath of aot_autograd. Ordinarily, o_1...o_k would all get a grad_fn, and
+                #     aot_autograd's view-replay might give each output an AsStridedBackward as its grad_fn.
+                #     "K" AsStridedBackward calls will be *much* slower than a single UnbindBackward.
+                # In this setup, is it possible to mutate one of the outputs o_i in a way that would affect the autograd meta
+                # of the other aliases?
+                #
+                # Claim: No! Consider a few example (which I'm pretty sure cover all cases of mutation w.r.t. autograd):
+                # (a) What happens if we mutate any of o_1 through o_k directly?
+                #     Autograd raises an error:
+                #     "RuntimeError: Output 0 of UnbindBackward0 is a view and is being modified inplace. This view is
+                #      the output of a function that returns multiple views. Such functions do not allow the output
+                #      views to be modified inplace. You should replace the inplace operation by an out-of-place one."
+                # (b) What if we take a view of one of the aliased outputs, and mutate that?
+                #     Autograd raises the same error- the "multi-output-view"ness of an alias propagates to future views.
+                # (c) What if we mutate one of the outputs under no_grad?
+                #     Autograd raises the same error
+                # (d) What if we detach and mutate, e.g. o_k.detach().mul_(2)?
+                #     Autograd allows this, *but* autograd updates all alias's grad_fn's to be error functions when accessed.
+                #     Autograd raises the same error
+                # (e) What if we try to mutate another alias of o_1...o_k, that was **not** created from a multi-output view?
+                #     We can't, since we promised that o_1...o_k are the only aliases that are visible to the user.
+                #
+                # Coming back to this optimization:
+                # Given that it is not possible for mutating one of these aliases to affect the autograd metadata of another alias
+                # without causing an error in eager mode, we will simple hide the aliasing from autograd during torch.compile
+                # if all of the above conditions are met.
+                # This has the slight downside that it's possible to write some "bad" code that autograd will raise an error on
+                # in eager but fail to during torch.compile, but it has the benefit that this code has much better performance.
+                # NOTE: if and when we eventually update AOTAutograd to do the "view graph slicing" defined here:
+                # https://docs.google.com/document/d/1DlfFq8TKbuAn2zyJxLfoW-X1qkkm5PLdHFtySo03QAk/edit,
+                # then this optimization will probably matter less and might be ok to remove.
+                is_cur_tensor_multi_out_view = isinstance(o, FunctionalTensor) \
+                    and torch._functionalize_is_multi_output_view(o.elem)
+                if curr_storage not in are_aliased_tensors_all_multi_output_views:
+                    are_aliased_tensors_all_multi_output_views[curr_storage] = is_cur_tensor_multi_out_view
+                else:
+                    are_aliased_tensors_all_multi_output_views[curr_storage] &= is_cur_tensor_multi_out_view
                 out_storage_to_tensors[curr_storage].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
@@ -1125,7 +1194,8 @@ def run_functionalized_fw_and_collect_metadata(
                 and o.requires_grad
                 and o._base.requires_grad
             ):
-                if out_tensor_alias_counts[curr_storage] == 1:
+                # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+                if out_tensor_alias_counts[curr_storage] == 1 or are_aliased_tensors_all_multi_output_views[curr_storage]:
                     # Note [Intermediate Bases Optimization]
                     # Normally if we have an output that aliases an intermediate,
                     # we need to add the extra "intermediate base" logic further down
