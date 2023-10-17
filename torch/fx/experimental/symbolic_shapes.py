@@ -1359,7 +1359,7 @@ def _sym_ite(pred, then_val, else_val):
     pred_node = pred.node
     then_node = to_node(pred_node, then_val)
     else_node = to_node(pred_node, else_val)
-    assert then_node.pytype == else_node.pytype
+    assert isinstance(then_node, SymNode), isinstance(else_node, SymNode) and then_node.pytype == else_node.pytype
     if then_node is NotImplemented or else_node is NotImplemented:
         return NotImplemented
 
@@ -1369,8 +1369,6 @@ def _sym_ite(pred, then_val, else_val):
             return to_node(pred_node,
                            _handle_sym_dispatch(sym_ite, (wrap_node(pred_node), wrap_node(then_node), wrap_node(else_node)), {}))
 
-        assert isinstance(then_node, SymNode), isinstance(else_node, SymNode)
-
         try:
             out = sympy.Piecewise((then_node.expr, pred_node.expr), (else_node.expr, True))
         except Exception:
@@ -1378,10 +1376,8 @@ def _sym_ite(pred, then_val, else_val):
             raise
 
         out = safe_expand(out)
-        pytype = then_node.pytype
-
         fx_node, _ = pred_node.shape_env.create_fx_call_function(sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node))
-        return SymNode(out, pred_node.shape_env, pytype, out_hint, fx_node=fx_node)
+        return SymNode(out, pred_node.shape_env, then_node.pytype, out_hint, fx_node=fx_node)
 
     ret = wrap_node(_sym_node_ite(pred_node, then_node, else_node))
     return get_constant(ret) if ret.node.is_constant() else ret
