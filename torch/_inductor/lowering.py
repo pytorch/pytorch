@@ -12,6 +12,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -4840,9 +4841,7 @@ def _realize(x):
     return clone(x)
 
 
-@register_lowering(
-    torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_mutation
-)
+@register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs):
     ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
