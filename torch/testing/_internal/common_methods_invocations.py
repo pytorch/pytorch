@@ -3478,10 +3478,10 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
     def __init__(self):
         super().__init__()
-        self.kwargs['kernel_size'] += [(3,)]
-        self.kwargs['stride'] += [(2,)]
-        self.kwargs['padding'] += [(1,)]
-        self.kwargs['dilation'] += [(1,)]
+        self.kwargs['kernel_size'] += [(3,), (3,)]
+        self.kwargs['stride'] += [(2,), (1,)]
+        self.kwargs['padding'] += [(1,), (2,)]
+        self.kwargs['dilation'] += [(1,), (2,)]
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
@@ -3542,6 +3542,10 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
 
         # error inputs when pad > kernel_size / 2
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                         error_regex='pad should be at most half of kernel size')
+
+        # error inputs when pad > ((kernel_size - 1) * dilation + 1) / 2, when dilation is not default
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 3, 'dilation': 2, 'stride': 1, 'padding': 3, 'return_indices': True}),
                          error_regex='pad should be at most half of kernel size')
 
         # error inputs for input tensor
