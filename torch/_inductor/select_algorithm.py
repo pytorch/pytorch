@@ -144,6 +144,7 @@ class TritonTemplateKernel(TritonKernel):
         named_args = self.input_nodes[
             self.prefix_args : len(self.input_nodes) - self.suffix_args
         ]
+
         assert len(argnames) == len(named_args), (
             len(argnames),
             len(named_args),
@@ -264,6 +265,7 @@ class TritonTemplateKernel(TritonKernel):
         ):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
+
         V.ops.store(  # type: ignore[attr-defined]
             self.output_node.get_name(),
             output_index,

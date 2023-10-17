@@ -2894,11 +2894,16 @@ def create_runtime_wrapper(
                     disable_amp=disable_amp,
                 )
         else:
-            all_outs = call_func_with_args(
-                compiled_fn,
-                args,
-                disable_amp=disable_amp,
-            )
+            # When we have an inference graph, we run with torch.no_grad.
+            # It's possible to get an inference graph with inputs that require grad,
+            # in which case we want to make sure autograd is disabled
+            # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
+            with torch.no_grad():
+                all_outs = call_func_with_args(
+                    compiled_fn,
+                    args,
+                    disable_amp=disable_amp,
+                )
 
         num_mutated_inps = runtime_metadata.num_mutated_inputs
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
@@ -4136,7 +4141,38 @@ def create_aot_dispatcher_function(
                     is_train=needs_autograd,
                 )(*fake_flat_args)
 
-        req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
+                req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
+
+                if needs_autograd and not any(x.requires_grad for x in fw_metadata.output_info):
+                    # We realized that none of the outputs require grad,
+                    # so we actually have an inference graph.
+                    needs_autograd = False
+                    # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
+                    # changes depending on whether we pass in is_train / keep_input_mutations,
+                    # so we're forced to recompute the metadata.
+                    # TODO: refactor the subclass path of run_functionalized_fw_and_collect_metadata
+                    # so that this is unnecessary.
+                    if req_subclass_dispatch:
+                        fw_metadata = run_functionalized_fw_and_collect_metadata(
+                            flat_fn,
+                            keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                            is_train=needs_autograd,
+                        )(*fake_flat_args)
+                    else:
+                        fw_metadata = ViewAndMutationMeta(
+                            input_info=fw_metadata.input_info,
+                            requires_grad_info=fw_metadata.requires_grad_info,
+                            output_info=fw_metadata.output_info,
+                            num_intermediate_bases=fw_metadata.num_intermediate_bases,
+                            keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                            traced_tangents=fw_metadata.traced_tangents,
+                            subclass_inp_meta=fw_metadata.subclass_inp_meta,
+                            subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
+                            subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
+                            is_train=needs_autograd,
+                        )
+
+
         if fw_metadata.num_intermediate_bases > 0:
             assert not req_subclass_dispatch, f"""\
 torch.compile is currently being used with tensor subclass inputs:
@@ -4470,7 +4506,7 @@ def aot_function(
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
-        inference_compiler=fw_compiler,
+        inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
