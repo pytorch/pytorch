@@ -733,11 +733,17 @@ class Reduction(Loops):
                 # No need to split.
                 return ReductionHint.INNER, split
             if input_node is not None and isinstance(input_node, TensorBox):
-                _, reduction_size = extract_input_node_reduction_ranges(input_node)
-                if reduction_size is not None:
-                    # If the input_node or its dependent nodes are also Reduction nodes,
-                    # use reduction_sizes of this node or its dependent nodes directly.
-                    return ReductionHint.INNER, -1
+                ranges, reduction_ranges = extract_input_node_reduction_ranges(
+                    input_node
+                )
+                if reduction_ranges is not None:
+                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
+                        sympy_product(ranges + reduction_ranges)
+                    )
+                    if reduction_numel_hint == extracted_numel_hint:
+                        # If the input_node or its dependent nodes are also Reduction nodes,
+                        # use reduction_sizes of this node or its dependent nodes directly.
+                        return ReductionHint.INNER, -1
             return ReductionHint.INNER, split
         if (
             reduction_numel_hint <= min_elements_per_thread
