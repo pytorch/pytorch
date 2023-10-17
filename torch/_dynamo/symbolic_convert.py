@@ -630,27 +630,28 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self, fn, args, kwargs
             )
             self.output.guards.update(fn.guards)
-            if resume_at_insts is not None:
-                # An inner inlining translator has a graph break
-                # Call into its resume_at function, before running our
-                # our resume_at instructions.
-                assert result is None
-                resume_at_insts, push = resume_at_insts
-                new_co_names = list(self.output.global_scope)
-                for _ in range(push):
-                    self.push(UnknownVariable())
-                resume_at = self.create_call_resume_at(
-                    self.next_instruction, resume_at_insts, new_co_names
-                )
-                if isinstance(self, InstructionTranslator):
-                    self.output.add_output_instructions(resume_at)
-                    raise NestedGraphBreak()
-                else:
-                    self.resume_at_insts = resume_at
-                    raise NestedGraphBreak()
-            return result
-        except Exception:
-            self.restore_graphstate(state)
+            if resume_at_insts is None:
+                return result
+            # An inner inlining translator has a graph break
+            # Call into its resume_at function, before running our
+            # our resume_at instructions.
+            assert result is None
+            resume_at_insts, push = resume_at_insts
+            new_co_names = list(self.output.global_scope)
+            for _ in range(push):
+                self.push(UnknownVariable())
+            resume_at = self.create_call_resume_at(
+                self.next_instruction, resume_at_insts, new_co_names
+            )
+            if isinstance(self, InstructionTranslator):
+                self.output.add_output_instructions(resume_at)
+                raise NestedGraphBreak()
+            else:
+                self.resume_at_insts = resume_at
+                raise NestedGraphBreak()
+        except Exception as e:
+            if not isinstance(e, NestedGraphBreak):
+                self.restore_graphstate(state)
             raise
 
     def get_line_of_code_header(self, lineno=None):
