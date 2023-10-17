@@ -434,7 +434,7 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                if isinstance(excp, NestedGraphBreak)
+                if isinstance(excp, NestedGraphBreak):
                     return
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
