@@ -26,7 +26,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._mode_utils import no_dispatch
 
-from . import config, ir, metrics
+from . import config, ir
 from .codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -34,6 +34,7 @@ from .codegen.common import (
 )
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
+    CppWrapperCodeGenError,
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
@@ -463,11 +464,6 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def disable_cpp_wrapper(self, cond):
-        metrics.disable_cpp_wrapper += 1
-        self.cpp_wrapper = False
-        log.debug("Set cpp_wrapper to False due to %s", cond)
-
     def register_buffer(self, buffer: ir.ComputedBuffer):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
@@ -488,7 +484,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if (
                     not hasattr(value, "data")
                     or not isinstance(value.data, ir.IRNode)
-                    or not isinstance(value.data.data, ir.IRNode)
+                    or not (
+                        hasattr(value.data, "data")
+                        and isinstance(value.data.data, ir.IRNode)
+                    )
                 ):
                     return
 
@@ -528,6 +527,14 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
                 name = f"constant_{name}"
+            # We may generate a var name for each constant in the codegen.
+            # Let's only keep sane characters.
+            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            name = prefix
+            cnt = 0
+            while name in self.constants:
+                name = f"{prefix}_{cnt}"
+                cnt += 1
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
@@ -598,6 +605,9 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
+            assert isinstance(
+                target, torch._ops.OpOverload
+            ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
@@ -628,17 +638,24 @@ class GraphLowering(torch.fx.Interpreter):
                 e.__traceback__
             ) from None
 
+    @staticmethod
+    def can_inline_constant(t: torch.Tensor) -> bool:
+        """
+        True if this is a small constant attr that will be inlined.
+        """
+        return len(t.shape) == 1 and t.shape[0] <= 8
+
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
 
-        if unsupported_output_tensor(value):
+        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
-            if len(value.shape) == 1 and value.shape[0] <= 8:
+            if self.can_inline_constant(value):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
@@ -675,7 +692,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.graph_inputs.items():
             assert isinstance(
                 value, (TensorBox, sympy.Expr)
-            ), "Unsupported inductor graph input type: " + type(value)
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -698,12 +715,21 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
-            self.graph_id,
+            self.graph_id if self.graph_id is not None else -1,
         )
 
     def finalize(self):
         for buf in self.buffers:
             buf.decide_layout()
+
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
 
     def run_node(self, n: torch.fx.Node):
         log.debug("lowering %s", LazyString(lambda: n.format_node()))
@@ -858,15 +884,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         return result
 
-    def check_cpp_codegen_disabled(self):
+    def validate_can_generate_cpp_wrapper(self):
         if config.disable_cpp_codegen:
-            self.disable_cpp_wrapper("cpp codegen disabled")
+            raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-    def check_platform(self):
         if sys.platform != "linux":
-            self.disable_cpp_wrapper("platform not linux")
+            raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
-    def check_input_for_cpp_buffer(self):
         for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
@@ -877,35 +901,16 @@ class GraphLowering(torch.fx.Interpreter):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
-                self.disable_cpp_wrapper("unsupported inputs dtype")
-
-    @contextmanager
-    def set_current_node(self, node: torch.fx.Node):
-        old = self.current_node
-        try:
-            self.current_node = node
-            yield
-        finally:
-            self.current_node = old
-
-    def check_cpp_wrapper(self):
-        self.check_cpp_codegen_disabled()
-        self.check_platform()
-        self.check_input_for_cpp_buffer()
+                raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            # Re-check self.cpp_wrapper because it might be disabled due to failed checking
-            if self.cuda:
-                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
-
-            if self.cpp_wrapper:
-                self.wrapper_code = (
-                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
-                )
-                return
+            self.validate_can_generate_cpp_wrapper()
+            self.wrapper_code = (
+                CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
+            )
+            return
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to
@@ -956,13 +961,12 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = self.codegen()
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
-        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        mod = PyCodeCache.load_by_key_path(
+            key, path, linemap=linemap, attrs=self.constants
+        )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap
-
-        for name, value in self.constants.items():
-            setattr(mod, name, value)
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature

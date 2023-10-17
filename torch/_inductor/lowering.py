@@ -748,16 +748,19 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    # TODO: It would be better to realize the input if any of its sizes
-    # are unbacked, because typically the size will be non-zero.  However,
-    # this cannot be done directly as below as we'll choke on the size_hint
-    # here
-    if x_size_product > 0 and not any(
-        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-    ):
-        # maybe realize input before broadcasting it
-        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
+    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        # TODO: It would be better to realize the input if any of its sizes
+        # are unbacked, because typically the size will be non-zero.  However,
+        # this cannot be done directly as below as we'll choke on the size_hint
+        # here
+        if x_size_product > 0 and not any(
+            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
+        ):
+            # maybe realize input before broadcasting it
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+            )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -956,7 +959,7 @@ def cat(inputs, dim=0):
             input.realize()
         if all(len(input.layout.size) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
-        return fallback_handler(aten.cat)(inputs, dim)
+        return fallback_handler(aten.cat.default)(inputs, dim)
 
     if len(inputs) == 1:
         return clone(inputs[0])
@@ -1547,11 +1550,9 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, is_output=True)
 
 
-def make_fallback(kernel, layout_constraint=None, warn=True):
-    assert (
-        kernel not in decompositions
-    ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
+def make_fallback(op, layout_constraint=None, warn=True):
+    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -1563,16 +1564,28 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
                 " and suppress_errors is being disabled to surface it."
             )
         raise AssertionError(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            f"make_fallback({op}): a decomposition exists, we should switch to it."
             " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
             " or inductor_decompositions, and delete the corresponding `make_fallback` line."
             " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
         )
 
-    add_needs_realized_inputs(kernel)
-    if layout_constraint is not None:
-        add_layout_constraint(kernel, layout_constraint)
-    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+    def register_fallback(op_overload):
+        add_needs_realized_inputs(op_overload)
+        if layout_constraint is not None:
+            add_layout_constraint(op_overload, layout_constraint)
+        return register_lowering(op_overload, type_promotion_kind=None)(
+            fallback_handler(op_overload)
+        )
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        for ol in op.overloads():
+            op_overload = getattr(op, ol)
+            register_fallback(op_overload)
+    elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+        register_fallback(op)
+    else:
+        raise RuntimeError(f"Unsupported fallback {op} with type {type(op)}")
 
 
 def philox_rand_offset(shape):
@@ -1630,7 +1643,8 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 def native_dropout(x, p, train):
     if config.fallback_random:
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.native_dropout.default, x, p, train),
         )
     else:
         raise AssertionError("should be handled in replace_random.py")
@@ -1670,22 +1684,28 @@ def warn_triton_random():
     _warn_triton_random(V.graph.creation_time)
 
 
-fallback_rand = fallback_handler(aten.rand)
-fallback_randn = fallback_handler(aten.randn)
+fallback_rand_default = fallback_handler(aten.rand.default)
+fallback_rand_generator = fallback_handler(aten.rand.generator)
+fallback_randn_default = fallback_handler(aten.randn.default)
+fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if config.fallback_random or kwargs.get("generator", None) is not None:
-        return fallback_rand(*args, **kwargs)
+    if kwargs.get("generator", None) is not None:
+        return fallback_rand_generator(*args, **kwargs)
+    elif config.fallback_random:
+        return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if config.fallback_random or kwargs.get("generator", None) is not None:
-        return fallback_randn(*args, **kwargs)
+    if kwargs.get("generator", None) is not None:
+        return fallback_randn_generator(*args, **kwargs)
+    elif config.fallback_random:
+        return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
 
@@ -1787,7 +1807,7 @@ def bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
@@ -2554,63 +2574,112 @@ def check_and_broadcast_indices(indices, device):
         if x.get_device() != device:
             raise NotImplementedError("Fallback when indices is on a different device")
         new_indices[i] = x
-        output_dim = len(x.get_size())
-    start_offset = 0
-    # only support None at start or end for now
-    tmp = list(new_indices)
-    while tmp and tmp[-1] is None:
-        tmp.pop()
-    while tmp and tmp[0] is None:
-        tmp.pop(0)
-        start_offset += 1
-    if any((i is None) for i in tmp):
-        raise NotImplementedError("Fallback when None is in the middle of indices")
+    return new_indices, valid_idxs
 
-    end_offset = output_dim + start_offset
-    return new_indices, start_offset, end_offset
+
+def index_output_size_and_inner_fn(
+    x_size,
+    indices,
+    tensor_indices,
+    tensor_size,
+    indices_loaders,
+    indexed_size,
+    x_loader,
+):
+    # Note that behavior of indexing differs when there are non consecutive
+    # tensors. In this case, the tensor index is pulled to the beginning.
+    #
+    # Suppose a = torch.arange(3 * 4 * 5 * 6 * 7).view(3, 4, 5, 6, 7)
+    #         x = torch.tensor[1,2]
+    # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
+    # be pulled to the front.
+    non_consecutive_tensors = False
+    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+        if current - previous != 1:
+            non_consecutive_tensors = True
+
+    output_size = [x_size[i] for i, val in enumerate(indices) if val is None]
+    output_size = [*output_size, *x_size[len(output_size) + len(tensor_indices) :]]
+
+    first_tensor_index = tensor_indices[0]
+    if non_consecutive_tensors:
+        output_size = tensor_size + output_size
+    else:
+        output_size = (
+            output_size[:first_tensor_index]
+            + tensor_size
+            + output_size[first_tensor_index:]
+        )
+
+    def fn(idx):
+        assert len(idx) == len(output_size)
+        assert len(indices_loaders) == len(indexed_size)
+
+        rank = len(tensor_size)
+        new_index = []
+        first_tensor_index = tensor_indices[0]
+        start_offset = 0 if non_consecutive_tensors else first_tensor_index
+        next_idx = 0
+        for i in range(tensor_indices[-1] + 1):
+            if i == start_offset:
+                next_idx += rank
+            if indices[i] is None:
+                assert next_idx < len(idx)
+                new_index.append(idx[next_idx])
+                next_idx += 1
+            else:
+                loader = indices_loaders[i]
+                assert loader is not None
+                size = indexed_size[i]
+                new_index.append(
+                    ops.indirect_indexing(
+                        loader(idx[start_offset : start_offset + rank]),
+                        size,
+                        check=check,
+                    )
+                )
+        new_index = [
+            *new_index,
+            *idx[next_idx:],
+        ]
+        return new_index if x_loader is None else x_loader(new_index)
+
+    return output_size, fn
 
 
 def index_impl(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices, start_offset, end_offset = check_and_broadcast_indices(
-        indices, x.get_device()
-    )
+    indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
+    assert len(tensor_indices) > 0, "Must have at least one valid idx"
 
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
     # no guards on output size, all the guards are set in broadcast_tensors
 
-    output_size = list(indices_sizes[0])
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
 
     x_size = x.get_size()
 
     indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
-    if 0 in indexed_size and 0 not in output_size:
+    if 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
-    output_size = [
-        *x_size[:start_offset],
-        *output_size,
-        *x_size[start_offset + len(indices_loaders) :],
-    ]
-
-    def fn(idx):
-        assert len(idx) == len(output_size)
-        assert len(indices_loaders) == len(indexed_size)
-        new_index = [
-            ops.indirect_indexing(
-                loader(idx[start_offset:end_offset]), size, check=check
-            )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
-        new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
-        return x_loader(new_index)
+    indexed_size = [x_size[i] for i in range(len(indices))]
+    output_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        x_loader,
+    )
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        inner_fn=fn,
+        inner_fn=inner_fn,
         ranges=output_size,
     )
 
@@ -2622,7 +2691,7 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index)(x, indices)
+        return fallback_handler(aten.index.Tensor)(x, indices)
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -2705,14 +2774,16 @@ def index_put_impl_(self, indices, values, accumulate, check):
         return self
 
     values = to_dtype(values, self.get_dtype())
+
     try:
-        indices, start_offset, end_offset = check_and_broadcast_indices(
+        # Note that code will only get here when dtype is uint32
+        indices, tensor_indices = check_and_broadcast_indices(
             indices, self.get_device()
         )
     except NotImplementedError:
         return index_put_fallback(self, indices, values, accumulate)
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
 
     assert isinstance(self, TensorBox)
     self.realize()
@@ -2721,34 +2792,29 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if x_ndim == 0:
         self = view(self, [1])
 
-    output_size = list(indices_sizes[0])
-    expected_vals_size = [
-        *x_size[:start_offset],
-        *output_size,
-        *x_size[start_offset + len(indices_sizes) :],
-    ]
-    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
+    indexed_size = [x_size[i] for i in range(len(indices))]
+
+    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        None,
+    )
 
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
-
-    def output_indexer(index):
-        assert len(index) == len(expected_vals_size)
-        new_index = [
-            ops.indirect_indexing(
-                loader(index[start_offset:end_offset]), size, check=check
-            )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
-        new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
-        return new_index
 
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
-        output_indexer=output_indexer,
+        output_indexer=inner_fn,
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
@@ -3159,14 +3225,12 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.evaluate_static_shape(h)
-    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
-        size = ops.constant(size - 1, torch.int32)
+        size = ops.index_expr(size - 1, torch.int32)
         x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.constant(offset, torch.int32))
+        x = ops.sub(x, ops.index_expr(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
         return ops.indirect_indexing(x, size_num, check=False)
 
@@ -3180,7 +3244,7 @@ def reflection_pad2d(x, padding):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+        ranges=[*batch, h + top + bot, w + left + right],
     )
 
 
@@ -3417,7 +3481,9 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(aten.max_pool2d_with_indices)
+fallback_max_pool2d_with_indices = fallback_handler(
+    aten.max_pool2d_with_indices.default
+)
 
 
 @register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
@@ -3502,7 +3568,7 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward
+    aten.max_pool2d_with_indices_backward.default
 )
 
 
@@ -3723,7 +3789,7 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d)
+fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -3843,7 +3909,7 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d)
+fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -3940,7 +4006,7 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward)
+fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4343,7 +4409,9 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow = fallback_handler(aten.pow)
+fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
+fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
 
 
 @register_lowering(aten.pow, broadcast=True)
@@ -4384,7 +4452,12 @@ def pow(a, b):
 
     if is_integer_pow:
         # ops.pow doesn't work for integers
-        return fallback_pow(a, b)
+        if isinstance(a, Number):
+            return fallback_pow_scalar(a, b)
+        elif isinstance(b, Number):
+            return fallback_pow_tensor_scalar(a, b)
+        else:
+            return fallback_pow_tensor_tensor(a, b)
 
     return pow_native(a, b)
 
@@ -4472,7 +4545,7 @@ def mul(a, b):
 #   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
 def div_prim(a, b):
-    is_integral = is_boolean_type(a) or is_integer_type(a)
+    is_integral = all(is_boolean_type(x) or is_integer_type(x) for x in [a, b])
 
     if is_integral:
         return truncdiv(a, b)
@@ -4662,6 +4735,8 @@ sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
+register_lowering(aten._neg_view)(neg)
+
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
@@ -4789,6 +4864,15 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+@register_lowering(torch.ops.inductor.accumulate_grad_)
+def accumulate_grad_(variable, new_grad):
+    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
+    variable.realize()
+    new_grad.realize()
+    ir.AccumulateGrad(variable, new_grad)
+    return variable
 
 
 try:
