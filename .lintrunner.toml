@@ -259,7 +259,6 @@ exclude_patterns = [
     '**/fb/**',
     '**/*pb.h',
     '**/*CUDA*',
-    '**/cuda/*pp',
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/functions/**',
