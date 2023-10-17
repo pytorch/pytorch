@@ -1155,7 +1155,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 return super().__torch_function__(func, types, args, kwargs)
 
-        torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+        torch._dynamo.config.traceable_tensor_subclasses.append(TensorProxy)
 
         try:
             x = torch.randn(1).as_subclass(TensorProxy)
@@ -1168,7 +1168,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
         finally:
-            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+            torch._dynamo.config.traceable_tensor_subclasses.pop()
 
     def test_torch_function_with_closure(self):
         def run():
@@ -1192,7 +1192,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                     counter + 1
                     return super().__torch_function__(func, types, args, kwargs)
 
-            torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+            torch._dynamo.config.traceable_tensor_subclasses.append(TensorProxy)
 
             try:
                 x = torch.randn(1).as_subclass(TensorProxy)
@@ -1205,7 +1205,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.op_count, 4)
                 self.assertTrue(torch._dynamo.testing.same(out1, out2))
             finally:
-                torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+                torch._dynamo.config.traceable_tensor_subclasses.pop()
 
         run()
 

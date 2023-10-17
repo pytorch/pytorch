@@ -37,13 +37,13 @@ class EagerRecordGraphAndInputs:
 
 @contextlib.contextmanager
 def preserve_subclass_config():
-    old_subclass_set = set(torch._dynamo.config.traceable_tensor_subclasses)
+    old_subclass_set = list(torch._dynamo.config.traceable_tensor_subclasses)
     try:
-        torch._dynamo.config.traceable_tensor_subclasses.add(MockSubclass)
+        torch._dynamo.config.traceable_tensor_subclasses.append(MockSubclass)
         yield
     finally:
         torch._dynamo.config.traceable_tensor_subclasses.clear()
-        torch._dynamo.config.traceable_tensor_subclasses.update(old_subclass_set)
+        torch._dynamo.config.traceable_tensor_subclasses = old_subclass_set
 
 
 class SubclassTests(torch._dynamo.test_case.TestCase):
@@ -111,7 +111,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        torch._dynamo.config.traceable_tensor_subclasses.add(LocalSubclass)
+        torch._dynamo.config.traceable_tensor_subclasses.append(LocalSubclass)
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
