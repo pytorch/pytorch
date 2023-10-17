@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.fx
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -217,7 +218,10 @@ class ConstDictVariable(VariableTracker):
         if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
             return arg.specialized_value
         elif isinstance(arg, SymNodeVariable):
-            return arg.evaluate_expr()
+            try:
+                return arg.evaluate_expr()
+            except GuardOnDataDependentSymNode as e:
+                unimplemented(e.__str__())
         else:
             return arg.as_python_constant()
 
