@@ -538,7 +538,7 @@ class TestDoBench(TestCase):
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
     @parametrize("dynamic", (False, True))
-    def test_max_autotune_addmm(self, dynamic):
+    def test_max_autotune_addmm(self, dynamic=False):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """

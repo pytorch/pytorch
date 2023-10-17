@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
     for cutlass_module in cutlass_modules:
         content = content.replace(
-            f"from {cutlass_module} import ", f"from cutlass_{cutlass_module} import "
+            f"from {cutlass_module} import ",
+            f"from cutlass_library.{cutlass_module} import ",
         )
     return content
 
@@ -36,7 +37,7 @@ def _gen_cutlass_file(
     dst_full_path = os.path.abspath(
         os.path.join(
             dst_dir,
-            f"cutlass_{file_name}" if file_name != "__init__.py" else file_name,
+            file_name,
         )
     )
     with open(dst_full_path, "w") as f:
@@ -50,25 +51,36 @@ def try_import_cutlass() -> bool:
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.join(
-        inductor_cuda_config.cutlass_dir, "python/cutlass_library"
+        inductor_cuda_config.cutlass_dir, "tools/library/scripts"
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
     )
+    dst_dir = os.path.join(tmp_cutlass_py_full_path, "cutlass_library")
 
     if os.path.isdir(cutlass_py_full_path):
         if tmp_cutlass_py_full_path not in sys.path:
-            os.makedirs(tmp_cutlass_py_full_path, exist_ok=True)
-            package_symlink_path = os.path.join(
-                tmp_cutlass_py_full_path, "cutlass_library"
-            )
-            if not os.path.exists(package_symlink_path):
-                os.symlink(dst=package_symlink_path, src=cutlass_py_full_path)
+            os.makedirs(dst_dir, exist_ok=True)
+            cutlass_file_names = [
+                file_name
+                for file_name in os.listdir(cutlass_py_full_path)
+                if file_name.endswith(".py")
+            ]
+            cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
+            if not os.path.isdir(tmp_cutlass_py_full_path):
+                os.mkdir(tmp_cutlass_py_full_path)
+            for file_name in cutlass_file_names:
+                _gen_cutlass_file(
+                    file_name,
+                    cutlass_module_names,
+                    cutlass_py_full_path,
+                    dst_dir,
+                )
             sys.path.append(tmp_cutlass_py_full_path)
         try:
-            import cutlass_library.generator as cutlass_generator  # type: ignore[import]  # noqa: F401
-            import cutlass_library.library as cutlass_library  # type: ignore[import]  # noqa: F401
-            import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]  # noqa: F401
+            import cutlass_library.generator  # type: ignore[import]  # noqa: F401
+            import cutlass_library.library  # type: ignore[import]  # noqa: F401
+            import cutlass_library.manifest  # type: ignore[import]  # noqa: F401
 
             return True
 
