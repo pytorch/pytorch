@@ -337,7 +337,7 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, name: str, node: ir.TritonTemplateBuffer):
+    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
@@ -367,7 +367,7 @@ class TritonTemplateKernel(TritonKernel):
             )
         else:
             call_args = ", ".join(call_args)  # type: ignore[assignment]
-            stream_name = wrapper.write_get_cuda_stream(
+            stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
 
@@ -485,7 +485,8 @@ class TritonTemplate(KernelTemplate):
             expected_args,
         )
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
+            map(sympy.expand, call_args[len(expected_args) :]),
+            fallback=config.unbacked_symint_fallback,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -506,7 +507,13 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert mod.__file__ is not None
-        grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
+        grid = self.grid(
+            *V.graph.sizevars.size_hints(
+                layout.size,
+                fallback=config.unbacked_symint_fallback,
+            ),
+            kwargs,
+        )
         bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
             module_cache_key=mod.key,
@@ -768,9 +775,18 @@ class AlgorithmSelectorCache(PersistentCache):
         example_inputs_extern = [
             torch.as_strided(
                 unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(input_node.get_size()),
-                V.graph.sizevars.size_hints(input_node.get_stride()),
-                V.graph.sizevars.size_hint(input_node.get_layout().offset),
+                V.graph.sizevars.size_hints(
+                    input_node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    input_node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hint(
+                    input_node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                ),
             )
             for input_node in input_nodes
         ]
@@ -869,7 +885,14 @@ class AlgorithmSelectorCache(PersistentCache):
             return
         sizes = ", ".join(
             [
-                "x".join(map(str, V.graph.sizevars.size_hints(n.get_size())))
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(), fallback=config.unbacked_symint_fallback
+                        ),
+                    )
+                )
                 for n in input_nodes
             ]
         )
@@ -880,9 +903,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(
-                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
-            )
+            if result:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+                )
+            else:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>\n"
+                )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
@@ -901,8 +929,14 @@ class AlgorithmSelectorCache(PersistentCache):
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
         return rand_strided(
-            V.graph.sizevars.size_hints(node.get_size()),
-            V.graph.sizevars.size_hints(node.get_stride()),
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
             device=node.get_device(),
             dtype=node.get_dtype(),
             extra_size=node.layout.offset,
@@ -918,9 +952,18 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(node.get_size()),
-            *sizevars.size_hints(node.get_stride()),
-            sizevars.size_hint(node.get_layout().offset),
+            *sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            *sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
 

@@ -964,7 +964,8 @@ def configure_extension_build():
             extra_compile_args += ["-g"]
             extra_link_args += ["-g"]
 
-    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
+    # should be included in all wheels uploaded to pypi
     pytorch_extra_install_requirements = os.getenv(
         "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
     )
@@ -1293,7 +1294,8 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
-        "include/torch/csrc/inductor/aot_runtime/*.h",
+        "include/torch/csrc/inductor/aoti_runtime/*.h",
+        "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
@@ -1338,7 +1340,7 @@ def main():
         "include/THH/generic/*.h",
         "include/sleef.h",
         "_inductor/codegen/*.h",
-        "_inductor/codegen/aot_runtime/*.cpp",
+        "_inductor/codegen/aoti_runtime/*.cpp",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",

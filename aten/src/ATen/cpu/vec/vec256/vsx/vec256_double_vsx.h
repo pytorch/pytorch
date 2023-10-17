@@ -225,6 +225,9 @@ class Vectorized<double> {
   Vectorized<double> atan() const {
      return {Sleef_atand2_u10(_vec0), Sleef_atand2_u10(_vec1)};
   }
+  Vectorized<double> atanh() const {
+     return {Sleef_atanhd2_u10(_vec0), Sleef_atanhd2_u10(_vec1)};
+  }
   Vectorized<double> atan2(const Vectorized<double>& b) const {
      return {Sleef_atan2d2_u10(_vec0, b._vec0), Sleef_atan2d2_u10(_vec1, b._vec1)};
   }
@@ -362,6 +365,10 @@ class Vectorized<double> {
 
   Vectorized<double> i0e() const {
     return map(calc_i0e);
+  }
+
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
   }
 
   Vectorized<double> _nor() const {

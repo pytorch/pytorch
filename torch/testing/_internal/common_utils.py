@@ -519,7 +519,7 @@ class parametrize(_TestParametrizer):
                 yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
-                raise ValueError('An empty arg_values was passed to @parametrize. '
+                raise ValueError(f'{test}: An empty arg_values was passed to @parametrize. '
                                  'Note that this may result from reuse of a generator.')
 
 
@@ -719,19 +719,54 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     return wait_for_process(p, timeout=timeout)
 
 
-def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None, retries=1):
-    assert retries >= 0, f"Expecting non negative number for number of retries, got {retries}"
+def retry_shell(
+    command,
+    cwd=None,
+    env=None,
+    stdout=None,
+    stderr=None,
+    timeout=None,
+    retries=1,
+    was_rerun=False,
+) -> Tuple[int, bool]:
+    # Returns exicode + whether it was rerun
+    assert (
+        retries >= 0
+    ), f"Expecting non negative number for number of retries, got {retries}"
     try:
-        exit_code = shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout)
+        exit_code = shell(
+            command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout
+        )
         if exit_code == 0 or retries == 0:
-            return exit_code
-        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout, flush=True)
+            return exit_code, was_rerun
+        print(
+            f"Got exit code {exit_code}, retrying (retries left={retries})",
+            file=stdout,
+            flush=True,
+        )
     except subprocess.TimeoutExpired:
         if retries == 0:
-            print(f"Command took >{timeout // 60}min, returning 124", file=stdout, flush=True)
-            return 124
-        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout, flush=True)
-    return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
+            print(
+                f"Command took >{timeout // 60}min, returning 124",
+                file=stdout,
+                flush=True,
+            )
+            return 124, was_rerun
+        print(
+            f"Command took >{timeout // 60}min, retrying (retries left={retries})",
+            file=stdout,
+            flush=True,
+        )
+    return retry_shell(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        timeout=timeout,
+        retries=retries - 1,
+        was_rerun=True,
+    )
 
 
 def discover_test_cases_recursively(suite_or_case):
@@ -889,7 +924,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
-            exitcode = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+            exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
@@ -1087,6 +1122,9 @@ TestEnvironment.def_flag("TEST_WITH_TSAN", env_var="PYTORCH_TEST_WITH_TSAN")
 TestEnvironment.def_flag("TEST_WITH_UBSAN", env_var="PYTORCH_TEST_WITH_UBSAN")
 TestEnvironment.def_flag("TEST_WITH_ROCM", env_var="PYTORCH_TEST_WITH_ROCM")
 
+# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+# See #64427
+TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TestEnvironment.def_flag("TEST_WITH_SLOW", env_var="PYTORCH_TEST_WITH_SLOW")
 
@@ -1172,7 +1210,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
 
     return decorator
 
-def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
+def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
+                        condition=TEST_WITH_TORCHINDUCTOR):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1192,6 +1231,8 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
 
     return decorator
 
+def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
+    return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
 
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
@@ -2254,6 +2295,11 @@ class TestCase(expecttest.TestCase):
     # `torch.float` when `setUp` and `tearDown` are called.
     _default_dtype_check_enabled: bool = False
 
+    # Always use difflib to print diffs on multi line equality.
+    # Undocumented feature in unittest
+    _diffThreshold = sys.maxsize
+    maxDiff = None
+
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
         if torch.cuda.is_initialized():
@@ -2263,6 +2309,7 @@ class TestCase(expecttest.TestCase):
                 torch.cuda.synchronize()
             except RuntimeError as rte:
                 print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
+                print(str(rte), file=sys.stderr)
                 return True
             return False
         else:
@@ -2471,7 +2518,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
         elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager")(super_run)
+            super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
