@@ -1160,6 +1160,16 @@ class BuiltinVariable(VariableTracker):
             else:
                 return VariableBuilder(tx, source)(member).add_guards(guards)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+            # np.typecodes -> tnp.typecodes, both module-level Dict[Str, Str]
+            import numpy as np
+
+            import torch._numpy as tnp
+
+            if obj.value == np and name == "typecodes":
+                tcodes = tnp.typecodes
+                result = {k: ConstantVariable.create(tcodes[k]) for k in tcodes.keys()}
+                return ConstDictVariable(result, user_cls=dict)
+
             member = obj.value.__dict__[name]
 
             if config.replay_record_enabled:

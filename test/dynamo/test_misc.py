@@ -1659,6 +1659,23 @@ utils_device.CURRENT_DEVICE == None""",
         # We need to specialise the number as it's in a forloop
         self.assertEqual(cnts.frame_count, n_iter)
 
+    def test_numpy_typecodes(self):
+        # np.typecodes is a module level Dict[Str, Str]
+        # it differs between numpy and torch._numpy because we only support a subset of dtypes
+        # XXX: the function below returns something tensor-like, so that there is
+        # a compile step; otherwise the dict is just inlined from numpy
+        def fn():
+            return np.typecodes["AllInteger"], np.empty(3)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        res, _ = opt_fn()
+
+        import torch._numpy as tnp
+
+        self.assertEqual(res, tnp.typecodes["AllInteger"])
+
     def test_numpy_as_global(self):
         global x
         x = np.arange(10)
