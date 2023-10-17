@@ -1356,11 +1356,10 @@ def sym_ite(pred, then_val, else_val):
         raise NotImplementedError(f"sym_ite only supports bool or SymBool pred but got {type(pred)}.")
 
 def _sym_ite(pred, then_val, else_val):
-    assert isinstance(pred, (torch.SymBool, bool)) and type(then_val) == type(else_val)
-
     pred_node = pred.node
     then_node = to_node(pred_node, then_val)
     else_node = to_node(pred_node, else_val)
+    assert then_node.pytype == else_node.pytype
     if then_node is NotImplemented or else_node is NotImplemented:
         return NotImplemented
 
@@ -1379,7 +1378,6 @@ def _sym_ite(pred, then_val, else_val):
             raise
 
         out = safe_expand(out)
-        assert then_node.pytype == else_node.pytype
         pytype = then_node.pytype
 
         fx_node, _ = pred_node.shape_env.create_fx_call_function(sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node))
