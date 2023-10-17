@@ -351,6 +351,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
+                inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
@@ -854,6 +855,10 @@ class WrapperCodeGen(CodeGen):
             )
 
     def make_buffer_free(self, buffer):
+        name = buffer.get_name()
+        if name in self.freed:
+            return ""
+        self.freed.add(name)
         return f"del {buffer.get_name()}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
