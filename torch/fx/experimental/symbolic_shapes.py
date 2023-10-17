@@ -3431,7 +3431,7 @@ class ShapeEnv:
             expr = self.simplify(guard.expr)
 
             # Avoid re-issueing the same guard.
-            if guard.expr in issued:
+            if expr in issued:
                 return
 
             issued.add(expr)
