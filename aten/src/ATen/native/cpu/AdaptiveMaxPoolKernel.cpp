@@ -205,7 +205,6 @@ cpu_adaptive_max_pool_channels_last(
     const Tensor& indices_,
     const Tensor& input_,
     IntArrayRef output_size) {
-  using param_t = at::opmath_type<scalar_t>;
   TORCH_CHECK(input_.ndimension() == 4,
               "adaptive max pooling with channels last format supports tensors with 4 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast;
@@ -225,7 +224,7 @@ cpu_adaptive_max_pool_channels_last(
   int64_t output_width = output_size[1];
 
   using bVec = vec::Vectorized<scalar_t>;
-  using fVec = vec::Vectorized<param_t>;
+  using fVec = vec::Vectorized<float>;
   using iVec = vec::Vectorized<int32_t>;
   // need to make sure doesn't overflow
   TORCH_CHECK(input_height * input_width <= std::numeric_limits<int32_t>::max());
@@ -242,8 +241,8 @@ cpu_adaptive_max_pool_channels_last(
     // temp buffer holding index with integer_t
     auto index_buffer = std::make_unique<int32_t []>(len);
     // temp buffer holding max value with float
-    auto max_arr = std::make_unique<param_t []>(size);
-    param_t* max = max_arr.get();
+    auto max_arr = std::make_unique<float []>(size);
+    float* max = max_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t ih0 = start_index(oh, output_height, input_height);
@@ -257,7 +256,7 @@ cpu_adaptive_max_pool_channels_last(
 
       // Pass I: init out lane
       iVec index0_ivec = iVec(ih0 * input_width + iw0);
-      fVec max_fvec = fVec(-std::numeric_limits<param_t>::infinity());
+      fVec max_fvec = fVec(-std::numeric_limits<float>::infinity());
       int64_t d1 = 0;
       for (; d1 < len; d1 += fVec::size()) {
         index0_ivec.store(index_buffer.get() + d1);
@@ -265,7 +264,7 @@ cpu_adaptive_max_pool_channels_last(
       }
       for (; d1 < size; d1++) {
         ind[d1] = ih0 * input_width + iw0;
-        max[d1] = -std::numeric_limits<param_t>::infinity();
+        max[d1] = -std::numeric_limits<float>::infinity();
       }
       // Pass II: compute local max
       for (int64_t ih = ih0; ih < ih1; ih ++) {
@@ -303,9 +302,9 @@ cpu_adaptive_max_pool_channels_last(
           }
           for (; d2 < size; d2++) {
             int64_t index = ih * input_width + iw;
-            auto val = static_cast<param_t>(in[d2]);
+            float val = float(in[d2]);
             int64_t maxindex = ind[d2];
-            param_t maxval = max[d2];
+            float maxval = max[d2];
 
             bool mask = (val > maxval) || std::isnan(val);
             max[d2] = mask ? val : maxval;

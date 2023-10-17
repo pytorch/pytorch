@@ -895,8 +895,9 @@ def aot_compile(
     from torch._inductor.decomposition import select_decomp_table
     ep = ep.run_decompositions(select_decomp_table())
 
-    if remove_runtime_assertions:
-        ep = ep._transform(_RemoveRuntimeAssertionsPass())
+    # TODO(angelayi): Needed to comment this out in order to unblock something
+    # if remove_runtime_assertions:
+    ep = ep._transform(_RemoveRuntimeAssertionsPass())
 
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]

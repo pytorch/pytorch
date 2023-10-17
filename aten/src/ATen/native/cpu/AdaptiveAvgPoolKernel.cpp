@@ -160,7 +160,6 @@ cpu_adaptive_avg_pool_channels_last(
     Tensor& output_,
     const Tensor& input_,
     IntArrayRef output_size) {
-  using param_t = at::opmath_type<scalar_t>;
   auto memory_format = at::MemoryFormat::ChannelsLast;
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
@@ -176,7 +175,7 @@ cpu_adaptive_avg_pool_channels_last(
   int64_t output_width = output_size[1];
 
   using bVec = vec::Vectorized<scalar_t>;
-  using fVec = vec::Vectorized<param_t>;
+  using fVec = vec::Vectorized<float>;
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
     int64_t n = 0;
@@ -186,8 +185,8 @@ cpu_adaptive_avg_pool_channels_last(
 
     // temp buffer for sum, use float as accumulation type
     // can't reuse output buffer to store sum since it is BFloat16/Half
-    auto sum_arr = std::make_unique<param_t []>(channels);
-    param_t* sum = sum_arr.get();
+    auto sum_arr = std::make_unique<float []>(channels);
+    float* sum = sum_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t ih0 = start_index(oh, output_height, input_height);
@@ -204,11 +203,11 @@ cpu_adaptive_avg_pool_channels_last(
       // Pass I: zero the out lane
       int64_t d1 = 0;
       for (; d1 < size - (size % fVec::size()); d1 += fVec::size()) {
-        fVec sum_fvec = fVec(param_t(0));
+        fVec sum_fvec = fVec(float(0));
         sum_fvec.store(sum + d1);
       }
       for (; d1 < size; d1++) {
-        sum[d1] = param_t(0);
+        sum[d1] = float(0);
       }
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
@@ -228,15 +227,15 @@ cpu_adaptive_avg_pool_channels_last(
             sum_fvec1.store(sum + d2 + fVec::size());
           }
           for (; d2 < size; d2++) {
-            sum[d2] += param_t(in[d2]);
+            sum[d2] += float(in[d2]);
           }
         }
       }
       // Pass III: compute local average
       int64_t d3 = 0;
       for (; d3 < size - (size % bVec::size()); d3 += bVec::size()) {
-        fVec out_fvec0 = fVec::loadu(sum + d3) / fVec(param_t(kh * kw));
-        fVec out_fvec1 = fVec::loadu(sum + d3 + fVec::size()) / fVec(param_t(kh * kw));
+        fVec out_fvec0 = fVec::loadu(sum + d3) / fVec(float(kh * kw));
+        fVec out_fvec1 = fVec::loadu(sum + d3 + fVec::size()) / fVec(float(kh * kw));
 
         bVec out_bvec = convert_from_float<scalar_t>(out_fvec0, out_fvec1);
         out_bvec.store(out + d3);
