@@ -2645,7 +2645,7 @@ Tensor mexp_impl(
         a_large_norm,
         large_norm_subset,
         thetas[total_n_degs - 1]
-      );
+      ).to(res.dtype());
       res.index_put_({idx_large_norm}, mexp_out);
     }
     return res;
