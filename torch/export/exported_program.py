@@ -1,6 +1,5 @@
 import copy
 import dataclasses
-import math
 from enum import auto, Enum
 from typing import (
     Any,
@@ -517,9 +516,6 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def equality_constraints(self):
-        """
-        NOTE: This property will be removed in the future.
-        """
         return self._equality_constraints
 
     @property
@@ -574,7 +570,7 @@ class ExportedProgram:
         ordered_buffers = tuple(
             self.state_dict[name] for name in self.graph_signature.buffers
         )
-        self._check_input_constraints(*args)
+        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -620,6 +616,7 @@ class ExportedProgram:
             f"    {graph_module}\n"
             f"Graph signature: {self.graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
+            f"Equality constraints: {self.equality_constraints}\n"
         )
         return string
 
@@ -906,86 +903,24 @@ class ExportedProgram:
 
     def _check_input_constraints(self, *args):
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _convert_range_to_int,
+            _AddRuntimeAssertionsForConstraintsPass,
         )
 
-        def check(cond, msg):
-            if not cond:
-                # TODO(avik): maybe add more context, e.g., graph signature
-                raise RuntimeError(msg)
-
-        placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
-        inputs = [
-            p
-            for p, s in zip(placeholders, self.graph_signature.input_specs)
-            if s.kind == InputKind.USER_INPUT
-        ]
-        n_args, n_inputs = len(args), len(inputs)
-        check(
-            n_args == n_inputs,
-            f"unexpected number of inputs (expected {n_inputs}, got {n_args})",
-        )
-        # NOTE: export already guarantees that the same symbol is used in metadata
-        # for all InputDims related by equality constraints, so we can just unify
-        # symbols with given input dimension values to check equality constraints.
-        # TODO(avik): remove equality constraints from ExportedProgram
-        unification_map: Dict[sympy.Symbol, Any] = {}
-        for arg, p in zip(args, inputs):
-            p_val = p.meta["val"]
-            if (
-                isinstance(p_val, torch.Tensor)
-                and "tensor_meta" in p.meta
-                and p.meta["tensor_meta"] is not None
-            ):
-                p_shape = p.meta["tensor_meta"].shape
-                check(
-                    isinstance(arg, torch.Tensor),
-                    f"expected input {p.name} to be a tensor, but got {type(arg)}",
-                )
-                n_arg_shape, n_p_shape = len(arg.shape), len(p_shape)
-                check(
-                    n_arg_shape == n_p_shape,
-                    f"unexpected number of dimensions in input {p.name}.shape "
-                    f"(expected {n_p_shape}, got {n_arg_shape})",
-                )
-                for j, (arg_dim, p_dim) in enumerate(zip(arg.shape, p_shape)):
-                    if isinstance(p_dim, torch.SymInt):
-                        if p_dim.node.expr in unification_map:
-                            existing_dim = unification_map[p_dim.node.expr]
-                            check(
-                                arg_dim == existing_dim,
-                                f"expected input {p.name}.shape[{j}] to be equal to "
-                                f"{existing_dim}, but got {arg_dim}",
-                            )
-                        else:
-                            unification_map[p_dim.node.expr] = arg_dim
-                        min_val, max_val = _convert_range_to_int(
-                            self.range_constraints[p_dim.node.expr]
-                        )
-                        # NOTE: we allow dimensions to be 0/1 at runtime
-                        if min_val > 2:
-                            check(
-                                arg_dim >= min_val,
-                                f"expected input {p.name}.shape[{j}] to be >= "
-                                f"{min_val}, but got {arg_dim}",
-                            )
-                        if max_val < math.inf:
-                            check(
-                                arg_dim <= max_val,
-                                f"expected input {p.name}.shape[{j}] to be <= "
-                                f"{max_val}, but got {arg_dim}",
-                            )
-                    else:
-                        check(
-                            arg_dim == p_dim,
-                            f"expected input {p.name}.shape[{j}] to be equal to "
-                            f"{p_dim}, but got {arg_dim}",
-                        )
-            elif isinstance(p_val, (int, float, str)):
-                check(
-                    type(arg) == type(p_val) and arg == p_val,
-                    f"expected input {p.name} to be equal to {p_val}, but got {arg}",
-                )
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
+        for p in self.graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            self.range_constraints,
+            self.equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
 
     def _validate(self):
         from torch._export.verifier import Verifier, verify_exported_program_signature
