@@ -520,6 +520,23 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
+    def test_zero_elems(self):
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(0, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(0, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
     @bin_ops
     def test_2d_blocking(self, op):
         def fn(a0, a1, b0, b1):

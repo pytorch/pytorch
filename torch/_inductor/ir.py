@@ -3086,7 +3086,6 @@ class ConcatKernel(NopKernel):
                 input_unwrapped.is_input_buffer()
                 and inputs[i].get_device().type == "cuda"
                 and not is_dynamic(input_buffer)
-                and not input_buffer.is_no_op()
             ):
                 buffer_names.append(input_buffer.get_name())
 
