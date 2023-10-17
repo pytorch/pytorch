@@ -2181,7 +2181,8 @@ Tensor operator_1_norm(const Tensor& tensor) {
 // of shape [n_copies, a.size()]
 Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
   auto res = at::empty(
-    {n_copies, a.size(0), a.size(1), a.size(2)}
+    {n_copies, a.size(0), a.size(1), a.size(2)},
+    a.options().memory_format(at::MemoryFormat::Contiguous)
   );
 
   if (is_zero) {
