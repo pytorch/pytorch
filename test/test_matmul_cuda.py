@@ -413,12 +413,12 @@ class TestMixedDtypesLinearCuda(TestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesNewLinearCuda(TestCase):
-    version = _get_torch_cuda_version()
-    if version < (11, 8):
-        self.skipTest("_mixed_dtypes_new_linear only compiled for CUDA 11.8+")
-
     @dtypes(torch.float16)
     def test_mixed_dtypes_new_linear(self, dtype: torch.dtype, device: str = "cuda"):
+        version = _get_torch_cuda_version()
+        if version < (11, 8):
+            self.skipTest("_mixed_dtypes_new_linear only compiled for CUDA 11.8+")
+
         def run_test(
             batch_shape,
             m,
@@ -443,18 +443,20 @@ class TestMixedDtypesNewLinearCuda(TestCase):
                     (n,), low=val_lo, high=val_hi, dtype=input.dtype, device=device
                 )
                 if use_scale
-                else torch.ones((n,), dtype=input.dtype, device=device)  # FIXME!: None
+                else None
             )
             bias = (
                 make_tensor(
                     (n,), low=val_lo, high=val_hi, dtype=input.dtype, device=device
                 )
                 if use_bias
-                else torch.zeros((n,), dtype=input.dtype, device=device)  # FIXME!: None
+                else None
             )
 
             input_ref = input.reshape(-1, input.shape[-1])
-            weight_ref = weight.to(input.dtype) * scale.view(n, 1).expand(n, k)
+            weight_ref = weight.to(input.dtype)
+            if use_scale:
+                weight_ref *= scale.view(n, 1).expand(n, k)
 
             output_ref = torch.nn.functional.linear(input_ref, weight_ref, bias).reshape(*input.shape[:-1], n)
             output = torch.ops.aten._mixed_dtypes_new_linear(input, weight, scale=scale, bias=bias)

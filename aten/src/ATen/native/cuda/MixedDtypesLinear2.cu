@@ -28,7 +28,8 @@ namespace at {
 namespace native {
 
 #ifndef USE_ROCM
-template<typename ElementInputA, typename ElementInputB>
+template<typename ElementInputA, typename ElementInputB, bool use_scale,
+        bool use_bias>
 Tensor
 mixed_dtypes_linear_cutlass(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
@@ -98,10 +99,15 @@ mixed_dtypes_linear_cutlass(
 
   using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
 
-  using Scale = cutlass::epilogue::threadblock::VisitorAuxLoad<
-      ScaleTileThreadMap, ElementScale,
-      cute::Stride<int64_t, cute::_1, int64_t>
-  >;
+  using ScaleScalar =
+      cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementScale>;
+  using ScaleTensor =
+      cutlass::epilogue::threadblock::VisitorAuxLoad<
+          ScaleTileThreadMap,
+          ElementScale,
+          cute::Stride<int64_t, cute::_1, int64_t>>;
+  using Scale = std::conditional_t<use_scale, ScaleTensor, ScaleScalar>;
+  using ScaleArguments = typename Scale::Arguments;
 
   using ApplyScale = cutlass::epilogue::threadblock::VisitorCompute<
       cutlass::multiplies, ElementEpilogue, ElementEpilogue,
@@ -113,10 +119,15 @@ mixed_dtypes_linear_cutlass(
       Accum,
       Scale>;
 
-  using Bias = cutlass::epilogue::threadblock::VisitorAuxLoad<
-      BiasTileThreadMap, ElementBias,
-      cute::Stride<int64_t, cute::_1, int64_t>
-  >;
+  using BiasScalar =
+      cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementBias>;
+  using BiasTensor =
+      cutlass::epilogue::threadblock::VisitorAuxLoad<
+          BiasTileThreadMap,
+          ElementBias,
+          cute::Stride<int64_t, cute::_1, int64_t>>;
+  using Bias = std::conditional_t<use_bias, BiasTensor, BiasScalar>;
+  using BiasArguments = typename Bias::Arguments;
 
   using ApplyBias = cutlass::epilogue::threadblock::VisitorCompute<
       cutlass::plus, ElementOutput, ElementEpilogue,
@@ -162,24 +173,51 @@ mixed_dtypes_linear_cutlass(
 
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
   constexpr auto SplitKFactor = 1;
-  typename EVTOutput::Arguments callback_args{
+
+  ScaleArguments scale_arguments{
+    [&]() -> ScaleArguments {
+      if constexpr (use_scale) {
+        return {(ElementScale*)scale.data_ptr(),
+                ElementScale(1),
+                {cute::_0{}, cute::_1{}, problem_size.n()}};
+      } else {
+        return {ElementScale(1)};
+      }
+    }()
+  };
+  BiasArguments bias_arguments{
+    [&]() -> BiasArguments {
+      if constexpr (use_bias) {
+        return {(ElementBias*)bias.data_ptr(),
+                ElementBias(0),
+                {cute::_0{}, cute::_1{}, problem_size.n()}};
+      } else {
+        return {ElementBias(0)};
+      }
+    }()
+  };
+  typename Output::Arguments output_arguments{
+    (ElementOutput*)output.data_ptr(),
+    {problem_size.n(), cute::_1{}, problem_size.mn().product()}
+  };
+  typename EVTOutput::Arguments callback_arguments{
     {
       {
         {},                  // Accum
-        {(ElementScale*)scale.data_ptr(), ElementScale(0), {cute::_0{}, cute::_1{}, problem_size.n()}},      // Scale
+        scale_arguments,     // Scale
         {}                   // ApplyScale
       },                     // EVTApplyScale
-      {(ElementBias*)bias.data_ptr(), ElementBias(0), {cute::_0{}, cute::_1{}, problem_size.n()}},           // Bias
+      bias_arguments,        // Bias
       {}                     // ApplyBias
     },                       // EVTApplyBias
-    {(ElementOutput*)output.data_ptr(), {problem_size.n(), cute::_1{}, problem_size.mn().product()}},        // Output
+    output_arguments,        // Output
   };                         // EVTOutput
   constexpr auto AvailSms = -1;
   typename Gemm::Arguments arguments(
     cutlass::gemm::GemmUniversalMode::kGemm,
     problem_size,
     SplitKFactor,
-    callback_args,                            // argument of EVT callbacks
+    callback_arguments,                       // arguments of EVT callbacks
     (ElementInputA*)input.data_ptr(),
     (ElementInputB*)weight.data_ptr(),
     nullptr,                                  // ptr C (unused)
@@ -222,6 +260,45 @@ mixed_dtypes_linear_cutlass(
   return output;
 }
 #endif
+
+template<typename ElementInputA, typename ElementInputB>
+Tensor
+mixed_dtypes_linear_cutlass_dispatch_scale_bias(
+    const Tensor& input, const Tensor& weight, const Tensor& scale,
+    const Tensor& bias) {
+    if (scale.numel() > 0) {
+        if (bias.numel() > 0) {
+            return mixed_dtypes_linear_cutlass<
+                       ElementInputA,
+                       ElementInputB,
+                       true,
+                       true>(input, weight, scale, bias);
+        }
+        else {
+            return mixed_dtypes_linear_cutlass<
+                       ElementInputA,
+                       ElementInputB,
+                       true,
+                       false>(input, weight, scale, bias);
+        }
+    }
+    else {
+        if (bias.numel() > 0) {
+            return mixed_dtypes_linear_cutlass<
+                       ElementInputA,
+                       ElementInputB,
+                       false,
+                       true>(input, weight, scale, bias);
+        }
+        else {
+            return mixed_dtypes_linear_cutlass<
+                       ElementInputA,
+                       ElementInputB,
+                       false,
+                       false>(input, weight, scale, bias);
+        }
+    }
+}
 
 Tensor
 _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
@@ -340,7 +417,7 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                     at::ScalarType::Char,
                     [&]() {
                       output =
-                          mixed_dtypes_linear_cutlass<
+                          mixed_dtypes_linear_cutlass_dispatch_scale_bias<
                               cutlass::half_t,
                               int8_t>(input_2d, weight, scale, bias);
                       return;
@@ -349,7 +426,7 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                     at::ScalarType::Byte,
                     [&]() {
                       output =
-                          mixed_dtypes_linear_cutlass<
+                          mixed_dtypes_linear_cutlass_dispatch_scale_bias<
                               cutlass::half_t,
                               uint8_t>(input_2d, weight, scale, bias);
                       return;
