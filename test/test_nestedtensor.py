@@ -2886,10 +2886,9 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.numel(), 27)
 
         for op in (
-            torch.ops.aten.is_contiguous.default,
             torch.ops.aten.is_contiguous.memory_format,
         ):
-            error_msg = "NestedTensors do not support directly querying strides"
+            error_msg = "NestedTensors do not support directly querying contiguity by memory_format"
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 if "memory_format" in op.__name__:
                     op(nt, torch.preserve_format)
@@ -2899,7 +2898,7 @@ class TestNestedTensorSubclass(TestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
 
         def grad_test_func(a, b, c, weight):
             nt, _ = jagged_from_list([a, b, c], None)

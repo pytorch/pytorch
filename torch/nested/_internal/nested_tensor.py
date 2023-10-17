@@ -168,8 +168,9 @@ class NestedTensor(torch.Tensor):
         try:
             return jagged_torch_function(func, *args, **kwargs)
         except NotImplementedError:
-            with torch._C.DisableTorchFunctionSubclass():
-                return func(*args, **kwargs)
+            pass
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
 
 
 # Not actually a view!
