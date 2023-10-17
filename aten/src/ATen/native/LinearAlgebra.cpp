@@ -2574,7 +2574,9 @@ Tensor compute_T18_scale_square(
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
   for (int64_t i = 0; i < section_numel; ++i) {
     for (int64_t j = 0; j < pts[i]; j++) {
-      acc = at::matmul(acc, acc);
+      // To avoid AMP autocasting caused by at::matmul
+      auto acc_out = at::empty_like(acc);
+      acc = at::matmul_out(acc_out, acc, acc);
     }
     output_pieces.push_back(acc.slice(0, 0, scs[i]));
     acc = acc.slice(0, scs[i]);
@@ -2598,7 +2600,7 @@ Tensor mexp_impl(
   }
 
   if (!compute_highest_degree_approx) {
-    auto res = at::empty_like(a);
+    auto res = at::empty_like(a, {}, at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
@@ -2646,7 +2648,7 @@ Tensor mexp_impl(
         a_large_norm,
         large_norm_subset,
         thetas[total_n_degs - 1]
-      ).to(res.dtype());
+      );
       res.index_put_({idx_large_norm}, mexp_out);
     }
     return res;
@@ -2655,7 +2657,7 @@ Tensor mexp_impl(
   return compute_T18_scale_square(
     a, norm,
     thetas[total_n_degs - 1]
-  ).to(a.dtype());
+  );
 }
 
 // matrix exponential

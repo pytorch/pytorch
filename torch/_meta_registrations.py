@@ -171,7 +171,7 @@ def linalg_cross(self, other, *, dim=-1):
 def linalg_matrix_exp(self):
     squareCheckInputs(self, "linalg.matrix_exp")
     checkFloatingOrComplex(self, "linalg.matrix_exp")
-    return torch.empty_like(self)
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(
