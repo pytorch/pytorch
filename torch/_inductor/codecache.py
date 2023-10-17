@@ -51,7 +51,7 @@ from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
-from torch.fx.experimental.symbolic_shapes import definitely_true
+from torch.fx.experimental.symbolic_shapes import definitely_true, ShapeEnv
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -624,13 +624,6 @@ def compiled_fx_graph_hash(
     return "f" + FxGraphCachePickler.get_hash(details)
 
 
-def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
-    """
-    Get the SymInt objects from the input list.
-    """
-    return [s for s in inputs if isinstance(s, torch.SymInt)]
-
-
 class FxGraphCache:
     """
     Supports caching and reusing compiled Fx graphs.
@@ -669,6 +662,22 @@ class FxGraphCache:
         return os.path.join(cache_dir(), key[1:3], key)
 
     @staticmethod
+    def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
+        """
+        Get the SymInt objects from the input list.
+        """
+        return [s for s in inputs if isinstance(s, torch.SymInt)]
+
+    @staticmethod
+    def _get_shape_env() -> ShapeEnv:
+        """
+        Helper to get the shape env from the tracing context.
+        """
+        tracing_context = torch._guards.TracingContext.get()
+        assert tracing_context is not None
+        return tracing_context.fake_mode.shape_env
+
+    @staticmethod
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
@@ -692,10 +701,8 @@ class FxGraphCache:
                 return graph
 
             # Evaluate the guard expression in the current context.
-            tracing_context = torch._guards.TracingContext.get()
-            assert tracing_context is not None
-            shape_env = tracing_context.fake_mode.shape_env
-            symints = _filter_symints(example_inputs)
+            shape_env = FxGraphCache._get_shape_env()
+            symints = FxGraphCache._filter_symints(example_inputs)
 
             # We don't want to create the guards in the current shape env
             # unless we have a hit.
@@ -719,13 +726,25 @@ class FxGraphCache:
         return None
 
     @staticmethod
-    def _save_graph(key: str, compiled_graph: CompiledFxGraph):
+    def _save_graph(
+        key: str, compiled_graph: CompiledFxGraph, example_inputs: List[torch.Tensor]
+    ):
         """
         Store a serialized CompiledFxGraph on disk.
         """
         disk_compiled_graph = copy(compiled_graph)
         # Important as compiled models are not pickleable:
         disk_compiled_graph.compiled_artifact = None
+
+        # Before serializing, compute the guard expression that will be used to
+        # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
+        # sufficient to consider only the SymInt args to the fx graph since the
+        # Tensor shapes are already captured in the hash for the cache key. Any
+        # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
+        shape_env = FxGraphCache._get_shape_env()
+        symints = FxGraphCache._filter_symints(example_inputs)
+        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
+
         content = pickle.dumps(disk_compiled_graph)
 
         subdir = FxGraphCache._get_subdir(key)
@@ -761,7 +780,7 @@ class FxGraphCache:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
                 compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                FxGraphCache._save_graph(key, compiled_graph)
+                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
@@ -805,14 +824,7 @@ class CompiledFxGraph:
         self.mutated_inputs = graph.mutated_inputs
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
-
-        # Compute the guard expression to be used to fully validate that a
-        # CompiledFxGraph is applicable when loaded from the cache. It's
-        # sufficient to consider only the SymInt args to the fx graph since
-        # the Tensor shapes are already captured in the hash for the cache
-        # key. Any Tensor symbolic shape will have a SymInt arg for the graph.
-        symints = _filter_symints(example_inputs)
-        self.guards_expr = graph._shape_env.produce_guards_expression(symints)
+        self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)
