@@ -203,6 +203,64 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self.beta = beta
         self.can_fuse_epilogue = can_fuse_epilogue
 
+    @staticmethod
+    def add_cutlass_gemm_choices(
+        choices,
+        layout,
+        input_nodes,
+        alpha=1,
+        beta=0,
+        input_reorder=None,
+        fuseable=True,
+        non_fuseable=True,
+    ):
+        if non_fuseable:
+            if fuseable:
+                # list both fuseable and non-fuseable ops, and treat them all as non-fuseable
+                can_fuse_epilogue = False
+            else:
+                can_fuse_epilogue = None
+
+            cutlass_template = CUTLASSGemmTemplate(
+                input_nodes,
+                layout,
+                alpha=alpha,
+                beta=beta,
+                input_reorder=input_reorder,
+                can_fuse_epilogue=can_fuse_epilogue,
+            )
+            ops = cutlass_template.gen_ops()
+            for op in ops:
+                cutlass_template.maybe_append_choice(
+                    choices,
+                    op=op,
+                )
+        else:
+            ops = []
+        if fuseable:
+            cutlass_template_evt = CUTLASSGemmTemplate(
+                input_nodes,
+                layout,
+                alpha=alpha,
+                beta=beta,
+                input_reorder=input_reorder,
+                can_fuse_epilogue=True,
+            )
+            # This will list only ops capable of EVT fusion
+            ops_evt = cutlass_template_evt.gen_ops()
+            for op in ops_evt:
+                cutlass_template_evt.maybe_append_choice(
+                    choices,
+                    op=op,
+                )
+        else:
+            ops_evt = []
+        log.warning(
+            "Added %d cutlass gemm configs and %d fuseable gemm configs.",
+            len(ops),
+            len(ops_evt),
+        )
+
     def header(self) -> IndentedBuffer:
         res = super().header()
         res.splice(
