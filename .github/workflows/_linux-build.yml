@@ -72,6 +72,14 @@ jobs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
+      - name: DEBUG
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ jobs.build.timeout-minutes }}
+        run: |
+          set -eux
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
