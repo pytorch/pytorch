@@ -76,12 +76,10 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(2, 7, 3))
 
-        self.assertTrue(
-            torch.allclose(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
-        )
+        self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
 
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
@@ -101,10 +99,10 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "input arg1_1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -125,12 +123,12 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"expected input arg1_1.shape\[0\] to be equal to 5, but got 2"
+            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -154,12 +152,12 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, "input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"expected input arg1_1.shape\[0\] to be equal to 5, but got 2"
+            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -324,7 +322,7 @@ class TestPasses(TestCase):
         x = torch.rand(3, 5)
         y = torch.rand(3, 6)
         with self.assertRaisesRegex(
-            RuntimeError, r"expected input arg1_1.shape\[1\] to be equal to 5, but got 6"
+            RuntimeError, r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
         ):
             exported(x, y)
 
