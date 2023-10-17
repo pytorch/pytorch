@@ -289,6 +289,13 @@ class BaseSchedulerNode:
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
+                        # consider multi-stream
+                        if config.multiple_streams:
+                            ssgraph = V.graph.stream_graph
+                            if ssgraph.name_mapping[input_node.get_name()] != ssgraph.name_mapping[
+                                self.get_name()
+                            ]:
+                                continue
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
                         )
