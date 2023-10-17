@@ -4019,14 +4019,6 @@
   dispatch:
     CUDA: _int_mm_out_cuda
 
-- func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
-  dispatch:
-    CUDA: _convert_weight_to_int4pack_cuda
-
-- func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
-  dispatch:
-    CUDA: _weight_int4pack_mm_cuda
-
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
