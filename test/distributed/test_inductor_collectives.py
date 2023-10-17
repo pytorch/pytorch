@@ -479,7 +479,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided") \
+            .check("buf0 = empty(") \
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
@@ -518,7 +518,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("buf4 = empty_strided") \
+            .check("buf4 = empty(") \
             .check("return (buf4, buf5") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
@@ -547,8 +547,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf5 = empty_strided") \
+            .check("buf0 = empty(") \
+            .check("buf5 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
@@ -788,11 +788,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf6 = empty_strided(") \
+            .check("buf0 = empty(") \
+            .check("buf6 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf6") \
-            .check("buf1 = empty_strided") \
-            .check("buf2 = empty_strided") \
+            .check("buf1 = empty(") \
+            .check("buf2 = empty(") \
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
@@ -833,11 +833,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf6 = empty_strided(") \
+            .check("buf0 = empty(") \
+            .check("buf6 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf6") \
-            .check("buf1 = empty_strided") \
-            .check("buf2 = empty_strided") \
+            .check("buf1 = empty(") \
+            .check("buf2 = empty(") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
             .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("

@@ -2915,7 +2915,7 @@ else:
         large_size = 100000
         t = make_tensor((large_size,), dtype=dtype, device=device)
         t_np = t.cpu().numpy()
-        coordinates_np = list(np.random.randn(large_size))
+        coordinates_np = np.random.randn(large_size)
         coordinates = [torch.tensor(coordinates_np, device=device)]
         actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]

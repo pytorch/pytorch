@@ -523,6 +523,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif isinstance(value, np.generic):
+            # numpy array scalars: convert to 0D arrays
+            return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
             assert np
             return NumpyVariable(
@@ -1118,7 +1121,15 @@ class VariableBuilder:
         assert isinstance(value, np.ndarray)
 
         source = NumpyTensorSource(self.get_source())
-        tensor_value = torch.as_tensor(value)
+
+        from torch._numpy import _util
+
+        try:
+            tensor_value = _util._try_convert_to_tensor(value)
+        except NotImplementedError as e:
+            # failed to convert to tensor, graph break
+            unimplemented(str(e))
+
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
         # that there's not another great way to do this atm.
