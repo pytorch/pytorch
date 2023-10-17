@@ -45,6 +45,10 @@ class SkipFrame(TorchDynamoException):
     pass
 
 
+class NestedGraphBreak(TorchDynamoException):
+    pass
+
+
 class TorchRuntimeError(TorchDynamoException):
     pass
 
