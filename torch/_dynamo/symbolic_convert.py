@@ -631,6 +631,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             self.output.guards.update(fn.guards)
             if resume_at_insts is not None:
+                # An inner inlining translator has a graph break
+                # Call into its resume_at function, before running our
+                # our resume_at instructions.
                 assert result is None
                 resume_at_insts, push = resume_at_insts
                 new_co_names = list(self.output.global_scope)
