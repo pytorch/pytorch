@@ -1524,7 +1524,6 @@ class ExportedProgramDeserializer:
             res.graph_module,
             res.graph_module.graph,
             res.signature,
-            None,  # TODO(zhxchen17) Remove this.
             state_dict,  # type: ignore[arg-type]
             range_constraints,
             equality_constraints,
