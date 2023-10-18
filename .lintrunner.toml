@@ -1590,7 +1590,6 @@ exclude_patterns = [
     'test/test_type_hints.py',
     'test/test_type_info.py',
     'test/test_type_promotion.py',
-    'test/test_typing.py',
     'test/test_unary_ufuncs.py',
     'test/test_utils.py',
     'test/test_view_ops.py',
