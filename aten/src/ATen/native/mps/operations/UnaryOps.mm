@@ -556,7 +556,8 @@ void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int6
     MPSGraphTensor* one = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt64];
     MPSGraphTensor* zero = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64];
     MPSGraphTensor* values = [mpsGraph cumulativeMaximumWithTensor:inputTensor axis:dim name:nil];
-    MPSGraphTensor* rawIndices = [mpsGraph cumulativeSumWithTensor:one axis:dim exclusive:true reverse:false name:nil];
+    MPSGraphTensor* rawIndices = [mpsGraph coordinateAlongAxis:dim withShape:inputTensor.shape name:nil];
+    rawIndices = [mpsGraph castTensor:rawIndices toType:MPSDataTypeInt64 name:nil];
     MPSGraphTensor* boolEqualToValue = [mpsGraph equalWithPrimaryTensor:inputTensor secondaryTensor:values name:nil];
     MPSGraphTensor* sparseIndices = [mpsGraph selectWithPredicateTensor:boolEqualToValue
                                                     truePredicateTensor:rawIndices
@@ -576,7 +577,8 @@ void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int6
     MPSGraphTensor* one = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt64];
     MPSGraphTensor* zero = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64];
     MPSGraphTensor* values = [mpsGraph cumulativeMinimumWithTensor:inputTensor axis:dim name:nil];
-    MPSGraphTensor* rawIndices = [mpsGraph cumulativeSumWithTensor:one axis:dim exclusive:true reverse:false name:nil];
+    MPSGraphTensor* rawIndices = [mpsGraph coordinateAlongAxis:dim withShape:inputTensor.shape name:nil];
+    rawIndices = [mpsGraph castTensor:rawIndices toType:MPSDataTypeInt64 name:nil];
     MPSGraphTensor* boolEqualToValue = [mpsGraph equalWithPrimaryTensor:inputTensor secondaryTensor:values name:nil];
     MPSGraphTensor* sparseIndices = [mpsGraph selectWithPredicateTensor:boolEqualToValue
                                                     truePredicateTensor:rawIndices
