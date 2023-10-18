@@ -148,9 +148,36 @@ class DeviceMeshVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "get_dim_groups":
+            args = [x.as_python_constant() for x in args]
+            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            dim_groups = self.value.get_dim_groups(*args, **kwargs)
+            # desugar the results to ProcessGroupVariables
+            options = VariableTracker.propagate(self)
+            if isinstance(dim_groups, list):
+                return variables.ListVariable(
+                    [ProcessGroupVariable(group, **options) for group in dim_groups],
+                    **options,
+                )
+            else:
+                return ProcessGroupVariable(dim_groups, **options)
+
+        return super().call_method(tx, name, args, kwargs)
+
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
+        elif name == "get_dim_groups":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            ).add_options(self)
         return super().var_getattr(tx, name)
 
 

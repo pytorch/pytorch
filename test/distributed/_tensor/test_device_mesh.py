@@ -129,6 +129,27 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(device_mesh.size(0), 2)
         self.assertEqual(device_mesh.size(1), 2)
 
+    @with_comms
+    def test_dynamo_device_mesh(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def dim_group_fn(x):
+            mesh_dim_group = mesh.get_dim_groups(0)
+            return funcol.all_reduce(x, "sum", group=mesh_dim_group)
+
+        x = torch.ones((2, 2)).to(self.device_type)
+        opt_fn = torch.compile(dim_group_fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, torch.ones(2, 2) * self.world_size)
+
+        def dim_groups_fn(x):
+            mesh_dim_group = mesh.get_dim_groups()[0]
+            return funcol.all_reduce(x, "sum", group=mesh_dim_group)
+
+        opt_fn = torch.compile(dim_groups_fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, torch.ones(2, 2) * self.world_size)
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
