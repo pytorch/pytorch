@@ -416,7 +416,7 @@ def _compare_pytorch_onnx_with_ort(
 
     # Format original model inputs into the format expected by exported ONNX model.
     onnx_format_args = export_output.adapt_torch_inputs_to_onnx(
-        *input_args, model=model, **input_kwargs
+        *input_args, **input_kwargs
     )
 
     ref_outputs = export_output.adapt_torch_outputs_to_onnx(

@@ -650,9 +650,6 @@ class ExportOutput:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
         **model_kwargs,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -671,7 +668,6 @@ class ExportOutput:
         Args:
             model_args: The PyTorch model inputs.
             model_kwargs: The PyTorch model keyword inputs.
-            model: The PyTorch model with embedded parameters and buffers.
 
         Returns:
             A sequence of tensors converted from PyTorch model inputs.
@@ -708,7 +704,7 @@ class ExportOutput:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_adapter.apply(*model_args, model=model, **model_kwargs)
+        return self._input_adapter.apply(*model_args, **model_kwargs)
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
