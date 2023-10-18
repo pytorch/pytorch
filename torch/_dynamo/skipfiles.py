@@ -187,7 +187,7 @@ MOD_INLINELIST = {
     "torch.distributions",
     "torch.fx._pytree",
     "torch.nn",
-    "torch.optim._functional",
+    "torch.optim",
     "torch.random",
     "torch.sparse",
     "torch.testing",
@@ -200,12 +200,6 @@ MOD_INLINELIST = {
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-
-
-# Include optimizer code for tracing
-MOD_INLINELIST |= {
-    str(obj.__module__) for obj in torch.optim.__dict__.values() if inspect.isclass(obj)
-}
 
 
 # TODO: support adding bound method into this list
