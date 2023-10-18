@@ -566,7 +566,9 @@ void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int6
     return @[ values, indices ];
   };
 
-  mps::unary_to_binary_op(self, values, indices, "cummax_helper_mps", cumsum_op);
+  std::string op_name = "cummax_helper_mps_" + std::to_string(dim);
+
+  mps::unary_to_binary_op(self, values, indices, op_name, cumsum_op);
 }
 
 void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
@@ -584,7 +586,9 @@ void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int6
     return @[ values, indices ];
   };
 
-  mps::unary_to_binary_op(self, values, indices, "cummin_helper_mps", cummin_op);
+  std::string op_name = "cummin_helper_mps_" + std::to_string(dim);
+
+  mps::unary_to_binary_op(self, values, indices, op_name, cummin_op);
 }
 
 } // namespace at::native
