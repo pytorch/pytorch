@@ -25,14 +25,12 @@ from typing import (  # noqa: F401
     Dict,
     Final,
     ForwardRef,
-    Generic,
     get_args,  # new in 3.8
     get_origin,  # new in 3.8
     List,
     Optional,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
 
@@ -647,7 +645,7 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
     def __init__(self, **kwargs):
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         pass
 
 

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 
@@ -79,7 +79,7 @@ class no_grad(_NoParamDecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         torch.set_grad_enabled(self.prev)
 
 
@@ -134,7 +134,7 @@ class enable_grad(_NoParamDecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         torch._C._set_grad_enabled(self.prev)
 
 
@@ -187,7 +187,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         torch._C._set_grad_enabled(self.prev)
 
     def clone(self) -> "set_grad_enabled":
@@ -263,7 +263,7 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_context = torch._C._InferenceMode(self.mode)
         self._inference_mode_context.__enter__()
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
     def clone(self) -> "inference_mode":
@@ -306,7 +306,7 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
@@ -343,7 +343,7 @@ class _force_original_view_tracking(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         torch._C._set_view_replay_enabled(self.prev)
 
     def clone(self):

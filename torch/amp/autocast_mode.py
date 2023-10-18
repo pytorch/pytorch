@@ -1,7 +1,7 @@
 import functools
 import warnings
 
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 from torch.types import _dtype
@@ -366,7 +366,7 @@ class autocast:
             torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object):
         if torch._jit_internal.is_scripting():
             return
 

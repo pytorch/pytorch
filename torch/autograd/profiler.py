@@ -605,7 +605,7 @@ class record_function(_ContextDecorator):
         )
         return self
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object):
         if not self.run_callbacks_on_exit:
             return
 

@@ -9,7 +9,7 @@ try:
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-from typing import Any
+
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
@@ -41,7 +41,7 @@ class autocast(torch.amp.autocast_mode.autocast):
         return super().__enter__()
 
     # TODO: discuss a unified TorchScript-friendly API for autocast
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object):
         if torch._jit_internal.is_scripting():
             return
         return super().__exit__(exc_type, exc_val, exc_tb)

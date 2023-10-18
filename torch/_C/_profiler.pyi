@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 from torch._C import device, dtype, layout
 from typing_extensions import TypeAlias
@@ -236,4 +236,6 @@ def symbolize_tracebacks(
 class _RecordFunctionFast:
     def __init__(self, name: str) -> None: ...
     def __enter__(self) -> None: ...
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None: ...
+    def __exit__(
+        self, exc_type: object, exc_value: object, traceback: object
+    ) -> None: ...

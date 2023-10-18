@@ -1,7 +1,6 @@
 import warnings
 from abc import ABC, abstractmethod
-from types import TracebackType
-from typing import Any, List, NamedTuple, Optional, Type
+from typing import Any, List, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -229,12 +228,7 @@ class Join:
     def __enter__(self):
         ...
 
-    def __exit__(
-        self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType]
-    ):
+    def __exit__(self, type: object, value: object, traceback: object):
         r"""
         Repeatedly runs the main hooks until all processes join; then, runs
         the post-hooks.

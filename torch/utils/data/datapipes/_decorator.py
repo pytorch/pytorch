@@ -1,6 +1,6 @@
 import inspect
 from functools import wraps
-from typing import Any, Callable, Optional, Type, Union, get_type_hints
+from typing import Callable, Optional, Type, Union, get_type_hints
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 from torch.utils.data.datapipes._typing import _DataPipeMeta
 
@@ -55,7 +55,7 @@ class guaranteed_datapipes_determinism:
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         global _determinism
         _determinism = self.prev
 
@@ -154,7 +154,7 @@ class runtime_validation_disabled:
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         global _runtime_validation_enabled
         _runtime_validation_enabled = self.prev
 

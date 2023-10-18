@@ -64,7 +64,7 @@ class RemovableHandle:
     def __enter__(self) -> "RemovableHandle":
         return self
 
-    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
+    def __exit__(self, type: object, value: object, tb: object) -> None:
         self.remove()
 
 
