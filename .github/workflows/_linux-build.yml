@@ -109,13 +109,6 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
