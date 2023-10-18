@@ -729,14 +729,14 @@ def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
 
     for r in replacements:
         node_map = _get_conv_bn_getitem_relu_nodes(r)
+        conv_node = node_map["conv"][1]
+        bn_node = node_map["bn"][1]
 
         # Step (2): Copy over metadata from original subgraph
         for original_node, replacement_node in node_map.values():
             replacement_node.meta = original_node.meta
 
         # Step (3): Fold BN weights into conv
-        conv_node = node_map["conv"][1]
-        bn_node = node_map["bn"][1]
 
         # get conv weight and bias
         conv_weight_dq = conv_node.args[1]
