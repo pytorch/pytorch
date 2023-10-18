@@ -399,6 +399,10 @@ class TestNestedTensor(TestCase):
         assert not nt_noncontiguous.is_contiguous()
         self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
+        # Test querying by memory_format
+        self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
+
     @torch.inference_mode()
     def test_repr_string(self):
         a = torch.nested.nested_tensor([])
@@ -2884,15 +2888,6 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
-
-        for op in (
-            torch.ops.aten.is_contiguous.memory_format,
-        ):
-            error_msg = "NestedTensors do not support directly querying contiguity by memory_format"
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                if "memory_format" in op.__name__:
-                    op(nt, torch.preserve_format)
-                op(nt)
 
     def test_linear(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)

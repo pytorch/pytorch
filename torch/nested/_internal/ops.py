@@ -268,11 +268,8 @@ def prim_layout_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    [
-        torch.ops.aten.size.default,
-        torch.ops.aten.is_contiguous.memory_format,
-    ],
-    "self: jt, memory_format: any?",
+    [torch.ops.aten.size.default],
+    "self: jt",
 )
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
@@ -281,13 +278,9 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
             "please use `nested_tensor.size()` instead."
         )
 
-    raise RuntimeError(
-        "NestedTensors do not support directly querying contiguity by memory_format."
-    )
-
 
 @register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
-def is_contiguous_default(func, *args, **kwargs):
+def is_contiguous_general(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -296,7 +289,12 @@ def is_contiguous_default(func, *args, **kwargs):
 
     from torch._prims_common import is_contiguous
 
-    return is_contiguous(inp)
+    return is_contiguous(inp, **new_kwargs)
+
+
+register_jagged_func(
+    torch.ops.aten.is_contiguous.memory_format, "self: jt, memory_format: any?"
+)(is_contiguous_general)
 
 
 @register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
@@ -354,6 +352,7 @@ register_jagged_func(
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
+        torch.ops.aten.detach.default,
     ],
     "self: jt",
 )(jagged_unary_pointwise)
@@ -535,6 +534,11 @@ def is_pinned_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     return func(inp._values, **new_kwargs)
+
+
+@register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
+def is_same_size_default(func, *args, **kwargs):
+    return args[0]._size == args[1]._size
 
 
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
