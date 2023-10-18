@@ -748,16 +748,19 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    # TODO: It would be better to realize the input if any of its sizes
-    # are unbacked, because typically the size will be non-zero.  However,
-    # this cannot be done directly as below as we'll choke on the size_hint
-    # here
-    if x_size_product > 0 and not any(
-        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-    ):
-        # maybe realize input before broadcasting it
-        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
+    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        # TODO: It would be better to realize the input if any of its sizes
+        # are unbacked, because typically the size will be non-zero.  However,
+        # this cannot be done directly as below as we'll choke on the size_hint
+        # here
+        if x_size_product > 0 and not any(
+            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
+        ):
+            # maybe realize input before broadcasting it
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+            )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -3205,14 +3208,12 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.evaluate_static_shape(h)
-    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
-        size = ops.constant(size - 1, torch.int32)
+        size = ops.index_expr(size - 1, torch.int32)
         x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.constant(offset, torch.int32))
+        x = ops.sub(x, ops.index_expr(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
         return ops.indirect_indexing(x, size_num, check=False)
 
@@ -3226,7 +3227,7 @@ def reflection_pad2d(x, padding):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+        ranges=[*batch, h + top + bot, w + left + right],
     )
 
 
@@ -4837,6 +4838,15 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+@register_lowering(torch.ops.inductor.accumulate_grad_)
+def accumulate_grad_(variable, new_grad):
+    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
+    variable.realize()
+    new_grad.realize()
+    ir.AccumulateGrad(variable, new_grad)
+    return variable
 
 
 try:
