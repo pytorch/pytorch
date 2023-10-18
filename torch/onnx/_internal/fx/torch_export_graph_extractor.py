@@ -47,12 +47,10 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
         self.input_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradInputStep()
+            io_adapter.PrependParamsAndBuffersAotAutogradInputStep(model)
         )
 
-        updated_model_args = self.input_adapter.apply(
-            *model_args, model=model, **model_kwargs
-        )
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
 
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
