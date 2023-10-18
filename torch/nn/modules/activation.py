@@ -106,7 +106,7 @@ class ReLU(Module):
 
 
 class RReLU(Module):
-    r"""Applies the randomized leaky rectified liner unit function, element-wise,
+    r"""Applies the randomized leaky rectified linear unit function, element-wise,
     as described in the paper:
 
     `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
