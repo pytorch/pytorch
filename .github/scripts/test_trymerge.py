@@ -565,23 +565,6 @@ class TestTryMerge(TestCase):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestBypassFailures(TestCase):
-    def test_debug(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 111253)
-        checks = pr.get_checkrun_conclusions()
-        checks = get_classifications(
-            pr.pr_num,
-            pr.project,
-            checks,
-            [],
-        )
-        # Set the threshold larger or equal to the number of ok failures
-        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
-        self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 1)
-        self.assertTrue(len(ignorable["FLAKY"]) == 0)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
-        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
-
     def test_get_classifications(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 109584)
         checks = pr.get_checkrun_conclusions()
