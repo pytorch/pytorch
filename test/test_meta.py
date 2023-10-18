@@ -502,11 +502,7 @@ def run_meta_crossref(
     try:
         rs = func(*args, **kwargs)
     except Exception as e:
-        # A lot of OpInfo for inplace are actually broken because
-        # they're not tested outside of gradcheck which only checks
-        # torch.float64 and torch.complex128 (which this second one
-        # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken") from e
+        raise RuntimeError("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception
@@ -1150,6 +1146,8 @@ class TestMeta(TestCase):
         func = op.get_inplace()
         if not func:
             self.skipTest("No inplace variable for this op")
+        if op.promotes_int_to_float and not dtype.is_floating_point:
+            self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
         if func in meta_inplace_skips:
             self.skipTest("Skipped")
         func = self._get_safe_inplace(func)
@@ -1167,6 +1165,8 @@ class TestMeta(TestCase):
             func = op.get_inplace()
             if not func:
                 self.skipTest("No inplace variable for this op")
+            if op.promotes_int_to_float and not dtype.is_floating_point:
+                self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
         else:
             func = op.get_op()
 
