@@ -168,7 +168,6 @@ def get_tests_for_circleci(
     return test_cases
 
 
-
 def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Group test cases by classname, file, and job_id. We perform the aggregation
     manually instead of using the `test-suite` XML tag because xmlrunner does
