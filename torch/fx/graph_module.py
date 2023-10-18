@@ -727,7 +727,7 @@ class {module_name}(torch.nn.Module):
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
 
-        cls.__call__ = call_wrapped
+        cls.__call__ = call_wrapped  # type: ignore[method-assign]
 
         return python_code
 

@@ -748,16 +748,19 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    # TODO: It would be better to realize the input if any of its sizes
-    # are unbacked, because typically the size will be non-zero.  However,
-    # this cannot be done directly as below as we'll choke on the size_hint
-    # here
-    if x_size_product > 0 and not any(
-        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-    ):
-        # maybe realize input before broadcasting it
-        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
+    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        # TODO: It would be better to realize the input if any of its sizes
+        # are unbacked, because typically the size will be non-zero.  However,
+        # this cannot be done directly as below as we'll choke on the size_hint
+        # here
+        if x_size_product > 0 and not any(
+            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
+        ):
+            # maybe realize input before broadcasting it
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+            )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -1038,16 +1041,22 @@ def cat(inputs, dim=0):
     inputs = [to_dtype(inp, dtype) for inp in inputs]
 
     def should_lower_cat_input(x) -> bool:
+        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # them in case we want to fuse
+        if ir.is_storage_and_layout(x):
+            storage, _ = ir.as_storage_and_layout(x)
+            return ir.ConcatKernel.can_realize_into_without_copy(storage)
+
         if isinstance(x, TensorBox):
             if isinstance(x.data, ir.BaseView):
                 return should_lower_cat_input(x.data.unwrap_view())
             else:
                 return should_lower_cat_input(x.data)
+
         if isinstance(x, ir.StorageBox):
             return should_lower_cat_input(x.data)
 
-        # TODO: for input buffers, if we cant fuse use, consider foreach lowering
-        if isinstance(x, (ir.Pointwise, ir.InputBuffer)):
+        if isinstance(x, ir.Pointwise):
             return True
 
         return False
@@ -3319,7 +3328,7 @@ def reflection_pad2d(x, padding):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.sympify(h + top + bot), sympy.sympify(w + left + right)],
+        ranges=[*batch, h + top + bot, w + left + right],
     )
 
 
@@ -4930,6 +4939,15 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+@register_lowering(torch.ops.inductor.accumulate_grad_)
+def accumulate_grad_(variable, new_grad):
+    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
+    variable.realize()
+    new_grad.realize()
+    ir.AccumulateGrad(variable, new_grad)
+    return variable
 
 
 try:

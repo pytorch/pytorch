@@ -62,7 +62,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if is_inference and config.reordering:
+    if is_inference and config.reorder_for_locality:
         reorder_for_locality(gm.graph)
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)

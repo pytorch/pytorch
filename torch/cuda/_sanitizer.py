@@ -12,6 +12,7 @@ environment variable.
 
 import enum
 import functools
+import inspect
 import io
 import logging
 import sys
@@ -369,7 +370,7 @@ class EventHandler:
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
         stack_trace = traceback.StackSummary.extract(
-            traceback.walk_stack(None), lookup_lines=False
+            traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
         # The stack trace generated in this way is in the inverse order, so it must be
         # reversed.
@@ -428,7 +429,7 @@ class EventHandler:
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
         stack_trace = traceback.StackSummary.extract(
-            traceback.walk_stack(None), lookup_lines=False
+            traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
         # The stack trace generated in this way is in the inverse order, so it must be
         # reversed.
