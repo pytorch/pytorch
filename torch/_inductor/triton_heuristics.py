@@ -144,7 +144,7 @@ class CachingAutotuner(KernelInterface):
 
         self.fn = fn
         self.triton_meta = triton_meta
-        self.inductor_meta = inductor_meta
+        self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.configs = configs
