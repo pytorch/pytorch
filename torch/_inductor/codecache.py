@@ -1360,7 +1360,9 @@ class AotCodeCache:
 
                         return bytes(raw_array.contents)
 
-                    aot_constants = b"".join(_to_bytes(tensor) for tensor in graph.constants.values())
+                    aot_constants = b"".join(
+                        _to_bytes(tensor) for tensor in graph.constants.values()
+                    )
 
                     consts_key, consts_path = write(
                         aot_constants,
