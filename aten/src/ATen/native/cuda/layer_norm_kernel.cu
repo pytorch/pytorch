@@ -429,7 +429,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T_ACC stats_x1{0}, stats_x2{0};
   unsigned int l = threadIdx.x * vec_size;
   for (; l + vec_size - 1 < N; l += blockDim.x * vec_size) {
-    unsigned int vec_idx = l / 4;
+    unsigned int vec_idx = l / vec_size;
     if (gamma != nullptr) {
       gamma_vec_reg = gamma_vec_ptr[vec_idx];
     }
@@ -472,7 +472,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   l = threadIdx.x * vec_size;
   for (; l + vec_size - 1 < N; l += blockDim.x * vec_size) {
-    unsigned int vec_idx = l / 4;
+    unsigned int vec_idx = l / vec_size;
     if (gamma != nullptr) {
       gamma_vec_reg = gamma_vec_ptr[vec_idx];
     }
