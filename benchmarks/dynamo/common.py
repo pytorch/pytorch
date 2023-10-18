@@ -62,7 +62,6 @@ except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
-from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
