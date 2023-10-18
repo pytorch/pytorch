@@ -254,35 +254,15 @@ static struct PyModuleDef _module = {
 static py::object wrap_required_shapes(AutogradCompilerCall& compiler_call) {
   // see [Note: Required Shapes]
   std::vector<std::vector<c10::SymInt>> shapes;
-  shapes.reserve(compiler_call.tensor_args.inputs.size());
   for (const at::Tensor& arg : compiler_call.tensor_args.inputs) {
-    const auto& required = compiler_call.tensor_args.lookup(arg).required_shape;
     std::vector<c10::SymInt> shape;
-    shape.reserve(required.size());
-    for (const c10::SymInt& s : required) {
+    for (const c10::SymInt& s :
+         compiler_call.tensor_args.lookup(arg).required_shape) {
       shape.emplace_back(s);
     }
     shapes.emplace_back(std::move(shape));
   }
   return py::cast(shapes);
-}
-
-static at::Tensor munge_sizes(
-    const at::Tensor& grad,
-    const at::Tensor& var,
-    const at::Tensor& var_grad) {
-  static PyObject* method_name = PyUnicode_InternFromString("munge_sizes");
-  THPObjectPtr py_grad(THPVariable_Wrap(grad));
-  THPObjectPtr py_var(THPVariable_Wrap(var));
-  THPObjectPtr py_var_grad(THPVariable_Wrap(var_grad));
-  THPObjectPtr py_result(check(PyObject_CallMethodObjArgs(
-      the_autograd_compiler,
-      method_name,
-      py_grad.get(),
-      py_var.get(),
-      py_var_grad.get(),
-      nullptr)));
-  return THPVariable_Unpack(py_result.get());
 }
 
 static TraceState call_begin_capture(
@@ -314,8 +294,7 @@ static TraceState call_begin_capture(
     arg.proxy_tensor = proxy_inputs[i];
   }
 
-  return TraceState(
-      cache.unwrap_dynamic_inputs(fake_sizes), num_outputs, &munge_sizes);
+  return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
