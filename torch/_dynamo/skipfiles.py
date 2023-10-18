@@ -161,8 +161,13 @@ FUNC_INLINELIST = {
     "torch._constrain_as_value",
 }
 
-ALWAYS_MOD_INLINELIST = {
+LEGACY_MOD_INLINELIST = {
     "torch._dynamo.external_utils",
+    "torch._export.db.examples",
+    "torch._export.wrappers",
+    "torch._functorch.apis",
+    "torch._functorch.deprecated",
+    "torch._higher_order_ops.cond",
     "torch.ao.quantization.pt2e.eval_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
@@ -172,7 +177,7 @@ ALWAYS_MOD_INLINELIST = {
 }
 
 if torch.distributed.is_available():
-    ALWAYS_MOD_INLINELIST |= {
+    LEGACY_MOD_INLINELIST |= {
         "torch.distributed._tensor.api",
         "torch.distributed._tensor.device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
@@ -192,11 +197,6 @@ MOD_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
-    "torch._export.db.examples",
-    "torch._export.wrappers",
-    "torch._functorch.apis",
-    "torch._functorch.deprecated",
-    "torch._higher_order_ops.cond",
     "torch._inductor.test_operators",
     "torch.ao.nn",
     "torch.distributions",
@@ -230,9 +230,9 @@ def get_func_inlinelist():
 
 
 @functools.lru_cache(None)
-def get_always_mod_inlinelist():
+def get_legacy_mod_inlinelist():
     inlinelist = set()
-    for m in ALWAYS_MOD_INLINELIST:
+    for m in LEGACY_MOD_INLINELIST:
         inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
     return inlinelist
 
@@ -294,10 +294,10 @@ def check_file(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
-    if any(filename.startswith(d) for d in get_always_mod_inlinelist()):
+    if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,
-            "inlined according skipfiles.ALWAYS_MOD_INLINELIST",
+            "inlined according skipfiles.LEGACY_MOD_INLINELIST",
         )
     if allow_torch and is_torch_inline_allowed(filename):
         return SkipResult(
