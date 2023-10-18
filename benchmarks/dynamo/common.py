@@ -13,7 +13,6 @@ import itertools
 import logging
 import os
 import pathlib
-import random
 import shutil
 import signal
 import subprocess
@@ -53,22 +52,26 @@ import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
-from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs, graph_break_reasons
+from torch._dynamo.testing import (
+    dummy_fx_compile,
+    format_speedup,
+    reset_rng_state,
+    same,
+)
+
+try:
+    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+except ImportError:
+    from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
-
-try:
-    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
-except ImportError:
-    from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
     import torch_xla
@@ -289,7 +292,7 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
+    "nanogpt",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -710,9 +713,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, model_iter_fn
-            )
+            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1156,16 +1157,14 @@ class AOTInductorModelCache:
     cache = dict()
 
     @classmethod
-    def load(cls, model, example_inputs, eager_forward):
+    def load(cls, model, example_inputs):
         key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
-            example_outputs = eager_forward(
-                copy.deepcopy(model), clone_inputs(example_inputs)
-            )
+            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+            example_outputs = model(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
-            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
             so_path, exported = torch._export.aot_compile(
                 model, example_args, example_kwargs
             )
@@ -1181,21 +1180,31 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
 
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_spec"],
         )
 
 
-def export_aot_inductor(model, example_inputs, eager_forward):
-    module, exported, output_spec = AOTInductorModelCache.load(
-        model, example_inputs, eager_forward
-    )
+def export(model, example_inputs):
+    example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+    example_outputs = model(*example_args, **example_kwargs)
+    _register_dataclass_output_as_pytree(example_outputs)
+
+    ep = torch.export.export(model, example_args, example_kwargs)
+
+    def opt_export(_, example_inputs):
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        return ep(*example_args, **example_kwargs)
+
+    return opt_export
+
+
+def export_aot_inductor(model, example_inputs):
+    module, exported = AOTInductorModelCache.load(model, example_inputs)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1203,7 +1212,7 @@ def export_aot_inductor(model, example_inputs, eager_forward):
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
         output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, output_spec)
+        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
 
     return opt_aot_inductor
 
@@ -1446,9 +1455,11 @@ class OnnxModelFromTorchScript:
 class OnnxModelFromDynamo(OnnxModelFromTorchScript):
     """Dynamo and Fx based export. `torch.onnx.dynamo_export`."""
 
+    _EXPORTED_MODEL_FOLDER_NAME = "bench_dynamo_onnx_model"
+
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
         self.model_path = self._generate_onnx_model_path(
-            output_directory, "bench_dynamo_onnx_model"
+            output_directory, self._EXPORTED_MODEL_FOLDER_NAME
         )
         self._dynamic_shapes = dynamic_shapes
         self._export_output = self._export(model, example_inputs, self.model_path)
@@ -1472,6 +1483,29 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
 
     def format_pt_outputs(self, pt_outputs):
         return self._export_output.adapt_torch_outputs_to_onnx(pt_outputs)
+
+
+class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
+    """Dynamo and Fx based export, with AOT inline post export. `torch.onnx.dynamo_export`."""
+
+    _EXPORTED_MODEL_FOLDER_NAME = "bench_dynamo_onnx_aot_inline_model"
+
+    def _export(
+        self, model, example_inputs, output_path: str
+    ) -> torch.onnx.ExportOutput:
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
+        export_output = torch.onnx.dynamo_export(
+            model, *example_args, **example_kwargs, export_options=options
+        )
+        # Apply AOT inline post export.
+        # Requires onnx >= 1.15
+        import onnx
+        import onnx.inliner
+
+        model_proto = onnx.inliner.inline_local_functions(export_output.model_proto)
+        onnx.save_model(model_proto, output_path, save_as_external_data=True)
+        return export_output
 
 
 class _OnnxPatch:
@@ -1789,14 +1823,6 @@ def cast_to_fp64(model, inputs):
 
 def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
-
-
-def reset_rng_state(use_xla=False):
-    torch.manual_seed(1337)
-    random.seed(1337)
-    np.random.seed(1337)
-    if use_xla:
-        xm.set_rng_state(1337, str(xm.xla_device()))
 
 
 class DummyGradScaler:
@@ -2289,27 +2315,15 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                if self.args.export:
-                    # TB and TIMM use list example_inputs
-                    # HF use dict example_inputs
-                    example_args, example_kwargs = _normalize_bench_inputs(
-                        example_inputs
-                    )
-
-                    # Register the output dataclass to pytree
-                    example_outputs = model_copy(*example_args, **example_kwargs)
-                    _register_dataclass_output_as_pytree(example_outputs)
-
+                if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast():
                         optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_args, example_kwargs
+                            model_copy, example_inputs
                         )
-                        new_result = optimized_model_iter_fn(
-                            *example_args, **example_kwargs
-                        )
+                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                     new_result = optimized_model_iter_fn(model_copy, example_inputs)
@@ -2485,9 +2499,6 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
-        if not hasattr(model, name):
-            model.name = name
-
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2501,7 +2512,7 @@ class BenchmarkRunner:
 
             if self.args.export_aot_inductor:
                 t_0 = time.perf_counter()
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                optimized_model_iter_fn = optimize_ctx
                 t_1 = time.perf_counter()
                 aot_compilation_time = t_1 - t_0
             else:
@@ -2547,6 +2558,8 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
+            if not hasattr(model, name):
+                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -2599,9 +2612,6 @@ class BenchmarkRunner:
         print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
-
-        if self.args.export_aot_inductor:
-            optimize_ctx = functools.partial(optimize_ctx, model, example_inputs)
 
         if self.args.accuracy:
             status = self.check_accuracy(
@@ -3120,6 +3130,12 @@ def parse_args(args=None):
         help="Measure speedup with Dynamo ONNX, i.e. `torch.onnx.dynamo_export`",
     )
     group.add_argument(
+        "--dynamo-onnx-aot-inline",
+        "--dynamo_onnx_aot_inline",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX AOT Inline, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
@@ -3181,10 +3197,10 @@ def process_entry(rank, runner, original_dir, args):
         )(runner, args, original_dir)
 
 
-def main(runner, original_dir=None):
+def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
-    args = parse_args()
+    args = parse_args() if not args else parse_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
@@ -3437,7 +3453,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.export:
-        optimize_ctx = torch._export.export
+        optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
@@ -3464,6 +3480,18 @@ def run(runner, args, original_dir=None):
         )
         experiment = functools.partial(speedup_experiment_onnx, OnnxModelFromDynamo)
         output_filename = "dynamo_onnx.csv"
+        current_onnx_compiler = "dynamo"
+    elif args.dynamo_onnx_aot_inline:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromDynamoAotInline,
+            dynamic_shapes=args.dynamic_shapes,
+        )
+        experiment = functools.partial(
+            speedup_experiment_onnx, OnnxModelFromDynamoAotInline
+        )
+        output_filename = "dynamo_onnx_aot_inline.csv"
         current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
@@ -3793,6 +3821,10 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
         return
 
     print(f"Running {name}")
+    try:
+        from .microbenchmarks.operator_inp_utils import OperatorInputsMode
+    except ImportError:
+        from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
     operator_mode = OperatorInputsMode()
     fake_tensor_mode = FakeTensorMode()

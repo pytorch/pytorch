@@ -195,6 +195,9 @@ public:
     }
     return loadu(tmp);
   }
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
+  }
   Vectorized<double> igamma(const Vectorized<double> &x) const {
     __at_align__ double tmp[size()];
     __at_align__ double tmp_x[size()];

@@ -470,6 +470,9 @@ public:
   Vectorized<T> i0e() const {
     return map(calc_i0e);
   }
+  Vectorized<T> digamma() const {
+    return map(calc_digamma);
+  }
   Vectorized<T> igamma(const Vectorized<T> &x) const {
     Vectorized<T> ret;
     for (const auto i : c10::irange(size())) {

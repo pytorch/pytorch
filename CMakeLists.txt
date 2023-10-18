@@ -197,9 +197,6 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(
-    BUILD_NVFUSER "Build NVFUSER" ON
-    "USE_CUDA OR USE_ROCM" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
@@ -851,7 +848,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
@@ -1052,7 +1048,7 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
-include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+include_directories(BEFORE ${CMAKE_BINARY_DIR}/aten/src/)
 
 if(USE_MIMALLOC)
   set(MI_OVERRIDE OFF)
@@ -1205,19 +1201,6 @@ if(BUILD_JNI)
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
-endif()
-
-if(NOT USE_CUDA AND NOT USE_ROCM)
-  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
-endif()
-
-if(BUILD_NVFUSER)
-  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
-    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
-  else()
-    add_subdirectory(third_party/nvfuser nvfuser)
-  endif()
-  add_compile_definitions(BUILD_NVFUSER)
 endif()
 
 include(cmake/Summary.cmake)

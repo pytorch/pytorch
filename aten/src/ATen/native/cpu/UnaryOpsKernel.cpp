@@ -408,9 +408,10 @@ static void atanh_kernel(TensorIteratorBase& iter) {
 
 static void digamma_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "digamma", [&]() {
-    cpu_kernel(
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
+        [=](scalar_t a) -> scalar_t { return calc_digamma(a); },
+        [=](Vectorized<scalar_t> x) { return x.digamma(); });
   });
 }
 

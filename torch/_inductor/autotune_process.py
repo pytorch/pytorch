@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
 
 import torch
 from torch import multiprocessing
@@ -313,7 +313,7 @@ class TuningProcessPool:
 
         results = {}
 
-        # Use a ThreadExecutorPool to spread the work across the subproccesses and
+        # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
         for choice, result in zip(choices, self.executor.map(self.target, choices)):
             results[choice] = result
@@ -337,9 +337,9 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
-        if isinstance(irnodes, (tuple, list)):
+        if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
@@ -354,9 +354,18 @@ class TensorMeta:
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(node.get_size()),
-            strides=V.graph.sizevars.size_hints(node.get_stride()),
-            offset=V.graph.sizevars.size_hint(node.get_layout().offset),
+            sizes=V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            strides=V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            offset=V.graph.sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
     def to_tensor(self) -> torch.Tensor:

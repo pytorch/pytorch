@@ -506,6 +506,22 @@ public:
     const auto o2 = _mm512_loadu_ps(tmp2);
     return cvt_from_fp32<T>(o1, o2);
   }
+  Vectorized<T> digamma() const {
+    __m512 lo, hi;
+    cvt_to_fp32<T>(values, lo, hi);
+    constexpr auto sz = size();
+    __at_align__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
+      tmp1[i] = calc_digamma(tmp1[i]);
+      tmp2[i] = calc_digamma(tmp2[i]);
+    }
+    const auto o1 = _mm512_loadu_ps(tmp1);
+    const auto o2 = _mm512_loadu_ps(tmp2);
+    return cvt_from_fp32<T>(o1, o2);
+  }
   Vectorized<T> igamma(const Vectorized<T> &x) const {
     __m512 lo, hi;
     __m512 xlo, xhi;
