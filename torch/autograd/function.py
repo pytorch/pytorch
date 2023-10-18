@@ -1,11 +1,11 @@
 import functools
+import inspect
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._C as _C
-import torch._dynamo_utils
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
@@ -534,12 +534,23 @@ class Function(_SingleLevelFunction):
 
     @classmethod
     def apply(cls, *args, **kwargs):
+        def bind_default_args(func, *args, **kwargs):
+            signature = inspect.signature(func)
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            return bound_args.args
+
+        is_setup_ctx_defined = cls.setup_context != _SingleLevelFunction.setup_context
+        if is_setup_ctx_defined:
+            args = bind_default_args(cls.forward, *args, **kwargs)
+
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
             return super().apply(*args, **kwargs)  # type: ignore[misc]
 
-        if cls.setup_context == _SingleLevelFunction.setup_context:
+        if not is_setup_ctx_defined:
             raise RuntimeError(
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
@@ -551,14 +562,7 @@ class Function(_SingleLevelFunction):
 
 
 def once_differentiable(fn):
-    # In order for the function returned by once_differentiable to work with Dynamo,
-    # Dynamo needs to be able to inline through its return to prove safety.
-    # However, Dynamo thinks the function returned by once_differentiable is in a
-    # SKIPFILES, because this file is in SKIPFILES, which prevents inlining. We apply
-    # the following decorator (once per function) to force inlines.
-    @torch._dynamo_utils.force_inline
     @functools.wraps(fn)
-    @torch._dynamo_utils.force_inline
     def wrapper(ctx, *args):
         with torch.no_grad():
             outputs = fn(ctx, *args)

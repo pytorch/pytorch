@@ -177,7 +177,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
       try {
-        device_idx = c10::stoi(num, &num_len);
+        device_idx = std::stoi(num, &num_len);
       } catch (const std::invalid_argument& e) {
         throw ErrorReport(L.cur())
             << "Device index cannot be converted to integer";
@@ -202,7 +202,7 @@ c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   std::string::size_type num_len;
 
   try {
-    return (bool)c10::stoi(num, &num_len);
+    return (bool)std::stoi(num, &num_len);
   } catch (const std::invalid_argument& e) {
     throw ErrorReport(L.cur())
         << "Field requires_grad cannot be converted to integer";
@@ -262,7 +262,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
           try {
-            auto stride = c10::stoll(num, &num_len);
+            auto stride = std::stoll(num, &num_len);
             strides.push_back(stride);
           } catch (const std::invalid_argument& e) {
             throw ErrorReport(L.cur())
@@ -302,7 +302,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     std::string::size_type num_len;
     int64_t dim = 0;
     try {
-      dim = c10::stoll(num, &num_len);
+      dim = std::stoll(num, &num_len);
     } catch (const std::invalid_argument& e) {
       throw ErrorReport(L.cur()) << "The number can't be converted to int";
     } catch (const std::out_of_range& e) {

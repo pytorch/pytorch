@@ -186,7 +186,7 @@ Node* createONNXConstant(
     at::Tensor value) {
   Node* constant_node = graph->create(onnx::Constant, 1);
   constant_node->insertBefore(n_to_insert_before);
-  constant_node->t_(attr::value, value);
+  constant_node->t_(attr::value, std::move(value));
   return constant_node;
 }
 

@@ -159,12 +159,9 @@ def redistribute_local_tensor(
 
         elif target.is_partial():
             if current.is_replicate():
-                # For replicate -> partial, we zero out all other ranks of the current mesh dim
-                # and leave only 1 rank have the data, to perform a "zero cost" reshard.
-                if my_coordinate[i] != 0:
-                    new_local_tensor = local_tensor.zero_()
-                else:
-                    new_local_tensor = local_tensor
+                # For replicate -> partial, we perform division to num of chunks and generate
+                # parial, and recover it back when pending sum get cleared.
+                new_local_tensor = local_tensor / num_chunks
             else:
                 raise RuntimeError(
                     f"redistribute from {current_placements} to {target_placements} not supported yet"
@@ -229,7 +226,11 @@ class Redistribute(torch.autograd.Function):
                 target_placements.append(Replicate())
             else:
                 target_placements.append(target)
-        target_spec = DTensorSpec(previous_spec.mesh, tuple(target_placements))
+        target_spec = DTensorSpec(
+            previous_spec.mesh,
+            tuple(target_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         local_tensor = grad_output._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)

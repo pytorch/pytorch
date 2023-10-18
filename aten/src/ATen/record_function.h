@@ -5,12 +5,12 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <c10/util/variant.h>
 
 #include <array>
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <variant>
 
 namespace c10 {
 class TORCH_API OperatorHandle;
@@ -456,13 +456,13 @@ struct TORCH_API RecordFunction {
   // Stores various ObserverContext objects with event metadata for callbacks.
   ObserverContextList ctx_;
 
-  c10::variant<std::string, schema_ref_t> fn_;
+  std::variant<std::string, schema_ref_t> fn_;
 
   int64_t sequence_nr_ = -1;
   c10::ArrayRef<const IValue> inputs_;
   std::vector<c10::IValue> outputs_;
 
-  // For backward functions - thread id of the the forward function
+  // For backward functions - thread id of the forward function
   uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
