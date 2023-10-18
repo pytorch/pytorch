@@ -7606,10 +7606,15 @@ ShapeEnv not equal: field values don't match:
 
             inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
 
-        torch.set_default_dtype(torch.float)
-        foo()
-        torch.set_default_dtype(torch.double)
-        foo()
+        default_dtype = torch.get_default_dtype()
+
+        try:
+            torch.set_default_dtype(torch.float)
+            foo()
+            torch.set_default_dtype(torch.double)
+            foo()
+        finally:
+            torch.set_default_dtype(default_dtype)
 
     def test_no_recompile_inner_function(self):
         def forward(inp):
