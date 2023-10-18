@@ -1314,28 +1314,6 @@ class AotCodeCache:
             specified_dir=config.aot_inductor.output_path,
         )
 
-        def _to_bytes(t: torch.Tensor) -> bytes:
-            # This serializes the tensor's untyped_storage to bytes by accessing
-            # the raw data of the underlying structure.
-            import ctypes
-
-            t_cpu = t.untyped_storage().cpu()
-            raw_array = ctypes.cast(
-                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
-            )
-
-            return bytes(raw_array.contents)
-
-        aot_constants = b""
-        for tensor in graph.constants.values():
-            aot_constants += _to_bytes(tensor)
-
-        consts_key, consts_path = write(
-            aot_constants,
-            "bin",
-            specified_dir=config.aot_inductor.output_path,
-        )
-
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -1368,6 +1346,29 @@ class AotCodeCache:
                         os.chmod(output_o, 0o644)
                     else:
                         run_command_and_check(cmd)
+
+                    def _to_bytes(t: torch.Tensor) -> bytes:
+                        # This serializes the tensor's untyped_storage to bytes by accessing
+                        # the raw data of the underlying structure.
+                        import ctypes
+
+                        t_cpu = t.untyped_storage().cpu()
+                        raw_array = ctypes.cast(
+                            t_cpu.data_ptr(),
+                            ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
+                        )
+
+                        return bytes(raw_array.contents)
+
+                    aot_constants = b"".join(
+                        _to_bytes(tensor) for tensor in graph.constants.values()
+                    )
+
+                    consts_key, consts_path = write(
+                        aot_constants,
+                        "bin",
+                        specified_dir=config.aot_inductor.output_path,
+                    )
 
                     consts_o = os.path.splitext(consts_path)[0] + ".o"
                     if fbcode_aot_cpu_re:
