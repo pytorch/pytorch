@@ -297,6 +297,16 @@ AOTITorchError aoti_torch_tensor_copy_(
   });
 }
 
+AOTITorchError aoti_torch_assign_tensors(
+    AtenTensorHandle src,
+    AtenTensorHandle dst) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
+    *dst_tensor = *src_tensor;
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
