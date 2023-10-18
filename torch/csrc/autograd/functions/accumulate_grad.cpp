@@ -1,6 +1,5 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -19,9 +18,7 @@ namespace autograd {
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
-  LOG(WARNING) << "add_input_metadata before";
   add_input_metadata(variable);
-  LOG(WARNING) << "add_input_metadata after";
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
@@ -72,10 +69,6 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
   if (args.cond(variable.defined() && variable.requires_grad())) {
     args.collect(variable);
     args.collect(variable.grad());
-    // see [Note: Required Shapes]
-    auto shape = input_metadata(0).shape_as_dim_vector();
-    args.set_required_shape(variable, shape);
-    args.set_required_shape(variable.grad(), shape);
   }
 }
 variable_list AccumulateGrad::apply_with_saved(
@@ -90,18 +83,16 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
   saved.before(grad_copy);
-  variable_copy.mutable_grad() = grad_copy;
-  // op is intentionally static
-  static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("inductor::accumulate_grad_", "")
-                       .typed<void(const at::Tensor&, const at::Tensor&)>();
-  op.call(variable_copy, grads[0]);
+  accumulateGrad(
+      variable_copy,
+      grad_copy,
+      grads[0],
+      0 /* num_expected_refs, 0 disables aliased reuse */,
+      [&saved, this](const at::Tensor& grad_update) {
+        saved.assign_mutable_grad(variable, grad_update);
+      });
   saved.after(variable_copy);
   saved.after(grad_copy);
-
-  TORCH_CHECK(
-      tensor_post_acc_grad_hooks() == nullptr,
-      "compiled_autograd does not support tensor_post_acc_grad_hooks");
 
   return variable_list();
 }

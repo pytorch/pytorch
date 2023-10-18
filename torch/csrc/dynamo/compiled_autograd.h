@@ -105,8 +105,6 @@ struct TensorArg {
   }
   uint32_t id;
   at::Tensor proxy_tensor;
-  // see [Note: Required Shapes]
-  torch::autograd::SymIntSmallVec required_shape;
 };
 
 struct TensorArgs {
@@ -434,10 +432,6 @@ class CompiledNodeArgs {
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
-  void set_required_shape(const at::Tensor& tensor, c10::SymIntArrayRef shape) {
-    _compiler.tensor_args.lookup(tensor).required_shape = shape;
-  }
-
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
@@ -461,15 +455,8 @@ class CompiledNodeArgs {
 struct TraceState {
   TraceState(
       const std::vector<c10::optional<c10::SymInt>>& ss,
-      size_t num_outputs,
-      at::Tensor (*munge_sizes_)(
-          const at::Tensor&,
-          const at::Tensor&,
-          const at::Tensor&))
-      : sym_sizes_index(0),
-        sym_sizes(ss),
-        outputs(num_outputs),
-        munge_sizes(munge_sizes_) {}
+      size_t num_outputs)
+      : sym_sizes_index(0), sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
@@ -482,6 +469,7 @@ struct TraceState {
   size_t sym_sizes_index;
   std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
+  std::vector<size_t> output_grad_targets;
 };
 
 class SwapSavedVariables {
@@ -489,13 +477,6 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  at::Tensor munge_sizes(
-      const at::Tensor& grad,
-      const at::Tensor& var,
-      const at::Tensor& var_grad) {
-    return state.munge_sizes(grad, var, var_grad);
-  }
-
   void before(at::Tensor& t) {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_tensors.save(&t, std::move(t));
@@ -638,6 +619,17 @@ class SwapSavedVariables {
   NO_OP_VISIT(bool);
   NO_OP_VISIT(double);
 #undef NO_OP_VISIT
+
+  // record the need to run `dst.mutable_grad() = src` after the graph
+  // dst is a real tensor, src is a fake tensor
+  void assign_mutable_grad(const at::Tensor& dst, const at::Tensor& src) {
+    const TensorArg& arg = compiler.tensor_args.lookup(dst);
+    TORCH_INTERNAL_ASSERT(arg.defined());
+    TORCH_INTERNAL_ASSERT(
+        state.outputs.size() == state.output_grad_targets.size());
+    state.outputs.emplace_back(src);
+    state.output_grad_targets.emplace_back(arg.index());
+  }
 
   SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
       : compiler(c), state(s) {}
