@@ -80,6 +80,7 @@ if(@USE_CUDA@)
   # be found again when including the Caffe2 target.
   set(CAFFE2_USE_CUDA @USE_CUDA@)
   set(CAFFE2_USE_TENSORRT @USE_TENSORRT@)
+  set(CAFFE2_STATIC_LINK_CUDA @CAFFE2_STATIC_LINK_CUDA@)
 
   # Add current directory to module path so we pick up FindCUDAToolkit.cmake
   set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
