@@ -156,6 +156,8 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         torch.ops.aten.sym_numel.default,
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
+        torch.ops.aten.is_contiguous.default,
+        torch.ops.aten.is_contiguous.memory_format,
     ],
     "self: jt",
 )
@@ -178,6 +180,12 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.sym_storage_offset.default:
         return 0
 
+    if func == torch.ops.aten.is_contiguous.default:
+        return True
+
+    if func == torch.ops.aten.is_contiguous.memory_format:
+        return True
+
 
 @register_jagged_func(torch.ops.prim.layout.default, "self: jt")
 def prim_layout_default(func, *args, **kwargs):
@@ -187,8 +195,6 @@ def prim_layout_default(func, *args, **kwargs):
 @register_jagged_func(
     [
         torch.ops.aten.size.default,
-        torch.ops.aten.is_contiguous.default,
-        torch.ops.aten.is_contiguous.memory_format,
     ],
     "self: jt, memory_format: any?",
 )
@@ -263,6 +269,7 @@ register_jagged_func(
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
+        torch.ops.aten.detach.default,
     ],
     "self: jt",
 )(jagged_unary_pointwise)
@@ -433,3 +440,8 @@ def is_pinned_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     return func(inp._values, **new_kwargs)
+
+
+@register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
+def is_same_size_default(func, *args, **kwargs):
+    return args[0]._size == args[1]._size
