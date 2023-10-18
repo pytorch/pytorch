@@ -546,8 +546,9 @@ struct TORCH_API SmoothL1LossOptions {
   /// be summed. Default: 'mean'
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
   /// Specifies the threshold at which to change between L1 and L2 loss.
-  /// Default: 1.0
-  TORCH_ARG(double, beta) = 1.0;
+  /// If beta is not specified, a value of 1.0 will be used.
+  /// Default: nullopt
+  TORCH_ARG(c10::optional<double>, beta) = c10::nullopt;
 };
 
 namespace functional {

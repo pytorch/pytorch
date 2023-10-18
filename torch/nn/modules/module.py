@@ -9,6 +9,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
@@ -811,7 +812,13 @@ class Module:
                 module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
-            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
+            if is_traceable_wrapper_subclass(tensor):
+                # NOTE: wrapper tensor subclass storage is different from the original
+                # tensor of nn.Parameters (i.e. the wrapper storage and the real storage
+                # are separate), so we should avoid using the `.data` path
+                # TODO: consider if we should add tensor.move_ native op
+                return False
+            elif torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,

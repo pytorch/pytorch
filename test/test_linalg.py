@@ -5236,6 +5236,7 @@ class TestLinalg(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
     @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
@@ -7593,6 +7594,18 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b = torch.ones(300)
         check_correctness(torch.dot, torch.bfloat16, a, b)
         check_correctness(torch.dot, torch.half, a, b)
+
+    @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 1e-4})
+    def test_1_sized_with_0_strided(self, device, dtype):
+        a = make_tensor((8, 1, 64), dtype=dtype, device=device)
+        a_strided = torch.as_strided(a, size=[8, 1, 64], stride=[64, 0, 1])
+        b = make_tensor((8, 64, 512), dtype=dtype, device=device)
+        b_strided = torch.as_strided(b, size=[8, 64, 512], stride=[64, 1, 512])
+        res = torch.bmm(a_strided, b_strided)
+        expect = torch.from_numpy(
+            a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
+        self.assertEqual(expect, res)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

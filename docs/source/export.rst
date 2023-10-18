@@ -61,7 +61,6 @@ serialized.
             assertion_dep_token=None,
         )
         Range constraints: {}
-        Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
 following invariants. More specifications about the IR can be found
@@ -329,7 +328,6 @@ run. Such dimensions must be specified by using the
             assertion_dep_token=None,
         )
         Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
-        Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
 
 Some additional things to note:
 
@@ -337,8 +335,9 @@ Some additional things to note:
   dimension of each input to be dynamic. Looking at the inputs ``arg5_1`` and
   ``arg6_1``, they have a symbolic shape of (s0, 64) and (s0, 128), instead of
   the (32, 64) and (32, 128) shaped tensors that we passed in as example inputs.
-  ``s0`` is a symbol representing that this dimension can be a range
-  of values.
+  Here ``s0`` is a symbol representing that ``arg5_1`` dimension 0 and ``arg6_1``
+  dimension 0 can have a range
+  of values, but are required to be equal.
 
 * ``exported_program.range_constraints`` describes the ranges of each symbol
   appearing in the graph. In this case, we see that ``s0`` has the range
@@ -347,13 +346,6 @@ Some additional things to note:
   that the exported program will not work for dimensions 0 or 1. See
   `The 0/1 Specialization Problem <https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ#heading=h.ez923tomjvyk>`_
   for an in-depth discussion of this topic.
-
-* ``exported_program.equality_constraints`` describes which dimensions are
-  required to be equal. Since we specified in the constraints that the first
-  dimension of each argument is equivalent,
-  (``dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0)``),
-  we see in the equality constraints the tuple specifying that ``arg5_1``
-  dimension 0 and ``arg6_1`` dimension 0 are equal.
 
 (A legacy mechanism for specifying dynamic shapes
 involves marking and constraining dynamic dimensions with the
@@ -394,7 +386,7 @@ Input shapes
 
 As mentioned before, by default, ``torch.export`` will trace the program
 specializing on the input tensors' shapes, unless a dimension is specified as
-dynamic via the :func:`torch.export.dynamic_dim` API. This means that if there
+dynamic via the :func:`torch.export.Dim` API. This means that if there
 exists shape-dependent control flow, ``torch.export`` will specialize on the
 branch that is being taken with the given sample inputs. For example:
 
@@ -426,7 +418,7 @@ The conditional of (``x.shape[0] > 5``) does not appear in the
 shape of (10, 2). Since ``torch.export`` specializes on the inputs' static
 shapes, the else branch (``x - 1``) will never be reached. To preserve the dynamic
 branching behavior based on the shape of a tensor in the traced graph,
-:func:`torch.export.dynamic_dim` will need to be used to specify the dimension
+:func:`torch.export.Dim` will need to be used to specify the dimension
 of the input tensor (``x.shape[0]``) to be dynamic, and the source code will
 need to be :ref:`rewritten <Data/Shape-Dependent Control Flow>`.
 
@@ -504,16 +496,6 @@ number of paths. In such cases, users will need to rewrite their code using
 special control flow operators. Currently, we support :ref:`torch.cond <cond>`
 to express if-else like control flow (more coming soon!).
 
-Data-Dependent Accesses
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Data dependent behavior such as using the value inside of a tensor to construct
-another tensor, or using the value of a tensor to slice into another tensor, is
-also something the tracer cannot fully determine. Users will need to rewrite
-their code using the inline constraint APIs
-:func:`torch.export.constrain_as_size` and
-:func:`torch.export.constrain_as_value`.
-
 Missing Meta Kernels for Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -521,9 +503,13 @@ When tracing, a META implementation (or "meta kernel") is required for all
 operators. This is used to reason about the input/output shapes for this
 operator.
 
-Note that the official API for registering custom meta kernels for custom ops is
-currently undergoing development. While the final API is being refined, you can
-refer to the documentation `here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
+To register a meta kernel for a C++ Custom Operator, please refer to
+`this documentation <https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz>`__.
+
+The official API for registering custom meta kernels for custom ops implemented
+in python is currently undergoing development. While the final API is being
+refined, you can refer to the documentation
+`here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
 
 In the unfortunate case where your model uses an ATen operator that is does not
 have a meta kernel implementation yet, please file an issue.
@@ -557,8 +543,6 @@ API Reference
 .. automodule:: torch.export
 .. autofunction:: export
 .. autofunction:: dynamic_dim
-.. autofunction:: constrain_as_size
-.. autofunction:: constrain_as_value
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
@@ -579,6 +563,8 @@ API Reference
 .. autoclass:: ModuleCallEntry
 
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
-.. py:module:: torch.export.exported_program
+.. automodule:: torch.export.exported_program
+.. autoclass:: InputKind
+.. autoclass:: InputSpec
+.. autoclass:: OutputKind
+.. autoclass:: OutputSpec

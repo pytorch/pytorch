@@ -438,7 +438,6 @@ class DTensorTest(DTensorTestBase):
             self.assertEqual(fc.weight._local_tensor.device.type, self.device_type)
 
 
-
 class DTensorMeshTest(DTensorTestBase):
     @property
     def world_size(self):
