@@ -947,7 +947,7 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim, bool 
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.split_with_sizes_symint(split_sizes, dim, drop_remainder);
   } else {
-    if (!redistribute && !drop_remainder || split_mod == 0) {
+    if ((!redistribute && !drop_remainder) || split_mod == 0) {
       return self.split_symint(std::move(split_size), dim);
     } else if (drop_remainder) {
       std::vector<c10::SymInt> split_sizes(chunks, split_size - 1);
