@@ -372,6 +372,10 @@ class CppPrinter(ExprPrinter):
             il = "{" + ", ".join(args) + "}"
             return f"std::min({il})"
 
+    def _print_align(self, expr):
+        assert len(expr.args) == 1
+        return f"align({self._print(expr.args[0])})"
+
     def _print_Max(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:

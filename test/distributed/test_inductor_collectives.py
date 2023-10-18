@@ -479,7 +479,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty(") \
+            .check("buf0 = pool") \
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
@@ -511,14 +511,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf1 = buf0; del buf0  # reuse") \
             .check_not("buf1.copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("buf4 = empty(") \
+            .check("buf4 = pool") \
             .check("return (buf4, buf5") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
@@ -547,11 +546,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty(") \
-            .check("buf5 = empty(") \
+            .check("buf0 = pool") \
+            .check("buf5 = pool") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
             .check_not("copy_(") \
-            .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
@@ -788,11 +786,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty(") \
-            .check("buf6 = empty(") \
+            .check("buf0 = pool") \
+            .check("buf6 = pool") \
             .check("triton_poi__0.run(arg0_1, buf0, buf6") \
-            .check("buf1 = empty(") \
-            .check("buf2 = empty(") \
+            .check("buf1 = pool") \
+            .check("buf2 = pool") \
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
@@ -801,14 +799,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
-            .check("buf5 = buf0; del buf0  # reuse") \
             .check("_wait_tensor(buf2)") \
             .check("buf8 = buf2") \
             .check("return (buf5, buf6, buf7, buf9") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        assert same(out, correct), f"{out} vs {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config.triton, "descriptive_names", False)
@@ -833,11 +830,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty(") \
-            .check("buf6 = empty(") \
+            .check("buf0 = pool") \
+            .check("buf6 = pool") \
             .check("triton_poi__0.run(arg0_1, buf0, buf6") \
-            .check("buf1 = empty(") \
-            .check("buf2 = empty(") \
+            .check("buf1 = pool") \
+            .check("buf2 = pool") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
             .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
@@ -845,7 +842,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
-            .check("buf5 = buf0; del buf0  # reuse") \
             .check("_wait_tensor(buf2)") \
             .check("buf8 = buf2") \
             .check("return (buf5, buf6, buf7, buf9") \

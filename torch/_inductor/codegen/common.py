@@ -352,6 +352,14 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"abs({self._print(expr.args[0])})"
 
+    def _print_align(self, expr):
+        assert len(expr.args) == 1
+        return f"align({self._print(expr.args[0])})"
+
+    def _print_Max(self, expr):
+        assert len(expr.args) >= 2
+        return f"max({', '.join(map(self._print, expr.args))})"
+
 
 class OpOverrides:
     def __init__(self, parent):

@@ -2213,10 +2213,11 @@ class BenchmarkRunner:
                 else x,
                 fp64_outputs,
             )
-        except Exception:
+        except Exception as e:
             log.warning(
-                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                "fp64 golden ref were not generated for %s because of %s. Setting accuracy check to cosine",
                 name,
+                str(e),
             )
             self.args.cosine = True
             fp64_outputs = None
