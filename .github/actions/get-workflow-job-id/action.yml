@@ -24,6 +24,5 @@ runs:
         set -eux
         GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
         echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"
-        curl "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id}}/attempts/${{ github.run_attempt }}/jobs"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
