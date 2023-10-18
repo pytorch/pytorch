@@ -986,7 +986,7 @@ class TestCommon(TestCase):
             try:
                 if with_out:
                     out = torch.empty(0, dtype=torch.int32, device=device)
-                    op_to_test(inputs, *args, **kwargs, out=out)
+                    op_to_test(inputs, *args, out=out, **kwargs)
                 else:
                     out = op_to_test(inputs, *args, **kwargs)
                 self.assertFalse(expectFail)
