@@ -13,10 +13,10 @@ import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     InputDim,
-    RangeConstraint,
 )
 
 
@@ -271,7 +271,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[sympy.Symbol, RangeConstraint], List[Tuple[InputDim, InputDim]]]:
+) -> Tuple[Dict[sympy.Symbol, ValueRanges], List[Tuple[InputDim, InputDim]]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -283,7 +283,7 @@ def _process_constraints(
         example_inputs: Flattened list of example inputs used to export the graph module
 
     Returns:
-        range_constraints (Dict[sympy.Symbol, RangeConstraints]): Mapping of
+        range_constraints (Dict[sympy.Symbol, ValueRanges]): Mapping of
             symbols (from SymInts) appearing in the fake tensors in
             node.meta["val"] to their range constraints, which are a tuple
             containing (lower, upper) constraints.
@@ -313,14 +313,14 @@ def _process_constraints(
     equality_constraints: List[Tuple[InputDim, InputDim]] = []
     # Create dict mapping (node name, dim) a list of range (lower, upper)
     # constraints
-    multi_range_constraints: Dict[InputDim, List[RangeConstraint]] = defaultdict(list)
+    multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
     for constraint in input_shape_constraints:
         for node in tensor_id_to_nodes[constraint["t_id"]]:
             node_dim = InputDim(node, constraint["dim"])
 
             # Accumulate range constraints
             multi_range_constraints[node_dim].append(
-                RangeConstraint(constraint["min"], constraint["max"])
+                ValueRanges(constraint["min"], constraint["max"])
             )
 
             # Accumulate equality constraints
@@ -330,21 +330,20 @@ def _process_constraints(
                     equality_constraints.append((node_dim, other_node_dim))
 
     # Create dict mapping symbol to a singular range (lower, upper)
-    range_constraints: Dict[sympy.Symbol, RangeConstraint] = {}
+    range_constraints: Dict[sympy.Symbol, ValueRanges] = {}
 
     # Add inline constraints to range_constraints
-    for symbol, value_range in inline_constraints.items():
-        range_constraints[symbol] = RangeConstraint(value_range.lower, value_range.upper)
+    range_constraints = {symbol: inline_constraints[symbol] for symbol in inline_constraints}
 
     # Add input range constraints to range_constraints
     for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
         # Simplify the range constraints into a single range constraint
         # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
-        min_vals = [rc.min_val for rc in multi_range_constraint]
-        max_vals = [rc.max_val for rc in multi_range_constraint]
-        min_val = max(min_vals)
-        max_val = min(max_vals)
-        assert min_val <= max_val
+        min_vals = [rc.lower for rc in multi_range_constraint]
+        max_vals = [rc.upper for rc in multi_range_constraint]
+        min_val = max(min_vals)  # type: ignore[type-var]
+        max_val = min(max_vals)  # type: ignore[type-var]
+        assert min_val <= max_val  # type: ignore[operator]
 
         # Add input node range constraints
         val = placeholder_nodes[input_dim.input_name].meta["val"]
@@ -352,7 +351,7 @@ def _process_constraints(
         symint = val.shape[input_dim.dim]
         assert isinstance(symint, SymInt), f"Expected SymInt but got {symint}: {type(symint)}"
         symbol = symint.node._expr
-        range_constraints[symbol] = RangeConstraint(min_val, max_val)
+        range_constraints[symbol] = ValueRanges(min_val, max_val)
 
     return range_constraints, equality_constraints
 

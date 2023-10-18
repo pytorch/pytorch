@@ -72,11 +72,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(atleast_3d);
   OP_DECOMPOSE2(atleast_3d, Sequence);
   OP_DECOMPOSE(batch_norm);
-  OP_DECOMPOSE2(bitwise_and_, Scalar);
-  OP_DECOMPOSE2(bitwise_or, Scalar);
-  OP_DECOMPOSE2(bitwise_or_, Scalar);
-  OP_DECOMPOSE2(bitwise_xor, Scalar);
-  OP_DECOMPOSE2(bitwise_xor_, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
   m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
@@ -129,7 +124,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
   OP_DECOMPOSE2(float_power, Scalar);
-  OP_DECOMPOSE2(floor_divide, Scalar);
   OP_DECOMPOSE(gather_backward);
   OP_DECOMPOSE(ger);
   OP_DECOMPOSE2(gradient, scalarint);
@@ -151,6 +145,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("index_select_backward", native::index_select_backward_symint);
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(inverse);
+  OP_DECOMPOSE(isfinite);
+  OP_DECOMPOSE(isreal);
   OP_DECOMPOSE(concatenate);
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
@@ -171,6 +167,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_multi_dot);
   OP_DECOMPOSE(linalg_norm);
   OP_DECOMPOSE2(linalg_norm, ord_str);
+  OP_DECOMPOSE(linalg_eigh);
   OP_DECOMPOSE(linalg_solve);
   OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
@@ -180,6 +177,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(cumprod_backward);
   OP_DECOMPOSE(linalg_matrix_power);
   OP_DECOMPOSE(linalg_vecdot);
+  OP_DECOMPOSE(log_sigmoid);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
