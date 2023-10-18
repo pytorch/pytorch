@@ -1167,7 +1167,7 @@ class BuiltinVariable(VariableTracker):
 
             if obj.value == np and name == "typecodes":
                 tcodes = tnp.typecodes
-                result = {k: ConstantVariable.create(tcodes[k]) for k in tcodes.keys()}
+                result = {k: ConstantVariable.create(v) for k, v in tcodes.items()}
                 return ConstDictVariable(result, user_cls=dict)
 
             member = obj.value.__dict__[name]
