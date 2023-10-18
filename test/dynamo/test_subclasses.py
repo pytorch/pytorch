@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import functools
+import unittest
 
 import torch
 
@@ -13,7 +14,10 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import jagged_from_list
+from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class MockSubclass(torch.Tensor):
@@ -632,6 +636,39 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+
+    # TODO: cannot parametrize this test class with device for some reason
+    def _test_autograd(self, backend):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt, offsets = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], offsets)
+
+        def fn1(nt1, nt2):
+            return (nt1 + nt2).sin().cos()
+
+        compiled_f = torch.compile(
+            fn1, fullgraph=True, backend="aot_eager", dynamic=True
+        )
+        out = compiled_f(nt, nt2)
+        out_buffer = ViewBufferFromNested.apply(out)
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
+        out_ref = compiled_f(nt, nt2)
+        out_buffer_ref = ViewBufferFromNested.apply(out_ref)
+        ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
+
+        self.assertTrue(torch.allclose(ga, ga_ref))
+        self.assertTrue(torch.allclose(gb, gb_ref))
+        self.assertTrue(torch.allclose(gc, gc_ref))
+
+    def test_basic_autograd(self):
+        self._test_autograd("aot_eager")
+
+    @requires_cuda()
+    def test_basic_autograd_inductor(self):
+        self._test_autograd("inductor")
 
 
 if __name__ == "__main__":

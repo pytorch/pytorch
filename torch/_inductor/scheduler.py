@@ -1206,14 +1206,19 @@ class Scheduler:
         kept_node_names = self.name_to_fused_node.keys()
 
         for names in V.graph.lists.values():
-            removed_node_names.update(names)
-
-            names = [name for name in names if name in kept_node_names]
+            names = [
+                name
+                for name in names
+                if name in kept_node_names
+                and not isinstance(self.name_to_node[name], NopKernelSchedulerNode)
+            ]
             if not names:
                 # All nodes eliminated
                 continue
 
+            removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
+
             fe_node = ForeachKernelSchedulerNode(self, snodes)
 
             fe_nodes.append(fe_node)

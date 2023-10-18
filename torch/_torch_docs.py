@@ -4396,7 +4396,7 @@ tensor is not resizable.
 It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
 ``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
 ``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
-and ``numpy.bool``.
+and ``bool``.
 
 .. warning::
     Writing to a tensor created from a read-only NumPy array is not supported and will result in undefined behavior.
