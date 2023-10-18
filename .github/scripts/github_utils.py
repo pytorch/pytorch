@@ -5,7 +5,7 @@ import os
 import warnings
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -26,7 +26,7 @@ def gh_fetch_url_and_headers(
     url: str,
     *,
     headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    data: Union[Optional[Dict[str, Any]], str] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> Tuple[Any, Any]:
@@ -35,7 +35,11 @@ def gh_fetch_url_and_headers(
     token = os.environ.get("GITHUB_TOKEN")
     if token is not None and url.startswith("https://api.github.com/"):
         headers["Authorization"] = f"token {token}"
-    data_ = json.dumps(data).encode() if data is not None else None
+
+    data_ = None
+    if data is not None:
+        data_ = data.encode() if isinstance(data, str) else json.dumps(data).encode()
+
     try:
         with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
             return conn.headers, reader(conn)
@@ -57,7 +61,7 @@ def gh_fetch_url(
     url: str,
     *,
     headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    data: Union[Optional[Dict[str, Any]], str] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> Any:

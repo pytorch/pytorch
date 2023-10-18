@@ -4,6 +4,11 @@ import math
 import warnings
 import importlib
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 import torch
 from torch import _VF
 from torch import sym_int as _sym_int
@@ -3776,9 +3781,11 @@ if upsample.__doc__:
 
 def _is_integer(x) -> bool:
     r"""Type check the input number is an integer.
-    Will return True for int, SymInt and Tensors with integer elements.
+    Will return True for int, SymInt, Numpy integers and Tensors with integer elements.
     """
     if isinstance(x, (int, torch.SymInt)):
+        return True
+    if np is not None and isinstance(x, np.integer):
         return True
     return isinstance(x, Tensor) and not x.is_floating_point()
 
@@ -4922,7 +4929,7 @@ greater than 0.0 is specified.
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
-                attn_mask.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
             else:
                 attn_bias += attn_mask
         attn_weight = query @ key.transpose(-2, -1) * scale_factor

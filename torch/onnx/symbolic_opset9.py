@@ -1655,7 +1655,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # To convert the indices to the same format used by Pytorch,
         # we first execute a maxpool with a kernel and stride of 1 on the same input.
         # This will result in a tensor of indices in which each index will have it's own value.
-        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # Using this tensor as a reference, we extract the first index of each axis and subtract
         # it from each index of this axis in the indices to convert.
         # This step will result in a tensor were each dimension has values of indices within
         # the dimension it is in.
@@ -6047,7 +6047,7 @@ def linalg_matrix_norm(
             # ord = 2/-2 unimplemented due to lack of operators
             # used to calculate singular values
             return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==2", self)
-        # Wrap the dim vector to handle neagtive dim values
+        # Wrap the dim vector to handle negative dim values
         self_dim = symbolic_helper._get_tensor_rank(self)
         if self_dim is None:
             return symbolic_helper._unimplemented(
@@ -6154,13 +6154,14 @@ def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = N
         raise errors.SymbolicValueError(
             f"Unsupported indexing: {indexing}", tensor_list
         )
+    unpacked_tensor_list = symbolic_helper._unpack_list(tensor_list)
     if indexing == "xy":
-        tensor_list[0], tensor_list[1] = tensor_list[1], tensor_list[0]
+        unpacked_tensor_list[:2] = unpacked_tensor_list[1::-1]
     tensors = [
         symbolic_helper._reshape_helper(
             g, t, g.op("Constant", value_t=torch.LongTensor([-1]))
         )
-        for t in symbolic_helper._unpack_list(tensor_list)
+        for t in unpacked_tensor_list
     ]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
@@ -7161,7 +7162,7 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
     # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
     # which results in failures due to missing operators for complex numbers
 
-    # While `aten::_conj` and `aten::conj_phisical` raise exception when input is complex
+    # While `aten::_conj` and `aten::conj_physical` raise exception when input is complex
     if symbolic_helper.is_complex_value(input):
         # FIXME(justinchuby): report correct name for symbolic being executed
         return symbolic_helper._onnx_unsupported(

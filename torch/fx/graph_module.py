@@ -106,7 +106,9 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
     import_strs: Set[str] = set()
     for name, obj in globals.items():
         import_strs.add(_format_import_statement(name, obj, importer))
-    return "\n".join(import_strs)
+    # Sort the imports so we have a stable import block that allows us to
+    # hash the graph module and get a consistent key for use in a cache.
+    return "\n".join(sorted(import_strs))
 
 
 @compatibility(is_backward_compatible=True)
@@ -705,6 +707,7 @@ class {module_name}(torch.nn.Module):
             self._out_spec = self._graph._codegen.pytree_info.out_spec
         python_code = self._graph.python_code(root_module="self")
         self._code = python_code.src
+        self._lineno_map = python_code._lineno_map
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}

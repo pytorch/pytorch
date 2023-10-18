@@ -47,7 +47,7 @@ static_assert(
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -286,7 +286,7 @@ TypePtr OptionalType::get(TypePtr inner) {
   return containerTypePtrs[inner];
 }
 
-TypePtr ListType::get(std::string identifier, TypePtr inner) {
+TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -300,7 +300,7 @@ TypePtr ListType::get(std::string identifier, TypePtr inner) {
   return containerTypePtrs[key];
 }
 
-TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind

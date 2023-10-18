@@ -339,9 +339,9 @@ def logspace(
 
 
 def arange(
-    start: Optional[ArrayLike] = None,
-    stop: Optional[ArrayLike] = None,
-    step: Optional[ArrayLike] = 1,
+    start: Optional[ArrayLikeOrScalar] = None,
+    stop: Optional[ArrayLikeOrScalar] = None,
+    step: Optional[ArrayLikeOrScalar] = 1,
     dtype: Optional[DTypeLike] = None,
     *,
     like: NotImplementedType = None,
@@ -359,22 +359,23 @@ def arange(
 
     # the dtype of the result
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes().int_dtype
-    # XXX: default values do not get normalized
-    start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
+        dtype = (
+            _dtypes_impl.default_dtypes().float_dtype
+            if any(_dtypes_impl.is_float_or_fp_tensor(x) for x in (start, stop, step))
+            else _dtypes_impl.default_dtypes().int_dtype
+        )
+    work_dtype = torch.float64 if dtype.is_complex else dtype
 
-    dummy = torch.empty(1, dtype=dtype)
-    target_dtype = _dtypes_impl.result_type_impl(start, stop, step, dummy)
-
-    # work around RuntimeError: "arange_cpu" not implemented for 'ComplexFloat'
-    work_dtype = torch.float64 if target_dtype.is_complex else target_dtype
+    # RuntimeError: "lt_cpu" not implemented for 'ComplexFloat'. Fall back to eager.
+    if any(_dtypes_impl.is_complex_or_complex_tensor(x) for x in (start, stop, step)):
+        raise NotImplementedError
 
     if (step > 0 and start > stop) or (step < 0 and start < stop):
         # empty range
-        return torch.empty(0, dtype=target_dtype)
+        return torch.empty(0, dtype=dtype)
 
     result = torch.arange(start, stop, step, dtype=work_dtype)
-    result = _util.cast_if_needed(result, target_dtype)
+    result = _util.cast_if_needed(result, dtype)
     return result
 
 
@@ -496,7 +497,7 @@ def zeros_like(
 
 
 def _xy_helper_corrcoef(x_tensor, y_tensor=None, rowvar=True):
-    """Prepate inputs for cov and corrcoef."""
+    """Prepare inputs for cov and corrcoef."""
 
     # https://github.com/numpy/numpy/blob/v1.24.0/numpy/lib/function_base.py#L2636
     if y_tensor is not None:
@@ -584,6 +585,12 @@ def _conv_corr_impl(a, v, mode):
     v = _util.cast_if_needed(v, dt)
 
     padding = v.shape[0] - 1 if mode == "full" else mode
+
+    if padding == "same" and v.shape[0] % 2 == 0:
+        # UserWarning: Using padding='same' with even kernel lengths and odd
+        # dilation may require a zero-padded copy of the input be created
+        # (Triggered internally at pytorch/aten/src/ATen/native/Convolution.cpp:1010.)
+        raise NotImplementedError("mode='same' and even-length weights")
 
     # NumPy only accepts 1D arrays; PyTorch requires 2D inputs and 3D weights
     aa = a[None, :]
@@ -875,7 +882,7 @@ def take(
 def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
     (arr,), axis = _util.axis_none_flatten(arr, axis=axis)
     axis = _util.normalize_axis_index(axis, arr.ndim)
-    return torch.gather(arr, axis, indices)
+    return torch.take_along_dim(arr, indices, axis)
 
 
 def put(
@@ -890,7 +897,7 @@ def put(
     if ind.numel() > v.numel():
         ratio = (ind.numel() + v.numel() - 1) // v.numel()
         v = v.unsqueeze(0).expand((ratio,) + v.shape)
-    # Trim unnecessary elements, regarldess if v was expanded or not. Note
+    # Trim unnecessary elements, regardless if v was expanded or not. Note
     # np.put() trims v to match ind by default too.
     if ind.numel() < v.numel():
         v = v.flatten()
@@ -1478,7 +1485,7 @@ def reshape(a: ArrayLike, newshape, order: NotImplementedType = "C"):
 
 
 def transpose(a: ArrayLike, axes=None):
-    # numpy allows both .tranpose(sh) and .transpose(*sh)
+    # numpy allows both .transpose(sh) and .transpose(*sh)
     # also older code uses axes being a list
     if axes in [(), None, (None,)]:
         axes = tuple(reversed(range(a.ndim)))
