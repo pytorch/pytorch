@@ -319,5 +319,6 @@ class TestDoBench(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    # Set env to make it work in CI.
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()
