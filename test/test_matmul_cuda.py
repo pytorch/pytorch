@@ -413,7 +413,7 @@ class TestMixedDtypesLinearCuda(TestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesNewLinearCuda(TestCase):
-    @dtypes(torch.float16)
+    @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_new_linear(self, dtype: torch.dtype, device: str = "cuda"):
         version = _get_torch_cuda_version()
         if version < (11, 8):

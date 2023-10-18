@@ -366,7 +366,8 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
               "capability 8.x");
 
   // Validate datatypes of input tensors.
-  TORCH_CHECK(input.dtype() == at::kHalf,
+  TORCH_CHECK(input.dtype() == at::kHalf ||
+              input.dtype() == at::kBFloat16,
               "_mixed_dtypes_linear2: The input datatype ", input.dtype(),
               " is not supported");
   TORCH_CHECK(weight.dtype() == at::kChar ||
@@ -479,6 +480,33 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                       output =
                           mixed_dtypes_linear_cutlass_dispatch_scale_bias<
                               cutlass::half_t,
+                              uint8_t>(input_2d, weight, scale, bias,
+                                       activation);
+                      return;
+                    }));
+          })
+      AT_DISPATCH_CASE(
+          at::ScalarType::BFloat16,
+          [&]() {
+            AT_DISPATCH_SWITCH(
+                scalar_type_quant,
+                "_mixed_dtypes_linear2",
+                AT_DISPATCH_CASE(
+                    at::ScalarType::Char,
+                    [&]() {
+                      output =
+                          mixed_dtypes_linear_cutlass_dispatch_scale_bias<
+                              cutlass::bfloat16_t,
+                              int8_t>(input_2d, weight, scale, bias,
+                                      activation);
+                      return;
+                    })
+                AT_DISPATCH_CASE(
+                    at::ScalarType::Byte,
+                    [&]() {
+                      output =
+                          mixed_dtypes_linear_cutlass_dispatch_scale_bias<
+                              cutlass::bfloat16_t,
                               uint8_t>(input_2d, weight, scale, bias,
                                        activation);
                       return;
