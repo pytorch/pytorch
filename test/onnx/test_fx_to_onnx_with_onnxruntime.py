@@ -813,6 +813,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
+    def test_exported_program_torch_distributions_normal_Normal(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                self.normal = torch.distributions.normal.Normal(0, 1)
+                super().__init__()
+
+            def forward(self, x):
+                return self.normal.sample(x.shape)
+
+        x = torch.randn(2, 3)
+        exported_program = torch.export.export(Model(), args=(x,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(exported_program, (x,))
+
 
 def _parameterized_class_attrs_and_values_with_fake_options():
     input_values = []
