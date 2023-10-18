@@ -1466,6 +1466,9 @@ utils_device.CURRENT_DEVICE == None""",
         for op, t1_np, t2_np in itertools.product(
             operators, (True, False), (True, False)
         ):
+            if op in [operator.ne, operator.eq]:
+                # This always returns single boolean which says they are not equal
+                continue
             if op is operator.getitem:
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
