@@ -3,7 +3,8 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#ifndef USE_ROCM
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm_universal.h>
@@ -11,24 +12,23 @@
 #include <cutlass/epilogue/thread/activation.h>
 #include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
 #include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
-#endif
 
-#ifndef USE_ROCM
-#define CUTLASS_STATUS_CHECK(status)                                      \
+#define CUTLASS_STATUS_CHECK(status)                                    \
   {                                                                       \
     TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
                 "Got CUTLASS error: ", cutlassGetStatusString(status));   \
   }
-#endif
 
 namespace {
   enum class Activation{NONE, RELU, SILU};
 }
+#endif
 
 namespace at {
 namespace native {
 
-#ifndef USE_ROCM
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
 template<typename ElementInputA, typename ElementInputB, bool use_scale,
         bool use_bias, Activation activation = Activation::NONE>
 Tensor mixed_dtypes_linear_cutlass(
@@ -284,7 +284,6 @@ Tensor mixed_dtypes_linear_cutlass(
 
   return output;
 }
-#endif
 
 template<typename ElementInputA, typename ElementInputB, bool use_scale,
         bool use_bias>
@@ -347,13 +346,17 @@ Tensor mixed_dtypes_linear_cutlass_dispatch_scale_bias(
         }
     }
 }
+#endif
 
 Tensor
 _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
                       const c10::optional<Tensor>& scale_opt,
                       const c10::optional<Tensor>& bias_opt,
                       const c10::optional<c10::string_view> activation_opt) {
-#ifndef USE_ROCM
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+  AT_ERROR("_mixed_dtypes_linear2: ROCm doesn't support CUTLASS");
+  return Tensor{};
+#else
   const auto scale = scale_opt.has_value() ? *scale_opt : Tensor{};
   const auto bias = bias_opt.has_value() ? *bias_opt : Tensor{};
   const auto activation = activation_opt.has_value() ? *activation_opt : "none";
@@ -516,9 +519,6 @@ _mixed_dtypes_linear2(const Tensor& input, const Tensor& weight,
   auto output_sizes = input_sizes;
   output_sizes.back() = weight.size(0);
   return output.reshape(output_sizes);
-#else
-  AT_ERROR("_mixed_dtypes_linear2: ROCm doesn't support CUTLASS");
-  return Tensor{};
 #endif
 }
 
