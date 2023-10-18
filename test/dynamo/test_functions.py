@@ -1843,7 +1843,7 @@ def forward(self, x_1, output_1):
                 (float, True),
                 (int, 1),
                 # (int, 1.0), # fails due to a >= 0 comparison
-            ]:  # , bool, complex]:
+            ]:  # , bool, complex]: no casting for sym_bool, no sym_complex
 
                 def fn(x):
                     x = x + 1
