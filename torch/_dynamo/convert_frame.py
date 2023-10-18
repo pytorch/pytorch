@@ -446,6 +446,26 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     _bytecode_hooks[handle.id] = hook
     return handle
 
+def debuggable_hook(code, new_code):
+    try:
+        import depyf
+        import os
+        import hashlib
+        src = depyf.Decompiler(new_code).decompile(overwite_fn_name="compiled_func")
+        full_hash = hashlib.md5(src.encode()).hexdigest()
+        filename = f"/workspace/youkaichao/code/pytorch/compiled_src_{full_hash}.py"
+        if not os.path.exists(filename):
+            with open(filename, "w") as f:
+                f.write(src)
+        compiled_code = compile(src, filename=filename, mode="exec")
+        scope = {}
+        exec(compiled_code, scope)
+        func = scope["compiled_func"]
+        return func.__code__
+    except Exception:
+        pass
+
+register_bytecode_hook(debuggable_hook)
 
 @maybe_cprofile
 def _compile(
