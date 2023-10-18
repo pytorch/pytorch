@@ -5908,7 +5908,7 @@ class Wait(ExternKernelAlloc):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self))
+        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):

@@ -210,6 +210,17 @@ class MemoryPlanningLine:
         """Second pass to output code"""
         pass
 
+    def __str__(self):
+        args: List[str] = []
+        for field in dataclasses.fields(self):
+            if field.name == "wrapper":
+                continue
+            val = getattr(self, field.name)
+            args.append(
+                f"{field.name}={val.get_name() if field.type is ir.Buffer else val}"
+            )
+        return f"{type(self).__name__}({', '.join(args)})"
+
 
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
@@ -259,6 +270,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 class ReuseLine(MemoryPlanningLine):
     node: ir.Buffer
     reused_as: ir.Buffer
+    delete_old: bool = True
 
     def plan(self, state: MemoryPlanningState):
         if self.node.get_name() in V.graph.removed_buffers:
@@ -270,7 +282,9 @@ class ReuseLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
-        code.writeline(self.wrapper.make_buffer_reuse(self.node, self.reused_as))
+        code.writeline(
+            self.wrapper.make_buffer_reuse(self.node, self.reused_as, self.delete_old)
+        )
 
 
 class NullLine(MemoryPlanningLine):
@@ -855,21 +869,17 @@ class WrapperCodeGen(CodeGen):
             )
 
     def make_buffer_free(self, buffer):
-        name = buffer.get_name()
-        if name in self.freed:
-            return ""
-        self.freed.add(name)
         return f"del {buffer.get_name()}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
-    def make_buffer_reuse(self, old, new):
+    def make_buffer_reuse(self, old, new, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
         del_line = ""
-        if old_name not in V.graph.get_output_names():
+        if old_name not in V.graph.get_output_names() and delete_old:
             del_line = f"; {self.make_buffer_free(old)}"
 
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
@@ -935,6 +945,7 @@ class WrapperCodeGen(CodeGen):
 
         if not self.can_reuse(buffer):
             return
+        self.freed.add(name)
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
@@ -1326,9 +1337,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
+            cst_names = V.graph.constants.keys()
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
-                    if output in self.cached_thread_locals:
+                    if output in self.cached_thread_locals or output in cst_names:
                         self.wrapper_call.writeline(
                             f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
                         )
@@ -1531,10 +1543,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def make_buffer_free(self, buffer):
-        name = buffer.get_name()
-        if name in self.freed:
-            return ""
-        self.freed.add(name)
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
