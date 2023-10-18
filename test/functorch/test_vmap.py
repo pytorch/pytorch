@@ -27,7 +27,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     skipIfRocm,
-    TEST_WITH_TORCHDYNAMO
+    TEST_WITH_TORCHDYNAMO,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -3528,6 +3529,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
+        decorate("frexp", decorator=skipIfTorchDynamo()),
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),

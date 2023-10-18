@@ -85,6 +85,16 @@ class _MeshEnv:
                 return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
         return None
 
+    @staticmethod
+    def num_devices_per_host(device_type: str) -> int:
+        return _get_device_handle(device_type).device_count()
+
+    @staticmethod
+    def num_hosts(device_type: str) -> int:
+        # ProcessGroup can't tell us this info so we have to infer it, assume
+        # homogeneous hardware for now
+        return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
+
 
 mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -188,7 +198,10 @@ class DeviceMesh:
             # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
             # NOTE: This device selection would only work for homogeneous hardware.
             num_devices_per_host = device_handle.device_count()
-            if world_size % num_devices_per_host != 0:
+            if (
+                world_size > num_devices_per_host
+                and world_size % num_devices_per_host != 0
+            ):
                 raise RuntimeError(
                     f"DeviceMesh only support homogeneous hardware, but found "
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"

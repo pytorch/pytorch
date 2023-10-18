@@ -328,6 +328,7 @@ vjp_fail = {
     decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
     decorate('svd', decorator=skipIfTorchDynamo()),
     decorate('linalg.svd', decorator=skipIfTorchDynamo()),
+    decorate("frexp", decorator=skipIfTorchDynamo()),
 }
 
 aliasing_ops = {
@@ -1305,6 +1306,7 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
+        decorate("frexp", decorator=skipIfTorchDynamo()),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost

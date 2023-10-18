@@ -31,17 +31,13 @@ namespace {
 // General helpers
 
 struct UsageStream {
-  cudaStream_t stream;
-  int device;
+  cudaStream_t stream{nullptr};
+  int device{-1};
   UsageStream() = default;
   UsageStream(cudaStream_t s, int d) : stream(s), device(d) {}
   UsageStream(const UsageStream& us) = default;
-  UsageStream(const UsageStream&& us) : stream(us.stream), device(us.device) {}
-  UsageStream& operator=(UsageStream other) {
-    stream = other.stream;
-    device = other.device;
-    return *this;
-  }
+  UsageStream(UsageStream&& us) noexcept = default;
+  UsageStream& operator=(const UsageStream& other) = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -58,10 +54,11 @@ struct PtrUsage {
   // recorded_streams holds side usage streams added by record_stream calls.
   // In other words, it does NOT include the original creation stream.
   ska::flat_hash_set<UsageStream, UsageStreamHash> recorded_streams;
-  UsageStream creation_stream{};
+  UsageStream creation_stream;
   uint64_t size;
   bool captured;
-  PtrUsage(uint64_t s, bool c) : size(s), captured(c) {}
+  PtrUsage(UsageStream stream, uint64_t s, bool c)
+      : creation_stream(stream), size(s), captured(c) {}
 };
 
 int device_count = 0;
@@ -148,7 +145,7 @@ bool capture_underway = false;
 // Assumes the caller holds general_mutex
 inline void lazy_init_device(int device) {
   if (!devs_initialized_flags[device]) {
-    CUDAGuard g(device);
+    CUDAGuard g(static_cast<DeviceIndex>(device));
 
     // See "Retaining memory in the pool" here:
     // https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
@@ -200,7 +197,7 @@ inline void free_impl(PtrInfo::iterator& it) {
   // If the usage stream is a null (default) stream,
   // cudaFreeAsync infers the device from the ambient context,
   // so we need to set the right ambient context.
-  CUDAGuard g(creation_stream.device);
+  CUDAGuard g(static_cast<DeviceIndex>(creation_stream.device));
 
   if (recorded_streams.empty()) {
     // ptr was only used on one stream, which must have been
@@ -240,7 +237,7 @@ inline void free_impl(PtrInfo::iterator& it) {
 
       // cudaEventRecord requires that the input event and stream are on the
       // same device.
-      CUDAGuard g_usage(recorded_stream.device);
+      CUDAGuard g_usage(static_cast<DeviceIndex>(recorded_stream.device));
 
       sync_raw(recorded_stream.stream, dummy_unifying_free_stream.stream);
     }
@@ -326,7 +323,7 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
   // If stream is a null (default) stream,
   // cudaMallocAsync infers the device from the ambient context,
   // so we need to set the right ambient context.
-  CUDAGuard g(device);
+  CUDAGuard g(static_cast<DeviceType>(device));
 
   std::lock_guard<std::mutex> lk(general_mutex);
 
@@ -387,14 +384,12 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
     C10_CUDA_CHECK(err);
   }
 
-  auto inserted = ptr_info.emplace(*devPtr, PtrUsage(size, capture_underway));
+  auto inserted = ptr_info.emplace(
+      *devPtr, PtrUsage(UsageStream{stream, device}, size, capture_underway));
   TORCH_INTERNAL_ASSERT(
       inserted.second,
       "address returned by cudaMallocAsync already exists "
       "in ptr_info");
-
-  inserted.first->second.creation_stream = {stream, device};
-
   pytorch_used_bytes[device] += size;
 }
 
@@ -414,9 +409,17 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
-      mallocAsync(&r, device, size, cuda::getCurrentCUDAStream(device));
+      mallocAsync(
+          &r,
+          device,
+          size,
+          cuda::getCurrentCUDAStream(static_cast<DeviceIndex>(device)));
     }
-    return {r, r, &local_raw_delete, Device(DeviceType::CUDA, device)};
+    return {
+        r,
+        r,
+        &local_raw_delete,
+        Device(DeviceType::CUDA, static_cast<DeviceIndex>(device))};
   }
   DeleterFnPtr raw_deleter() const override {
     return &local_raw_delete;
@@ -459,7 +462,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     std::lock_guard<std::mutex> lk(general_mutex);
     assertValidDevice(device);
-    CUDAGuard g(device);
+    CUDAGuard g(static_cast<DeviceIndex>(device));
     // Should setMemoryFraction be allowed to trigger a full device context and
     // pool-creating lazy_init_device, or should we simply assert this device is
     // already initialized, ie
@@ -486,7 +489,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     for (int dev = 0; dev < device_count; dev++) {
       if (devs_initialized_flags[dev]) {
-        CUDAGuard g(dev);
+        CUDAGuard g(static_cast<DeviceIndex>(dev));
 
         cudaMemPool_t mempool = nullptr;
         cudaDeviceGetDefaultMemPool(&mempool, dev);
@@ -530,7 +533,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // also stabilizes to a point where they all come straight from the pool.
     std::lock_guard<std::mutex> lk(general_mutex);
     assertValidDevice(device);
-    CUDAGuard g(device);
+    CUDAGuard g(static_cast<DeviceIndex>(device));
     lazy_init_device(device);
 
     size_t free_upper_bound = 0;
@@ -666,7 +669,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     if (devs_initialized_flags[device]) {
-      CUDAGuard g(device);
+      CUDAGuard g(static_cast<DeviceIndex>(device));
 
       cudaMemPool_t mempool = nullptr;
       C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, device));
@@ -724,7 +727,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void resetPeakStats(int device) override {
     assertValidDevice(device);
 
-    CUDAGuard g(device);
+    CUDAGuard g(static_cast<DeviceIndex>(device));
     cudaMemPool_t mempool = nullptr;
     C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, device));
     // Using zero as the reset value is the method recommended by Cuda driver
@@ -774,13 +777,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "CudaMallocAsync::notifyCaptureAboutToEnd called, "
         "but CudaMallocAsync::capture_underway is false.");
 
-    auto capture_stream = cuda::getCurrentCUDAStream(device);
+    auto capture_stream =
+        cuda::getCurrentCUDAStream(static_cast<DeviceIndex>(device));
 
     // See Note [Avoid dangling free streams during CUDA graph capture]
     for (const auto& free_stream : capture_free_streams) {
       // cudaEventRecord requires that the input event and stream are on the
       // same device.
-      CUDAGuard g(free_stream.device);
+      CUDAGuard g(static_cast<DeviceIndex>(free_stream.device));
 
       // CUDACachingAllocator.cpp uses raw cuda events, as do we.
       cudaEvent_t event = nullptr;
@@ -820,7 +824,11 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     int device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
-    mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
+    mallocAsync(
+        &r,
+        device,
+        nbytes,
+        cuda::getCurrentCUDAStream(static_cast<DeviceIndex>(device)));
     return r;
   }
 
@@ -842,7 +850,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // an error. cudaMallocAsync pools are unaffected by
     // cudaDeviceEnablePeerAccess. We need pool-specific enablement. See
     // https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-2/
-    c10::cuda::CUDAGuard device_guard(dev);
+    c10::cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(dev));
     cudaMemPool_t mempool = nullptr;
     C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev_to_access));
     cudaMemAccessDesc desc = {};

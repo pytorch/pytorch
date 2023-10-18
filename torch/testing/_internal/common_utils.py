@@ -1210,7 +1210,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
 
     return decorator
 
-def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
+def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
+                        condition=TEST_WITH_TORCHINDUCTOR):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1230,6 +1231,8 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
 
     return decorator
 
+def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
+    return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
 
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
@@ -2527,7 +2530,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if TEST_WITH_TORCHINDUCTOR:
             super_run = dynamo_wrapper("inductor", super_run)
         elif TEST_WITH_AOT_EAGER:
-            super_run = dynamo_wrapper("aot_eager", super_run)
+            super_run = dynamo_wrapper("aot_eager_decomp_partition")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             super_run = dynamo_wrapper("eager", super_run)
 
