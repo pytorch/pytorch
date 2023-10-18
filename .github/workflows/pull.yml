@@ -173,6 +173,8 @@ jobs:
           { config: "dynamo", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
         ]}
 
+  linux-focal-py3_11-clang10-test:
+    name: linux-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-py3_11-clang10-build
     with:
