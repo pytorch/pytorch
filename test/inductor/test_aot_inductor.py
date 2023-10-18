@@ -901,6 +901,19 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
 
+    def test_return_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(10, 10, device=device)
+
+            def forward(self, x):
+                a = self.cst.clone()
+                return (x, a)
+
+        x = torch.randn(4, device=self.device)
+        self.check_model(Model(self.device), (x,))
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
