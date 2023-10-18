@@ -1857,6 +1857,11 @@ def forward(self, x_1, output_1):
                 ref = opt_fn(x)
                 self.assertEqual(ref, res)
 
+                with self.assertRaises(ValueError):
+                    fn(torch.tensor([val] * 2))
+                with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
+                    opt_fn(torch.tensor([val] * 2))
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
