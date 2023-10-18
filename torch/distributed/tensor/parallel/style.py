@@ -482,8 +482,8 @@ class RowwiseParallel(ParallelStyle):
 
     def __init__(
         self,
-        _prepare_input=None,
-        _prepare_output=None,
+        _prepare_input=make_input_shard_1d_last_dim,
+        _prepare_output=make_output_tensor,
         *,
         input_layouts=Shard(-1),
         output_layouts=Replicate(),
@@ -553,8 +553,8 @@ class ColwiseParallel(ParallelStyle):
 
     def __init__(
         self,
-        _prepare_input=None,
-        _prepare_output=None,
+        _prepare_input=make_input_replicate_1d,
+        _prepare_output=make_sharded_output_tensor,
         *,
         input_layouts=Replicate(),
         output_layouts=Shard(-1),
