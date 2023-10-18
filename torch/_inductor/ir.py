@@ -3944,7 +3944,11 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
-        if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
+        if (
+            V.graph.cpp_wrapper
+            and hasattr(self, "args_default_value")
+            and not config.is_fbcode()
+        ):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
             # Some positional args are not provided, need to use their default value in cpp wrapper
@@ -4003,7 +4007,9 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
         serializer = GraphModuleSerializer(None, None)
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(
+            self.op_overload, args, kwargs, include_default_values=False
+        )
 
         # serialize_outputs
         def handle_single_output(return_type, output):
