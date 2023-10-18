@@ -193,7 +193,6 @@ FILE_INLINELIST = {
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
-    "torch.utils._pytree",
 }
 
 
