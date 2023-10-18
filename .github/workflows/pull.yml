@@ -148,7 +148,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-py3_8-clang10-build
     with:
-      timeout-minutes: 99999
+      timeout-minutes: 1200
       build-environment: linux-focal-py3.8-clang10
       docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
@@ -178,7 +178,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-py3_11-clang10-build
     with:
-      timeout-minutes: 99999
+      timeout-minutes: 1200
       build-environment: linux-focal-py3.11-clang10
       docker-image: ${{ needs.linux-focal-py3_11-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_11-clang10-build.outputs.test-matrix }}
