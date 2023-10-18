@@ -397,13 +397,13 @@ __global__ void layer_norm_grad_input_kernel(
 
 template<typename T, typename T_ACC>
 __global__ void layer_norm_grad_input_kernel_vectorized(
-    const T* __restrict__ dY,
-    const T* __restrict__ X,
-    const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ rstd,
-    const T* __restrict__ gamma,
-    T* dX,
-    const int N) {
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T* dX,
+  const int N) {
   alignas(sizeof(double)) extern __shared__ char shared_data[];
   T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
 
@@ -415,11 +415,10 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T* dX_i = dX + bIdx * N;
 
   using vec_t = aligned_vector<T, vec_size>;
-  const vec_t* const X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
-  const vec_t* const dY_i_vec_ptr = reinterpret_cast<const vec_t*>(dY_i);
-  const vec_t* const gamma_vec_ptr =
-      (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
-  vec_t* const dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
+  const vec_t* X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
+  const vec_t* dY_i_vec_ptr = reinterpret_cast<const vec_t*>(dY_i);
+  const vec_t* gamma_vec_ptr = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+  vec_t* dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
 
   vec_t X_i_vec_reg, dY_i_vec_reg, gamma_vec_reg, dX_i_vec_reg;
   for (int k = 0; k < vec_size; ++k) {
@@ -438,9 +437,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
-      const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      const auto c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
-      const auto c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const T_ACC c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const T_ACC c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
       stats_x1 += c_loss * gamma_val;
       stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
@@ -448,10 +447,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   // Tail Loop
   for (; l < N; l++) {
-    const auto gamma_val =
-        (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
-    const auto c_h = static_cast<T_ACC>(X_i[l]);
-    const auto c_loss = static_cast<T_ACC>(dY_i[l]);
+    T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
+    const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
     stats_x1 += c_loss * gamma_val;
     stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
   }
@@ -481,9 +479,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
-      const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      const auto x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
-      const auto dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const T_ACC x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const T_ACC dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
 
       T_ACC f_grad_input = fH * gamma_val * dy;
       f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
@@ -497,10 +495,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   // Tail Loop
   for (; l < N; l += blockDim.x) {
-    const auto x = X_i[l];
-    const auto dy = dY_i[l];
-    const auto gamma_val =
-        (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const T_ACC x = X_i[l];
+    const T_ACC dy = dY_i[l];
+    T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
     T_ACC f_grad_input = fH * gamma_val * dy;
     f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
     f_grad_input -= stats_x1;
