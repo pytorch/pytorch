@@ -202,11 +202,12 @@ class OptimizeForInferenceTemplate(TestCase):
                     ]
                 ]
 
-        for mod in [
-            MM().to(self.device),
-            MM2().to(self.device),
-            AddMM().to(self.device),
+        for mod_fn in [
+            lambda: MM().to(self.device),
+            lambda: MM2().to(self.device),
+            lambda: AddMM().to(self.device),
         ]:
+            mod = mod_fn()
             inp = torch.rand([10, 10]).to(self.device)
 
             @torch.compile()
@@ -220,6 +221,25 @@ class OptimizeForInferenceTemplate(TestCase):
                 out, code = run_and_get_code(foo, mod, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
                     "mm(", count=1, exactly=True
+                ).run(code[0])
+                self.assertEqual(out_eager, out)
+
+            mod2 = mod_fn()
+            mod2.t1 = torch.nn.Parameter(torch.rand([10, 15], device=self.device))
+            mod2.t2 = torch.nn.Parameter(torch.rand([10, 20], device=self.device))
+
+            if hasattr(mod2, "b1"):
+                mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
+                mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
+
+            # not fused
+            count = 3 if hasattr(mod2, "t3") else 2
+
+            with torch.no_grad():
+                out_eager = mod2(inp)
+                out, code = run_and_get_code(foo, mod2, inp)
+                FileCheck().check_not(kernel_invoke).check_count(
+                    "mm(", count=count, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
