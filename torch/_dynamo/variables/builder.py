@@ -727,6 +727,7 @@ class VariableBuilder:
             istype(value, (type, types.FunctionType))
             and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
             return SkipFilesVariable(
                 value,
