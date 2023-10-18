@@ -1842,6 +1842,7 @@ def forward(self, x_1, output_1):
                 (float, 1),
                 (float, True),
                 (int, 1),
+                (int, False),
                 # (int, 1.0), # fails due to a >= 0 comparison
             ]:  # , bool, complex]: no casting for sym_bool, no sym_complex
 
