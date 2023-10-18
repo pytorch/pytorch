@@ -41,7 +41,7 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
   int64_t grid = (N + num_threads() - 1) / num_threads();
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf, iter.common_dtype(), "cross_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "cross_cuda", [&] {
     auto out = static_cast<scalar_t*>(iter.data_ptr(0));
     auto x1 = static_cast<const scalar_t*>(iter.data_ptr(1));
     auto x2 = static_cast<const scalar_t*>(iter.data_ptr(2));

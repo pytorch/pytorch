@@ -134,7 +134,7 @@ def _retrieve_or_adapt_input_to_graph_set(
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
-                # dim, and onnx-script will promote it to tensot(int64)
+                # dim, and onnx-script will promote it to tensor(int64)
                 sequence_mixed_elements.append([tensor])
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
@@ -217,7 +217,7 @@ def _fill_tensor_shape_type(
     expected_values: Union[
         fx_type_utils.META_VALUE_TYPE,
         List[fx_type_utils.META_VALUE_TYPE],
-        Tuple[fx_type_utils.META_VALUE_TYPE, ...],
+        Tuple[Optional[fx_type_utils.META_VALUE_TYPE], ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -234,10 +234,15 @@ def _fill_tensor_shape_type(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # aten::sym_size output is a int, not a tensor, which stands
-        # for the size of one dim. We treat it as 0-D tensor.
-        # TODO(titaiwang): set shape?
-        if isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        if expected_value is None:
+            # There is no shape/type from None.
+            # NOTE: according to https://github.com/pytorch/pytorch/blob/main/torch/_meta_registrations.py,
+            # None could be a valid value for return type, so we need to handle it.
+            # e.g. the function: meta__scaled_dot_product_flash() in cpu mode.
+            continue
+        elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # aten::sym_size output is a int, not a tensor, which stands
+            # for the size of one dim. We treat it as 0-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
@@ -509,7 +514,7 @@ class FxOnnxInterpreter:
         )
         # In the following loop, a TorchScript graph is created to
         # represent the input FX graph with ONNX symbols (e.g., onnx::add).
-        # To connect the values to nodes in the TorchScript graph, we maintian
+        # To connect the values to nodes in the TorchScript graph, we maintain
         # fx_name_to_onnxscript_value. Basically, we want to translate
         #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
         # to

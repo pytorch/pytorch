@@ -127,8 +127,12 @@ void Work::finishAndThrow(std::exception_ptr exception) {
   }
 }
 
-float Work::getDuration() const {
-  TORCH_CHECK(false, "Only ProcessGrouppNCCL::WorkNCCL supports getDuration.");
+c10::optional<float> Work::getDuration() const {
+  return c10::optional<float>();
+}
+
+uint64_t Work::getSequencenumber() const {
+  TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
 }
 
 class FutureWrappingWork : public Work {

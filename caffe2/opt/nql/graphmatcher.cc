@@ -200,7 +200,7 @@ std::vector<MatchedSubgraph> GraphMatcher::getMatches(
     if (match.isMatch()) {
       MatchedSubgraph ms;
       ms.subgraph = *match.getMatchedSubgraph();
-      // This is a map from the the internal TestMatchGraph to the nodes in the
+      // This is a map from the internal TestMatchGraph to the nodes in the
       // NNGraph
       auto match_graph_map = match.getMatchNodeMap();
       // We iterate through the "varMap_" map (string ->

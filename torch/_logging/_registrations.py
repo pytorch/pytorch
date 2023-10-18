@@ -46,6 +46,11 @@ register_artifact(
     "Print FX joint graph from AOTAutograd, prior to partitioning. Useful for debugging partitioning",
 )
 register_artifact(
+    "compiled_autograd",
+    "Prints various logs in compiled_autograd, including but not limited to the graphs. Useful for debugging compiled_autograd.",
+    visible=True,
+)
+register_artifact(
     "ddp_graphs",
     "Only relevant for compiling DDP. DDP splits into multiple graphs to trigger comms early. This will print each individual graph here.",
 )
@@ -76,5 +81,10 @@ register_artifact(
 )
 register_artifact("perf_hints", "", off_by_default=True)
 register_artifact("onnx_diagnostics", "", off_by_default=True)
+register_artifact(
+    "fusion",
+    "Detailed Inductor fusion decisions. More detailed than 'schedule'",
+    off_by_default=True,
+)
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")

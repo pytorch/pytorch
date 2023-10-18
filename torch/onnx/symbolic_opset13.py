@@ -755,20 +755,24 @@ def repeat_interleave(
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
 def diagonal(g: jit_utils.GraphContext, self, offset, dim1, dim2):
+    rank = symbolic_helper._get_tensor_rank(self)
+    # Replace negative indexing when rank is known
+    if rank is not None:
+        dim1 = dim1 if dim1 >= 0 else dim1 + rank
+        dim2 = dim2 if dim2 >= 0 else dim2 + rank
+
     dim1_size = opset9.size(
         g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1]))
     )
     dim2_size = opset9.size(
         g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2]))
     )
-
     # Create appropriate mask
     mask_shape = g.op("Concat", dim1_size, dim2_size, axis_i=0)
     mask = opset9.zeros(g, mask_shape, None, None, None)
     mask = g.op("EyeLike", mask, k_i=offset)
-
     # dim1 and dim2 appended as a dimension at the end of the shape
-    rank = symbolic_helper._get_tensor_rank(self)
+
     if rank is not None:
         axes = list(range(rank))
         axes.remove(dim1)
@@ -884,6 +888,24 @@ def quantized_linear(
     bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output = opset9.linear(g, input, weight, bias)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::linear_relu")
+@_beartype.beartype
+def quantized_linear_relu(
+    g: jit_utils.GraphContext, q_input, q_weight, bias, op_scale, op_zero_point
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.linear(g, input, weight, bias)
+    output = opset9.relu(g, output)
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

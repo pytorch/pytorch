@@ -20,6 +20,18 @@ TORCH_API Tensor masked_softmax(
     const Tensor& query,
     c10::optional<int64_t> mask_type = {});
 
+using transform_bias_rescale_qkv_fn = void(*)(
+    at::ScalarType type,
+    void* _q_k_v,
+    const void* _qkv,
+    const void* _qkv_bias,
+    int64_t B,
+    int64_t T,
+    int64_t D,
+    int64_t num_head);
+
+DECLARE_DISPATCH(transform_bias_rescale_qkv_fn, transform_bias_rescale_qkv_stub);
+
 TORCH_API Tensor transform0213_gemm_nt_bias(
     const Tensor& a,
     const Tensor& b,
