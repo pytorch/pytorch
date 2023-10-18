@@ -243,6 +243,7 @@ def _allowed_function_ids():
     _find_torch_objects(math)
 
     if config.trace_distributed and torch.distributed.is_available():
+        import torch.distributed._functional_collectives_impl as fci
         for f in [
             fci._all_gather_into_tensor,
             fci._all_reduce,
@@ -355,9 +356,6 @@ def _maybe_init_lazy_module(obj: object) -> None:
 
 
 def is_allowed(obj):
-    if config.trace_distributed and not _is_allowed_distributed(obj):
-        return False
-
     """Is this safe to trace like torch.add ?"""
     _maybe_init_lazy_module(obj)
 
