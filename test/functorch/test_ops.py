@@ -320,6 +320,8 @@ vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
     decorate('nn.functional.batch_norm', decorator=skipIfRocm),
     decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
 
 aliasing_ops = {
@@ -388,6 +390,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # query: last dimension must be contiguous
         # Fused attention kernels require last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -1767,6 +1770,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),  # contiguous call
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
+
+       # https://github.com/pytorch/pytorch/issues/96560
+        decorate('xlogy', decorator=skipIfRocm),
 
         # numerical inconsistencies, look like bugs
         skip('matrix_exp', dtypes=(torch.float32,), device_type='cuda'),  # fails on linux, passes on windows
