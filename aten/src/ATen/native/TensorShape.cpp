@@ -930,40 +930,36 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim, bool 
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  const auto dim_size = self.sym_size(dim) - (!drop_remainder ? 0 : self.sym_size(dim) % chunks);
-  auto split_size = (dim_size + (!drop_remainder ? chunks - 1 : 0)) / chunks;
-  auto split_mod = self.sym_size(dim) % chunks;
+  const auto dim_size = self.sym_size(dim);
+  const auto split_size = (dim_size + chunks - 1) / chunks;
+  const auto split_mod = dim_size % chunks;
+
+  if (drop_remainder && !redistribute && split_size <= 1) {
+    chunks = 1;
+  }
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
   if (split_size == 0 && dim_size == 0) {
-    if (drop_remainder && !redistribute) {
-      chunks = 1;
-    }
     std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.split_with_sizes_symint(split_sizes, dim, drop_remainder);
   } else {
-    if (drop_remainder && split_mod > 0) {
-      return self
-          .slice(dim, c10::nullopt, dim_size.expect_int())
-          .split_symint(std::move(split_size), dim);
-    } else if (!redistribute || split_mod == 0) {
+    if (!redistribute && !drop_remainder || split_mod == 0) {
       return self.split_symint(std::move(split_size), dim);
+    } else if (drop_remainder) {
+      std::vector<c10::SymInt> split_sizes(chunks, split_size - 1);
+      return self.split_with_sizes_symint(split_sizes, dim, drop_remainder);
     } else {
-      // Case when redistribute=true and there are > 0 elements to redistribute.
-      split_size = dim_size / chunks;
-      auto limit = split_mod * (split_size+1);
-      auto result = self
-          .slice(dim, c10::nullopt, limit.expect_int())
-          .split(split_size.expect_int() + 1); // split_mod chunks
-      auto second_part = self
-          .slice(dim, limit.expect_int(), c10::nullopt)
-          .split(split_size.expect_int()); // chunks-split_mod chunks
-      result.insert(result.end(), second_part.begin(), second_part.end());
-      return result;
+      // redistribute=True, drop_remainder=False and split_mod != 0
+      std::vector<c10::SymInt> split_sizes(chunks, split_size);
+      int64_t split_mod_int = split_mod.guard_int(__FILE__, __LINE__);
+      for(auto i = split_mod_int; i < chunks; ++i) {
+				split_sizes[i] = split_size - 1;
+			}
+      return self.split_with_sizes_symint(split_sizes, dim, drop_remainder);
     }
   }
 }

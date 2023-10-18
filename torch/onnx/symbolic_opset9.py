@@ -6837,11 +6837,22 @@ def prim_constant_split(g: jit_utils.GraphContext, self, split_size, dim):
 # method, and use the desugared version
 @_onnx_symbolic("prim::ConstantChunk")
 @_beartype.beartype
-def prim_constant_chunk(g: jit_utils.GraphContext, self, chunks, dim):
+def prim_constant_chunk(
+    g: jit_utils.GraphContext, self, chunks, dim, redistribute, drop_remainder
+):
     dim_size = symbolic_helper._get_tensor_dim_size(self, dim)
     if dim_size is None:
         return symbolic_helper._unimplemented(
             "prim::ConstantChunk", "unknown dimension size", self
+        )
+    parsed_redistribute = symbolic_helper._get_const(redistribute, "b", "redistribute")
+    parsed_drop_remainder = symbolic_helper._get_const(
+        drop_remainder, "b", "drop_remainder"
+    )
+    if parsed_redistribute or parsed_drop_remainder:
+        return symbolic_helper._unimplemented(
+            "prim_constant_chunk",
+            "redistribute=True or drop_remainder=True not supported yet",
         )
     split_size = (dim_size + chunks - 1) // chunks
     return prim_constant_split(g, self, split_size, dim)

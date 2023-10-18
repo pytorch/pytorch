@@ -1607,7 +1607,18 @@ def atleast_3d(g: jit_utils.GraphContext, self: torch._C.Value):
 
 @_onnx_symbolic("prim::ConstantChunk")
 @_beartype.beartype
-def prim_constant_chunk(g: jit_utils.GraphContext, self, chunks, dim):
+def prim_constant_chunk(
+    g: jit_utils.GraphContext, self, chunks, dim, redistribute, drop_remainder
+):
+    parsed_redistribute = symbolic_helper._get_const(redistribute, "b", "redistribute")
+    parsed_drop_remainder = symbolic_helper._get_const(
+        drop_remainder, "b", "drop_remainder"
+    )
+    if parsed_redistribute or parsed_drop_remainder:
+        return symbolic_helper._unimplemented(
+            "prim_constant_chunk",
+            "redistribute=True or drop_remainder=True not supported yet",
+        )
     input_shape = g.op("Shape", self)
     axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
     input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
