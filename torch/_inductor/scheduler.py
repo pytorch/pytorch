@@ -3,13 +3,13 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import os
 import pprint
 import textwrap
 from typing import Dict, List, Optional, Set
 
 import sympy
-import math
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -1529,15 +1529,21 @@ class Scheduler:
         try:
             ms1 = self.benchmark_fused_nodes(node_list_1)
             if math.isinf(ms1):
-                log.debug("Skip fusion because of register spilling of the first kernel")
+                log.debug(
+                    "Skip fusion because of register spilling of the first kernel"
+                )
                 return False
             ms2 = self.benchmark_fused_nodes(node_list_2)
             if math.isinf(ms2):
-                log.debug("Skip fusion because of register spilling of the second kernel")
+                log.debug(
+                    "Skip fusion because of register spilling of the second kernel"
+                )
                 return False
             ms_fused = self.benchmark_fused_nodes(node_list_fused)
             if math.isinf(ms_fused):
-                log.debug("Skip fusion because of register spilling of the fused kernel")
+                log.debug(
+                    "Skip fusion because of register spilling of the fused kernel"
+                )
                 return False
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151

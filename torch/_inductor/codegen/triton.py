@@ -8,8 +8,8 @@ import itertools
 import logging
 import math
 import operator
-from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
 import os
+from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
 
 import sympy
 
@@ -2942,7 +2942,7 @@ class TritonScheduling(BaseScheduling):
             n.last_usage = set()
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
             src_code = kernel.codegen_kernel()
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
