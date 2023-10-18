@@ -825,7 +825,7 @@ class ExportOutput:
                 try:
                     serializer.serialize(self, destination)
                 except ValueError:
-                    raise ValueError(
+                    raise ValueError(  # noqa: TRY200
                         "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
                         "External tensor data will be saved alongside the model on disk."
                     )

@@ -360,7 +360,7 @@ def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
     except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
+        raise ImportError(f"{__name__} needs numpy, but it's not installed.")  # noqa: TRY200
 
     if isinstance(input, torch.Tensor):
         return input.detach().cpu().numpy()
