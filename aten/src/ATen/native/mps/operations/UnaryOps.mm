@@ -552,6 +552,15 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 }
 
 void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("cummax supported by MPS on MacOS 13+, please upgrade");
+    std::tuple<Tensor, Tensor> cpu_result = self.to(at::Device(kCPU)).cummax(dim);
+    at::_copy_from_and_resize(std::get<0>(cpu_result), values);
+    at::_copy_from_and_resize(std::get<1>(cpu_result), indices);
+    return;
+  }
+
   auto cumsum_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> NSArray<MPSGraphTensor*>* {
     MPSGraphTensor* one = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt64];
     MPSGraphTensor* zero = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64];
@@ -573,6 +582,15 @@ void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int6
 }
 
 void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("cummin supported by MPS on MacOS 13+, please upgrade");
+    std::tuple<Tensor, Tensor> cpu_result = self.to(at::Device(kCPU)).cummin(dim);
+    at::_copy_from_and_resize(std::get<0>(cpu_result), values);
+    at::_copy_from_and_resize(std::get<1>(cpu_result), indices);
+    return;
+  }
+
   auto cummin_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> NSArray<MPSGraphTensor*>* {
     MPSGraphTensor* one = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt64];
     MPSGraphTensor* zero = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64];
