@@ -12,7 +12,7 @@ try:
     from tools.testing.test_selections import calculate_shards, ShardedTest, THRESHOLD
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
-    exit(1)
+    sys.exit(1)
 
 
 class TestCalculateShards(unittest.TestCase):
@@ -308,7 +308,7 @@ class TestCalculateShards(unittest.TestCase):
                 if k != "super_long_test" and k != "long_test1"
             ]
             sum_of_rest = sum(rest_of_tests)
-            random_times["super_long_test"] = max(sum_of_rest / 2, max(rest_of_tests))
+            random_times["super_long_test"] = max(sum_of_rest / 2, *rest_of_tests)
             random_times["long_test1"] = sum_of_rest - random_times["super_long_test"]
             # An optimal sharding would look like the below, but we don't need to compute this for the test:
             # optimal_shards = [

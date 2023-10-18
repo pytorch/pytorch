@@ -1537,6 +1537,7 @@ class TestSparseCSR(TestCase):
     @parametrize("noncontiguous", [True, False])
     @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfTorchDynamo("raises 'sparse matrix length is ambiguous; use getnnz()'")
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater else [],
@@ -3381,7 +3382,7 @@ class TestSparseCSR(TestCase):
 
 
 def skipIfNoTriton(cls):
-    from torch._inductor.utils import has_triton
+    from torch.utils._triton import has_triton
 
     # no-op if triton is present
     if has_triton():

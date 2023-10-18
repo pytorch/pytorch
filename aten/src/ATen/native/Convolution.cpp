@@ -508,7 +508,9 @@ struct ConvParams {
     if (transposed && is_output_padding_big()) {
       return false;
     }
-    if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
+    if (input.device().is_cpu() &&
+        ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
+         (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -1430,6 +1432,11 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::SlowTranspose2d:
       if (thnn_conv_use_channels_last(input, weight)) {
         backend_memory_format = at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Overrideable:
+      if (xpu_conv_use_channels_last(input, weight)) {
+        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
     default:

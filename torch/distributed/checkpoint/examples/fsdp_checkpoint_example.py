@@ -62,7 +62,7 @@ def run_fsdp_checkpoint_example(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # Initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
     # Create a model

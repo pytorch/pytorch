@@ -154,7 +154,6 @@ TensorTypePtr TorchTensorTypeFromONNX(
 ListTypePtr TorchListTypeFromONNX(
     const onnx::TypeProto_Sequence& onnx_sequence_type,
     SymbolDimMap& symbol_dim_map) {
-  c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
     const auto& onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {

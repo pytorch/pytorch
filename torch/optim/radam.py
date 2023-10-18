@@ -67,8 +67,10 @@ class RAdam(Optimizer):
                 s["step"] = torch.tensor(float(s["step"]))
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps):
+        has_complex = False
         for p in group["params"]:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError("RAdam does not support sparse gradients")
@@ -91,6 +93,8 @@ class RAdam(Optimizer):
                 exp_avg_sqs.append(state["exp_avg_sq"])
                 state_steps.append(state["step"])
 
+        return has_complex
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -112,7 +116,7 @@ class RAdam(Optimizer):
             state_steps = []
             beta1, beta2 = group["betas"]
 
-            self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps)
 
             radam(
                 params_with_grad,
@@ -128,6 +132,7 @@ class RAdam(Optimizer):
                 foreach=group["foreach"],
                 differentiable=group["differentiable"],
                 decoupled_weight_decay=group["decoupled_weight_decay"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -216,6 +221,7 @@ def radam(
     decoupled_weight_decay: bool = False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     beta1: float,
     beta2: float,
@@ -257,6 +263,7 @@ def radam(
         eps=eps,
         decoupled_weight_decay=decoupled_weight_decay,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -274,6 +281,7 @@ def _single_tensor_radam(
     eps: float,
     differentiable: bool,
     decoupled_weight_decay: bool,
+    has_complex: bool,
 ):
 
     for i, param in enumerate(params):
@@ -281,6 +289,13 @@ def _single_tensor_radam(
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
+
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+
         # update step
         step_t += 1
         step = _get_value(step_t)
@@ -339,6 +354,7 @@ def _multi_tensor_radam(
     eps: float,
     decoupled_weight_decay: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     if len(params) == 0:
@@ -356,6 +372,15 @@ def _multi_tensor_radam(
     ), _) in grouped_tensors.values():
         # Update steps
         torch._foreach_add_(grouped_state_steps, 1)
+
+        if has_complex:
+            for i in range(len(grouped_params)):
+                if torch.is_complex(grouped_params[i]):
+                    grouped_params[i] = torch.view_as_real(grouped_params[i])
+                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
+                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
+
 
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1

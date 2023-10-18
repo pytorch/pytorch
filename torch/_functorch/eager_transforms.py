@@ -13,6 +13,7 @@ from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
+from torch._subclasses.functional_tensor import FunctionalTensor
 
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 from .apis import vmap
@@ -1291,21 +1292,29 @@ def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):
     grad, _ = results
     return grad
 
-def _maybe_wrap_functional_tensor(maybe_tensor, level):
+def _maybe_wrap_functional_tensor(maybe_tensor, level, *, _python_functionalize: bool = False):
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
     wrapped = _wrap_functional_tensor(maybe_tensor, level)
     _assert_wrapped_functional(maybe_tensor, wrapped)
+    if _python_functionalize:
+        out = FunctionalTensor(wrapped)
+        torch._mirror_autograd_meta_to(maybe_tensor, out)
+        return out
     return wrapped
 
 
-def _wrap_all_tensors_to_functional(tensor_pytree, level):
-    return tree_map(partial(_maybe_wrap_functional_tensor, level=level), tensor_pytree)
+def _wrap_all_tensors_to_functional(tensor_pytree, level, *, _python_functionalize: bool = False):
+    return tree_map(partial(lambda x: _maybe_wrap_functional_tensor(
+        x, level, _python_functionalize=_python_functionalize)), tensor_pytree)
 
 
 def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
+    if isinstance(maybe_tensor, FunctionalTensor):
+        maybe_tensor = maybe_tensor.elem
+
     if not torch._is_functional_tensor(maybe_tensor):
         # If it's not a functional tensor, just return it.
         # This can happen if we functionalize a fn that returns a global,
@@ -1351,7 +1360,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     Returns:
         Returns a new "functionalized" function. It takes the same inputs as
         ``func``, and has the same behavior, but any mutations
-        (and optionally aliasing) performed on intermeidate tensors
+        (and optionally aliasing) performed on intermediate tensors
         in the function will be removed.
 
     functionalize will also remove mutations (and views) that were performed on function inputs.
@@ -1461,7 +1470,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
 
     Finally, a helpful mental model for understanding functionalization is that
-    most user pytorch programs are writting with the public torch API.
+    most user pytorch programs are writing with the public torch API.
     When executed, torch operators are generally decomposed into
     our internal C++ "ATen" API.
     The logic for functionalization happens entirely at the level of ATen.
@@ -1541,7 +1550,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         ``func`` evaluated at ``primals``.
 
     linearize is useful if jvp is to be computed multiple times at ``primals``. However,
-    to achieve this, linearize saves intermediate computation and has higher memory requrements
+    to achieve this, linearize saves intermediate computation and has higher memory requirements
     than directly applying `jvp`. So, if all the ``tangents`` are known, it maybe more efficient
     to compute vmap(jvp) instead of using linearize.
 
