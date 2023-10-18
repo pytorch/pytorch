@@ -482,7 +482,7 @@ except ImportError:
 
 for name in dir(_C):
     if name[0] != '_' and not name.endswith('Base'):
-        __all__.append(name)
+        __all__ += [name]  # noqa: PLE0604, PLE0605
         obj = getattr(_C, name)
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
@@ -1145,7 +1145,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+__all__ += ['e', 'pi', 'nan', 'inf']
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1398,7 +1398,7 @@ for name in dir(_C._VariableFunctions):
         name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
-        __all__.append(name)
+        __all__ += [name]  # noqa: PLE0604, PLE0605
 
 
 

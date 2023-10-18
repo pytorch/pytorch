@@ -23,7 +23,7 @@ def _public_functions(mod):
 
 
 # We fill in __all__ in the loop below
-__all__ = []
+__all__ = ["index_exp", "s_"]
 
 # decorate implementer functions with argument normalizers and export to the top namespace
 for name, func in itertools.chain(
@@ -40,7 +40,7 @@ for name, func in itertools.chain(
     decorated.__qualname__ = name
     decorated.__name__ = name
     vars()[name] = decorated
-    __all__.append(name)
+    __all__ += [name]  # noqa: PLE0604, PLE0605
 
 
 """
@@ -68,6 +68,3 @@ class IndexExpression:
 
 index_exp = IndexExpression(maketuple=True)
 s_ = IndexExpression(maketuple=False)
-
-
-__all__ += ["index_exp", "s_"]

@@ -23,7 +23,7 @@ for name in dir(return_types):
     globals()[name] = _attr
 
     if not name.startswith('_'):
-        __all__.append(name)
+        __all__ += [name]  # noqa: PLE0604, PLE0605
 
     # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
     # thing defined by the Python C-API. We're going to need to modify this when that
