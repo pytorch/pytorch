@@ -15,7 +15,6 @@ import itertools
 import logging
 import os
 import pathlib
-import random
 import shutil
 import signal
 import subprocess
@@ -32,6 +31,7 @@ from typing import (
     Mapping,
     NamedTuple,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -55,7 +55,12 @@ import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
-from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
+from torch._dynamo.testing import (
+    dummy_fx_compile,
+    format_speedup,
+    reset_rng_state,
+    same,
+)
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -1275,7 +1280,7 @@ class OnnxModel(abc.ABC):
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
-    ) -> str:
+    ) -> pathlib.Path:
         model_path = pathlib.Path(
             output_directory,
             ".onnx_models",
@@ -1288,21 +1293,21 @@ class OnnxModel(abc.ABC):
         return model_path
 
     @abc.abstractmethod
-    def format_pt_inputs(self, pt_inputs):
+    def format_pt_inputs(self, pt_inputs: Any) -> Sequence[torch.Tensor]:
         ...
 
     @abc.abstractmethod
-    def format_pt_outputs(self, pt_outputs):
+    def format_pt_outputs(self, pt_outputs: Any) -> Sequence[torch.Tensor]:
         ...
 
-    def adapt_pt_inputs_to_onnx(self, pt_inputs):
+    def adapt_pt_inputs_to_onnx(self, pt_inputs) -> Mapping[str, np.ndarray]:
         pt_inputs = self.format_pt_inputs(pt_inputs)
         return {
             ort_input.name: pt_input.cpu().numpy()
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs):
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[np.ndarray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
@@ -1445,7 +1450,8 @@ class OnnxModelFromTorchScript(OnnxModel):
     _COMPILER_NAME = "torchscript"
 
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        assert not dynamic_shapes, "NYI dynamic shapes for OnnxModelFromTorchScript"
+        if dynamic_shapes:
+            raise NotImplementedError("NYI dynamic shapes for OnnxModelFromTorchScript")
         super().__init__(output_directory, model, example_inputs, dynamic_shapes)
         self._export(
             model,
@@ -1891,14 +1897,6 @@ def cast_to_fp64(model, inputs):
 
 def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
-
-
-def reset_rng_state(use_xla=False):
-    torch.manual_seed(1337)
-    random.seed(1337)
-    np.random.seed(1337)
-    if use_xla:
-        xm.set_rng_state(1337, str(xm.xla_device()))
 
 
 class DummyGradScaler:
