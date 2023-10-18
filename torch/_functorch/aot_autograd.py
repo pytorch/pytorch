@@ -448,6 +448,7 @@ class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
     mutates_metadata: bool
+    mutations_triton_only: bool
     requires_grad: bool
 
 
@@ -882,6 +883,15 @@ def has_metadata_mutation(t):
         assert isinstance(t, FunctionalTensor)
         return torch._functionalize_has_metadata_mutation(t.elem)
 
+def are_all_mutations_triton_only(t):
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        # If all inner elemnts are triton only mutations, then it is a triton only mutation
+        return all(are_all_mutations_triton_only(getattr(t, attr)) for attr in attrs)
+    else:
+        assert isinstance(t, FunctionalTensor)
+        return torch._functionalize_are_all_mutations_triton_only(t.elem)
+
 # new_arg and arg here are either:
 # (1) both a FakeTensor
 # (2) both a traceable tensor subclass that holds a FakeTensor
@@ -1042,14 +1052,17 @@ def run_functionalized_fw_and_collect_metadata(
                 input_requires_grad_info.append(
                     isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
                 )
+                mutations_triton_only = are_all_mutations_triton_only(f_arg)
             else:
                 mutates_data = False
                 mutates_metadata = False
+                mutations_triton_only = False
 
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata,
+                mutations_triton_only=mutations_triton_only,
                 requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
             ))
 
@@ -1700,7 +1713,11 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     assert inpt_new is not inpt_old
-                    inpt_old.copy_(inpt_new)
+                    if meta.input_info[i].mutations_triton_only:
+                        #with torch.no_grad():
+                        inpt_old.detach().copy_(inpt_new)
+                    else:
+                        inpt_old.copy_(inpt_new)
 
         return pytree.tree_map(from_fun, f_outs)
 

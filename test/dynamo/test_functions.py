@@ -1726,11 +1726,6 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, backend):
-        if backend == "inductor" and grad is True:
-            # TODO(oulgen): somehow functionalization over fake tensors
-            # is broken, fix it
-            return
-
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
         ):
