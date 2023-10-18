@@ -2195,7 +2195,22 @@ class TestFakeTensor(TestCase):
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
+    def test_empty_strided(self, device):
+        result = torch.empty((3, 3), layout=torch.strided, device=device)
+        self.assertEqual(result.layout, torch.strided)
 
+    def test_zeros_strided(self, device):
+        result = torch.zeros((3, 3), layout=torch.strided, device=device)
+        self.assertEqual(result.layout, torch.strided)
+
+    def test_ones_strided(self, device):
+        result = torch.ones((3, 3), layout=torch.strided, device=device)
+        self.assertEqual(result.layout, torch.strided)
+
+    def test_rand_strided(self, device):
+        result = torch.rand((3, 3), layout=torch.strided, device=device)
+        self.assertEqual(result.layout, torch.strided)
+    
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
