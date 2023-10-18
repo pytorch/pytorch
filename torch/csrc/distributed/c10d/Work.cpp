@@ -127,8 +127,8 @@ void Work::finishAndThrow(std::exception_ptr exception) {
   }
 }
 
-c10::optional<float> Work::getDuration() const {
-  return c10::optional<float>();
+float Work::getDuration() const {
+  TORCH_CHECK(false, "This Backend doesn't support getDuration.");
 }
 
 uint64_t Work::getSequencenumber() const {
