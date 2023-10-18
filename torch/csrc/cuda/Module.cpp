@@ -5,6 +5,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/TypeCast.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -82,17 +83,14 @@ static void poison_fork() {
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
-void THCPModule_setDevice(int device) {
-  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
-}
-
 PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
-  int64_t device = THPUtils_unpackLong(arg);
+  auto device = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(arg), "c10::DeviceIndex");
 
   torch::utils::cuda_lazy_init();
-  THCPModule_setDevice(device);
+  c10::cuda::set_device(device);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -272,7 +270,7 @@ PyObject* THCPModule_setStream_wrap(
 
   auto device = c10::cuda::current_device();
   if (device != stream.device_index()) {
-    THCPModule_setDevice(stream.device_index());
+    c10::cuda::set_device(stream.device_index());
   }
   at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
