@@ -1835,6 +1835,28 @@ def forward(self, x_1, output_1):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_cast_tensor_single_elem(self):
+        with torch._dynamo.config.patch({"capture_scalar_outputs": True}):
+            for t, val in [
+                (float, 1.0),
+                (float, 1),
+                (float, True),
+                (int, 1),
+                # (int, 1.0), # fails due to a >= 0 comparison
+            ]:  # , bool, complex]:
+
+                def fn(x):
+                    x = x + 1
+                    return t(x)
+
+                opt_fn = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=False
+                )
+                x = torch.tensor([val])
+                res = fn(x)
+                ref = opt_fn(x)
+                self.assertEqual(ref, res)
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 

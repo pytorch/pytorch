@@ -589,6 +589,26 @@ class BuiltinVariable(VariableTracker):
             )
             return out
 
+        # TODO(jon-chuang): Handle complex, bool
+        if self.fn in (int, float) and isinstance(args[0], variables.TensorVariable):
+            item = args[0].call_method(tx, "item", [], {})
+
+            if isinstance(item, SymNodeVariable):
+                fn = sym_int if self.fn is int else sym_float
+            else:
+                fn = self.fn
+            out = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn,
+                    (item.as_proxy(),),
+                    {},
+                ),
+                **options,
+            )
+            return out
+
         # Handle `str` on a user defined function
         if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(args[0].fn))
