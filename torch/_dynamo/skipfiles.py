@@ -161,6 +161,26 @@ FUNC_INLINELIST = {
     "torch._constrain_as_value",
 }
 
+ALWAYS_MOD_INLINELIST = {
+    "torch._dynamo.external_utils",
+    "torch.ao.quantization.pt2e.eval_utils",
+    "torch.ao.quantization.pt2e.qat_utils",
+    "torch.ao.quantization.pt2e.representation.rewrite",
+    "torch.ao.quantization.pt2e.utils",
+    "torch.ao.quantization.quantizer.xnnpack_quantizer",
+    "torch.optim",
+}
+
+if torch.distributed.is_available():
+    ALWAYS_MOD_INLINELIST |= {
+        "torch.distributed._tensor.api",
+        "torch.distributed._tensor.device_mesh",
+        "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
+        "torch.distributed.tensor.parallel._data_parallel_utils",
+        "torch.distributed.tensor.parallel._utils",
+        "torch.distributed.tensor.parallel.style",
+    }
+
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
@@ -179,15 +199,9 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.cond",
     "torch._inductor.test_operators",
     "torch.ao.nn",
-    "torch.ao.quantization.pt2e.eval_utils",
-    "torch.ao.quantization.pt2e.qat_utils",
-    "torch.ao.quantization.pt2e.representation.rewrite",
-    "torch.ao.quantization.pt2e.utils",
-    "torch.ao.quantization.quantizer.xnnpack_quantizer",
     "torch.distributions",
     "torch.fx._pytree",
     "torch.nn",
-    "torch.optim",
     "torch.random",
     "torch.sparse",
     "torch.testing",
@@ -200,6 +214,7 @@ MOD_INLINELIST = {
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
+    MOD_INLINELIST.add("torch.distributed._functional_collectives")
 
 
 # TODO: support adding bound method into this list
@@ -215,8 +230,11 @@ def get_func_inlinelist():
 
 
 @functools.lru_cache(None)
-def get_external_utils_filename():
-    return _module_dir(torch) + "_dynamo/external_utils.py"
+def get_always_mod_inlinelist():
+    inlinelist = set()
+    for m in ALWAYS_MOD_INLINELIST:
+        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    return inlinelist
 
 
 @functools.lru_cache(None)
@@ -276,10 +294,10 @@ def check_file(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
-    if filename == get_external_utils_filename():
+    if any(filename.startswith(d) for d in get_always_mod_inlinelist()):
         return SkipResult(
             False,
-            "inlined according torch._dynamo.external_utils",
+            "inlined according skipfiles.ALWAYS_MOD_INLINELIST",
         )
     if allow_torch and is_torch_inline_allowed(filename):
         return SkipResult(
