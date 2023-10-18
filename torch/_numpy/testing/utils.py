@@ -2270,7 +2270,9 @@ def check_free_memory(free_bytes):
         try:
             mem_free = _parse_size(env_value)
         except ValueError as exc:
-            raise ValueError(f"Invalid environment variable {env_var}: {exc}")  # noqa: TRY200
+            raise ValueError(
+                f"Invalid environment variable {env_var}: {exc}"
+            )  # noqa: TRY200
 
         msg = (
             f"{free_bytes/1e9} GB memory required, but environment variable "

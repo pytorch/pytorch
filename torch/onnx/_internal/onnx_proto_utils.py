@@ -136,7 +136,9 @@ def export_data(data, value_info_proto, f: str) -> None:
     try:
         from onnx import numpy_helper
     except ImportError as exc:
-        raise ImportError("Export data to ONNX format failed: Please install ONNX.") from exc
+        raise ImportError(
+            "Export data to ONNX format failed: Please install ONNX."
+        ) from exc
 
     with open(f, "wb") as opened_file:
         if value_info_proto.type.HasField("map_type"):
