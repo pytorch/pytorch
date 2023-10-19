@@ -132,7 +132,7 @@ class TestWorkspace(unittest.TestCase):
             tensor.init([3, 4], core.DataType.STRING)
 
         """ feed (copy) data into tensor """
-        val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=np.object)
+        val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=object)
         tensor.feed(val)
         self.assertEqual(tensor.data[0, 0], b"abc")
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
