@@ -2161,7 +2161,7 @@ class Module:
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
-                if v is None or v in memo:
+                if v is None or any(v is m for m in memo):
                     continue
                 if remove_duplicate:
                     memo.add(v)
