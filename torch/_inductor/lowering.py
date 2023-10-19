@@ -4299,7 +4299,6 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
             assert len(index) == len(size)
-            assert all(index[i] == 0 for i in reduced_idx)
             index = [index[i] for i in kept_idx]
         assert len(index) == len(kept_idx)
         new_index = [None] * (len(index) + len(reduction_index))

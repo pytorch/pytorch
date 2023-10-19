@@ -343,6 +343,20 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
+    def test_cat_pointwise_inps(self):
+        def f(a, b, c):
+            return torch.cat((a + 1, b + 2, c + 3)) + 10
+
+        inp = (T(10, 10), T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
+
+    def test_cat_pointwise_inps_non_fused(self):
+        def f(a, b, c, d, e):
+            return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
+
+        inp = [T(10, 10) for _ in range(5)]
+        self.assertExpectedInline(count_numel(f, *inp), """2000""")
+
 
 class SchedulerFusionTests(TestCase):
     """
