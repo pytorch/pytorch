@@ -147,9 +147,6 @@ class TestForeach(TestCase):
         else:
             func, ref, _, _ = self._get_funcs(op)
         for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
-            if 'alpha' in sample.kwargs:
-                print(sample.summary())
-            return
             kwargs = sample.kwargs
             disable_fastpath = kwargs.pop("disable_fastpath")
             expect_fastpath = not (noncontiguous or disable_fastpath)
