@@ -138,8 +138,12 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
         assert isinstance(input_arg, Tensor)
 
         ctx.replace(input_arg, output_arg)
+        # matching for replace
+        ctx.mark_mutated_by_triton_kernel(input_arg)
         ctx.commit_update(input_arg)
         ctx.sync(input_arg)
+        # matching for sync
+        ctx.mark_mutated_by_triton_kernel(input_arg)
     return None
 
 

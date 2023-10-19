@@ -1,4 +1,5 @@
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/CallOnce.h>
@@ -10,7 +11,6 @@
 #include <mutex>
 #include <vector>
 
-// NOLINTBEGIN(*c-arrays*)
 namespace c10 {
 namespace cuda {
 
@@ -256,7 +256,6 @@ cudaStream_t CUDAStream::stream() const {
         " official API like c10::cuda::getStreamFromPool() to get a new stream.");
     return nullptr;
   } else if (st.isExt()) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return reinterpret_cast<cudaStream_t>(stream_id);
   } else {
     auto streamType = st.getStreamType();
@@ -342,4 +341,3 @@ std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
 
 } // namespace cuda
 } // namespace c10
-// NOLINTEND(*c-arrays*)
