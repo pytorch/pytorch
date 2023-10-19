@@ -5,7 +5,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch.fx import Graph, GraphModule, Node
-from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+from torch.fx.subgraph_rewriter import (
+    replace_pattern_with_filters,
+    ReplacedPatterns,
+)
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.ao.quantization.quantizer import (
@@ -363,33 +366,56 @@ def _get_fused_convbn_q_dq_nodes(nodes: List[Node]) -> Tuple[Node, Node]:
     assert dq_node is not None
     return (q_node, dq_node)
 
-def _get_conv_bn_getitem_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node, Optional[Node]]:
+def _get_conv_bn_getitem_relu_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Node]]:
     """
-    Helper function to extract the conv, bn, getitem, and relu nodes from the list.
-    This asserts that the list contains exactly one of each of the above nodes.
+    Helper function to extract the conv, bn, getitem, and relu nodes after
+    subgraph rewriting, in the form of a map:
 
-    Return a 4-tuple of (conv node, bn node, getitem node, [relu node]).
+        {name: (original_node, replacement_node)}
+
+    The returned map must contain entries for "conv", "bn", "getitem" as names,
+    and may optionally contain an entry for "relu".
     """
-    conv_node, bn_node, getitem_node, relu_node = None, None, None, None
-    for n in nodes:
-        if n.op != "call_function":
-            continue
-        if n.target == torch.ops.aten.conv2d.default:
-            assert conv_node is None
-            conv_node = n
-        elif _is_supported_batch_norm_for_training(n):
-            assert bn_node is None
-            bn_node = n
-        elif n.target == operator.getitem:
-            assert getitem_node is None
-            getitem_node = n
-        elif n.target == torch.ops.aten.relu.default:
-            assert relu_node is None
-            relu_node = n
-    assert conv_node is not None
-    assert bn_node is not None
-    assert getitem_node is not None
-    return (conv_node, bn_node, getitem_node, relu_node)
+    def _get_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node, Optional[Node]]:
+        """
+        Return a 4-tuple of (conv_node, bn_node, getitem_node, relu_node).
+        This asserts that the match contains exactly one conv, bn, and getitem,
+        and at most one relu.
+        """
+        conv_node, bn_node, getitem_node, relu_node = None, None, None, None
+        for n in nodes:
+            if n.op != "call_function":
+                continue
+            if n.target == torch.ops.aten.conv2d.default:
+                assert conv_node is None
+                conv_node = n
+            if _is_supported_batch_norm_for_training(n):
+                assert bn_node is None
+                bn_node = n
+            if n.target == operator.getitem:
+                assert getitem_node is None
+                getitem_node = n
+            if n.target == torch.ops.aten.relu.default:
+                assert relu_node is None
+                relu_node = n
+        assert conv_node is not None
+        assert bn_node is not None
+        assert getitem_node is not None
+        return (conv_node, bn_node, getitem_node, relu_node)
+
+    original_nodes = list(_filter_nodes_map(r.nodes_map).values())
+    o_conv, o_bn, o_getitem, o_relu = _get_nodes(original_nodes)
+    r_conv, r_bn, r_getitem, r_relu = _get_nodes(r.replacements)
+
+    mapping = {
+        "conv": (o_conv, r_conv),
+        "bn": (o_bn, r_bn),
+        "getitem": (o_getitem, r_getitem),
+    }
+    if o_relu is not None:
+        assert r_relu is not None
+        mapping["relu"] = (o_relu, r_relu)
+    return mapping
 
 def _filter_nodes_map(nodes_map: Dict[Node, Node]) -> Dict[Node, Node]:
     """
@@ -576,39 +602,21 @@ def _fuse_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
     # subgraph rewriter as possible, so we don't have to manually copy anything over.
     # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
 
-    original_to_replacement_node = {}
+    all_original_to_replacement_nodes = {}
     for r in replacements_with_conv_bias + replacements_no_conv_bias:
-        # TODO: rewrite this to return a map
-        (
-            replacement_conv_node,
-            replacement_bn_node,
-            replacement_getitem_node,
-            replacement_relu_node,
-        ) = _get_conv_bn_getitem_nodes(r.replacements)
-
-        # Step (3a): Copy over metadata for all three nodes in [conv - bn - getitem]
-        for original_node in _filter_nodes_map(r.nodes_map).values():
+        for original_node, replacement_node in _get_conv_bn_getitem_relu_nodes(r).values():
+            # Step (3a): Copy over metadata for all nodes in [conv - bn - getitem (- relu)]
+            replacement_node.meta = original_node.meta
             if original_node.target == torch.ops.aten.conv2d.default:
-                replacement_conv_node.meta = original_node.meta
-                original_to_replacement_node[original_node] = replacement_conv_node
                 # Step (3b): Copy over conv literal args
-                _copy_over_literal_conv_args(original_node, replacement_conv_node)
+                _copy_over_literal_conv_args(original_node, replacement_node)
                 # Step (3c): Update old references in the conv node's input_qspec_map
-                _update_conv_input_qspec_map_after_replacement(original_node, replacement_conv_node)
-            if _is_supported_batch_norm_for_training(original_node):
-                replacement_bn_node.meta = original_node.meta
-                original_to_replacement_node[original_node] = replacement_bn_node
-            if original_node.target == operator.getitem:
-                replacement_getitem_node.meta = original_node.meta
-                original_to_replacement_node[original_node] = replacement_getitem_node
-            if original_node.target == torch.ops.aten.relu.default:
-                assert replacement_relu_node is not None
-                replacement_relu_node.meta = original_node.meta
-                original_to_replacement_node[original_node] = replacement_relu_node
+                _update_conv_input_qspec_map_after_replacement(original_node, replacement_node)
+            all_original_to_replacement_nodes[original_node] = replacement_node
 
     # Step (3c): Update old references in the special qspecs for all nodes in the graph
     for n in m.graph.nodes:
-        _update_special_qspecs_after_replacement(n, original_to_replacement_node)
+        _update_special_qspecs_after_replacement(n, all_original_to_replacement_nodes)
 
     return m
 
@@ -710,29 +718,16 @@ def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
     m.recompile()
     _remove_extra_dequantize(m)
 
-    # Step (2): Copy over metadata from original subgraph
     for r in replacements:
-        (
-            replacement_conv_node,
-            replacement_bn_node,
-            replacement_getitem_node,
-            replacement_relu_node,
-        ) = _get_conv_bn_getitem_nodes(r.replacements)
+        node_map = _get_conv_bn_getitem_relu_nodes(r)
+        (_, conv_node) = node_map["conv"]
+        (_, bn_node) = node_map["bn"]
 
-        for original_node in _filter_nodes_map(r.nodes_map).values():
-            if original_node.target == torch.ops.aten.conv2d.default:
-                replacement_conv_node.meta = original_node.meta
-            if _is_supported_batch_norm_for_training(original_node):
-                replacement_bn_node.meta = original_node.meta
-            if original_node.target == operator.getitem:
-                replacement_getitem_node.meta = original_node.meta
-            if original_node.target == torch.ops.aten.relu.default:
-                assert replacement_relu_node is not None
-                replacement_relu_node.meta = original_node.meta
+        # Step (2): Copy over metadata from original subgraph
+        for original_node, replacement_node in node_map.values():
+            replacement_node.meta = original_node.meta
 
-    # Step (3): Fold BN weights into conv
-    for r in replacements:
-        (conv_node, bn_node, _, _) = _get_conv_bn_getitem_nodes(r.replacements)
+        # Step (3): Fold BN weights into conv
 
         # get conv weight and bias
         conv_weight_dq = conv_node.args[1]
