@@ -1061,13 +1061,13 @@ def cat(inputs, dim=0):
 
         return False
 
-    pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-    pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+    if len(inputs) <= config.max_pointwise_cat_inputs:
+        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
-    if (pointwise_uses or pointwise_inputs) and len(
-        inputs
-    ) <= config.max_pointwise_cat_inputs:
-        return pointwise_cat(inputs, dim)
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+            return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
