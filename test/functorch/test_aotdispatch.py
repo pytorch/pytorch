@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+import copy
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -2072,13 +2073,22 @@ def forward(self, tangents_1):
 
             def forward(self, x):
                 self.buf.add_(1)
-                return (self.w1*x*self.w2).sum() + self.buf.sum()
+                return (self.w1 * x * self.w2).sum() + self.buf.sum()
 
-        model = MyModel()
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
+        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
+
+        print(eager_version_counters, compile_version_counters)
+
+        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
+        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
 
         fw_graph_cell = [None]
         compiled_f = aot_module(
-            MyModel(),
+            model_for_compile,
             fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
             bw_compiler=nop,
             keep_inference_input_mutations=True,
@@ -2086,8 +2096,12 @@ def forward(self, tangents_1):
         inp_ref = torch.ones(1, requires_grad=True)
         inp_test = torch.ones(1, requires_grad=True)
 
-        out_ref = model(inp_ref.clone())
+        out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
+        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
+        print(eager_version_counters, compile_version_counters)
 
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3, primals_4):
@@ -2098,14 +2112,18 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = None
-    return [add_1, primals_1, primals_2, primals_4, mul]"""
-        )
+    return [add_1, primals_1, primals_2, primals_4, mul]
+    """)
 
         self.assertEqual(out_ref, out_test)
 
         out_ref.sum().backward()
         out_test.sum().backward()
 
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+
+        self.assertEqual(eager_grads, compile_grads)
         self.assertEqual(inp_ref.grad, inp_test.grad)
 
     def test_buffer_copied_in_graph_with_different_shapes(self):
@@ -2117,13 +2135,19 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 
             def forward(self, x):
                 self.buf.add_(1)
-                return (self.w@x).sum() + self.buf.sum()
+                return (self.w @ x).sum() + self.buf.sum()
 
-        model = MyModel()
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
+        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
+
+        print(eager_version_counters, compile_version_counters)
 
         fw_graph_cell = [None]
         compiled_f = aot_module(
-            MyModel(),
+            model_for_compile,
             fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
             bw_compiler=nop,
             keep_inference_input_mutations=True,
@@ -2131,8 +2155,13 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         inp_ref = torch.ones(2, 4, requires_grad=True)
         inp_test = torch.ones(2, 4, requires_grad=True)
 
-        out_ref = model(inp_ref.clone())
+        out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
+        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
+
+        print(eager_version_counters, compile_version_counters)
 
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
@@ -2142,12 +2171,17 @@ def forward(self, primals_1, primals_2, primals_3):
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = None
-    return [add_1, primals_1, primals_3]"""
-        )
+    return [add_1, primals_1, primals_3]
+    """)
         self.assertEqual(out_ref, out_test)
 
         out_ref.sum().backward()
         out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+
+        self.assertEqual(eager_grads, compile_grads)
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
 
@@ -2160,12 +2194,19 @@ def forward(self, primals_1, primals_2, primals_3):
             def forward(self, x):
                 return self.m(x)
 
-        model = MyModel()
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        for name, buffer in model_for_eager.named_buffers():
+            print("EAGER", buffer._version)
+
+        for name, buffer in model_for_compile.named_buffers():
+            print(buffer._version)
 
         fw_graph_cell = [None]
         bw_graph_cell = [None]
         compiled_f = aot_module(
-            MyModel(),
+            model_for_compile,
             fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
             bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
             keep_inference_input_mutations=True,
@@ -2173,8 +2214,14 @@ def forward(self, primals_1, primals_2, primals_3):
         inp_ref = torch.ones(20, 100, requires_grad=True)
         inp_test = torch.ones(20, 100, requires_grad=True)
 
-        out_ref = model(inp_ref.clone())
+        out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
+
+        for name, buffer in model_for_eager.named_buffers():
+            print("EAGER", buffer._version)
+
+        for name, buffer in model_for_compile.named_buffers():
+            print(buffer._version)
 
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
@@ -2188,13 +2235,17 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
     copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
     copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = None
-    return [getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]"""
-        )
+    return [getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]
+    """)  # noqa: B950
 
         self.assertEqual(out_ref, out_test)
 
         out_ref.sum().backward()
         out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+        self.assertEqual(eager_grads, compile_grads)
 
         self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4, tangents_1):
@@ -2202,13 +2253,10 @@ def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem
     getitem_5 = native_batch_norm_backward[0]
     getitem_6 = native_batch_norm_backward[1]
     getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
-    return [getitem_6, getitem_7, None, None, None, getitem_5]"""
-                )
+    return [getitem_6, getitem_7, None, None, None, getitem_5]
+    """)  # noqa: B950
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
-
-
-
 
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
