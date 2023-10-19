@@ -747,6 +747,8 @@ def stream_schedule(snodes):
             with open(load_existing_stream_assignment, 'r') as fin:
                 content = json.load(fin)
             success = ssgraph.check_fingerprint(content)
+            if not success:
+                log.warning("Failed to load existing stream assignment. Reassign the stream.")
         if not success:
             ssgraph.stream_assign()
             ssgraph.event_assign()
