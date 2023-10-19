@@ -28,25 +28,7 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_torch_ctx_manager_classes = {
-    torch._C._ForceDispatchKeyGuard,
-    torch._C._IncludeDispatchKeyGuard,
-    torch._C._ExcludeDispatchKeyGuard,
-    torch._C._SetExcludeDispatchKeyGuard,
-    torch._C._AutoDispatchBelowAutograd,
-    torch._C._profiler._RecordFunctionFast,
-    torch._C.DisableTorchFunctionSubclass,
-    torch._C.DisableTorchFunction,
-    torch._C._InferenceMode,
-    torch._C._RestorePythonTLSSnapshot,
-    torch._C._DisableTorchDispatch,
-    torch._C._EnableTorchFunction,
-    torch._C._EnablePythonDispatcher,
-    torch._C._DisablePythonDispatcher,
-    torch._C._EnablePreDispatch,
-    torch._C._DisableFuncTorch,
-    torch._C._DisableAutocast,
-}
+ignored_torch_ctx_manager_classes = set()
 
 
 def gen_get_func_inlinelist(dummy_func_inlinelist):
