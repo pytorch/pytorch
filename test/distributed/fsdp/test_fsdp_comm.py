@@ -142,7 +142,7 @@ class TestCommunication(FSDPTest):
         ):
             # Root does not free the full parameters at the end of the
             # forward pass
-            num_all_gathers = num_fsdp - 1
+            num_all_gathers = max(num_fsdp - 3, 0)
         elif (
             pass_type == PassType.BWD
             and sharding_strategy == ShardingStrategy.SHARD_GRAD_OP
