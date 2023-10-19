@@ -10,6 +10,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import Self
+
 from torch import Tensor
 from torch.types import _device, _dtype
 
@@ -30,7 +32,7 @@ class PackedSequence(PackedSequence_):
         batch_sizes: Optional[Tensor] = ...,
         sorted_indices: Optional[Tensor] = ...,
         unsorted_indices: Optional[Tensor] = ...,
-    ) -> PackedSequence: ...
+    ) -> Self: ...
     def pin_memory(self: T) -> T: ...
     def cuda(self: T, *args: Any, **kwargs: Any) -> T: ...
     def cpu(self: T) -> T: ...

@@ -77,7 +77,7 @@ TEST(ModuleAPITest, MethodRunAsync) {
 
   future->wait();
 
-  // expect 2 forks and 2 wait callbacks being excuted on provided taskLauncher
+  // expect 2 forks and 2 wait callbacks being executed on provided taskLauncher
   // but ivalue::Future would be marked completed and release wait before
   // finishing all callbacks
   ASSERT_GE(counter, 2);
@@ -424,6 +424,23 @@ TEST(ModuleAPITest, OfiFreezesTraining) {
   auto frozen_mod = torch::jit::optimize_for_inference(m);
   forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
+}
+
+TEST(ModuleAPITest, OfiFreezesNoForward) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def bar(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  m.eval();
+
+  // OFI is called without the presence of forward methods
+  auto frozen_mod =
+      torch::jit::optimize_for_inference(m, std::vector<std::string>{"bar"});
+  ASSERT_EQ(
+      m.run_method("bar", torch::ones({})).toTensor().item<float>(),
+      frozen_mod.run_method("bar", torch::ones({})).toTensor().item<float>());
 }
 
 TEST(ModuleAPITest, To_CUDA) {

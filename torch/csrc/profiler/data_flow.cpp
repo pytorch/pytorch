@@ -1,7 +1,6 @@
 #include <torch/csrc/profiler/data_flow.h>
 
 #include <c10/util/overloaded.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/profiler/collection.h>
 
 namespace torch {

@@ -24,16 +24,14 @@ def embedding_rules(op_schema: OpSchema) -> OutputSharding:
             "DTensor does not support row-wise sharded embedding operation yet!"
         )
 
-    if all(
-        placement.is_replicate() for placement in weight_spec.placements
-    ) and inp_spec.placements == [Shard(0)]:
+    if weight_spec.is_replicated() and inp_spec.placements == [Shard(0)]:
         # Embedding table is replicated, input ids are sharded along batch
         # dimension. Output lookups should match input sharding spec in this case.
         return OutputSharding(
             output_spec=DTensorSpec(mesh=inp_spec.mesh, placements=inp_spec.placements)
         )
 
-    if all(placement.is_replicate() for placement in inp_spec.placements):
+    if inp_spec.is_replicated():
         weight_dim_map = weight_spec.dim_map
         output_dim_map = inp_spec.dim_map
         output_dim_map.append(weight_dim_map[1])

@@ -13,6 +13,11 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+if config.is_fbcode():
+    from torch._inductor.fb.utils import (  # type: ignore[import]  # noqa: F401
+        get_everpaste_url,
+    )
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401
@@ -67,8 +72,10 @@ class GroupLinearFusion(GroupFusion):
             and len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
-            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
-            for shape in input_shape + weight_shape
+            and all(
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                for shape in input_shape + weight_shape
+            )
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
@@ -78,8 +85,10 @@ class GroupLinearFusion(GroupFusion):
             len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
-            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
-            for shape in input_shape + weight_shape
+            and all(
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                for shape in input_shape + weight_shape
+            )
         )
 
     def match(self, node: torch.fx.Node) -> Optional[Tuple[str, bool]]:
@@ -120,7 +129,7 @@ class GroupLinearFusion(GroupFusion):
 
         with graph.inserting_before(subset[0]):
             fused_mm = graph.call_function(
-                torch.ops.fbgemm.gmm,
+                torch.ops.fbgemm.gmm.default,
                 args=(group_inputs, group_weights, group_biases),
             )
 
@@ -564,7 +573,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 )
 
 
+def print_graph(graph: torch.fx.Graph, msg: str):
+    if config.is_fbcode():
+        log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))  # noqa: F401
+
+
 def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in post grads pass.")
     fusions: List[GroupBatchFusionBase] = []
 
     if config.group_fusion and has_fbgemm:
@@ -572,9 +587,11 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
 
 
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in pre grads pass.")
     fusions: List[GroupBatchFusionBase] = []
     if config.batch_fusion:
         fusions += [
@@ -585,3 +602,4 @@ def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
         ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
