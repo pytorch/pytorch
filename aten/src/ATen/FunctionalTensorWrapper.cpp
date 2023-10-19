@@ -534,14 +534,14 @@ void commit_update(ITensorListRef functional_tensor) {
   }
 }
 
-void mark_mutated_by_triton_kernel(const Tensor& functional_tensor) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
-  unsafeGetFunctionalWrapper(functional_tensor)->mark_mutated_by_triton_kernel();
+void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->mark_mutation_hidden_from_autograd();
 }
 
-bool are_all_mutations_triton_only(const Tensor& functional_tensor) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
-  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_triton_only();
+bool are_all_mutations_hidden_from_autograd(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_hidden_from_autograd();
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {
