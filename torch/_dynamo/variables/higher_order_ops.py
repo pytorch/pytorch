@@ -911,9 +911,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         batch_input_args = args[5:]
 
         options = {}
-        if fn.value.__name__.endswith("_") or fn.value.__name__ in [
-            "select",
-        ]:
+        if fn.value.__name__.endswith("_"):
             options.update({"source": batch_input_args[0].source})
 
         if not isinstance(in_dims, (ConstantVariable, TupleVariable)):
