@@ -860,9 +860,7 @@ class TestMultiIndexingAutomated(TestCase):
                         except Exception as exc:
                             # This happens with 0-sized orig_slice (sometimes?)
                             # here it is a ValueError, but indexing gives a:
-                            raise IndexError(
-                                "invalid index into 0-sized"
-                            ) from exc
+                            raise IndexError("invalid index into 0-sized") from exc
                     else:
                         mi = np.ravel_multi_index(indx[1:], orig_slice, mode="wrap")
                 else:
