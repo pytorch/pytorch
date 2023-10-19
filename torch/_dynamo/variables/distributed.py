@@ -161,6 +161,7 @@ class DeviceMeshVariable(DistributedVariable):
             kwargs_val = {k: v.as_python_constant() for k, v in kwargs.items()}
             # ensure no DeviceMesh subclassing happened
             from torch.distributed._tensor.device_mesh import DeviceMesh
+
             assert istype(self.value, DeviceMesh), f"{self.value} is not a DeviceMesh"
             dim_groups = self.value.get_dim_groups(*args_val, **kwargs_val)
             # desugar the results to ProcessGroupVariables
