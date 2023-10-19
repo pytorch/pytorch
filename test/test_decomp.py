@@ -466,9 +466,19 @@ core_backward_failures = {
     xfail('zero_'),
 }
 if not TEST_WITH_SLOW:
-  core_backward_failures.add(skip('baddbmm'))  # slow: takes 800+ sec on A100
-  core_backward_failures.add(skip('clamp_min'))
-  core_backward_failures.add(skip('clamp_max'))
+  core_backward_failures.update({
+      skip('addr'),  # slow: takes 46 sec on A100
+      skip('baddbmm'),  # slow: takes 800+ sec on A100
+      skip('clamp_min'),  # slow: takes 800 sec on A100
+      skip('clamp_max'),  # slow: takes 800 sec on A100
+      skip('logit'),  # slow: takes 44 sec on A100
+      skip('nn.functional.hardswish'),  # slow: takes 60 sec on A100
+      skip('std_mean'),  # slow: takes 170 sec on A100
+      skip('split', variant_name='list_args'),  # slow: takes 118 sec on A100
+      skip('transpose'),  # slow: takes 50 sec on A100
+      skip('unbind'),  # slow: takes 70 sec on A100
+      skip('unsafe_split'),  # slow: takes 49 sec on A100
+  })
 
 
 class TestDecomp(TestCase):
