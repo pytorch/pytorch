@@ -4755,6 +4755,7 @@ register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)

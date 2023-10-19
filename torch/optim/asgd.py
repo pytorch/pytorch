@@ -315,8 +315,14 @@ def _multi_tensor_asgd(
                 grouped_grads[i] = torch.view_as_real(grouped_grads[i])
                 grouped_axs[i] = torch.view_as_real(grouped_axs[i])
 
-        # update step
-        torch._foreach_add_(grouped_state_steps, 1)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
         if weight_decay != 0:
