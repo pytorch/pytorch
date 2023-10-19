@@ -910,7 +910,7 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(fn(x), opt_fn(x))
             self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
 
-    def test_context_wrapping_grad_mode_nested_decorator(self):
+    def test_context_wrapping_grad_mode_nested_function_decorator(self):
         ctx_wrappers = [torch.enable_grad, torch.no_grad]
         for i in range(2):
             torch._dynamo.reset()
