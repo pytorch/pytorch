@@ -207,7 +207,7 @@ struct ExtraFields<EventType::Allocation> : RawAllocation {
 template <>
 struct ExtraFields<EventType::OutOfMemory> {
   torch::profiler::impl::approx_time_t start_time_;
-  size_t alloc_size_;
+  int64_t alloc_size_;
   size_t total_allocated_;
   size_t total_reserved_;
   c10::DeviceType device_type_;
