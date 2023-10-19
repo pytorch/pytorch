@@ -4,6 +4,7 @@ import torch
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
 from torch.fx.operator_schemas import normalize_function
+from torch._subclasses.fake_tensor import is_fake
 
 __all__: List[Any] = []
 
@@ -380,8 +381,28 @@ def prod_dim_int(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
 
 
+# Ordinarily, if a program calls .tolist compiling still works because there is
+# special handling in dynamo, but for tensor subclasses .tolist is called on
+# FakeTensor directly which would error since wrapper subclasses don't hav
+# storage.
+def sym_tolist(x):
+    if is_fake(x):
+        assert isinstance(x.shape[0], torch.SymInt)
+        shape_env = x.shape[0].node.shape_env
+        out = []
+        # Specialize on the length of the list
+        for i in range(x.shape[0]):
+            s = shape_env.create_unbacked_symint()
+            # max value?
+            torch._constrain_as_size(s, min=2)
+            out.append(s)
+        return out
+    return x.tolist()
+
+
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
 def unbind_int(func, *args, **kwargs):
+    # Note that this specializes on the length of the offsets
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -394,13 +415,8 @@ def unbind_int(func, *args, **kwargs):
     values = inp._values
     offsets = inp.offsets()
 
-    views = []
-    start = 0
-    for length in offsets.diff().cpu().tolist():
-        views.append(inp._values[start : start + length, ...])
-        start += length
-
-    return tuple(views)
+    out_values = torch.split(values, sym_tolist(offsets.diff()))
+    return out_values
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
