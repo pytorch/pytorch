@@ -1615,7 +1615,7 @@
   variants: method
   manual_cpp_binding: True
 
-- func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, SymInt[] padding, int[] dilation, bool transposed, SymInt[] output_padding, int groups) -> Tensor
+- func: convolution(Tensor input, Tensor weight, Tensor? bias, SymInt[] stride, SymInt[] padding, SymInt[] dilation, bool transposed, SymInt[] output_padding, SymInt groups) -> Tensor
   dispatch:
     CompositeExplicitAutograd: convolution
   autogen: convolution.out
