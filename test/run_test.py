@@ -184,7 +184,6 @@ TESTS = discover_tests(
         "test_nnapi",
         "test_static_runtime",
         "test_throughput_benchmark",
-        "test_typing",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
         "distributed/launcher/bin/test_script",

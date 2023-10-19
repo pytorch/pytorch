@@ -597,7 +597,7 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
+        if target is operator.getitem and isinstance(args[0], (list, tuple)):
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -605,6 +605,9 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
+            assert isinstance(
+                target, torch._ops.OpOverload
+            ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
