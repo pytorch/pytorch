@@ -548,7 +548,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    def __init__(self, value, value_type=None, inference=False, tracer=None, **kwargs):
+    def __init__(self, value, value_type=None, inference=False, **kwargs):
         saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
         self._saved_tensors = saved_tensors
