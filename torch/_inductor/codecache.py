@@ -1287,7 +1287,7 @@ class AotCodeCache:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
-    ) -> Callable[..., Any]:
+    ) -> str:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
@@ -1311,28 +1311,6 @@ class AotCodeCache:
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor.output_path,
-        )
-
-        def _to_bytes(t: torch.Tensor) -> bytes:
-            # This serializes the tensor's untyped_storage to bytes by accessing
-            # the raw data of the underlying structure.
-            import ctypes
-
-            t_cpu = t.untyped_storage().cpu()
-            raw_array = ctypes.cast(
-                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
-            )
-
-            return bytes(raw_array.contents)
-
-        aot_constants = b""
-        for tensor in graph.constants.values():
-            aot_constants += _to_bytes(tensor)
-
-        consts_key, consts_path = write(
-            aot_constants,
-            "bin",
             specified_dir=config.aot_inductor.output_path,
         )
 
@@ -1368,6 +1346,29 @@ class AotCodeCache:
                         os.chmod(output_o, 0o644)
                     else:
                         run_command_and_check(cmd)
+
+                    def _to_bytes(t: torch.Tensor) -> bytes:
+                        # This serializes the tensor's untyped_storage to bytes by accessing
+                        # the raw data of the underlying structure.
+                        import ctypes
+
+                        t_cpu = t.untyped_storage().cpu()
+                        raw_array = ctypes.cast(
+                            t_cpu.data_ptr(),
+                            ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
+                        )
+
+                        return bytes(raw_array.contents)
+
+                    aot_constants = b"".join(
+                        _to_bytes(tensor) for tensor in graph.constants.values()
+                    )
+
+                    consts_key, consts_path = write(
+                        aot_constants,
+                        "bin",
+                        specified_dir=config.aot_inductor.output_path,
+                    )
 
                     consts_o = os.path.splitext(consts_path)[0] + ".o"
                     if fbcode_aot_cpu_re:
@@ -1433,11 +1434,7 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        def wrapper_call(*args) -> Any:
-            assert graph.graph_outputs is not None and len(graph.graph_outputs) > 0
-            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
-
-        return wrapper_call
+        return cls.cache[key]
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -2004,14 +2001,12 @@ def _worker_compile(
     device_interface = get_interface_for_device(device.type)
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
-    if hasattr(kernel, "precompile"):
-        kernel.precompile(warm_cache_only_with_cc=cc)
+    kernel.precompile(warm_cache_only_with_cc=cc)
 
 
 def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
     kernel = TritonCodeCache.load(kernel_name, source_code)
-    if hasattr(kernel, "precompile"):
-        kernel.precompile()
+    kernel.precompile()
     return kernel
 
 
