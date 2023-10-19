@@ -1083,10 +1083,12 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchCtxManagerClassVariable,
             TorchVariable,
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
+        from .torch import is_torch_ctx_manager_class
 
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
@@ -1174,6 +1176,8 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
+            elif is_torch_ctx_manager_class(member):
+                return TorchCtxManagerClassVariable(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):

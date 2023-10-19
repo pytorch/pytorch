@@ -137,7 +137,13 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import (
+    is_torch_ctx_manager_class,
+    tensor_dunder_fns,
+    torch_special_class_types,
+    TorchCtxManagerClassVariable,
+    TorchVariable,
+)
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -723,6 +729,12 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif issubclass(type(value), type) and is_torch_ctx_manager_class(value):
+            return TorchCtxManagerClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif is_allowed(value):
             if is_user_defined_allowed(value):

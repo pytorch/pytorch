@@ -503,6 +503,22 @@ def is_lazy_module(mod):
     return isinstance(mod, LazyModuleMixin)
 
 
+def is_torch_function_types(obj):
+    return isinstance(
+        obj,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+            torch._ops.OpOverloadPacket,
+            torch._ops.OpOverload,
+            torch._ops._OpNamespace,
+        ),
+    )
+
+
 @functools.lru_cache(4096)
 def print_once(*args):
     print(*args)

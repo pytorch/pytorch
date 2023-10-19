@@ -56,7 +56,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchVariable
+from .torch import TorchCtxManagerClassVariable, TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -93,6 +93,7 @@ __all__ = [
     "SliceVariable",
     "SuperVariable",
     "TensorVariable",
+    "TorchCtxManagerClassVariable",
     "TorchVariable",
     "TupleVariable",
     "UnknownVariable",

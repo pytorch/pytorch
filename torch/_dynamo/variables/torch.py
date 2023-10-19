@@ -180,6 +180,96 @@ def check_allowed_op(value):
             )
 
 
+torch_ctx_manager_classes = {
+    torch.no_grad,
+    torch.enable_grad,
+    torch.set_grad_enabled,
+    torch.inference_mode,
+    torch.cuda.streams.Stream,
+    torch.amp.autocast_mode.autocast,
+    torch.cuda.amp.autocast,
+    torch.cpu.amp.autocast,
+    torch.profiler.profile,
+    torch.profiler.record_function,
+    torch.autograd.profiler.profile,
+    torch.autograd.profiler.record_function,
+}
+
+
+def is_torch_ctx_manager_class(obj):
+    return obj in torch_ctx_manager_classes
+
+
+class TorchCtxManagerClassVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def reconstruct(self, codegen):
+        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
+
+    def as_proxy(self):
+        return self.value
+
+    def python_type(self):
+        if isinstance(self.value, (torch.Tensor, torch.nn.Module, torch.device)):
+            return type(self.value)
+        if isinstance(self.value, type):
+            return type
+        return super().python_type()
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_hasattr(self, tx, name):
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable.create(result).add_options(self)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import CUDAStreamVariable, GradModeVariable, InferenceModeVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if self.value is torch.no_grad:
+            return GradModeVariable.create(tx, False, **options)
+        elif self.value is torch.enable_grad:
+            return GradModeVariable.create(tx, True, **options)
+        elif self.value is torch.set_grad_enabled and len(args) == 1:
+            return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
+        elif self.value is torch.inference_mode:
+            return InferenceModeVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.cuda.streams.Stream:
+            return wrap_fx_proxy_cls(
+                CUDAStreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.cuda.streams.Stream,
+                    (),
+                    {},
+                ),
+                **options,
+            )
+        elif self.value in [
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
+        ]:
+            return AutocastModeVariable.create(self.value, args, kwargs)
+        elif self.value in (
+            torch.profiler.profile,
+            torch.profiler.record_function,
+            torch.autograd.profiler.profile,
+            torch.autograd.profiler.record_function,
+        ):
+            log.warning("Profiler function %s will be ignored", self.value)
+            return NullContextVariable(**options)
+
+
 class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
@@ -256,12 +346,10 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
+            CUDAStreamContextVariable,
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
-            InferenceModeVariable,
-            StreamContextVariable,
-            StreamVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -371,23 +459,6 @@ class TorchVariable(VariableTracker):
             torch.nn.modules.utils._ntuple,
         ):
             return self._call_ntuple(tx, args, kwargs, options)
-        elif self.value is torch.no_grad:
-            if len(args) == 1 and isinstance(
-                args[0], variables.functions.BaseUserFunctionVariable
-            ):
-                ctx = GradModeVariable.create(tx, False, initialized=False, **options)
-                return ctx.call_function(tx, args, kwargs)
-            else:
-                return GradModeVariable.create(tx, False, **options)
-        elif self.value is torch.enable_grad:
-            if len(args) == 1 and isinstance(
-                args[0], variables.functions.BaseUserFunctionVariable
-            ):
-                ctx = GradModeVariable.create(tx, True, initialized=False, **options)
-                return ctx.call_function(tx, args, kwargs)
-            return GradModeVariable.create(tx, True, **options)
-        elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
         elif self.value is torch.is_grad_enabled:
             assert not (args or kwargs)
             return ConstantVariable.create(
@@ -395,10 +466,6 @@ class TorchVariable(VariableTracker):
             ).add_guards(GradModeVariable._guards_singleton)
         elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
             return DeterministicAlgorithmsVariable.create(
-                tx, args[0].as_python_constant(), **options
-            )
-        elif self.value is torch.inference_mode:
-            return InferenceModeVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
         elif self.value is torch.are_deterministic_algorithms_enabled:
@@ -473,21 +540,26 @@ class TorchVariable(VariableTracker):
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
         elif can_dispatch_torch_function(tx, args, kwargs):
-            return dispatch_torch_function(tx, self, args, kwargs)
-        elif self.value in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ]:
-            return AutocastModeVariable.create(self.value, args, kwargs)
-        elif self.value in (
-            torch.profiler.profile,
-            torch.profiler.record_function,
-            torch.autograd.profiler.profile,
-            torch.autograd.profiler.record_function,
-        ):
-            warning_once(log, "Profiler function %s will be ignored", self.value)
-            return NullContextVariable(**options)
+            unwrapped = dispatch_torch_function(tx, self, args, kwargs)
+            # The wrapping here follows the logic in
+            # `torch.Tensor.__torch_function__`.
+            # TODO: This shouldn't be here as well, this should be traced in the base torch function
+            # impl
+            if self.value in torch.overrides.get_default_nowrap_functions():
+                return unwrapped
+
+            # TODO: It's not correct to always rewrap args[0]; with multiple subclasses the dispatch
+            # may be on the second or later argument. Fix this to respect what dispatch_torch_function says
+            # the dispatch should be.
+            # TODO: We also should not be rewrapping unconditionally, it's possible that
+            # the return value *MAY NOT* be a torch function override tensor.
+            # The solution here is to trace the base torch function impl
+            return TensorWithTFOverrideVariable.create(
+                tx,
+                unwrapped,
+                args[0].torch_function_fn,
+                args[0].subclass_type,
+            )
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
