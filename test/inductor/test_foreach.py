@@ -56,6 +56,7 @@ all_ops = parametrize(
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
+scalar_tensor_bin_ops = parametrize("op", bin_ops_under_test[:2], name_fn=lambda f: f.__name__)
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
@@ -115,6 +116,18 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
         )
+    
+    def _test_single_scalar_tensor(self, op):
+        def fn(a0, a1):
+            return op([a0, a1], torch.tensor(3.3, device="cuda:0"))
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+            ),
+        )
 
     # called in test_cpp_wrapper.py
     @requires_cuda()
@@ -131,6 +144,12 @@ class ForeachTests(TestCase):
     @scalar_bin_ops
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+    
+    @requires_cuda()
+    @scalar_tensor_bin_ops
+    def test_single_scalar_tensor(self, op):
+        self._test_single_scalar_tensor(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
