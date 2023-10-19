@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     slowTest as slow,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 
@@ -1014,7 +1015,7 @@ class LstsqCases(LinalgSquareTestCase, LinalgNonsquareTestCase):
 
 @instantiate_parametrized_tests
 class TestLstsq(LstsqCases, TestCase):
-    @xfail  # (reason="Lstsq: we use the future default =None")
+    @xpassIfTorchDynamo  # (reason="Lstsq: we use the future default =None")
     def test_future_rcond(self):
         a = np.array(
             [
@@ -1344,8 +1345,8 @@ class _TestNormGeneral(_TestNormBase):
     def test_vector_return_type(self):
         a = np.array([1, 0, 1])
 
-        exact_types = np.typecodes["AllInteger"]
-        inexact_types = np.typecodes["AllFloat"]
+        exact_types = "Bbhil"  # np.typecodes["AllInteger"]
+        inexact_types = "efdFD"  # np.typecodes["AllFloat"]
 
         all_types = exact_types + inexact_types
 
@@ -1523,7 +1524,7 @@ class _TestNorm2D(_TestNormBase):
     def test_matrix_return_type(self):
         a = np.array([[1, 0, 1], [0, 1, 1]])
 
-        exact_types = np.typecodes["AllInteger"]
+        exact_types = "Bbhil"  # np.typecodes["AllInteger"]
 
         # float32, complex64, float64, complex128 types are the only types
         # allowed by `linalg`, which performs the matrix operations used
@@ -1759,7 +1760,7 @@ class TestQR(TestCase):
         assert_(isinstance(r2, a_type))
         assert_almost_equal(r2, r1)
 
-    @xfail  # (reason="torch does not allow qr(..., mode='raw'")
+    @xpassIfTorchDynamo  # (reason="torch does not allow qr(..., mode='raw'")
     @parametrize("m, n", [(3, 0), (0, 3), (0, 0)])
     def test_qr_empty(self, m, n):
         k = min(m, n)
@@ -1773,7 +1774,7 @@ class TestQR(TestCase):
         assert_equal(h.shape, (n, m))
         assert_equal(tau.shape, (k,))
 
-    @xfail  # (reason="torch does not allow qr(..., mode='raw'")
+    @xpassIfTorchDynamo  # (reason="torch does not allow qr(..., mode='raw'")
     def test_mode_raw(self):
         # The factorization is not unique and varies between libraries,
         # so it is not possible to check against known values. Functional
@@ -1908,7 +1909,7 @@ class TestCholesky(TestCase):
 
 
 class TestMisc(TestCase):
-    @xfail  # (reason="endianness")
+    @xpassIfTorchDynamo  # (reason="endianness")
     def test_byteorder_check(self):
         # Byte order check should pass for native order
         if sys.byteorder == "little":
@@ -2243,7 +2244,7 @@ class TestTensorsolve(TestCase):
 
 
 class TestMisc2(TestCase):
-    @xfail  # (reason="TODO")
+    @xpassIfTorchDynamo  # (reason="TODO")
     def test_unsupported_commontype(self):
         # linalg gracefully handles unsupported type
         arr = np.array([[1, -2], [2, 5]], dtype="float16")
@@ -2251,7 +2252,6 @@ class TestMisc2(TestCase):
         with assert_raises(TypeError):
             linalg.cholesky(arr)
 
-    @xfail  # (reason="TODO")
     # @slow
     # @pytest.mark.xfail(not HAS_LAPACK64, run=False,
     #                   reason="Numpy not compiled with 64-bit BLAS/LAPACK")
