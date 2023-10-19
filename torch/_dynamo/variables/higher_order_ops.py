@@ -346,7 +346,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
-            return AutogradFunctionMethodHigherOrderVariable(value, source, **kwargs)
+            return AutogradFunctionMethodHigherOrderVariable(
+                value=value, source=source, **kwargs
+            )
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -1056,29 +1058,22 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def __init__(self, value, source: Optional[Source] = None, **kwargs):
+    def __init__(
+        self, value, fwd_bwd_tracer=None, source: Optional[Source] = None, **kwargs
+    ):
         super().__init__(value, source, **kwargs)
+        # The fwd_bwd_tracer is owned by AutogradFunctionVariable and passed
+        # in for speculation. It allows us to share tracing information about proxies
+        # across fwd bwd, such as when users stash tensors on a context.
+        self.fwd_bwd_tracer = fwd_bwd_tracer
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import (
-            AutogradFunctionContextVariable,
-            ConstantVariable,
-            UserFunctionVariable,
-        )
+        from . import ConstantVariable, UserFunctionVariable
         from .builder import wrap_fx_proxy
 
-        if self.value.__name__ == "trampoline_autograd_apply":
-            tracer = None
-        else:
-            assert isinstance(args[0], AutogradFunctionContextVariable)
-            tracer = args[0].tracer
-            if not tracer:
-                tracer = torch._dynamo.output_graph.SubgraphTracer(
-                    tx.output, parent=tx.output.current_tracer, source_target=self.value
-                )
-                args[0].tracer = tracer
+        tracer = self.fwd_bwd_tracer
 
         self.check_kwargs(kwargs, ConstantVariable)
 
