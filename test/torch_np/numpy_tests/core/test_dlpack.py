@@ -3,7 +3,7 @@
 import functools
 import sys
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import skipIf as skipif
 
 import pytest
 
@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -33,7 +34,7 @@ IS_PYPY = False
 
 @instantiate_parametrized_tests
 class TestDLPack(TestCase):
-    @xfail  # (reason="pytorch seems to handle refcounts differently")
+    @xpassIfTorchDynamo  # (reason="pytorch seems to handle refcounts differently")
     @skipif(IS_PYPY, reason="PyPy can't get refcounts.")
     def test_dunder_dlpack_refcount(self):
         x = np.arange(5)
@@ -42,7 +43,7 @@ class TestDLPack(TestCase):
         del y
         assert sys.getrefcount(x) == 2
 
-    @xfail  # (reason="pytorch does not raise")
+    @xpassIfTorchDynamo  # (reason="pytorch does not raise")
     def test_dunder_dlpack_stream(self):
         x = np.arange(5)
         x.__dlpack__(stream=None)
@@ -50,7 +51,7 @@ class TestDLPack(TestCase):
         with pytest.raises(RuntimeError):
             x.__dlpack__(stream=1)
 
-    @xfail  # (reason="pytorch seems to handle refcounts differently")
+    @xpassIfTorchDynamo  # (reason="pytorch seems to handle refcounts differently")
     @skipif(IS_PYPY, reason="PyPy can't get refcounts.")
     def test_from_dlpack_refcount(self):
         x = np.arange(5)

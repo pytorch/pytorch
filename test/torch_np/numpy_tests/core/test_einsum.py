@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -760,15 +761,15 @@ class TestEinsum(TestCase):
             np.einsum("ij,i->", x, y, optimize=optimize), [2.0]
         )  # contig_stride0_outstride0_two
 
-    @xfail  # (reason="int overflow differs in numpy and pytorch")
+    @xpassIfTorchDynamo  # (reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_int8(self):
         self.check_einsum_sums("i1")
 
-    @xfail  # (reason="int overflow differs in numpy and pytorch")
+    @xpassIfTorchDynamo  # (reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_uint8(self):
         self.check_einsum_sums("u1")
 
-    @xfail  # (reason="int overflow differs in numpy and pytorch")
+    @xpassIfTorchDynamo  # (reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_int16(self):
         self.check_einsum_sums("i2")
 
@@ -779,7 +780,7 @@ class TestEinsum(TestCase):
     def test_einsum_sums_int64(self):
         self.check_einsum_sums("i8")
 
-    @xfail  # (reason="np.float16(4641) == 4640.0")
+    @xpassIfTorchDynamo  # (reason="np.float16(4641) == 4640.0")
     def test_einsum_sums_float16(self):
         self.check_einsum_sums("f2")
 
@@ -963,7 +964,7 @@ class TestEinsum(TestCase):
         y = tensor.trace(axis1=0, axis2=2).trace()
         assert_allclose(x, y)
 
-    @xfail  # (reason="no base")
+    @xpassIfTorchDynamo  # (reason="no base")
     def test_einsum_all_contig_non_contig_output(self):
         # Issue gh-5907, tests that the all contiguous special case
         # actually checks the contiguity of the output
@@ -1173,7 +1174,7 @@ class TestEinsum(TestCase):
         g = np.arange(64).reshape(2, 4, 8)
         self.optimize_compare("obk,ijk->ioj", operands=[g, g])
 
-    @xfail  # (reason="order='F' not supported")
+    @xpassIfTorchDynamo  # (reason="order='F' not supported")
     def test_output_order(self):
         # Ensure output order is respected for optimize cases, the below
         # conraction should yield a reshaped tensor view

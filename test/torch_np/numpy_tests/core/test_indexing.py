@@ -19,6 +19,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
+    xpassIfTorchDynamo,
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -135,15 +137,13 @@ class TestIndexing(TestCase):
         assert_equal(a[None], a[np.newaxis])
         assert_equal(a[None].ndim, a.ndim + 1)
 
+    @skip
     def test_empty_tuple_index(self):
         # Empty tuple index creates a view
         a = np.array([1, 2, 3])
         assert_equal(a[()], a)
         assert_(a[()].tensor._base is a.tensor)
         a = np.array(0)
-        raise SkipTest(
-            "torch doesn't have scalar types with distinct instancing behaviours"
-        )
         assert_(isinstance(a[()], np.int_))
 
     def test_same_kind_index_casting(self):
@@ -185,7 +185,6 @@ class TestIndexing(TestCase):
         assert_(a[...] is not a)
         assert_equal(a[...], a)
         # `a[...]` was `a` in numpy <1.9.
-        assert_(a[...].tensor._base is a.tensor)
 
         # Slicing with ellipsis can skip an
         # arbitrary number of dimensions
@@ -201,6 +200,14 @@ class TestIndexing(TestCase):
         b = np.array(1)
         b[(Ellipsis,)] = 2
         assert_equal(b, 2)
+
+    @xfailIfTorchDynamo  # numpy ndarrays do not have `.tensor` attribute
+    def test_ellipsis_index_2(self):
+        a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        assert_(a[...] is not a)
+        assert_equal(a[...], a)
+        # `a[...]` was `a` in numpy <1.9.
+        assert_(a[...].tensor._base is a.tensor)
 
     def test_single_int_index(self):
         # Single integer index selects one row
@@ -413,7 +420,7 @@ class TestIndexing(TestCase):
         # Unlike the non nd-index:
         assert_(arr[index,].shape != (1,))
 
-    @xfail  # (reason="XXX: low-prio behaviour to support")
+    @xpassIfTorchDynamo  # (reason="XXX: low-prio behaviour to support")
     def test_broken_sequence_not_nd_index(self):
         # See https://github.com/numpy/numpy/issues/5063
         # If we have an object which claims to be a sequence, but fails
@@ -571,7 +578,7 @@ class TestBroadcastedAssignments(TestCase):
 
 
 class TestFancyIndexingCast(TestCase):
-    @xfail  # (
+    @xpassIfTorchDynamo  # (
     #    reason="XXX: low-prio to support assigning complex values on floating arrays"
     # )
     def test_boolean_index_cast_assign(self):
