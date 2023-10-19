@@ -1064,7 +1064,9 @@ def cat(inputs, dim=0):
     pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
     pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
 
-    if (pointwise_uses or pointwise_inputs) and len(inputs) <= config.max_pointwise_cat_inputs:
+    if (pointwise_uses or pointwise_inputs) and len(
+        inputs
+    ) <= config.max_pointwise_cat_inputs:
         return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
