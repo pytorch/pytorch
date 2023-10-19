@@ -1728,7 +1728,7 @@ def forward(self, x_1, output_1):
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
         ):
-            output = torch.zeros_like(x)
+            output = torch.zeros_like(x, requires_grad=grad)
             n_elements = output.numel()
 
             def grid_fn(meta):

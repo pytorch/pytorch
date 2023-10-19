@@ -75,6 +75,16 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return has_metadata_mutation_;
   };
 
+  // Denotes a mutation for the purposes of passing a tensor to a triton kernel
+  void mark_mutated_by_triton_kernel() {
+    mutation_from_triton_kernels_counter_++;
+  }
+  // Are all the mutations happening to the tensor for the purposes of passing
+  // to a triton kernel
+  bool are_all_mutations_triton_only() const {
+    return mutation_from_triton_kernels_counter_ == mutation_counter_;
+  }
+
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
   // Replay the views (if any) to regenerate the current tensor off of the
@@ -172,6 +182,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
+  uint64_t mutation_counter_ = 0;
+  uint64_t mutation_from_triton_kernels_counter_ = 0;
   bool has_metadata_mutation_ = false;
 
   size_t generation_ = 0;
@@ -227,6 +239,10 @@ TORCH_API void replace_(
 
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
+
+TORCH_API void mark_mutated_by_triton_kernel(const Tensor& functional_tensor);
+
+TORCH_API bool are_all_mutations_triton_only(const Tensor& functional_tensor);
 
 // These two methods are XLA-specific logic and are no-ops
 // for the normal functionalization flow.

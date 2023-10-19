@@ -742,6 +742,12 @@ def gen_pyi(
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
+            "_functionalize_mark_mutated_by_triton_kernel": [
+                "def _functionalize_mark_mutated_by_triton_kernel(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_triton_only": [
+                "def _functionalize_are_all_mutations_triton_only(t: Tensor) -> _bool: ..."
+            ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
