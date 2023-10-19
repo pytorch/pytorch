@@ -302,6 +302,8 @@ python test/test_jit.py TestJit.test_Sequential
 
 **Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
 
+**Notice:** If you fail to run the tests with `TESTCLASSNAME.TESTNAME`, continue to the next section so you can try running the tests with `pytest`.
+
 ### Better local unit tests with `pytest`
 
 We don't officially support `pytest`, but it works well with our
@@ -318,6 +320,17 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
+
+Furthermore, you can also narrow down what you're testing even further,
+consider you can find the function name of a test easily, so you can simply
+run an individual test just by specifying its function name with '-k' flag:
+
+```bash
+python test/test_linalg.py -k test_linalg_matrix_exp_perverse_nan_values
+```
+
+As we can see, `-k` flag is very powerful, using it to run tests is quite
+convenient.
 
 ### Local linting
 
