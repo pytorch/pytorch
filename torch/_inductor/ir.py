@@ -60,6 +60,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_dynamic,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -3068,13 +3069,29 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        buffer_names = []
         for i in range(len(inputs)):
-            concat_kernel.inputs.append(
-                cls.realize_into(
-                    inputs[i],
-                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
-                )
+            input_buffer = cls.realize_into(
+                inputs[i],
+                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
+            concat_kernel.inputs.append(input_buffer)
+
+            if isinstance(inputs[i].data, BaseView):
+                input_unwrapped = inputs[i].data.unwrap_view()
+            else:
+                input_unwrapped = inputs[i].data
+
+            if (
+                input_unwrapped.is_input_buffer()
+                and inputs[i].get_device().type == "cuda"
+                and not is_dynamic(input_buffer)
+            ):
+                buffer_names.append(input_buffer.get_name())
+
+        if len(buffer_names) > 1:
+            V.graph.register_list(buffer_names)
+
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
 
@@ -3397,21 +3414,22 @@ class ExternKernel(InputsKernel):
         )
 
     def codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            if V.graph.cpp_wrapper:
-                # TODO: use native_functions.yaml as the ground truth
+        if V.graph.cpp_wrapper:
+            # FIXME: we should unconditionally fill self.kwargs with missing default values
+            # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
+            if self.kwargs:
                 assert (
                     self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel has to be provided"
-                for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    v = self.get_kwargs_value(arg_name)
-                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
-            else:
-                kwargs = [
-                    f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
-                    for k, v in self.kwargs.items()
-                ]
+                ), "ordered_kwargs_for_cpp_kernel is missing"
+            kwargs = []
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                v = self.get_kwargs_value(arg_name)
+                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+        else:
+            kwargs = [
+                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
+                for k, v in self.kwargs.items()
+            ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -3813,12 +3831,10 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
-        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
         assert isinstance(
             kernel,
             (
                 torch._ops.OpOverload,
-                torch._ops.OpOverloadPacket,
                 torch._ops.HigherOrderOperator,
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
@@ -3830,19 +3846,17 @@ class FallbackKernel(ExternKernelAlloc):
                 else kernel.__name__
             )
             if V.graph.cpp_wrapper:
-                if isinstance(kernel, torch._ops.OpOverload):
-                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                    self.kernel = (
-                        f"at::_ops::{kernel.__name__.replace('.default', '')}::call"
-                        if kernel._overloadname == "default"
-                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                    )
-                    schema = kernel._schema
-                else:
-                    self.kernel = f"at::{op_base_name}"
+                assert isinstance(kernel, torch._ops.OpOverload)
+                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                self.kernel = (
+                    f"at::{op_base_name}"
+                    if kernel._overloadname == "default"
+                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                )
+                schema = kernel._schema
             else:
                 self.kernel = f"aten.{op_base_name}"
 
@@ -3930,7 +3944,11 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
-        if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
+        if (
+            V.graph.cpp_wrapper
+            and hasattr(self, "args_default_value")
+            and not config.is_fbcode()
+        ):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
             # Some positional args are not provided, need to use their default value in cpp wrapper
@@ -3989,7 +4007,9 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
         serializer = GraphModuleSerializer(None, None)
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(
+            self.op_overload, args, kwargs, include_default_values=False
+        )
 
         # serialize_outputs
         def handle_single_output(return_type, output):

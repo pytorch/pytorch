@@ -15,7 +15,7 @@ import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity
+from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
@@ -136,6 +136,7 @@ class TritonTemplateKernel(TritonKernel):
         named_args = self.input_nodes[
             self.prefix_args : len(self.input_nodes) - self.suffix_args
         ]
+
         assert len(argnames) == len(named_args), (
             len(argnames),
             len(named_args),
@@ -256,6 +257,7 @@ class TritonTemplateKernel(TritonKernel):
         ):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
+
         V.ops.store(  # type: ignore[attr-defined]
             self.output_node.get_name(),
             output_index,
@@ -926,19 +928,22 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
-        return rand_strided(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            device=node.get_device(),
-            dtype=node.get_dtype(),
-            extra_size=node.layout.offset,
-        )
+        # preserve rng states to avoid the rand_strided call below changes
+        # the rng states for the real model code.
+        with preserve_rng_state():
+            return rand_strided(
+                V.graph.sizevars.size_hints(
+                    node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                device=node.get_device(),
+                dtype=node.get_dtype(),
+                extra_size=node.layout.offset,
+            )
 
     @staticmethod
     def key_of(node):
