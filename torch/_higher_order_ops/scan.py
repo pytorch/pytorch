@@ -96,8 +96,8 @@ def create_fw_bw_graph(f, flat_init, flat_xs):
             
             carry_length = len(example_init)
             leading_dim_size = example_xs[0].shape[0]
-            import pdb
-            pdb.set_trace()
+            #import pdb
+            #pdb.set_trace()
             #Expect BxF, BxF
             flattened_out = f(*example_init, *example_xs)
             #example_flat_carry_out, example_flat_ys = _stack_pytree([flattened_out[:carry_length]]*(leading_dim_size+1)), _stack_pytree([flattened_out[carry_length:]]*(leading_dim_size))
@@ -178,8 +178,8 @@ def create_fw_bw_graph(f, flat_init, flat_xs):
 
         #import pdb
         #pdb.set_trace()
-        #Expects BxF, TxBxF, BxF, TxBxF
-        print('Expected: BxF, TxBxF, BxF, TxBxF')
+        #Expects BxF, BxF, BxF, BxF
+        print('Expected: BxF, BxF, BxF, BxF')
         print((example_grad_carry_out[0].shape, example_grad_ys[0].shape, example_init[0].shape, example_xs[0].shape))
         #bw_graph = make_fx(bw_f)(*example_grad_carry_out, *example_grad_ys, *example_init, *example_all_xs)
         bw_graph = make_fx(bw_f)(*example_grad_carry_out, *example_grad_ys, *example_init, *example_xs)
@@ -369,7 +369,11 @@ class ScanAutogradOp(torch.autograd.Function):
         fwd_args = ctx.saved_tensors[:ctx._num_input_args]
         # bring back the nested carries list by chunking up the list to equal lengthed nested lists
         # all carries should have length num_init_args
+        #From 30x2 into 10x3x2; 20x1x2
         carries = [_stack_pytree(flat_carries[i*ctx._leading_dim_size:(i+1)*ctx._leading_dim_size]) for i in range(len(flat_carries)//ctx._leading_dim_size)]
+        #From 20x1x2 into 2 10x1x2
+        carries = [carries[i*ctx._num_init_args:(i+1)*ctx._num_init_args] for i in range(len(carries)//ctx._num_init_args)]
+        
         flat_xs = fwd_args[ctx._num_init_args:]
         # carry and init should have the same spec
         final_carry_grad = flat_grads[:ctx._num_init_args]
