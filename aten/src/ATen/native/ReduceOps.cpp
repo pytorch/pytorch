@@ -926,8 +926,6 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   auto out_len = self.sym_size(dim) - 1;
   auto result = self;
   bool is_kBool = (self.dtype() == at::kBool);
-
-  // Short circuit for the common n = 1 case to avoid unnecessary guard
   n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
 
   for (C10_UNUSED const auto i : c10::irange(n)) {
