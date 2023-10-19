@@ -807,12 +807,12 @@ PyObject* THCPModule_attachOutOfMemoryObserver(
   Py_XINCREF(observer);
   auto obs = [observer](
                  int64_t device,
-                 int64_t alloc,
-                 int64_t device_allocated,
-                 int64_t device_free) {
+                 size_t alloc,
+                 size_t device_allocated,
+                 size_t device_free) {
     py::gil_scoped_acquire g;
     PyObject* result = PyObject_CallFunction(
-        observer, "LLLL", device, alloc, device_allocated, device_free);
+        observer, "LKKK", device, alloc, device_allocated, device_free);
     if (!result) {
       throw py::error_already_set();
     }
@@ -1088,7 +1088,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto data_ptr = storage_impl->data_ptr().get();
     bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
-    TORCH_CHECK("Expected standard deleter");
+    TORCH_CHECK(succeeded, "Expected standard deleter");
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
