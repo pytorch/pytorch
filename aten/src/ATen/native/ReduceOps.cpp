@@ -955,7 +955,9 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
 
 static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
   if (n == 0) {
-    result.resize__symint(self.sym_sizes()).copy_(self);
+    if (resize_output_check_symint(result, self.sym_sizes())) {
+      result.resize__symint(self.sym_sizes());
+    }
     check_scalar_type_device_layout_equal(result, self);
     return result.copy_(self);
   }
