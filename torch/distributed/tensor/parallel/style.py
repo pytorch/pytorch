@@ -482,8 +482,8 @@ class RowwiseParallel(ParallelStyle):
 
     def __init__(
         self,
-        _prepare_input=make_input_shard_1d_last_dim,
-        _prepare_output=make_output_tensor,
+        _prepare_input=None,
+        _prepare_output=None,
         *,
         input_layouts=Shard(-1),
         output_layouts=Replicate(),
@@ -494,19 +494,32 @@ class RowwiseParallel(ParallelStyle):
                 "RowwiseParallel only supports single input/output."
             )
 
+        if _prepare_input is not None:
+            prepare_input_fn = _prepare_input
+        if input_layouts == Shard(-1):
+            prepare_input_fn = make_input_shard_1d_last_dim
+        else:
+            prepare_input_fn = _get_prepare_input(
+                input_layouts,
+                Shard(-1),
+            )
+
+        if _prepare_output is not None:
+            prepare_output_fn = _prepare_output
+        elif output_layouts == Replicate():
+            prepare_output_fn = make_output_tensor
+        else:
+            prepare_output_fn = _get_prepare_output(
+                output_layouts,
+                use_local_output,
+            )
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
-            _prepare_input=_prepare_input
-            if _prepare_input is not None
-            else _get_prepare_input(
-                input_layouts,
-                Shard(-1),
-            ),
-            _prepare_output=_prepare_output
-            if _prepare_output is not None
-            else _get_prepare_output(output_layouts, use_local_output),
+            _prepare_input=prepare_input_fn,
+            _prepare_output=prepare_output_fn,
         )
 
 
@@ -553,8 +566,8 @@ class ColwiseParallel(ParallelStyle):
 
     def __init__(
         self,
-        _prepare_input=make_input_replicate_1d,
-        _prepare_output=make_sharded_output_tensor,
+        _prepare_input=None,
+        _prepare_output=None,
         *,
         input_layouts=Replicate(),
         output_layouts=Shard(-1),
@@ -568,21 +581,32 @@ class ColwiseParallel(ParallelStyle):
                 "ColwiseParallel only supports single input/output."
             )
 
+        if _prepare_input is not None:
+            prepare_input_fn = _prepare_input
+        if input_layouts == Replicate():
+            prepare_input_fn = make_input_replicate_1d
+        else:
+            prepare_input_fn = _get_prepare_input(
+                input_layouts,
+                Replicate(),
+            )
+
+        if _prepare_output is not None:
+            prepare_output_fn = _prepare_output
+        elif output_layouts == Shard(-1):
+            prepare_output_fn = make_sharded_output_tensor
+        else:
+            prepare_output_fn = _get_prepare_output(
+                output_layouts,
+                use_local_output,
+            )
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
-            _prepare_input=_prepare_input
-            if _prepare_input is not None
-            else _get_prepare_input(
-                input_layouts,
-                [Replicate()] * len(input_layouts)  # type: ignore[arg-type]
-                if isinstance(input_layouts, tuple)
-                else Replicate(),
-            ),
-            _prepare_output=_prepare_output
-            if _prepare_output is not None
-            else _get_prepare_output(output_layouts, use_local_output),
+            _prepare_input=prepare_input_fn,
+            _prepare_output=prepare_output_fn,
         )
 
 
