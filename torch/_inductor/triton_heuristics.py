@@ -930,6 +930,8 @@ def pointwise(
     """
     Construct @triton.heuristics() based on size_hints.
     """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
 
@@ -1036,6 +1038,8 @@ def reduction(
     inductor_meta=None,
 ):
     """args to @triton.heuristics()"""
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+
     assert triton_meta is not None
     rnumel = size_hints[-1]
     if len(size_hints) == 2:

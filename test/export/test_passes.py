@@ -258,9 +258,8 @@ class TestPasses(TestCase):
             ep.graph, torch.ops.aten.scalar_tensor.default
         )
 
-        # TODO: De-duplicate assertions for same symbol.
-        self.assertEqual(num_assert, 4)
-        self.assertEqual(num_scalar_tensor, 4)
+        self.assertEqual(num_assert, 2)
+        self.assertEqual(num_scalar_tensor, 2)
 
         with self.assertRaisesRegex(
             RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."

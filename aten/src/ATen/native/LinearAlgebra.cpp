@@ -59,6 +59,7 @@
 #include <ATen/ops/frobenius_norm_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/ger_native.h>
 #include <ATen/ops/index_select.h>
@@ -2603,7 +2604,11 @@ Tensor mexp_impl(
   }
 
   if (!compute_highest_degree_approx) {
-    auto res = at::empty_like(a, {}, at::MemoryFormat::Contiguous);
+    // To prevent undefined behavior which outputs "normal" result from a matrix
+    // contains NaN values, we put NaN values in `res`, so if input has NaN values,
+    // its computation will be skipped to return the NaN contained `res` directly.
+    auto res = at::full_like(a, std::numeric_limits<double>::quiet_NaN(), {},
+                             at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
