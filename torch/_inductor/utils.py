@@ -342,6 +342,22 @@ def pad_listlike(x, size):
         return x
 
 
+# Used to ensure that iterating over a set is deterministic
+def tuple_sorted(x):
+    if len(x) == 0:
+        return []
+
+    def sort_func(elem):
+        if isinstance(elem, str):
+            return elem
+        else:
+            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
+            # but we are not able to do isinstance assert because of circular dependency
+            return elem.get_name()
+
+    return sorted(x, key=sort_func)
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
@@ -1175,6 +1191,31 @@ def reduction_num_outputs(reduction_type):
 
 def is_linux() -> bool:
     return platform.system() == "Linux"
+
+
+def has_free_symbols(itr):
+    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if has_free_symbols(t.data.get_size()) or (
+                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+            ):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
 
 
 # Placeholder strings used in triton codegen.

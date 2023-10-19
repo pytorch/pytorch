@@ -855,10 +855,6 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 }
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
-  emitCollectiveStart(*work.get());
-  work->getFuture()->addCallback(
-      [=](auto& f) { this->emitCollectiveEnd(*work.get()); });
-
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
   lock.unlock();

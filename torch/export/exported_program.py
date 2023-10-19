@@ -425,7 +425,6 @@ class ExportedProgram:
         root: Union[torch.nn.Module, Dict[str, Any]],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        call_spec: Any,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: Dict[sympy.Symbol, Any],
         equality_constraints: List[Tuple[Any, Any]],
@@ -687,8 +686,12 @@ class ExportedProgram:
             for old_node, new_node in zip(old_outputs, new_outputs)
         }
 
-        def make_argument_spec(node) -> ArgumentSpec:
-            val = node.meta["val"]
+        def make_argument_spec(old_node, node) -> ArgumentSpec:
+            if "val" not in node.meta:
+                assert len(node.users) == 0
+                val = old_node.meta["val"]
+            else:
+                val = node.meta["val"]
             if isinstance(val, torch.Tensor):
                 return TensorArgument(name=node.name)
             elif isinstance(val, torch.SymInt):
@@ -719,15 +722,15 @@ class ExportedProgram:
             grad_user_inputs={},
             loss_output=None,
             inputs=[
-                make_argument_spec(node)
-                for node in gm.graph.nodes
+                make_argument_spec(old_placeholders[i], node)
+                for i, node in enumerate(gm.graph.nodes)
                 if node.op == "placeholder"
             ],
             outputs=[
-                make_argument_spec(node)
-                for node in pytree.tree_flatten(
-                    next(iter(reversed(gm.graph.nodes))).args
-                )[0]
+                make_argument_spec(old_outputs[i], node)
+                for i, node in enumerate(
+                    pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]
+                )
             ],
         )
 
@@ -768,7 +771,6 @@ class ExportedProgram:
             gm,
             gm.graph,
             new_graph_signature,
-            copy.deepcopy(self.call_spec),
             self.state_dict,
             new_range_constraints,
             new_equality_constraints,
@@ -885,7 +887,6 @@ class ExportedProgram:
             transformed_gm,
             transformed_gm.graph,
             _get_updated_graph_signature(self.graph_signature, transformed_gm),
-            copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),

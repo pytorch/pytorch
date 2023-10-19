@@ -71,8 +71,7 @@ static void upsample_nearest3d_out_frame(
         const auto* pos1 = &i_p[d1 * input_height * input_width + h1 * input_width + w1];
         auto* pos2 = &o_p[d2 * output_height * output_width + h2 * output_width + w2];
 
-        for (const auto c : c10::irange(channels)) {
-          (void)c; //Suppress unused variable warning
+        for (C10_UNUSED const auto c : c10::irange(channels)) {
           pos2[0] = pos1[0];
           pos1 += input_depth * input_height * input_width;
           pos2 += output_depth * output_height * output_width;
