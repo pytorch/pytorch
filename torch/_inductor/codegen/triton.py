@@ -2159,7 +2159,12 @@ class TritonScheduling:
                     kernel_IndentedBuffer.writeline(f"{{")
                 else:
                     kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
-                kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
+                if config.multiple_streams_profiling:
+                    kernel_IndentedBuffer.writeline(f"with torch._C._profiler._RecordFunctionFast('{node_name}'):")
+                    with kernel_IndentedBuffer.indent():
+                        kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
+                else:
+                    kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
                 if V.graph.cpp_wrapper:
                     kernel_IndentedBuffer.writeline(f"}}")
                 else:

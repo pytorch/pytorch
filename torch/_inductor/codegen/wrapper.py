@@ -538,8 +538,14 @@ class WrapperCodeGen(CodeGen):
             if V.graph.cpp_wrapper:
                 kernel_IndentedBuffer.writeline(f"at::cuda::setCurrentCUDAStream(stream{stream_id});")
             if isinstance(call_strs, list):
-                for call_str in call_strs:
-                    kernel_IndentedBuffer.writeline(call_str)
+                if config.multiple_streams_profiling and not V.graph.cpp_wrapper:
+                    kernel_IndentedBuffer.writeline(f"with torch._C._profiler._RecordFunctionFast('{node_name}'):")
+                    with kernel_IndentedBuffer.indent():
+                        for call_str in call_strs:
+                            kernel_IndentedBuffer.writeline(call_str)
+                else:
+                    for call_str in call_strs:
+                        kernel_IndentedBuffer.writeline(call_str)
             else:
                 kernel_IndentedBuffer.writeline(call_strs)
             if V.graph.cpp_wrapper:

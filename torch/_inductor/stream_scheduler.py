@@ -608,13 +608,75 @@ class SSGraph:
             new_node_list.append(ssnode.original_node)
         return new_node_list
 
-        
+    def check_fingerprint(self, ssgraphs_from_file):
+        """
+        This function is used to check if there is matched ssgraph in the file. If found, directly load the stream assignment from the file rather than assigning the stream again.
+        Args: 
+            ssgraphs_from_file: {graph_name: {'buf0':{successors:[], predecessors:[], stream_id:0,},,,}}. It records all the ssgraphs from the file.
+        """
+        def two_list_equal(list1, list2):
+            if len(list1) != len(list2):
+                return False
+            for item in list1:
+                if item not in list2:
+                    return False
+            return True
+        for graph_name, graph in ssgraphs_from_file.items():
+            if graph_name.startswith("graph_"):
+                if len(graph) != len(self.ssnodes):
+                    continue
+                for ssnode in self.ssnodes:
+                    if ssnode.get_name() not in graph:
+                        break
+                else:
+                    for ssnode in self.ssnodes:
+                        # make sure the predecessors and successors are the same
+                        if not (two_list_equal(ssnode.successors.keys(), graph[ssnode.get_name()]["successors"]) and two_list_equal(ssnode.predecessors.keys(), graph[ssnode.get_name()]["predecessors"])):
+                            break
+                    else:
+                        for ssnode in self.ssnodes:
+                            ssnode.stream_id = graph[ssnode.get_name()]["stream_id"]
+                            self.stream_pool[ssnode.stream_id] += 1
+                        self.event_assign()
+                        return True
+        else:
+            return False
+
 
     def print_graph(self):
         import datetime
         current_time = datetime.datetime.now().strftime("%Y%m%d%H%M")
-        reset_log_path = temporary_log_path(f'{V.debug._path}/stream_assignment_{current_time}.log')
-
+        debug_path=V.debug._path
+        if not debug_path:
+            debug_path = "/tmp/yhao/debug2023/"
+            os.makedirs(debug_path, exist_ok=True)
+        content = {}
+        stream_assign_file = f"{debug_path}/resnet18_stream_assignment.json"
+        if os.path.exists(stream_assign_file):
+            with open(stream_assign_file, 'r') as fin:
+                content = json.load(fin)
+        else:
+            content = {}
+        keys = list(content.keys())
+        # let's use graph_X as the key for different graphs
+        graphs = [_ for _ in keys if _.startswith("graph_")]
+        if len(graphs) == 0:
+            graph_name = "graph_0"
+        else:
+            # get the max number of the graph
+            max_graph = max([int(_.split("_")[1]) for _ in graphs])
+            graph_name = f"graph_{max_graph+1}"
+        content[graph_name] = {}
+        content[graph_name]['order'] = []
+        for ssnode in self.ssnodes:
+            content[graph_name]['order'].append(ssnode.get_name())
+            content[graph_name][ssnode.get_name()] = {}
+            content[graph_name][ssnode.get_name()]["stream_id"] = ssnode.stream_id
+            content[graph_name][ssnode.get_name()]["predecessors"] = list(ssnode.predecessors.keys())
+            content[graph_name][ssnode.get_name()]["successors"] = list(ssnode.successors.keys())
+        with open(stream_assign_file, 'w') as fout:
+            json.dump(content, fout)
+        reset_log_path = temporary_log_path(f'{debug_path}/stream_assignment_{current_time}.log')
         log.info("=====TorchInductor Stream Scheduler Tree=====")
         for node in self.ssnodes:
             log.info(node.get_name())
@@ -677,8 +739,17 @@ def stream_schedule(snodes):
         ssgraph.event_assign()
         checkpoints.save()
     else:
-        ssgraph.stream_assign()
-        ssgraph.event_assign()
+        # load updated stream assignment. It saves the json file path to import.
+        load_existing_stream_assignment = os.getenv("TORCHINDUCTOR_LOAD_EXISTING_STREAM_ASSIGNMENT", None)
+        success = False
+        if load_existing_stream_assignment is not None:
+            content = {}
+            with open(load_existing_stream_assignment, 'r') as fin:
+                content = json.load(fin)
+            success = ssgraph.check_fingerprint(content)
+        if not success:
+            ssgraph.stream_assign()
+            ssgraph.event_assign()
     if os.getenv("TORCHINDUCTOR_STREAM_PRINT_GRAPH", "0") == "1" and V.debug:
         ssgraph.print_graph()
     V.graph.stream_graph = ssgraph

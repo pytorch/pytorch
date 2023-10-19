@@ -31,7 +31,7 @@ pick_loop_orders = True
 inplace_buffers = True
 
 # allow reusing buffers for more efficient memory use
-allow_buffer_reuse = True
+allow_buffer_reuse = False
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -142,6 +142,7 @@ debug_index_asserts = False
 # Enable mutiple streams for codegen
 multiple_streams = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS", "1") == "1"
 
+multiple_streams_profiling = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS_PROFILING", "0") == "1"
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
