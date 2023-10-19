@@ -1184,7 +1184,22 @@ def run_functionalized_fw_and_collect_metadata(
             elif curr_storage in inp_storage_refs:
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
-                if is_input_tensor:
+                num_aliased_outs = out_tensor_alias_counts[curr_storage]
+                num_multi_output_view_outs = num_aliased_tensors_that_are_multi_output_views[curr_storage]
+                num_aliased_outs_that_are_not_multi_output_views = num_aliased_outs - num_multi_output_view_outs
+                if o.grad_fn is not None and num_aliased_outs_that_are_not_multi_output_views == 0:
+                    # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+                    # In particular, given:
+                    # def f(x):
+                    #     return list(x.unbind(0))
+                    # The main reason we ordinarily try to regenerate these output aliases outside of the
+                    # compiled autograd.Function is because if any of the outputs are later mutated,
+                    # autograd needs to perform view-replay to regenerate them.
+                    # However, autograd does not allow users to mutate multi-output views
+                    # in any way that can change the autograd metadata of other aliases.
+                    # So we hide this aliasing from autograd here.
+                    output_type = OutputType.non_alias
+                elif is_input_tensor:
                     output_type = OutputType.is_input
                 else:
                     output_type = OutputType.alias_of_input

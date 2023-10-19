@@ -825,6 +825,58 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
     return [view]""")
 
+    def test_output_aliases_input_multi_output_view(self):
+        # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
+        def f1(a):
+            return list(a.unbind(0))
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        inp_ref = torch.ones(3, 3, requires_grad=True)
+        f1_compiled = aot_function(f1, nop)
+
+        out_ref = f1(inp_ref)
+        out_test = f1_compiled(inp)
+        # Assert that we get CompiledFunctionBackward in the backward graph,
+        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+        self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
+
+        sum(out_ref).sum().backward()
+        sum(out_test).sum().backward()
+        self.assertEqual(inp_ref.grad, inp.grad)
+
+        # Several of the outputs are from multi-output views.
+        # However: they are part of the same alias set as "a", and "a.view(out.shape)",
+        # which are both user-visible.
+        # AOTAutograd will not try to be smart here and hide the aliasing relationships from autograd.
+        # Instead, it will perform its "output aliases input" logic, and regenerate all aliases.
+        def f3(a):
+            return *list(a.unbind(0)), a.view(a.shape)
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        inp_ref = torch.ones(3, 3, requires_grad=True)
+        f3_compiled = aot_function(f3, nop)
+
+        inp_ref_clone = inp_ref.clone()
+        inp_clone = inp.clone()
+        out_ref = f3(inp_ref_clone)
+        out_test = f3_compiled(inp_clone)
+        # We rely on autograd's view-replay here, and view-replay gives up and uses as_strided
+        # for multi-output views
+        self.assertTrue(all('AsStridedBackward' in str(o.grad_fn) for o in out_test[:3]))
+
+        # The last output is not from a multi-output view, so autograd will let us mutate it.
+        out_ref[-1].mul_(2)
+        out_test[-1].mul_(2)
+        # Also mutate the input, which should affect the aliased output.
+        inp_ref_clone.view(-1).mul_(3)
+        inp_clone.view(-1).mul_(3)
+        # Do backward
+        (inp_ref + out_ref[-1]).sum().backward()
+        (inp + out_test[-1]).sum().backward()
+        self.assertEqual(inp_ref.grad, inp.grad)
+
+
     def test_output_aliases_intermediate_multi_output_view(self):
         # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
         def f1(a):
