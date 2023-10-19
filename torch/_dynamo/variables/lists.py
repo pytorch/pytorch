@@ -45,13 +45,13 @@ def _listlike_contains_helper(items, search, tx, options, check_hash_match=False
         # 1. Previously unaliased is aliased e.g. f(x, y) -> f(x, x)
         # 2. Previously aliased is unaliased e.g. f(x, x) -> f(y, y)
         # Thankfully, we install guards which fail whenever the input tensors' alias matrix changes.
-        search = id(search.as_proxy())
+        search = id(search.as_proxy().node)
 
     found = None
     for x in items:
         if must_check_hash:
             if isinstance(x, variables.TensorVariable):
-                if search == id(x.as_proxy()):
+                if search == id(x.as_proxy().node):
                     return ConstantVariable.create(True)
             else:
                 unimplemented(

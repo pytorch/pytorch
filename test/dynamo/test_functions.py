@@ -1940,14 +1940,17 @@ def forward(self, x_1, output_1):
         assert param not in tensor_list
 
         def fn(param, param2):
+            param.add_(1)
             tensor_list = set([param2])
             return param in tensor_list
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         self.assertEqual(opt_fn(param, param2), fn(param, param2))
-
+        self.assertEqual(cnts.frame_count, 1)
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
