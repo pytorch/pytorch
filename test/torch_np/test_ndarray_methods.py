@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -407,27 +408,27 @@ class TestArgmax(TestCase):
         )
     ]
     nan_arr = darr + [
-        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xfail]),
-        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xfail]),
-        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xfail]),
-        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
-        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xpassIfTorchDynamo]),
+        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xpassIfTorchDynamo]),
+        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xpassIfTorchDynamo]),
+        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xpassIfTorchDynamo]),
+        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]),
+        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-            decorators=[xfail],
+            decorators=[xpassIfTorchDynamo],
         ),
         subtest(
             ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-            decorators=[xfail],
+            decorators=[xpassIfTorchDynamo],
         ),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-            decorators=[xfail],
+            decorators=[xpassIfTorchDynamo],
         ),
-        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xfail]),
-        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
-        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xfail]),
+        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xpassIfTorchDynamo]),
+        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xpassIfTorchDynamo]),
+        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xpassIfTorchDynamo]),
         ([False, False, False, False, True], 4),
         ([False, False, False, True, False], 3),
         ([True, False, False, False, False], 0),
