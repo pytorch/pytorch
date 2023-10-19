@@ -606,6 +606,8 @@ class TestTuningProcess(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._inductor.utils import is_big_gpu
+
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU:
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()
