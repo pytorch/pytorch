@@ -237,7 +237,6 @@ class TorchVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value.__name__.endswith("_") or self.value.__name__ in [
-            "clone",
             "select",
         ]:
             options.update({"source": args[0].source})

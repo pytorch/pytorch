@@ -353,7 +353,6 @@ class TensorVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name.endswith("_") or name in [
-            "clone",
             "select",
         ]:  # inplace / self-propagating op
             options.update({"source": self.source})

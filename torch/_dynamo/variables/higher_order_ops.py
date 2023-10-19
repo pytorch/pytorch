@@ -912,7 +912,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         options = {}
         if fn.value.__name__.endswith("_") or fn.value.__name__ in [
-            "clone",
             "select",
         ]:
             options.update({"source": batch_input_args[0].source})
