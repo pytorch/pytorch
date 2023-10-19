@@ -167,7 +167,8 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
+> [!NOTE]
+> You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
@@ -357,14 +358,15 @@ You can also pull a pre-built docker image from Docker Hub and run with docker v
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
-
-Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
+> [!NOTE]
+> Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
 
 #### Building the image yourself
 
-**NOTE:** Must be built with a docker version > 18.06
+> [!IMPORTANT]
+> Must be built with a docker version > 18.06
 
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
@@ -397,7 +399,8 @@ You can then build the documentation by running `make <format>` from the
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
 
-> Note: if you installed `nodejs` with a different package manager (e.g.,
+> [!NOTE]
+> if you installed `nodejs` with a different package manager (e.g.,
 `conda`) then `npm` will probably install a version of `katex` that is not
 compatible with your version of `nodejs` and doc builds will fail.
 A combination of versions that is known to work is `node@6.13.1` and
@@ -457,7 +460,8 @@ PyTorch is a community-driven project with several skillful engineers and resear
 PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
-Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
+> [!NOTE]
+> This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
 ## License
 
