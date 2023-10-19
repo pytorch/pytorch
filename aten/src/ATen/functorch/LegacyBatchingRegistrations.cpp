@@ -100,18 +100,6 @@ static bool participatesInCurrentLevel(ITensorListRef self) {
   return false;
 }
 
-std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntArrayRef indices, int64_t dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::tensor_split(self, indices, dim);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::tensor_split(self_physical.tensor(), indices, dim_physical);
-  self_physical.getPhysicalToLogicalMap().applyInplace(result);
-  return result;
-}
-
 Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
