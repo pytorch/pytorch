@@ -928,7 +928,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   bool is_kBool = (self.dtype() == at::kBool);
 
   // Short circuit for the common n = 1 case to avoid unnecessary guard
-  n = (n > 1 && n > self.sym_size(dim)) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
+  n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
 
   for (C10_UNUSED const auto i : c10::irange(n)) {
     if (is_kBool) {
@@ -957,14 +957,12 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
 
 static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
   if (n == 0) {
-    at::native::resize_output_symint(result, self.sym_sizes());
+    result.resize__symint(self.sym_sizes()).copy_(self);
     check_scalar_type_device_layout_equal(result, self);
-    result.copy_(self);
-    return result;
+    return result.copy_(self);
   }
 
-  // Short circuit for the common n = 1 case to avoid unnecessary guard
-  n = (n > 1 && n > self.sym_size(dim)) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
+  n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
   const auto out_len = self.sym_size(dim) - n;
   auto prev_result = self;
 
