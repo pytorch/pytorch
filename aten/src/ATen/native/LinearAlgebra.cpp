@@ -2605,12 +2605,9 @@ Tensor mexp_impl(
   if (!compute_highest_degree_approx) {
     auto res = at::empty_like(a, {}, at::MemoryFormat::Contiguous);
     // To prevent undefined behavior which outputs "normal" result from a matrix
-    // contains NaN values, we do NaN check here.
-    const auto norm_max = norm.max().to(at::kCPU).item<float>();
-    if (std::isnan(norm_max)) {
-      res.fill_(std::numeric_limits<double>::quiet_NaN());
-      return res;
-    }
+    // contains NaN values, we put NaN values in `res`, so if input has NaN values,
+    // its computation will be skipped to return the NaN contained `res` directly.
+    res.index_put_({at::indexing::Slice(), 0, 0}, std::numeric_limits<double>::quiet_NaN());
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
