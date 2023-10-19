@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     suppress_warnings,
     TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
     run_tests,
     skipIfTorchDynamo,
 )
@@ -435,7 +436,6 @@ core_backward_failures = {
     skip('_softmax_backward_data'),  # slow: fails with --timeout=360 secs
     xfail('addcdiv'),
     skip('addcmul'),  # slow: fails with --timeout=360 secs
-    skip('baddbmm'),  # slow: takes 800+ sec on A100
     skip('deg2rad'),  # slow: fails with --timeout=360 secs
     skip('diag_embed'),  # slow: fails with --timeout=360 secs
     skip('frac'),  # slow: fails with --timeout=360 secs
@@ -465,6 +465,10 @@ core_backward_failures = {
     skip('xlogy'),  # slow: fails with --timeout=360 secs
     xfail('zero_'),
 }
+if not TEST_WITH_SLOW:
+  core_backward_failures.add(skip('baddbmm'))  # slow: takes 800+ sec on A100
+  core_backward_failures.add(skip('clamp_min'))
+  core_backward_failures.add(skip('clamp_max'))
 
 
 class TestDecomp(TestCase):
