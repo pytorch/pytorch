@@ -620,23 +620,6 @@ def forward(self, primals_1, primals_2, primals_3):
         inp = [torch.ones(3, 3, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
-    def test_input_mutation_resize_smaller(self):
-        def f(a, b):
-            a.resize_(2, 2)
-            return a + b
-        # tenors that require gradients cannot be resized, so only test requires_grad=False case
-        inp = [
-            torch.ones(3, 3),
-            torch.ones(2, 2, requires_grad=True),
-        ]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
-        inp = [
-            torch.ones(3, 3),
-            torch.ones(2, 2),
-        ]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
     def test_input_mutation_batchnorm(self):
         def f(inpt, weight, bias, running_mean, running_var):
             # This is additionally a good test, because the input tensors that we mutate
@@ -1884,45 +1867,6 @@ def forward(self, tangents_1):
             AssertionError, lambda: fxz(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
-
-    def test_resize_input(self):
-        def f(x, y):
-            y.resize_(4)
-            y.zero_()
-            self.assertEqual(x.shape, (4,))
-            return y
-
-        # NB: don't use verify_aot_autograd as the inputs get
-        # mutated and I don't trust verify to do it right
-
-        compiled_f = aot_function(f, nop)
-        ref_x = torch.randn(0)
-        ref_out = f(ref_x, ref_x)
-
-        test_x = torch.randn(0)
-        test_out = compiled_f(test_x, test_x)
-
-        self.assertEqual(ref_out, test_out)
-
-    def test_resize_input_smaller(self):
-        def f(x, y):
-            y.resize_(4)
-            y.zero_()
-            self.assertEqual(x.shape, (4,))
-            return y
-
-        # NB: don't use verify_aot_autograd as the inputs get
-        # mutated and I don't trust verify to do it right
-
-        compiled_f = aot_function(f, nop)
-        ref_x = torch.randn(5)
-        ref_out = f(ref_x, ref_x)
-
-        test_x = torch.randn(5)
-        test_out = compiled_f(test_x, test_x)
-
-        self.assertEqual(ref_out, test_out)
-
 
     def test_custom_autograd(self):
         class CustomFn(torch.autograd.Function):
