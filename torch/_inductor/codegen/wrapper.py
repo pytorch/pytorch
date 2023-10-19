@@ -13,7 +13,9 @@ from sympy import Expr
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
+
 from torch.fx.node import _get_qualified_name
+from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
@@ -366,7 +368,6 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
-                inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
@@ -748,6 +749,13 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
+                if isinstance(value, sympy.Symbol) and isinstance(
+                    V.graph.sizevars.var_to_val.get(value, None), SingletonInt
+                ):
+                    # Inductor should only work with dense -> dense graph, and
+                    # SingletonInts belong to metadata that should only live on
+                    # the subclass.
+                    continue
                 if isinstance(value, sympy.Expr):  # Don't need to add symbolic
                     add_expr_input(name, V.graph.sizevars.size_hint(value))
                 else:
@@ -1385,10 +1393,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
-            cst_names = V.graph.constants.keys()
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
-                    if output in self.cached_thread_locals or output in cst_names:
+                    if output in self.cached_thread_locals:
                         self.wrapper_call.writeline(
                             f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
                         )
