@@ -6455,7 +6455,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         expm = torch.linalg.matrix_exp
 
         def with_nan(x):
-            x[0][0][0] = torch.nan
+            x[0, 0, 0] = torch.nan
             return x
 
         # Check small batches
