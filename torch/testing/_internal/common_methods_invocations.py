@@ -9066,7 +9066,7 @@ foreach_unary_op_db: List[OpInfo] = [
 foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "add",
-        foreach_inputs_sample_func(2, True, True),
+        foreach_inputs_sample_func(2, True, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
