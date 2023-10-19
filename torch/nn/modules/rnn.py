@@ -174,7 +174,8 @@ class RNNBase(Module):
             return
 
         for w in self._flat_weights:
-            if not isinstance(w, Tensor):
+            # Opt for slow path if we are dealing with any functorch wrapped tensor.
+            if not isinstance(w, Tensor) or torch._C._functorch.is_functorch_wrapped_tensor(w):
                 return
         # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
         # or the tensors in _flat_weights are of different dtypes

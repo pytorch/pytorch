@@ -9,6 +9,7 @@
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/core/GradMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
@@ -1445,55 +1446,58 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(_input)) {
-    Tensor output, hy, cy;
-    lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-  }
-#ifdef USE_MPS
-  if (_input.is_mps() && (mps::is_macos_13_or_newer() || num_layers == 1)) {
-    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
-    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
-    return return_values;
-  } else if (_input.is_mps()) {
-    TORCH_WARN_ONCE("Native multi-layer LSTM support in MPS available only on MacOS 13 onwards.",
-                    " Falling back to LSTMCell iteration.",
-                    " This may have performance implications.");
-  }
-#endif
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
-  if (use_miopen(_input, dropout_p)) {
-    if (!has_projections) {
+  // Opt for slow path if we are dealing with subclassed tensor.
+  bool any_subclass_like = at::isTensorSubclassLike(_input) || at::areAnyTensorSubclassLike(hx) || at::areAnyTensorSubclassLike(_params);
+  if (!any_subclass_like) {
+    if (at::cudnn_is_acceptable(_input)) {
       Tensor output, hy, cy;
-      lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                num_layers, dropout_p, train, bidirectional, batch_first);
+      lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+              num_layers, dropout_p, train, bidirectional, batch_first);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-    } else {
-      TORCH_WARN_ONCE(
-          "LSTM with projections is not supported with MIOpen. Using default implementation.");
     }
-  }
-
-  if (use_mkldnn(_input, _params, hx)) {
-    if (!has_projections) {
-      if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
-        TORCH_WARN_ONCE(
-          "LSTM with symbolic sizes and strides is not supported with oneDNN. Using default implementation.");
-      } else {
+#ifdef USE_MPS
+    if (_input.is_mps() && (mps::is_macos_13_or_newer() || num_layers == 1)) {
+      std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
+              num_layers, dropout_p, train, bidirectional, batch_first);
+      std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
+      return return_values;
+    } else if (_input.is_mps()) {
+      TORCH_WARN_ONCE("Native multi-layer LSTM support in MPS available only on MacOS 13 onwards.",
+                      " Falling back to LSTMCell iteration.",
+                      " This may have performance implications.");
+    }
+#endif
+    if (use_miopen(_input, dropout_p)) {
+      if (!has_projections) {
         Tensor output, hy, cy;
-        lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
+        lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+                  num_layers, dropout_p, train, bidirectional, batch_first);
         return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      } else {
+        TORCH_WARN_ONCE(
+            "LSTM with projections is not supported with MIOpen. Using default implementation.");
       }
-    } else {
-      TORCH_WARN_ONCE(
-          "LSTM with projections is not supported with oneDNN. Using default implementation.");
+    }
+
+    if (use_mkldnn(_input, _params, hx)) {
+      if (!has_projections) {
+        if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+          TORCH_WARN_ONCE(
+            "LSTM with symbolic sizes and strides is not supported with oneDNN. Using default implementation.");
+        } else {
+          Tensor output, hy, cy;
+          lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
+              num_layers, dropout_p, train, bidirectional, batch_first);
+          return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+        }
+      } else {
+        TORCH_WARN_ONCE(
+            "LSTM with projections is not supported with oneDNN. Using default implementation.");
+      }
     }
   }
-
   check_attributes(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases, has_projections);
@@ -1510,26 +1514,29 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(data)) {
-    Tensor output, hy, cy;
-    lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-  }
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
-  if (use_miopen(data, dropout_p)) {
-    if (!has_projections) {
+  // Opt for slow path if we are dealing with subclassed tensor.
+  bool any_subclass_like = at::isTensorSubclassLike(data) || at::areAnyTensorSubclassLike(hx) || at::areAnyTensorSubclassLike(_params);
+  if (!any_subclass_like) {
+    if (at::cudnn_is_acceptable(data)) {
       Tensor output, hy, cy;
-      lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+      lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
               _params, has_biases, num_layers, dropout_p, train, bidirectional);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-    } else {
-      TORCH_WARN_ONCE(
-          "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
+    if (use_miopen(data, dropout_p)) {
+      if (!has_projections) {
+        Tensor output, hy, cy;
+        lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+                _params, has_biases, num_layers, dropout_p, train, bidirectional);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      } else {
+        TORCH_WARN_ONCE(
+            "LSTM with projections is not supported with MIOpen. Using default implementation.");
+      }
     }
   }
-
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases, has_projections);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
