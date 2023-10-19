@@ -444,7 +444,7 @@ class GraphModuleSerializer:
         return serialized_args
 
     def serialize_inputs(
-        self, target: torch._ops.OpOverload, args, kwargs=None
+        self, target: torch._ops.OpOverload, args, kwargs=None, include_default_values=True
     ) -> List[NamedArgument]:
         assert isinstance(target, torch._ops.OpOverload)
         kwargs = kwargs or {}
@@ -465,12 +465,13 @@ class GraphModuleSerializer:
                     )
                 )
             else:
-                serialized_args.append(
-                    NamedArgument(
-                        name=schema_arg.name,
-                        arg=self.serialize_input(schema_arg.default_value),
+                if include_default_values:
+                    serialized_args.append(
+                        NamedArgument(
+                            name=schema_arg.name,
+                            arg=self.serialize_input(schema_arg.default_value),
+                        )
                     )
-                )
 
         return serialized_args
 
@@ -1524,7 +1525,6 @@ class ExportedProgramDeserializer:
             res.graph_module,
             res.graph_module.graph,
             res.signature,
-            None,  # TODO(zhxchen17) Remove this.
             state_dict,  # type: ignore[arg-type]
             range_constraints,
             equality_constraints,
