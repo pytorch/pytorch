@@ -481,7 +481,7 @@ class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
     mutates_metadata: bool
-    mutations_triton_only: bool
+    mutations_hidden_from_autograd: bool
     requires_grad: bool
 
 
@@ -916,14 +916,14 @@ def has_metadata_mutation(t):
         assert isinstance(t, FunctionalTensor)
         return torch._functionalize_has_metadata_mutation(t.elem)
 
-def are_all_mutations_triton_only(t):
+def are_all_mutations_hidden_from_autograd(t):
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
-        # If all inner elemnts are triton only mutations, then it is a triton only mutation
-        return all(are_all_mutations_triton_only(getattr(t, attr)) for attr in attrs)
+        # If all inner elements are mutations hidden from autograd, then it is a mutation hidden from autograd.
+        return all(are_all_mutations_hidden_from_autograd(getattr(t, attr)) for attr in attrs)
     else:
         assert isinstance(t, FunctionalTensor)
-        return torch._functionalize_are_all_mutations_triton_only(t.elem)
+        return torch._functionalize_are_all_mutations_hidden_from_autograd(t.elem)
 
 # new_arg and arg here are either:
 # (1) both a FakeTensor
@@ -1085,17 +1085,17 @@ def run_functionalized_fw_and_collect_metadata(
                 input_requires_grad_info.append(
                     isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
                 )
-                mutations_triton_only = are_all_mutations_triton_only(f_arg)
+                mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
             else:
                 mutates_data = False
                 mutates_metadata = False
-                mutations_triton_only = False
+                mutations_hidden_from_autograd = False
 
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata,
-                mutations_triton_only=mutations_triton_only,
+                mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
             ))
 
@@ -1755,7 +1755,7 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     assert inpt_new is not inpt_old
-                    if meta.input_info[i].mutations_triton_only:
+                    if meta.input_info[i].mutations_hidden_from_autograd:
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(inpt_old):
                             inpt_old.copy_(inpt_new)
                     else:
@@ -2432,6 +2432,7 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data,
             mutates_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata,
+            mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
             is_leaf=any_leaf,
             requires_grad=any(m.input_info[x].requires_grad for x in outer_indices)
         )

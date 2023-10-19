@@ -185,8 +185,8 @@ class FunctionalTensor(torch.Tensor):
     def sync(self) -> None:
         torch._functionalize_sync(self.elem)
 
-    def mark_mutated_by_triton_kernel(self) -> None:
-        torch._functionalize_mark_mutated_by_triton_kernel(self.elem)
+    def mark_mutation_hidden_from_autograd(self) -> None:
+        torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
 
 
 class FunctionalTensorMode(TorchDispatchMode):
@@ -418,7 +418,7 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def mark_mutated_by_triton_kernel(self, tensor) -> None:
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         pass
 
 
@@ -452,9 +452,9 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         assert isinstance(tensor, FunctionalTensor)
         tensor.sync()
 
-    def mark_mutated_by_triton_kernel(self, tensor) -> None:
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         assert isinstance(tensor, FunctionalTensor)
-        tensor.mark_mutated_by_triton_kernel()
+        tensor.mark_mutation_hidden_from_autograd()
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -487,8 +487,8 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
     def sync(self, tensor) -> None:
         torch._functionalize_sync(tensor)
 
-    def mark_mutated_by_triton_kernel(self, tensor) -> None:
-        torch._functionalize_mark_mutated_by_triton_kernel(tensor)
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
 
 class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -529,5 +529,5 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
     def sync(self, tensor) -> None:
         torch._functionalize_sync(tensor)
 
-    def mark_mutated_by_triton_kernel(self, tensor) -> None:
-        torch._functionalize_mark_mutated_by_triton_kernel(tensor)
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)

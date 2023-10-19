@@ -1409,6 +1409,20 @@ if HAS_TRITON:
         output = 2 * x
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.jit
+    def mul2_inplace_kernel(
+        ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(ptr + offsets, mask=mask)
+        output = 2 * x
+        tl.store(ptr + offsets, output, mask=mask)
+
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
@@ -1637,6 +1651,73 @@ def forward(self, x_1, output_1):
     getitem_3 = triton_kernel_wrapper_functional_proxy['BLOCK_SIZE'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
         )
+
+    @requires_cuda()
+    @requires_triton()
+    @skipIfRocm
+    def test_triton_kernel_mutation_type(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def prep():
+            x = torch.ones(4, device="cuda", requires_grad=True)
+            x_func = FunctionalTensor.to_functional(x)
+            self.assertTrue(torch._is_functional_tensor(x_func.elem))
+            return x_func
+
+        # normal mutation only
+        with FakeTensorMode():
+            x_func = prep()
+
+            with FunctionalTensorMode():
+                x_func.mul_(2)
+
+            self.assertFalse(
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
+            )
+
+        # triton kernel mutation only
+        with FakeTensorMode():
+            x_func = prep()
+
+            with FunctionalTensorMode():
+                triton_kernel_wrapper_mutation(
+                    kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
+                    grid=(x_func.numel(),),
+                    kwargs={
+                        "ptr": x_func,
+                        "n_elements": x_func.numel(),
+                        "BLOCK_SIZE": 16,
+                    },
+                )
+
+            self.assertTrue(
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
+            )
+
+        # normal mutation + triton kernel mutation
+        with FakeTensorMode():
+            x_func = prep()
+
+            with FunctionalTensorMode():
+                x_func.mul_(2)
+                triton_kernel_wrapper_mutation(
+                    kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
+                    grid=(x_func.numel(),),
+                    kwargs={
+                        "ptr": x_func,
+                        "n_elements": x_func.numel(),
+                        "BLOCK_SIZE": 16,
+                    },
+                )
+
+            self.assertFalse(
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
+            )
 
     @requires_cuda()
     @requires_triton()
