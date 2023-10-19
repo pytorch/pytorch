@@ -311,17 +311,18 @@ def _parse_stack_trace(stack_trace: str):
 class CodeGen:
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
+        self._func_name: str = "forward"
 
     def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
-        By default, `gen_fn_def(['a', 'b'], '') == 'def forward(a, b):'`
+        By default, `gen_fn_def(['a', 'b'], '') == 'def {self._func_name}(a, b):'`
         """
         # If the original function didn't have self as its first argument, we
         # would have added it.
         if len(free_vars) == 0 or free_vars[0] != 'self':
             free_vars.insert(0, 'self')
-        return f"def forward({', '.join(free_vars)}){maybe_return_annotation}:"
+        return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
 
     def generate_output(self, output_args: Argument) -> str:
         """
