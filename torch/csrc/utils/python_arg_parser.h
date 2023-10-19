@@ -658,6 +658,9 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         } catch (std::exception& e) {
           throw_intlist_exception(this, i, obj, idx, e);
         }
+      } else if (torch::is_symint(py::handle(obj))) {
+        res[idx] = py::cast<c10::SymInt>(py::handle(obj))
+                       .guard_int(__FILE__, __LINE__);
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
@@ -1039,6 +1042,10 @@ inline double PythonArgs::toDouble(int i) {
   if (torch::is_symfloat(py::handle(args[i]))) {
     return py::cast<c10::SymFloat>(py::handle(args[i]))
         .guard_float(__FILE__, __LINE__);
+  }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return static_cast<double>(py::cast<c10::SymInt>(py::handle(args[i]))
+                                   .guard_int(__FILE__, __LINE__));
   }
   return THPUtils_unpackDouble(args[i]);
 }

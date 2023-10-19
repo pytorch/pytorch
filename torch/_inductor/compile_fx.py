@@ -1,10 +1,12 @@
 import contextlib
 import dataclasses
 import functools
-import itertools
 import logging
+import os
 import sys
+import time
 import warnings
+from itertools import count
 
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
@@ -22,7 +24,7 @@ from torch._dynamo import (
 )
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
-from torch._inductor.codecache import code_hash, CompiledFxGraph
+from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._ops import OpOverload
@@ -293,11 +295,11 @@ def compile_fx_inner(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-):
+) -> Union[CompiledFxGraph, str]:
     """
     Inductor API that compiles a single graph.
 
-    If you change the argument list for this funtion, make sure you
+    If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     if dynamo_utils.count_calls(gm.graph) == 0:
@@ -323,6 +325,8 @@ def compile_fx_inner(
         cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     # Inputs to fx_codegen_and_compile
+    # Anything that affects codegen should go here, so if the signature
+    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
     graph_args = [gm, example_inputs]
     graph_kwargs = {
         "cudagraphs": cudagraphs,
@@ -337,9 +341,18 @@ def compile_fx_inner(
         "extern_node_serializer": extern_node_serializer,
     }
 
-    compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
-        *graph_args, **graph_kwargs  # type: ignore[arg-type]
-    )
+    start = time.time()
+
+    if config.fx_graph_cache and not aot_mode:
+        compiled_graph = FxGraphCache.load(
+            fx_codegen_and_compile, graph_args, graph_kwargs
+        )
+    else:
+        compiled_graph = fx_codegen_and_compile(
+            *graph_args, **graph_kwargs  # type: ignore[arg-type]
+        )
+
+    log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     if aot_mode:
         return compiled_graph
@@ -361,7 +374,7 @@ def compile_fx_inner(
 
         # doesnt work for non-trees because the warmup run would apply mutation twice
         if config.triton.cudagraph_trees:
-            # checking if mutation is only on paramameters/static inputs
+            # checking if mutation is only on parameters/static inputs
             has_mutation = not all(
                 idx < num_fixed for idx in compiled_graph.mutated_input_idxs
             )
@@ -473,7 +486,7 @@ def fx_codegen_and_compile(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-) -> CompiledFxGraph:
+) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -547,6 +560,7 @@ def fx_codegen_and_compile(
                         )
                     else:
                         context.output_strides.append(None)
+
             compiled_fn = graph.compile_to_fn()
 
             if V.aot_compilation is True:
@@ -564,6 +578,7 @@ def fx_codegen_and_compile(
                 device_idxs=graph.device_idxs,
                 mutated_inputs=graph.mutated_inputs,
                 mutated_input_idxs=set(graph.mutated_input_idxs),
+                constants=graph.constants,
             )
     return compiled_graph
 
@@ -847,7 +862,7 @@ def compile_fx_aot(
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
-        return compile_fx(
+        compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -857,9 +872,13 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
+        assert os.path.exists(
+            compiled_lib_path
+        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
+        return compiled_lib_path
 
 
-_graph_counter = itertools.count(0)
+_graph_counter = count(0)
 
 
 def fw_compiler_freezing(
@@ -962,8 +981,6 @@ def compile_fx(
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
-                # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
-                "triton.unique_kernel_names": True,
             }
         ), V.set_real_inputs(
             example_inputs_
@@ -976,6 +993,14 @@ def compile_fx(
                     if node.op == "placeholder"
                 ]
                 if all(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi.device != i.device:
+                            raise ValueError(
+                                f"Device mismatch between fake input and example input at position #{idx}: "
+                                f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                "make sure torch.export() and torch.aot_compile() run on the same device."
+                            )
                     inputs_ = fake_inputs
             return compile_fx(
                 model_,
@@ -1076,9 +1101,9 @@ def compile_fx(
             # For training
             #   len(orig_model_outputs) <= len(model_outputs)
             # During training, most of the time the model_outputs starts with
-            # orignal module's outputs followed by saved activations.
+            # original module's outputs followed by saved activations.
             # But this can be not true if the model have inplace updated tensors.
-            # AOTAutograd will make those tensors being returned before the orignal
+            # AOTAutograd will make those tensors being returned before the original
             # module's output.
             # To make things safe, we'll use original_output_start_index field
             # set by AOTAutograd to decide where the original module outputs start.

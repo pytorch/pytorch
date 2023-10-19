@@ -367,6 +367,10 @@ class Vectorized<double> {
     return map(calc_i0e);
   }
 
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
+  }
+
   Vectorized<double> _nor() const {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
