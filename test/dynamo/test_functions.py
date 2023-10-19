@@ -1835,6 +1835,24 @@ def forward(self, x_1, output_1):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_broadcast_in_set(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            tensor_list = set([param2])
+            return param in tensor_list
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+
     def test_compare_constant_and_tensor(self):
         for op in [
             operator.lt,
