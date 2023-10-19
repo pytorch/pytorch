@@ -890,6 +890,33 @@ class GraphModule(torch.nn.Module):
         actual = normalize_gm(graph.print_readable(False))
         check_graph(actual, expected)
 
+    def test_context_wrapping_grad_mode_decorator(self):
+        for ctx_wrapper in [torch.no_grad, torch.enable_grad]:
+
+            def fn(x):
+                def cool_name(x):
+                    return x.sin()
+
+                return ctx_wrapper(cool_name)(x)
+
+            x = torch.zeros(10)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_context_wrapping_grad_mode_nested_decorator(self):
+        for ctx_wrapper in [torch.no_grad, torch.enable_grad]:
+
+            def fn(x):
+                @ctx_wrapper
+                def cool_name(x):
+                    return x.sin()
+
+                return cool_name(x)
+
+            x = torch.zeros(10)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
