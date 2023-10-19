@@ -3,7 +3,7 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGuardImpl.h>
 
-namespace at::mps %{
+namespace at::mps {
 
 void MPSGuardImpl::createEvent(mpsEvent_t* event, const EventFlag flag) const {}
 
