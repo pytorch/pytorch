@@ -1459,6 +1459,9 @@ static Tensor _embedding_bag_dense_backward_cpu_max(
   AT_ASSERT(max_indices.defined());
   auto index_grad_weight =
       at::zeros({num_weights, grad.sizes()[1]}, grad.options());
+  if (index_grad_weight.device() == kMeta) {
+    return index_grad_weight;
+  }
   auto nonempty_max_indices = max_indices.index_select(0, bag_size.nonzero().view(-1));
   auto nonempty_grad = grad.index_select(0, bag_size.nonzero().view(-1));
 
@@ -1627,6 +1630,9 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
 
   auto index_grad_weight =
       at::zeros({num_weights, grad.sizes()[1]}, grad.options());
+  if (index_grad_weight.device() == kMeta) {
+    return index_grad_weight;
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
@@ -1674,6 +1680,10 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   AT_ASSERT(weight.sizes()[1] == embedding_features);
 
   auto output = at::zeros({num_samples}, grad.options());
+
+  if (output.device() == kMeta) {
+    return output;
+  }
 
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
