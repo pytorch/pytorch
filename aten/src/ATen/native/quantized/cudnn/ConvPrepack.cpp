@@ -138,8 +138,7 @@ class QConvPackWeightInt8Cudnn final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (const auto idx : c10::irange(kSpatialDim)) {
-      (void)idx; //Suppress unused variable warning
+    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,

@@ -272,7 +272,10 @@ void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   }
   if (profile_memory) {
     reportOutOfMemoryToProfiler(
-        nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        static_cast<int64_t>(nbytes),
+        allocated,
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 
