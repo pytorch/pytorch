@@ -33,7 +33,6 @@ class TensorParallelStyleTest(DTensorTestBase):
         input_local_tensor,
         expected_local_tensor,
         func,
-        tensor_input_only=False,
         error_msgs="device_mesh is not passed nor can be inferred",
     ) -> None:
         with self.assertRaisesRegex(RuntimeError, error_msgs):
@@ -43,13 +42,12 @@ class TensorParallelStyleTest(DTensorTestBase):
         # test 1: replicate local tensor
         dtensor = func(input_local_tensor, device_mesh)
         self.assertEqual(expected_local_tensor, dtensor.to_local())
-        if not tensor_input_only:
-            # test 2: replicate DTensor
-            dtensor = func(dtensor)
-            self.assertEqual(expected_local_tensor, dtensor.to_local())
-            # test 3: replicate DTensor with DeviceMesh passed
-            dtensor = func(dtensor, device_mesh)
-            self.assertEqual(expected_local_tensor, dtensor.to_local())
+        # test 2: replicate DTensor
+        dtensor = func(dtensor)
+        self.assertEqual(expected_local_tensor, dtensor.to_local())
+        # test 3: replicate DTensor with DeviceMesh passed
+        dtensor = func(dtensor, device_mesh)
+        self.assertEqual(expected_local_tensor, dtensor.to_local())
 
     @with_comms
     def test_make_input_replicate_1d(self):
@@ -189,9 +187,9 @@ class TensorParallelStyleTest(DTensorTestBase):
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
         output = [dtensor]
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Tensor parallel module expects DTensor or tensor when layout specified but received"
-            f" {type(output)}!",
+            AssertionError,
+            "Expect output of Tensor Parallel to be a DTensor, but found"
+            f" {type(output)}.",
         ):
             func(output, device_mesh)
 
@@ -209,7 +207,6 @@ class TensorParallelStyleTest(DTensorTestBase):
             tensor,
             tensor,
             rs._prepare_input,
-            error_msgs="No device mesh is currently active!",
         )
         # TODO: change output test
         output, dtensor, device_mesh = self._test_prepare_output(
@@ -235,7 +232,6 @@ class TensorParallelStyleTest(DTensorTestBase):
             tensor,
             tensor,
             cs._prepare_input,
-            error_msgs="No device mesh is currently active!",
         )
         output, dtensor, device_mesh = self._test_prepare_output(
             cs._prepare_output, [Shard(-1)]
