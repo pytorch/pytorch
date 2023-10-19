@@ -34,6 +34,7 @@ from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles
+from ..allow_skip_list import is_torch_ctx_manager_class
 from ..allowed_functions import (
     is_allowed,
     is_builtin_callable,
@@ -138,7 +139,6 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
-    is_torch_ctx_manager_class,
     tensor_dunder_fns,
     torch_special_class_types,
     TorchCtxManagerClassVariable,

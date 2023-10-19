@@ -326,8 +326,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from ..allow_skip_list import is_torch_ctx_manager_class
         from .builder import VariableBuilder
-        from .torch import is_torch_ctx_manager_class
 
         if (
             self.is_supported_random()
