@@ -912,7 +912,7 @@ class WrapperCodeGen(CodeGen):
 
     def make_free_by_names(self, names_to_del: List[str]):
         return (
-            f"del {', '.join(name for name in names_to_del if name not in self.freed)}"
+            f"del {', '.join(name for name in names_to_del)}"
         )
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
