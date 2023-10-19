@@ -748,8 +748,6 @@ def _export(
         gm,
         gm.graph,
         export_graph_signature,
-        # TODO(zhxchen17) Remove this field.
-        CallSpec(in_spec, orig_out_spec),
         # TODO(zhxchen17) Return empty state_dict for functions.
         params_buffers,
         range_constraints,
@@ -940,7 +938,6 @@ def aot_compile(
                 ) for o in user_outputs
             ]
         ),
-        call_spec=copy.deepcopy(ep.call_spec),
         state_dict={},
         range_constraints=copy.deepcopy(ep.range_constraints),
         equality_constraints=copy.deepcopy(ep.equality_constraints),
