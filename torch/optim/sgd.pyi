@@ -1,9 +1,9 @@
-from .optimizer import Optimizer, params_t
+from .optimizer import Optimizer, ParamsT
 
 class SGD(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: ParamsT,
         lr: float,
         momentum: float = ...,
         dampening: float = ...,

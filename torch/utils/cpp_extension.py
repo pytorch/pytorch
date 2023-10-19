@@ -1928,6 +1928,8 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # (from `extra_compile_args`)
     if cflags is not None:
         for flag in cflags:
+            if 'TORCH_EXTENSION_NAME' in flag:
+                continue
             if 'arch' in flag:
                 return []
 

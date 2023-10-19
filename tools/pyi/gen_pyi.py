@@ -742,6 +742,12 @@ def gen_pyi(
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
