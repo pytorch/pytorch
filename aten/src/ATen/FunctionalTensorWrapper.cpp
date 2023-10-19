@@ -228,6 +228,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
+  mutation_counter_++;
 }
 
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
@@ -531,6 +532,16 @@ void commit_update(ITensorListRef functional_tensor) {
   for (const auto& t : functional_tensor) {
     commit_update(t);
   }
+}
+
+void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->mark_mutation_hidden_from_autograd();
+}
+
+bool are_all_mutations_hidden_from_autograd(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_hidden_from_autograd();
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {

@@ -601,6 +601,47 @@ static PyObject* THPVariable__functionalize_sync(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_mark_mutation_hidden_from_autograd(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_mark_mutation_hidden_from_autograd(Tensor t)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  at::functionalization::impl::mark_mutation_hidden_from_autograd(self_);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject*
+THPVariable__functionalize_are_all_mutations_hidden_from_autograd(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_are_all_mutations_hidden_from_autograd(Tensor t)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  if (at::functionalization::impl::are_all_mutations_hidden_from_autograd(
+          self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
@@ -662,6 +703,16 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_has_metadata_mutation",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_has_metadata_mutation),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_mark_mutation_hidden_from_autograd",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_mark_mutation_hidden_from_autograd),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_are_all_mutations_hidden_from_autograd",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_enable_reapply_views",
