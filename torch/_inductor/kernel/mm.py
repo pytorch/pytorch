@@ -299,8 +299,8 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
         if out_dtype is None
         else out_dtype
     )
-    m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, layout=layout, out_dtype=out_dtype
+    m, n, k, layout, mat1, mat2, mat3 = mm_args(
+        mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
     choices: List[Dict[Any, Any]] = []
     for config in int8_mm_configs(m, n, k):

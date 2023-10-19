@@ -68,7 +68,7 @@ class TestPaternMatcher(TestCase):
     def _test_fused_int_mm_mul_impl(self, fn, args, fused_int_mm_mul_expected=True):
         torch._dynamo.reset()
         counters.clear()
-        ref = fn(*args)
+        # ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn, mode="max-autotune"), *args)
         self.assertEqual("fused_int_mm_mul" in code, fused_int_mm_mul_expected)
         if fused_int_mm_mul_expected:
