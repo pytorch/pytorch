@@ -17,9 +17,9 @@ def get_disabled_issues() -> List[str]:
     return issue_numbers
 
 
+SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
+DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
-SLOW_TESTS_FILE = "slow-tests.json"
-DISABLED_TESTS_FILE = "disabled-tests.json"
 TEST_TIMES_FILE = "test-times.json"
 TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
 TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
