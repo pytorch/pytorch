@@ -8,4 +8,4 @@ namespace at::native {
   // 32 bit), we need to programmatically calculate the max.
   constexpr int64_t MKL_LONG_MAX = ((1LL << (sizeof(MKL_LONG) * 8 - 2)) - 1) * 2 + 1;
 
-}} // namespace at::native
+} // namespace at::native
