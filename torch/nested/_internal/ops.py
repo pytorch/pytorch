@@ -5,6 +5,7 @@ from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.fake_tensor import is_fake
+from torch.fx.experimental.symbolic_shapes import is_symbolic
 
 __all__: List[Any] = []
 
@@ -385,14 +386,16 @@ def prod_dim_int(func, *args, **kwargs):
 # special handling in dynamo, but for tensor subclasses if .tolist is called
 # inside torch dispatch, the .tolist call will be directly on a FakeTensor.
 # This would result in an error since wrapper subclasses don't have storage.
-# To avoid this, we handle the fake tensor case in a special way.
+# To avoid this, we handle the fake tensor case by (1) specializing on the size
+# of the tensor to create the output Python list, and (2) creating unbacked
+# symints for each element of the list.
 def sym_tolist(x):
     if is_fake(x):
-        assert isinstance(x.shape[0], torch.SymInt)
+        assert x.dim() == 1 and is_symbolic(x.shape[0])
         shape_env = x.shape[0].node.shape_env
         out = []
         # Specialize on the length of the list
-        for i in range(x.shape[0]):
+        for _ in range(x.shape[0]):
             s = shape_env.create_unbacked_symint()
             # max value?
             torch._constrain_as_size(s, min=2)
