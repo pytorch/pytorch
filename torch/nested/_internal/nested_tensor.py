@@ -164,7 +164,7 @@ class NestedTensor(torch.Tensor):
         # propagated the meta["ragged_size"] which is still a symint and the
         # subclass is responsible for making sure that the symint doesn't leak.
         #
-        if len(free_symbols(values)) == 0 and len(free_symbols(offsets)):
+        if len(free_symbols(values)) == 0 and len(free_symbols(offsets)) == 0:
             # Note that we cannot simply check if is_fake(values) because
             # during aot autograd, FunctionalTensors are not fake but hold
             # symbolic sizes.
