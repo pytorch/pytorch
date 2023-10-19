@@ -578,38 +578,15 @@ class ViewAndMutationMeta:
     num_symints_saved_for_bw: Optional[int] = None
 
     def __post_init__(self):
-        if self.keep_input_mutations:
-            if self.is_train:
-                mutated_inp_indices = [
-                    i for i, m in enumerate(self.input_info)
-                    if _check_if_mutation_will_be_returned_in_runtime(m, self.keep_input_mutations, self.is_train)
-                ]
-            else:
-                mutated_inp_indices = [
-                    i for i, m in enumerate(self.input_info) if m.mutates_metadata
-                ]
-        else:
-            mutated_inp_indices = [
-                i for i, m in enumerate(self.input_info) if (m.mutates_metadata or m.mutates_data)
-            ]
+        mutated_inp_indices = [
+            i for i, m in enumerate(self.input_info)
+            if _check_if_mutation_will_be_returned_in_runtime(m, self.keep_input_mutations, self.is_train)
+        ]
 
-        # pre-compute the indices of the inputs that are mutated.
-        # When keep_input_mutations is set, we don't need to worry about our epilogue
-        # handling data-only mutations, because we keep them directly in the graph.
-        if self.keep_input_mutations:
-            if self.is_train:
-                mutated_inp_runtime_indices = [
-                    i for i, m in enumerate(self.input_info)
-                    if _check_if_mutation_will_be_returned_in_runtime(m, self.keep_input_mutations, self.is_train)
-                ]
-            else:
-                mutated_inp_runtime_indices = [
-                    i for i, m in enumerate(self.input_info) if m.mutates_metadata
-                ]
-        else:
-            mutated_inp_runtime_indices = [
-                i for i, m in enumerate(self.input_info) if (m.mutates_metadata or m.mutates_data)
-            ]
+        mutated_inp_runtime_indices = [
+            i for i, m in enumerate(self.input_info)
+            if _check_if_mutation_will_be_returned_in_runtime(m, self.keep_input_mutations, self.is_train)
+        ]
 
         aliased_out_indices = [
             i
@@ -1251,6 +1228,7 @@ def run_functionalized_fw_and_collect_metadata(
         # Our autograd.Function.forward returns both mutated inputs and outputs,
         # so we need grad info on all of them.
         requires_grad_info = input_requires_grad_info + output_requires_grad_info
+        # TODO (tmanlaibaatar) figure out why we can't just collapse this branch
         if keep_input_mutations and is_train:
             total_runtime_inps = len([
                 x for x in input_info
@@ -2142,11 +2120,18 @@ def _check_if_mutation_can_be_handled_in_fw_graph(input_info: InputAliasInfo):
 
 
 def _check_if_mutation_will_be_returned_in_runtime(input_info: InputAliasInfo, keep_input_mutations: bool, is_train: bool):
-    assert keep_input_mutations and is_train
-    return (
-        (input_info.mutates_data or input_info.mutates_metadata) and
-        not _check_if_mutation_can_be_handled_in_fw_graph(input_info)
-    )
+    if keep_input_mutations:
+        if is_train:
+            return (
+                (input_info.mutates_data or input_info.mutates_metadata) and
+                not _check_if_mutation_can_be_handled_in_fw_graph(input_info)
+            )
+        return (
+            ((input_info.mutates_data or input_info.mutates_metadata) and input_info.requires_grad) or
+            (input_info.mutates_metadata and not input_info.requires_grad)
+        )
+    else:
+        return input_info.mutates_data or input_info.mutates_metadata
 
 # Note [Handling mutations on an input that aliases other inputs]
 # The easiest example to show-case this edge case is here:
@@ -2499,13 +2484,12 @@ def create_synthetic_base_metadata(
     ]
 
     # grab the original requires grad info on the outputs, except the ones from the mutated inputs
+    # TODO (tmanlaibaatar) figure out why we can't just collapse this branch
     if m.keep_input_mutations and m.is_train:
-        num_original_input_data_mutations = len(
-            [
-                x for x in m.input_info
-                if _check_if_mutation_will_be_returned_in_runtime(x, m.keep_input_mutations, m.is_train)
-            ]
-        )
+        num_original_input_data_mutations = len([
+            x for x in m.input_info
+            if _check_if_mutation_will_be_returned_in_runtime(x, m.keep_input_mutations, m.is_train)
+        ])
     else:
         num_original_input_data_mutations = len([x for x in m.input_info if x.mutates_data or x.mutates_metadata])
 
@@ -3933,24 +3917,17 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # invariant: intermediate bases always require gradients, so we don't have to
             # consider marking them as non-differentiable.
             raw_returns_not_including_intermediate_bases = raw_returns[:num_mutated_inputs + num_outputs]
-
-            if CompiledFunction.metadata.keep_input_mutations and CompiledFunction.metadata.is_train:
-                raw_returns_meta = (
-                    [
-                        x for x in CompiledFunction.metadata.input_info
-                        if _check_if_mutation_will_be_returned_in_runtime(
-                            x,
-                            CompiledFunction.metadata.keep_input_mutations,
-                            CompiledFunction.metadata.is_train
-                        )
-                    ]
-                    + CompiledFunction.metadata.output_info
-                )
-            else:
-                raw_returns_meta = (
-                    [x for x in CompiledFunction.metadata.input_info if (x.mutates_data or x.mutates_metadata)]
-                    + CompiledFunction.metadata.output_info
-                )
+            raw_returns_meta = (
+                [
+                    x for x in CompiledFunction.metadata.input_info
+                    if _check_if_mutation_will_be_returned_in_runtime(
+                        x,
+                        CompiledFunction.metadata.keep_input_mutations,
+                        CompiledFunction.metadata.is_train
+                    )
+                ]
+                + CompiledFunction.metadata.output_info
+            )
 
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases):
                 assert CompiledFunction.metadata.requires_grad_info[i] == raw_returns_meta[i].requires_grad
