@@ -145,7 +145,7 @@ class NamedMemberAccessor:
                     f"{module._get_name()} has no attribute `{attr}`"
                 ) from ex
             if not isinstance(submodule, torch.nn.Module):
-                raise TypeError(
+                raise TypeError(  # noqa: TRY200
                     f"submodule `{name}`: {submodule} is not an instance of torch.nn.Module"
                 )
             self.memo[name] = submodule

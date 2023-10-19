@@ -167,7 +167,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
-    c10::optional<float> getDuration() const override;
+    float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
 
@@ -615,10 +615,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void runHookLoop();
 
   // Desync debug helper
-  void logWorkStart(WorkNCCL& work, bool emitDesyncInfo);
+  void logWorkStart(WorkNCCL& work);
 
   // Desync debug helper
-  void logWorkEnd(WorkNCCL& work, bool emitDesyncInfo);
+  void logWorkEnd(WorkNCCL& work);
 
  protected:
   static const int64_t kWatchdogThreadSleepMillis;

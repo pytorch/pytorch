@@ -198,7 +198,6 @@ def preferred_linalg_library(
     return torch._C._get_linalg_preferred_backend()
 
 
-# TODO how to do I get the same devex experience
 from torch._C import _SDPAParams as SDPAParams, SDPBackend as SDPBackend
 
 
