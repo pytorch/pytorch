@@ -27,10 +27,10 @@ from .functions import UserFunctionVariable, UserMethodVariable
 
 def _listlike_contains_helper(items, search, tx, options, check_hash_match=False):
     if search.is_python_constant():
-        result = any(
+        found = any(
             x.as_python_constant() == search.as_python_constant() for x in items
         )
-        return variables.ConstantVariable.create(result, **options)
+        return variables.ConstantVariable.create(found, **options)
 
     from .builtin import BuiltinVariable
 
@@ -61,7 +61,7 @@ def _listlike_contains_helper(items, search, tx, options, check_hash_match=False
                 found = check
             else:
                 found = BuiltinVariable(operator.or_).call_function(
-                    tx, [check, result], {}
+                    tx, [check, found], {}
                 )
     if found is None:
         found = ConstantVariable.create(False)
