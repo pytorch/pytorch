@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch.fx import Graph, GraphModule, Node
@@ -369,61 +369,52 @@ def _get_fused_convbn_q_dq_nodes(nodes: List[Node]) -> Tuple[Node, Node]:
 def _get_conv_bn_getitem_relu_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Node]]:
     """
     Helper function to extract the conv, bn, getitem, and relu nodes after
-    subgraph rewriting.
+    subgraph rewriting, in the form of a map:
 
-    This asserts that the match contains exactly one conv, bn, and getitem.
+        {name: (original_node, replacement_node)}
 
-    Return a map of {name: (original_node, replacement_node)}, where "name"
-    can be one of "conv", "bn", "getitem", or "relu".
+    The returned map must contain entries for "conv", "bn", "getitem" as names,
+    and may optionally contain an entry for "relu".
     """
-    # Extract original matched nodes
-    original_conv_node = None
-    original_bn_node = None
-    original_getitem_node = None
-    original_relu_node = None
-    for n in _filter_nodes_map(r.nodes_map).values():
-        if n.target == torch.ops.aten.conv2d.default:
-            original_conv_node = n
-        if _is_supported_batch_norm_for_training(n):
-            original_bn_node = n
-        if n.target == operator.getitem:
-            original_getitem_node = n
-        if n.target == torch.ops.aten.relu.default:
-            original_relu_node = n
+    def _get_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node, Optional[Node]]:
+        """
+        Return a 4-tuple of (conv_node, bn_node, getitem_node, relu_node).
+        This asserts that the match contains exactly one conv, bn, and getitem,
+        and at most one relu.
+        """
+        conv_node, bn_node, getitem_node, relu_node = None, None, None, None
+        for n in nodes:
+            if n.op != "call_function":
+                continue
+            if n.target == torch.ops.aten.conv2d.default:
+                assert conv_node is None
+                conv_node = n
+            if _is_supported_batch_norm_for_training(n):
+                assert bn_node is None
+                bn_node = n
+            if n.target == operator.getitem:
+                assert getitem_node is None
+                getitem_node = n
+            if n.target == torch.ops.aten.relu.default:
+                assert relu_node is None
+                relu_node = n
+        assert conv_node is not None
+        assert bn_node is not None
+        assert getitem_node is not None
+        return (conv_node, bn_node, getitem_node, relu_node)
 
-    # Extract replacement nodes
-    replacement_conv_node = None
-    replacement_bn_node = None
-    replacement_getitem_node = None
-    replacement_relu_node = None
-    for n in r.replacements:
-        if n.op != "call_function":
-            continue
-        if n.target == torch.ops.aten.conv2d.default:
-            assert replacement_conv_node is None
-            replacement_conv_node = n
-        elif _is_supported_batch_norm_for_training(n):
-            assert replacement_bn_node is None
-            replacement_bn_node = n
-        elif n.target == operator.getitem:
-            assert replacement_getitem_node is None
-            replacement_getitem_node = n
-        elif n.target == torch.ops.aten.relu.default:
-            assert replacement_relu_node is None
-            replacement_relu_node = n
-    assert replacement_conv_node is not None
-    assert replacement_bn_node is not None
-    assert replacement_getitem_node is not None
+    original_nodes = list(_filter_nodes_map(r.nodes_map).values())
+    o_conv, o_bn, o_getitem, o_relu = _get_nodes(original_nodes)
+    r_conv, r_bn, r_getitem, r_relu = _get_nodes(r.replacements)
 
-    # Create mapping to return
     mapping = {
-        "conv": (original_conv_node, replacement_conv_node),
-        "bn": (original_bn_node, replacement_bn_node),
-        "getitem": (original_getitem_node, replacement_getitem_node),
+        "conv": (o_conv, r_conv),
+        "bn": (o_bn, r_bn),
+        "getitem": (o_getitem, r_getitem),
     }
-    if original_relu_node is not None:
-        assert replacement_relu_node is not None
-        mapping["relu"] = (original_relu_node, replacement_relu_node)
+    if o_relu is not None:
+        assert r_relu is not None
+        mapping["relu"] = (o_relu, r_relu)
     return mapping
 
 def _filter_nodes_map(nodes_map: Dict[Node, Node]) -> Dict[Node, Node]:
@@ -729,8 +720,8 @@ def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
 
     for r in replacements:
         node_map = _get_conv_bn_getitem_relu_nodes(r)
-        conv_node = node_map["conv"][1]
-        bn_node = node_map["bn"][1]
+        (_, conv_node) = node_map["conv"]
+        (_, bn_node) = node_map["bn"]
 
         # Step (2): Copy over metadata from original subgraph
         for original_node, replacement_node in node_map.values():
