@@ -75,14 +75,14 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return has_metadata_mutation_;
   };
 
-  // Denotes a mutation for the purposes of passing a tensor to a triton kernel
-  void mark_mutated_by_triton_kernel() {
-    mutation_from_triton_kernels_counter_++;
+  // Denotes a mutation that's hidden from autograd,
+  // e.g. for the purposes of passing a tensor to a triton kernel
+  void mark_mutation_hidden_from_autograd() {
+    mutation_hidden_from_autograd_counter_++;
   }
-  // Are all the mutations happening to the tensor for the purposes of passing
-  // to a triton kernel
-  bool are_all_mutations_triton_only() const {
-    return mutation_from_triton_kernels_counter_ == mutation_counter_;
+  // Are all the mutations happening to the tensor hidden from autograd
+  bool are_all_mutations_hidden_from_autograd() const {
+    return mutation_hidden_from_autograd_counter_ == mutation_counter_;
   }
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
@@ -182,8 +182,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
+  // These two counters are used for identifying
+  // whether all the mutations on a given tensor are hidden from autograd or
+  // not. If we have an input mutation that is hidden from autograd, then once
+  // we convert the input mutation to a copy_() we know it will be safe to hide
+  // the copy_() from autograd as well.
   uint64_t mutation_counter_ = 0;
-  uint64_t mutation_from_triton_kernels_counter_ = 0;
+  uint64_t mutation_hidden_from_autograd_counter_ = 0;
   bool has_metadata_mutation_ = false;
 
   size_t generation_ = 0;
@@ -240,9 +245,11 @@ TORCH_API void replace_(
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
 
-TORCH_API void mark_mutated_by_triton_kernel(const Tensor& functional_tensor);
+TORCH_API void mark_mutation_hidden_from_autograd(
+    const Tensor& functional_tensor);
 
-TORCH_API bool are_all_mutations_triton_only(const Tensor& functional_tensor);
+TORCH_API bool are_all_mutations_hidden_from_autograd(
+    const Tensor& functional_tensor);
 
 // These two methods are XLA-specific logic and are no-ops
 // for the normal functionalization flow.

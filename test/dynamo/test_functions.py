@@ -1677,7 +1677,7 @@ def forward(self, x_1, output_1):
                 x_func.mul_(2)
 
             self.assertFalse(
-                torch._functionalize_are_all_mutations_triton_only(x_func.elem)
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
             )
 
         # triton kernel mutation only
@@ -1696,7 +1696,7 @@ def forward(self, x_1, output_1):
                 )
 
             self.assertTrue(
-                torch._functionalize_are_all_mutations_triton_only(x_func.elem)
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
             )
 
         # normal mutation + triton kernel mutation
@@ -1716,7 +1716,7 @@ def forward(self, x_1, output_1):
                 )
 
             self.assertFalse(
-                torch._functionalize_are_all_mutations_triton_only(x_func.elem)
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
             )
 
     @requires_cuda()
