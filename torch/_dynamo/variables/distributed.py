@@ -156,11 +156,14 @@ class DeviceMeshVariable(DistributedVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "get_dim_groups":
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            dim_groups = self.value.get_dim_groups(*args, **kwargs)
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            args_val = [x.as_python_constant() for x in args]
+            kwargs_val = {k: v.as_python_constant() for k, v in kwargs.items()}
+            # ensure no DeviceMesh subclassing happened
+            from torch.distributed._tensor.device_mesh import DeviceMesh
+            assert istype(self.value, DeviceMesh), f"{self.value} is not a DeviceMesh"
+            dim_groups = self.value.get_dim_groups(*args_val, **kwargs_val)
             # desugar the results to ProcessGroupVariables
-            options = VariableTracker.propagate(self)
             if isinstance(dim_groups, list):
                 return variables.ListVariable(
                     [ProcessGroupVariable(group, **options) for group in dim_groups],
