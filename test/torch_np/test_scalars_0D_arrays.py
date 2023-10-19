@@ -14,13 +14,13 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
-    TestCase,
     TEST_WITH_TORCHDYNAMO,
-    xfailIfTorchDynamo
+    TestCase,
+    xfailIfTorchDynamo,
 )
 
 
-if  TEST_WITH_TORCHDYNAMO:
+if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import assert_equal
 else:
@@ -86,7 +86,7 @@ class TestArrayScalars(TestCase):
         assert arr == 42
 
 
-#@xfailIfTorchDynamo
+# @xfailIfTorchDynamo
 @instantiate_parametrized_tests
 class TestIsScalar(TestCase):
     #
@@ -102,7 +102,7 @@ class TestIsScalar(TestCase):
         subtest([42], "list", decorators=[xfailIfTorchDynamo]),
         subtest([[42]], "list-list", decorators=[xfailIfTorchDynamo]),
         subtest(np.array([42]), "array_1D", decorators=[xfailIfTorchDynamo]),
-        subtest(np.array([[42]]), "array_2D", decorators=[xfailIfTorchDynamo])
+        subtest(np.array([[42]]), "array_2D", decorators=[xfailIfTorchDynamo]),
     ]
 
     import math

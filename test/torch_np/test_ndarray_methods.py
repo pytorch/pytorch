@@ -413,7 +413,9 @@ class TestArgmax(TestCase):
         subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xpassIfTorchDynamo]),
         subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xpassIfTorchDynamo]),
         subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]),
-        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]),
+        subtest(
+            ([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]
+        ),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
             decorators=[xpassIfTorchDynamo],
@@ -426,9 +428,18 @@ class TestArgmax(TestCase):
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
             decorators=[xpassIfTorchDynamo],
         ),
-        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xpassIfTorchDynamo]),
-        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xpassIfTorchDynamo]),
-        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xpassIfTorchDynamo]),
+        subtest(
+            ([complex(0, 0), complex(0, 2), complex(0, 1)], 1),
+            decorators=[xpassIfTorchDynamo],
+        ),
+        subtest(
+            ([complex(1, 0), complex(0, 2), complex(0, 1)], 0),
+            decorators=[xpassIfTorchDynamo],
+        ),
+        subtest(
+            ([complex(1, 0), complex(0, 2), complex(1, 1)], 2),
+            decorators=[xpassIfTorchDynamo],
+        ),
         ([False, False, False, False, True], 4),
         ([False, False, False, True, False], 3),
         ([True, False, False, False, False], 0),

@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from unittest import expectedFailure as xfail, SkipTest
+from unittest import SkipTest
 
 import pytest
 from pytest import raises as assert_raises
@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 
@@ -125,7 +126,7 @@ class TestMean(TestCase):
         # of float32.
         assert np.mean(np.ones(100000, dtype="float16")) == 1
 
-    @xfail  # (reason="XXX: mean(..., where=...) not implemented")
+    @xpassIfTorchDynamo  # (reason="XXX: mean(..., where=...) not implemented")
     def test_mean_where(self):
         a = np.arange(16).reshape((4, 4))
         wh_full = np.array(
@@ -191,7 +192,7 @@ class TestSum(TestCase):
         assert_allclose(res_float, 4.0, atol=1e-15)
         assert res_float.dtype == "float64"
 
-    @xfail  # (reason="sum: does not warn on overflow")
+    @xpassIfTorchDynamo  # (reason="sum: does not warn on overflow")
     def test_sum_dtypes_warnings(self):
         for dt in (int, np.float16, np.float32, np.float64):
             for v in (0, 1, 2, 7, 8, 9, 15, 16, 19, 127, 128, 1024, 1235):
@@ -258,7 +259,7 @@ class TestSum(TestCase):
         d += d
         assert_allclose(d, 2.0 + 2j, atol=1.5e-7)
 
-    @xfail  # (reason="initial=... need implementing")
+    @xpassIfTorchDynamo  # (reason="initial=... need implementing")
     def test_sum_initial(self):
         # Integer, single axis
         assert_equal(np.sum([3], initial=2), 5)
@@ -272,7 +273,7 @@ class TestSum(TestCase):
             [12, 12, 12],
         )
 
-    @xfail  # (reason="where=... need implementing")
+    @xpassIfTorchDynamo  # (reason="where=... need implementing")
     def test_sum_where(self):
         # More extensive tests done in test_reduction_with_where.
         assert_equal(np.sum([[1.0, 2.0], [3.0, 4.0]], where=[True, False]), 4.0)
@@ -317,6 +318,8 @@ fails_out_arg = {
 
 restricts_dtype_casts = {np.var, np.std}
 
+fails_empty_tuple = {np.argmin, np.argmax}
+
 
 @instantiate_parametrized_tests
 class TestGenericReductions(TestCase):
@@ -351,6 +354,9 @@ class TestGenericReductions(TestCase):
 
     @parametrize_func
     def test_axis_empty_generic(self, func):
+        if func in fails_empty_tuple:
+            raise SkipTest("func(..., axis=()) is not valid")
+
         a = np.array([[0, 0, 1], [1, 0, 1]])
         assert_array_equal(func(a, axis=()), func(np.expand_dims(a, axis=0), axis=0))
 
@@ -420,7 +426,7 @@ class TestGenericReductions(TestCase):
         # Here we follow pytorch, since the result is a superset
         # of the numpy functionality
 
-    @parametrize("keepdims", [True, False, None])
+    @parametrize("keepdims", [True, False])
     @parametrize("dtype", [bool, "int32", "float64"])
     @parametrize_func
     @parametrize_axis
