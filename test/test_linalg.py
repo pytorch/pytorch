@@ -5236,6 +5236,7 @@ class TestLinalg(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
     @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
@@ -6446,6 +6447,29 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # check 1x1 matrices
         x = torch.randn(3, 3, 1, 1)
         self.assertEqual(expm(x), x.exp())
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_linalg_matrix_exp_perverse_nan_values(self, device, dtype):
+        expm = torch.linalg.matrix_exp
+
+        def with_nan(x):
+            x[0, 0, 0] = torch.nan
+            return x
+
+        # Check small batches
+        x = with_nan(torch.randn(1, 1, 1))
+        self.assertTrue(torch.isnan(expm(x)).any())
+        x = with_nan(torch.randn(1, 2, 2))
+        for v in [1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 1000]:
+            self.assertTrue(torch.isnan(expm(x / v)).any())
+
+        # Check large batches
+        x = with_nan(torch.randn(2, 2, 2))
+        self.assertTrue(torch.isnan(expm(x)).any())
+        x = with_nan(torch.randn(4096, 2, 2))
+        self.assertTrue(torch.isnan(expm(x)).any())
 
     @slowTest
     @skipCUDAIfNoMagma

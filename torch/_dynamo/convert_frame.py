@@ -9,6 +9,11 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
@@ -184,6 +189,13 @@ def has_tensor_in_frame(frame):
 
         if isinstance(obj, (torch.Tensor, torch.nn.Module)) or (
             istype(obj, type) and issubclass(obj, torch.nn.Module)
+        ):
+            seen_ids[obj_id] = True
+            return seen_ids[obj_id]
+        elif (
+            config.trace_numpy
+            and np
+            and (istype(obj, np.ndarray) or isinstance(obj, np.generic))
         ):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]

@@ -34,6 +34,7 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     specialize_args_kwargs,
+    tensortype_to_dtype,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
@@ -966,8 +967,22 @@ class BuiltinVariable(VariableTracker):
         isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+
+            def _tensor_isinstance(tensor_var, tensor_type):
+                def check_type(ty):
+                    if ty not in tensortype_to_dtype:
+                        return issubclass(self.python_type(), ty)
+
+                    dtypes = tensortype_to_dtype[ty]
+                    return self.dtype in dtypes
+
+                if type(tensor_type) is tuple:
+                    return any(check_type(ty) for ty in tensor_type)
+                else:
+                    return check_type(tensor_type)
+
             return variables.ConstantVariable.create(
-                arg.call_isinstance(isinstance_type)
+                _tensor_isinstance(arg, isinstance_type)
             )
         # UserDefinedObject with C extensions can have torch.Tensor attributes,
         # so break graph.
@@ -1433,19 +1448,25 @@ class BuiltinVariable(VariableTracker):
                 except RuntimeError:
                     # not broadcastable, can't be compared
                     _unimplemented()
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return wrap_fx_proxy_cls(
                 type(left),  # handle Ndarrays and Tensors
                 tx,
-                op(left.as_proxy(), right.as_proxy()),
+                proxy,
             )
 
         if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
 
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return SymNodeVariable.create(
                 tx,
-                op(left.as_proxy(), right.as_proxy()),
+                proxy,
                 sym_num=None,
             )
 
