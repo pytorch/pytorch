@@ -442,8 +442,15 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
+            fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                tx.output,
+                parent=tx.output.current_tracer,
+                source_target="autograd.Function",
+            )
             higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
+                trampoline_autograd_fwd,
+                source=AttrSource(module_source, "forward"),
+                fwd_bwd_tracer=fwd_bwd_tracer,
             )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
@@ -457,6 +464,7 @@ class AutogradFunctionVariable(VariableTracker):
                 TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_bwd,
                     source=AttrSource(module_source, "backward"),
+                    fwd_bwd_tracer=fwd_bwd_tracer,
                 ),
                 bwd_args,
             )
@@ -464,7 +472,8 @@ class AutogradFunctionVariable(VariableTracker):
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
             return TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_apply
+                trampoline_autograd_apply,
+                fwd_bwd_tracer=None,
             ).call_function(tx, args, kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -539,7 +548,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    def __init__(self, value, value_type=None, inference=False, **kwargs):
+    def __init__(self, value, value_type=None, inference=False, tracer=None, **kwargs):
         saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
         self._saved_tensors = saved_tensors
