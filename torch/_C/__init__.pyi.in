@@ -1760,7 +1760,7 @@ def _gather(
 def _gather_out(tensors: List[Tensor], out_tensor: Tensor, dim: _int) -> Tensor: ...
 
 # Defined in torch/csrc/cuda/Stream.cpp
-class _CudaStreamBase:
+class _CudaStreamBase(Stream):
     stream_id: _int
     device_index: _int
     device_type: _int

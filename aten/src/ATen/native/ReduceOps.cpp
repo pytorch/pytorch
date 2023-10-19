@@ -928,8 +928,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   bool is_kBool = (self.dtype() == at::kBool);
   n = n >= self.size(dim) ? self.size(dim) : n;
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     if (is_kBool) {
       result = at::logical_xor(at::narrow(result, dim, 1, out_len), at::narrow(result, dim, 0, out_len));
     } else {
@@ -2104,8 +2103,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
       char* self_data = data[0];
       char* other_data = data[1];
-      for (const auto i : c10::irange(dim_size)) {
-        (void)i; //Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(dim_size)) {
         if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;

@@ -137,6 +137,7 @@ struct ReduceOptions {
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct GatherOptions {
@@ -152,6 +153,7 @@ struct ScatterOptions {
 struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct AllToAllOptions {

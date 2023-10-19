@@ -13,6 +13,19 @@ class LazyMutableLocal(MutableLocalBase):
 
 
 class LazyVariableTracker(VariableTracker):
+    """
+    A structure that defers the creation of the actual VariableTracker
+    for a given underlying value until it is accessed.
+
+    The `realize` function invokes VariableBuilder to produce the real object.
+    Once a LazyVariableTracker has been realized, internal bookkeeping will
+    prevent double realization.
+
+    This object should be utilized for processing containers, or objects that
+    reference other objects where we may not want to take on creating all the
+    VariableTrackers right away.
+    """
+
     _nonvar_fields = ["_value"]
 
     def __init__(self, _value, source, **kwargs):
@@ -20,7 +33,10 @@ class LazyVariableTracker(VariableTracker):
         self._value = _value
         if self.mutable_local is None:
             self.mutable_local = LazyMutableLocal()
-        assert self.source
+        # TODO(voz) - Support SourcelessBuilder during realize
+        assert (
+            self.source
+        ), "Illegal construction. LazyVariableTracker deferred creation utilizes VariableBuilder."
 
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker"""
@@ -29,6 +45,7 @@ class LazyVariableTracker(VariableTracker):
             from .builder import VariableBuilder
 
             tx = InstructionTranslator.current_tx()
+            # TODO(voz) - Support SourcelessBuilder during realize
             self.mutable_local.vt = VariableBuilder(tx, self.source)(self._value)
             self._value = None
             tx.output.guards.update(self.mutable_local.vt.guards)

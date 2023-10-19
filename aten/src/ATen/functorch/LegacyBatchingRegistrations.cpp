@@ -271,14 +271,14 @@ std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, 
   return result;
 }
 
-std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, SymIntArrayRef split_sizes, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return split_with_sizes(self, split_sizes, dim);
+    return split_with_sizes_symint(self, split_sizes, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = split_with_sizes(self_physical.tensor(), split_sizes, dim_physical);
+  auto result = split_with_sizes_symint(self_physical.tensor(), split_sizes, dim_physical);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
