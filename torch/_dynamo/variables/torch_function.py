@@ -1,7 +1,6 @@
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
-from ..source import AttrSource
 from ..utils import is_tensor_base_attr_getter
 from .constant import ConstantVariable
 from .lists import TupleVariable
@@ -46,19 +45,6 @@ def call_torch_function(
     # def __torch_function__(cls, func, types, args=(), kwargs=None):
     tf_args = (torch_function_type, fn, types, TupleVariable(list(args)))
     return tx.inline_user_function_return(torch_function_var, tf_args, kwargs)
-
-
-def build_torch_function_var(tx, fn_value, source):
-    from .builder import SourcelessBuilder, VariableBuilder
-
-    if source:
-        source = AttrSource(
-            AttrSource(source, "__torch_function__"),
-            "__func__",
-        )
-        return VariableBuilder(tx, source)(fn_value)
-    else:
-        return SourcelessBuilder()(tx, fn_value)
 
 
 def can_dispatch_torch_function(tx, args, kwargs):

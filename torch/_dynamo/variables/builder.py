@@ -1104,10 +1104,14 @@ class VariableBuilder:
             # NB: This is slightly misnamed, a tensor subclass might not have
             # any explicit __torch_function__ implementation and is relying
             # on the default inherited from torch.Tensor
+            torch_fn = VariableBuilder(
+                self.tx,
+                AttrSource(AttrSource(self.source, "__torch_function__"), "__func__"),
+            )(value.__torch_function__.__func__)
             return TensorWithTFOverrideVariable.create(
                 self.tx,
                 tensor_variable,
-                value.__torch_function__.__func__,
+                torch_fn,
                 type(value),
             )
 
