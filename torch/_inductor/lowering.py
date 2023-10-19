@@ -1044,8 +1044,8 @@ def cat(inputs, dim=0):
         # Unrealized inputs will not be storage and layouts, and we dont want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
-            storage, _ = ir.as_storage_and_layout(x)
-            return ir.ConcatKernel.can_realize_into_without_copy(storage)
+            storage, _ = ir.as_storage_and_layout(x, freeze=False)
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
 
         if isinstance(x, TensorBox):
             if isinstance(x.data, ir.BaseView):
