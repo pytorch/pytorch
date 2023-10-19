@@ -25,7 +25,7 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 
 
-def _listlike_contains_helper(items, search, tx, options):
+def _listlike_contains_helper(items, search, tx, options, check_hash_match=False):
     if search.is_python_constant():
         result = any(
             x.as_python_constant() == search.as_python_constant() for x in items
@@ -34,18 +34,38 @@ def _listlike_contains_helper(items, search, tx, options):
 
     from .builtin import BuiltinVariable
 
-    result = None
+    must_check_hash = False
+    if check_hash_match and isinstance(search, variables.TensorVariable):
+        must_check_hash = True
+        # ID_MATCH of Tensor means ID_MATCH of proxies.
+
+        # There are scenarios in which this could potentially fail. That is when:
+        # 1. Previously unaliased is aliased e.g. f(x, y) -> f(x, x)
+        # 2. Previously aliased is unaliased e.g. f(x, x) -> f(y, y)
+        # Thankfully, we install guards which fail whenever the input tensors' alias matrix changes.
+        search = id(search.as_proxy())
+
+    found = None
     for x in items:
-        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-        if result is None:
-            result = check
+        if must_check_hash:
+            if isinstance(x, variables.TensorVariable):
+                if search == id(x.as_proxy()):
+                    return ConstantVariable.create(True)
+            else:
+                unimplemented(
+                    "Cannot test hash match of Tensor in collection containing non-Tensor"
+                )
         else:
-            result = BuiltinVariable(operator.or_).call_function(
-                tx, [check, result], {}
-            )
-    if result is None:
-        result = ConstantVariable.create(None)
-    return result
+            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            if found is None:
+                found = check
+            else:
+                found = BuiltinVariable(operator.or_).call_function(
+                    tx, [check, result], {}
+                )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 class BaseListVariable(VariableTracker):
@@ -883,7 +903,9 @@ class SetVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return _listlike_contains_helper(self.items, args[0], tx, options)
+            return _listlike_contains_helper(
+                self.items, args[0], tx, options, check_hash_match=True
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
