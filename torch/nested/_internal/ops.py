@@ -397,7 +397,7 @@ def sym_tolist(x):
             torch._constrain_as_size(s, min=2)
             out.append(s)
         return out
-    return x.tolist()
+    return x.cpu().tolist()
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
@@ -415,8 +415,7 @@ def unbind_int(func, *args, **kwargs):
     values = inp._values
     offsets = inp.offsets()
 
-    out_values = torch.split(values, sym_tolist(offsets.diff()))
-    return out_values
+    return torch.split(values, sym_tolist(offsets.diff()))
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
