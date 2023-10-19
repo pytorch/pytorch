@@ -1714,8 +1714,8 @@ def create_functionalized_fn(
                     # so the compiler will see the input mutation in the graph.
                     assert inpt_new is not inpt_old
                     if meta.input_info[i].mutations_triton_only:
-                        #with torch.no_grad():
-                        inpt_old.detach().copy_(inpt_new)
+                        with torch.no_grad():
+                            inpt_old.copy_(inpt_new)
                     else:
                         inpt_old.copy_(inpt_new)
 
