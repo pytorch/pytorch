@@ -2730,6 +2730,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   int dev_in_group = 0;
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // Note 2: for asyncOp = false, we don't want to record streams because we
+  // know that the NCCL stream will join back to the "current" stream right
+  // after this op. So we might just as well keep the stream ownership of the
+  // input/output tensors unchanged. The benefit would be that the
+  // allocation/free of the tensors would look deterministic to the "current"
+  // stream so that the caching allocator can reuse memory pool for this stream
+  // in a clever way. This setting is added for libraries like FSDP which uses
+  // `reduce_scatter_tensor`.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       inputs,
       outputs,
@@ -2737,7 +2747,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        if (!avoidRecordStreams_) {
+        if (!avoidRecordStreams) {
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
         }
@@ -3307,7 +3317,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
-    const AllgatherOptions& /*unused */) {
+    const AllgatherOptions& opts) {
   check_gpu_single_tensor(input_tensor);
   check_gpu_single_tensor(output_tensor);
 
@@ -3326,6 +3336,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   auto outputs = std::vector<at::Tensor>{output_tensor};
 
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // Note 2: for asyncOp = false, we don't want to record streams because we
+  // know that the NCCL stream will join back to the "current" stream right
+  // after this op. So we might just as well keep the stream ownership of the
+  // input/output tensors unchanged. The benefit would be that the
+  // allocation/free of the tensors would look deterministic to the "current"
+  // stream so that the caching allocator can reuse memory pool for this stream
+  // in a clever way. This setting is added for libraries like FSDP which uses
+  // `all_gather_into_tensor`.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       inputs,
       outputs,
@@ -3333,7 +3353,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        if (!avoidRecordStreams_) {
+        if (!avoidRecordStreams) {
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
         }

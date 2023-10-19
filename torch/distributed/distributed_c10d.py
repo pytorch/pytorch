@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch._C._distributed_c10d import (
+    AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
     AllToAllOptions,
@@ -2893,6 +2894,9 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else torch.view_as_real(input_tensor)
     )
 
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+
     group = group or _get_default_group()
 
     if group in _world.pg_coalesce_state.keys():
@@ -2904,7 +2908,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor)
+    work = group._allgather_base(output_tensor, input_tensor, opts)
 
     if async_op:
         return work
@@ -3369,6 +3373,7 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
 
     group = group or _get_default_group()
 
