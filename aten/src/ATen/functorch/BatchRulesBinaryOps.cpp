@@ -221,8 +221,7 @@ static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
 
-  const auto result =
-      at::masked_select_backward(grad_, self_.contiguous(), mask);
+  const auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
   return std::make_tuple(result, 0);
 }
 
