@@ -1844,7 +1844,7 @@ def forward(self, x_1, output_1):
                 res = 1 in s
                 return res
 
-            opt_fn = torch.compile(fn, backend="eager")
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             x = torch.randn(1)
             ref = opt_fn(x)
             res = fn(x)
