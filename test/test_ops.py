@@ -2195,21 +2195,14 @@ class TestFakeTensor(TestCase):
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
-    def test_empty_strided(self, device):
-        result = torch.empty((3, 3), layout=torch.strided, device=device)
-        self.assertEqual(result.layout, torch.strided)
-
-    def test_zeros_strided(self, device):
-        result = torch.zeros((3, 3), layout=torch.strided, device=device)
-        self.assertEqual(result.layout, torch.strided)
-
-    def test_ones_strided(self, device):
-        result = torch.ones((3, 3), layout=torch.strided, device=device)
-        self.assertEqual(result.layout, torch.strided)
-
-    def test_rand_strided(self, device):
-        result = torch.rand((3, 3), layout=torch.strided, device=device)
-        self.assertEqual(result.layout, torch.strided)
+    @ops([op for op in op_db if op.is_factory_method], allowed_dtypes=(torch.float,))
+    def test_strided_layout(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        for sample in samples:
+            default_result = op(sample.input, *sample.args, **sample.kwargs)
+            self.assertEqual(default_result.layout, torch.strided)
+            strided_result = op(sample.input.to(layout=torch.strided), *sample.args, **sample.kwargs)
+            self.assertEqual(strided_result, default_result)
     
 
 instantiate_device_type_tests(TestCommon, globals())
