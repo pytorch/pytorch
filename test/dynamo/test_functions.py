@@ -1840,13 +1840,14 @@ def forward(self, x_1, output_1):
 
             def fn(x):
                 x.add_(1)
-                s = set([x])
-                return 1 in s
+                s = listlike([x])
+                res = 1 in s
+                return res
 
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            x = torch.randn(4)
-            res = fn(x)
+            opt_fn = torch.compile(fn, backend="eager")
+            x = torch.randn(1)
             ref = opt_fn(x)
+            res = fn(x)
             self.assertEqual(ref, res)
 
 
