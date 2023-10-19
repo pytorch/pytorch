@@ -513,7 +513,6 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def UNALIASED_INPUT(self, guard, source_b):
-        print("CREATING UNALIASED")
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 

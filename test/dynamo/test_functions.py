@@ -1842,7 +1842,7 @@ def forward(self, x_1, output_1):
             else:
                 return z + x + y
 
-        fn_opt = torch.compile(backend='eager', fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
@@ -1857,7 +1857,7 @@ def forward(self, x_1, output_1):
             else:
                 return x + 1
 
-        fn_opt = torch.compile(backend='eager', fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
 
         x = torch.zeros(1, 2)
         y = [1, 2]
@@ -1874,7 +1874,7 @@ def forward(self, x_1, output_1):
             else:
                 return x + 1
 
-        fn_opt = torch.compile(backend='eager', fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
 
         x = torch.zeros(1, 2)
         y = MyClass()
@@ -1886,6 +1886,7 @@ def forward(self, x_1, output_1):
         torch._dynamo.reset()
         self.assertEqual(fn(x, y, y), fn_opt(x, y, y))
         self.assertEqual(fn(x, y, z), fn_opt(x, y, z))
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
