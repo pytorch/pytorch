@@ -1,5 +1,4 @@
 import functools
-import torch
 
 torch_ctx_manager_classes = {
     "torch.device",
@@ -50,21 +49,24 @@ torch_ctx_manager_classes = {
     "torch.hub._Faketqdm",
     "torch.profiler.profiler.profile",
     "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
+    "torch._decomp.decompositions_for_rng.PhiloxStateTracker",
     "torch._subclasses.fake_tensor.FakeTensorMode",
     "torch._subclasses.functional_tensor.FunctionalTensorMode",
     "torch.onnx._internal.diagnostics.infra.context.DiagnosticContext",
     "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
 }
 
+
 @functools.lru_cache(None)
 def get_torch_ctx_manager_classes():
     classes = set()
     for cls_name in torch_ctx_manager_classes:
-        module_name, class_name = cls_name.rsplit('.', 1)
+        module_name, class_name = cls_name.rsplit(".", 1)
         module = __import__(module_name, fromlist=[class_name])
         class_obj = getattr(module, class_name)
         classes.add(class_obj)
     return classes
+
 
 def is_torch_ctx_manager_class(class_obj):
     return class_obj in get_torch_ctx_manager_classes()
