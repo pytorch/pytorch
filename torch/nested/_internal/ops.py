@@ -382,9 +382,10 @@ def prod_dim_int(func, *args, **kwargs):
 
 
 # Ordinarily, if a program calls .tolist compiling still works because there is
-# special handling in dynamo, but for tensor subclasses .tolist is called on
-# FakeTensor directly which would error since wrapper subclasses don't hav
-# storage.
+# special handling in dynamo, but for tensor subclasses if .tolist is called
+# inside torch dispatch, the .tolist call will be directly on a FakeTensor.
+# This would result in an error since wrapper subclasses don't have storage.
+# To avoid this, we handle the fake tensor case in a special way.
 def sym_tolist(x):
     if is_fake(x):
         assert isinstance(x.shape[0], torch.SymInt)

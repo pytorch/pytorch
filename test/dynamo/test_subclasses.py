@@ -605,7 +605,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((3, 4, 5), 4), None)
+        nt2, _ = self._get_jagged_tensor(((3, 4, 5, 6), 4), None)
         self._check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
 
     def test_binary_does_not_recompile(self):
