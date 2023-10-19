@@ -4269,7 +4269,7 @@ please file a github issue"""
             # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
             # Keeping .resize_() in the graph will require some work
             # Allowing it but keeping the graph functional will require some calling convention changes.
-            if len([x for x in fw_metadata.input_info if x.mutates_metadata or x.mutate_storage_metadata]) != 0:
+            if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
                 raise RuntimeError(f"""\
 Found an input that received a metadata mutation, through e.g. a call to `.resize_()` or `.transpose_()`.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.

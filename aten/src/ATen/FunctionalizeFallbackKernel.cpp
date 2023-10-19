@@ -299,7 +299,7 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   return out;
 }
 
-at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
+static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   // error case
   TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
     "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
