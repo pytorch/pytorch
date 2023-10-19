@@ -502,11 +502,7 @@ def run_meta_crossref(
     try:
         rs = func(*args, **kwargs)
     except Exception as e:
-        # A lot of OpInfo for inplace are actually broken because
-        # they're not tested outside of gradcheck which only checks
-        # torch.float64 and torch.complex128 (which this second one
-        # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken") from e
+        raise RuntimeError("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception
@@ -1150,6 +1146,8 @@ class TestMeta(TestCase):
         func = op.get_inplace()
         if not func:
             self.skipTest("No inplace variable for this op")
+        if op.promotes_int_to_float and not dtype.is_floating_point:
+            self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
         if func in meta_inplace_skips:
             self.skipTest("Skipped")
         func = self._get_safe_inplace(func)
@@ -1167,6 +1165,8 @@ class TestMeta(TestCase):
             func = op.get_inplace()
             if not func:
                 self.skipTest("No inplace variable for this op")
+            if op.promotes_int_to_float and not dtype.is_floating_point:
+                self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
         else:
             func = op.get_op()
 
@@ -1574,6 +1574,16 @@ class TestMeta(TestCase):
             self.assertEqual(res.shape, rs)
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res.untyped_storage().data_ptr(), 0)
+
+    def test_index_select_out(self):
+        def f():
+            input = torch.randn([8, 16], device='meta')
+            index = torch.tensor([2, 1, 6, 7, 3, 1, 7, 5, 6, 7], device='meta')
+            out = torch.empty([10, 16], device='meta')
+            return torch.index_select(input=input, dim=0, index=index, out=out)
+        with enable_python_dispatcher():
+            out = f()
+            self.assertEqual(out.shape, [10, 16])
 
 instantiate_device_type_tests(TestMeta, globals())
 
