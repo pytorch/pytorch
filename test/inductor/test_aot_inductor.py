@@ -143,10 +143,13 @@ def check_model(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
+        torch.manual_seed(0)
         model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
+
+        torch.manual_seed(0)
         actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
 
     self.assertTrue(same(actual, expected))
@@ -162,10 +165,13 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
+        torch.manual_seed(0)
         model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(list_example_inputs)
         list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
         list_actual = AOTInductorModelRunner.run_multiple(
             model, list_example_inputs, options, constraints
         )
@@ -885,6 +891,16 @@ class AOTInductorTestsTemplate:
             torch.float32, self.device == "cuda"
         )
 
+    def test_normal_functional(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.normal_functional.default(x)
+
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -907,6 +923,7 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
@@ -927,6 +944,9 @@ copy_tests(
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+    },
 )
 
 
