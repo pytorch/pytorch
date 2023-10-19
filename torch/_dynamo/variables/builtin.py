@@ -1431,9 +1431,22 @@ class BuiltinVariable(VariableTracker):
             from .builder import wrap_fx_proxy_cls
 
             if op is operator.is_:
+                # print(
+                #     "LHS FAKE TENSOR",
+                #     id(left.as_proxy().node.meta["example_value"]),
+                #     left.as_proxy().node.meta["example_value"],
+                # )
+                # print(
+                #     "RHS FAKE TENSOR",
+                #     id(right.as_proxy().node.meta["example_value"]),
+                #     right.as_proxy().node.meta["example_value"],
+                # )
+                # print("LHS SOURCE", id(left.source), left.source)
+                # print("RHS SOURCE", id(right.source), right.source),
                 return ConstantVariable.create(
-                    id(left.as_proxy().node.meta["example_value"])
-                    == id(right.as_proxy().node.meta["example_value"])
+                    id(left.source)
+                    == id(right.source)
+                    # id(left.as_proxy().node.meta['example_value']) == id(right.as_proxy().node.meta['example_value'])
                 )
 
             if op not in supported_tensor_comparison_ops.values():

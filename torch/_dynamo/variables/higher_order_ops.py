@@ -115,7 +115,10 @@ def validate_args_and_maybe_create_graph_inputs(
                 new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
                 example_value = a.as_proxy().node.meta["example_value"]
                 new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                    # source=a.source,
                 )
             else:
                 new_arg = a
@@ -907,6 +910,13 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         chunk_size = args[4]
         batch_input_args = args[5:]
 
+        options = {}
+        if fn.value.__name__.endswith("_") or fn.value.__name__ in [
+            "clone",
+            "select",
+        ]:
+            options.update({"source": batch_input_args[0].source})
+
         if not isinstance(in_dims, (ConstantVariable, TupleVariable)):
             unimplemented("torch.func.vmap: in_dims is not an int or tuple variable.")
 
@@ -1045,11 +1055,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
         proxy = vmap_proxy(*proxy_batched_fn_args)
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=proxy,
-            example_value=example_value,
-        )
+        return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value, **options)
 
 
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):

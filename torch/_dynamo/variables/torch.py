@@ -236,6 +236,12 @@ class TorchVariable(VariableTracker):
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
+        if self.value.__name__.endswith("_") or self.value.__name__ in [
+            "clone",
+            "select",
+        ]:
+            options.update({"source": args[0].source})
+
         if self.value is torch._functorch.vmap.vmap_impl:
             return TorchHigherOrderOperatorVariable.make(
                 self.value,

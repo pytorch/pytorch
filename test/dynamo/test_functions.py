@@ -1853,11 +1853,34 @@ def forward(self, x_1, output_1):
     def test_is_mutated_tensor_tensor(self):
         def fn(x):
             y = x.add_(1)
-            return x is y
+            return y is x
 
         fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
 
-        z = torch.ones(4)
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
+        def fn(z):
+            x = z.clone()
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_vmapped_mutated_tensor_tensor(self):
+        def fn(x):
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
 
         self.assertEqual(fn(z), fn_opt(z))
 

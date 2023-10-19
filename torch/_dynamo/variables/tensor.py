@@ -352,6 +352,12 @@ class TensorVariable(VariableTracker):
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
+        if name.endswith("_") or name in [
+            "clone",
+            "select",
+        ]:  # inplace / self-propagating op
+            options.update({"source": self.source})
+
         if name in ("stride", "size"):
             dim_var = None
             if len(args) == 1:
