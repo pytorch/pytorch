@@ -32,7 +32,7 @@ bool checkMetaData(
           if (line.find(metadata_val) != std::string::npos ||
               !metadata_val.size()) {
             /* if found the right metadata_val OR if expected
-             * metadata value is an empty string then ignore the matadata_val */
+             * metadata value is an empty string then ignore the metadata_val */
             return true;
           }
         }
