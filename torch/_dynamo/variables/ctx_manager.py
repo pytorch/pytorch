@@ -135,7 +135,6 @@ class GradModeVariable(ContextWrappingVariable):
             initial_values=[torch.is_grad_enabled()],
             **kwargs,
         )
-        var._call_func(tx, [target_value])
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
@@ -145,6 +144,7 @@ class GradModeVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
+        self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(
             None, **VariableTracker.propagate(self)
         )
