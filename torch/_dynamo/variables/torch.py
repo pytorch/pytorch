@@ -322,7 +322,9 @@ class TorchVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, False, should_initialize_once=False, **options)
+                ctx = GradModeVariable.create(
+                    tx, False, should_initialize_once=False, **options
+                )
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False, **options)
@@ -330,7 +332,9 @@ class TorchVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, True, should_initialize_once=False, **options)
+                ctx = GradModeVariable.create(
+                    tx, True, should_initialize_once=False, **options
+                )
                 return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True, **options)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
