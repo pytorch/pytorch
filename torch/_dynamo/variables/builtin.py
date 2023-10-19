@@ -1432,7 +1432,8 @@ class BuiltinVariable(VariableTracker):
 
             if op is operator.is_:
                 return ConstantVariable.create(
-                    id(left.as_proxy()) == id(right.as_proxy())
+                    id(left.as_proxy().node.meta["example_value"])
+                    == id(right.as_proxy().node.meta["example_value"])
                 )
 
             if op not in supported_tensor_comparison_ops.values():

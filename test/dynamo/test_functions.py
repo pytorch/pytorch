@@ -1836,19 +1836,30 @@ def forward(self, x_1, output_1):
         self.assertEqual(ref, res)
 
     def test_is_tensor_tensor(self):
-        def fn(z, x, y):
+        def fn(x, y):
             if x is y:
-                return z + x * 2
+                return x * 2
             else:
-                return z + x + y
+                return x + y
 
         fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
 
-        self.assertEqual(fn(x, x, y), fn_opt(x, x, y))
-        self.assertEqual(fn(x, x, x), fn_opt(x, x, x))
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return x is y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
 
     def test_is_tuple_list(self):
         def fn(x, y):
