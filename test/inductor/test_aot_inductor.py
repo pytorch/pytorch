@@ -914,6 +914,52 @@ class AOTInductorTestsTemplate:
         x = torch.randn(4, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_dynamic_batch_sizes(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+            def forward(self, a, b, c):
+                n_vectors = f([a,b,c])
+                return torch.cat((a,b,c), dim=1).reshape(-1, n_vectors)
+
+        def f(embeddings):
+            all_shapes = [_.shape for _ in embeddings]
+            input_shape = all_shapes[0]
+            if len(input_shape) != 2 and len(input_shape) != 3:
+                raise RuntimeError("2 or 3")
+
+            if len(input_shape) == 2:
+                return len(embeddings)
+            else:
+                n_vector = 0
+                for shape in all_shapes:
+                    n_vector += shape[1]
+                return n_vector
+
+        mod = Mod()
+        inp = (
+            torch.rand(4,5),
+            torch.rand(4,5),
+            torch.rand(4,5),
+        )
+        mod(*inp)
+
+        so, compiled_mod = torch._export.aot_compile(
+            mod, inp,
+            dynamic_shapes={
+                'a': [torch.export.Dim(name='batch_dim', min=1, max=16), None],
+                'b': [torch.export.Dim(name='batch_dim', min=1, max=16), None],
+                'c': [torch.export.Dim(name='batch_dim', min=1, max=16), None],
+            },
+        )
+
+        # test run with changed batch size: 4 -> 6
+        compiled_mod(
+            torch.rand(6,5),
+            torch.rand(6,5),
+            torch.rand(6,5),
+        )
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
