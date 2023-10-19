@@ -849,9 +849,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(msg, choice, debug_str())
+                        raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
                 except AssertionError as e:
-                    raise AssertionError(
+                    raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
 

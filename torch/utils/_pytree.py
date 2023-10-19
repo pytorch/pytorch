@@ -541,12 +541,12 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     if serialize_node_def.from_dumpable_context is None:
         try:
             context = json.loads(json_schema["context"])
-        except TypeError:
+        except TypeError as e:
             raise TypeError(
                 "Unable to deserialize context. "
                 "Please make the context json load-able, or register a "
                 "custom serializer using _register_pytree_node."
-            )
+            ) from e
     else:
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 

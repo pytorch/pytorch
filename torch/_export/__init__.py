@@ -546,9 +546,9 @@ def _export(
                         **kwargs,
                     )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
         except GuardOnDataDependentSymNode as e:
-            raise UserError(
+            raise UserError(  # noqa: TRY200
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
                 case_name="constrain_as_size_example",

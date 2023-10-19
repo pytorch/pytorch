@@ -124,7 +124,7 @@ class TestAsIntegerRatio(TestCase):
                 df = np.longdouble(d)
             except (OverflowError, RuntimeWarning):
                 # the values may not fit in any float type
-                raise SkipTest("longdouble too small on this platform")
+                raise SkipTest("longdouble too small on this platform")  # noqa: TRY200
 
             assert_equal(nf / df, f, f"{n}/{d}")
 
