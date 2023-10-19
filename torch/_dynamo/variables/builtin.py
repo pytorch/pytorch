@@ -1375,6 +1375,11 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
+        if op.__name__ == "is_":
+            # If the two objects are of different type, we can safely return False
+            if type(left) is not type(right):
+                return ConstantVariable.create(False)
+
         if (
             all(
                 isinstance(x, (NNModuleVariable, ConstantVariable))
@@ -1425,6 +1430,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
+            if op is operator.is_:
+                return ConstantVariable.create(
+                    id(left.as_proxy()) == id(right.as_proxy())
+                )
+
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
             if (
@@ -1465,12 +1475,16 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, UserDefinedObjectVariable) and isinstance(
             right, UserDefinedObjectVariable
         ):
-            return ConstantVariable.create(op(left.value, right.value))
-
-        if op.__name__ == "is_":
-            # If the two objects are of different type, we can safely return False
-            if type(left) is not type(right):
-                return ConstantVariable.create(False)
+            ret = op(left.value, right.value)
+            if op is operator.is_ and not ret:
+                guard = left.source.make_guard(
+                    functools.partial(
+                        GuardBuilder.UNALIASED_INPUT, source_b=right.source
+                    )
+                )
+                return ConstantVariable.create(ret, guards=set({guard}))
+            else:
+                return ConstantVariable.create(ret)
 
         _unimplemented()
 

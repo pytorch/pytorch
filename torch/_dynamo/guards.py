@@ -512,6 +512,14 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref_b} is {ref_a}"]
         self._produce_guard_code(guard, code)
 
+    def UNALIASED_INPUT(self, guard, source_b):
+        print("CREATING UNALIASED")
+        ref_a = self.arg_ref(guard)
+        ref_b = self.arg_ref(source_b.name())
+
+        code = [f"{ref_a} is not {ref_b}"]
+        self._produce_guard_code(guard, code)
+
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)

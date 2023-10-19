@@ -1835,6 +1835,57 @@ def forward(self, x_1, output_1):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_is_tensor_tensor(self):
+        def fn(z, x, y):
+            if x is y:
+                return z + x * 2
+            else:
+                return z + x + y
+
+        fn_opt = torch.compile(backend='eager', fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, x, y), fn_opt(x, x, y))
+        self.assertEqual(fn(x, x, x), fn_opt(x, x, x))
+
+    def test_is_tuple_list(self):
+        def fn(x, y):
+            if x.size(0) is y:
+                return x * 2
+            else:
+                return x + 1
+
+        fn_opt = torch.compile(backend='eager', fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(1, 2)
+        y = [1, 2]
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+
+    def test_is_object_object(self):
+        class MyClass:
+            pass
+
+        def fn(x, y, z):
+            if y is z:
+                return x * 2
+            else:
+                return x + 1
+
+        fn_opt = torch.compile(backend='eager', fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(1, 2)
+        y = MyClass()
+        z = MyClass()
+
+        self.assertEqual(fn(x, y, z), fn_opt(x, y, z))
+        self.assertEqual(fn(x, y, y), fn_opt(x, y, y))
+
+        torch._dynamo.reset()
+        self.assertEqual(fn(x, y, y), fn_opt(x, y, y))
+        self.assertEqual(fn(x, y, z), fn_opt(x, y, z))
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
