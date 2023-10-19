@@ -289,6 +289,8 @@ class TestUnshardParams(TestUnshardParamsBase):
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False, device=self.device), **fsdp_kwargs),
+                FSDP(nn.Linear(5, 5, bias=False, device=self.device), **fsdp_kwargs),
+                FSDP(nn.Linear(5, 5, bias=False, device=self.device), **fsdp_kwargs),
                 nn.Linear(5, 3, bias=False, device=self.device),
             ),
             **fsdp_kwargs,
