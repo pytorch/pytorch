@@ -94,6 +94,8 @@ jobs:
       - name: Install PyTorch and run MPS tests
         id: test
         env:
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           ENV_NAME: conda-test-env-${{ github.run_id }}
           PY_VERS: 3.9
           PR_BODY: ${{ github.event.pull_request.body }}
