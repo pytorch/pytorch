@@ -59,6 +59,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -9659,6 +9660,34 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for invalid_val in [-1, 2**65]:
             self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
             self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+
+    def test_swap(self):
+        ts = [
+            torch.rand(2),
+            torch.rand(3, 3),
+            torch.empty(3, dtype=torch.int),
+            TwoTensor(torch.rand(4), torch.rand(4))
+        ]
+
+        for t1, t2 in itertools.combinations(ts, 2):
+            t1 = t1.clone()
+            t2 = t2.clone()
+            t2.foo = "bar"
+            holder = []
+            holder.append(t1)
+            t1_ref = weakref.ref(t1)
+
+            t1_prop = (id(t1), sys.getrefcount(t1))
+            t2_prop = (id(t2), sys.getrefcount(t2))
+
+            torch.utils.swap_tensors(t1, t2)
+
+            self.assertEqual(t1_prop, (id(t1), sys.getrefcount(t1)))
+            self.assertEqual(t2_prop, (id(t2), sys.getrefcount(t2)))
+            self.assertIs(holder[0], t1)
+            self.assertEqual(t1.foo, "bar")
+            self.assertIs(t1_ref(), t1)
+            self.assertIsNot(t1_ref(), t2)
 
 
 # The following block extends TestTorch with negative dim wrapping tests

@@ -326,6 +326,74 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
+// BAD COPY PASTE
+/* GC information is stored BEFORE the object structure. */
+typedef struct {
+    // Pointer to next object in the list.
+    // 0 means the object is not tracked
+    uintptr_t _gc_next;
+
+    // Pointer to previous object in the list.
+    // Lowest two bits are used for flags documented later.
+    uintptr_t _gc_prev;
+} PyGC_Head;
+
+/* Get an object's GC head */
+static inline PyGC_Head* _Py_AS_GC(PyObject *op) {
+    char *gc = ((char*)op) - sizeof(PyGC_Head);
+    return (PyGC_Head*)gc;
+}
+
+PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
+  PyObject* a_ = nullptr;
+  PyObject* b_ = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &a_, &b_)) {
+    return nullptr;
+  }
+
+  TORCH_CHECK(THPVariable_Check(a_));
+  TORCH_CHECK(THPVariable_Check(b_));
+  // TODO: Add a check to make sure the user didn't subclass
+  // THPVariable from C and added new fields.
+  // Not sure how but that should be rare
+
+  // Make sure we use managed dict otherwise we would read out of bound!
+  TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_DICT));
+
+  // A bunch of stuff is before the pointer: the gc prev/next, __dict__
+  // and weakref list. So we offset back by 4
+  // PyObject should be PyDictOrValues but we don't have access to it
+  void* a = (void*)a_ - 4*sizeof(PyObject*);
+  void* b = (void*)b_ - 4*sizeof(PyObject*);
+  auto actual_size = sizeof(THPVariable) + 4*sizeof(PyObject*);
+
+  // Swap the full content of the PyObjects
+  void* tmp = malloc(actual_size);
+  memcpy(tmp, a, actual_size);
+  memcpy(a, b, actual_size);
+  memcpy(b, tmp, actual_size);
+  free(tmp);
+
+  // The only thing that we must preserve is the gc stuff!
+  // To make sure that everyone holding a PyObject* reference
+  // to this is still correct.
+  Py_ssize_t tmp_refcnt = Py_REFCNT(a_);
+  Py_SET_REFCNT(a_, Py_REFCNT(b_));
+  Py_SET_REFCNT(b_, tmp_refcnt);
+
+  PyGC_Head* a_gc = _Py_AS_GC(a_);
+  PyGC_Head* b_gc = _Py_AS_GC(b_);
+  uintptr_t tmp_gc_head;
+  tmp_gc_head = a_gc->_gc_next;
+  a_gc->_gc_next = b_gc->_gc_next;
+  b_gc->_gc_next = tmp_gc_head;
+  tmp_gc_head = a_gc->_gc_prev;
+  a_gc->_gc_prev = b_gc->_gc_prev;
+  b_gc->_gc_prev = tmp_gc_head;
+
+  Py_RETURN_NONE;
+}
+
 PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
@@ -1086,6 +1154,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
+    {"_swap", THPModule_swap, METH_VARARGS, nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",
