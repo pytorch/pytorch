@@ -6,8 +6,8 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.skipfiles import (
-    LEGACY_MOD_INLINELIST,
     FUNC_INLINELIST,
+    LEGACY_MOD_INLINELIST,
     MOD_INLINELIST,
 )
 from torch._dynamo.utils import istype
