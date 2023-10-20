@@ -6670,19 +6670,19 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor& self,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    at::IntArrayRef padding,
-    at::IntArrayRef output_padding,
-    at::IntArrayRef stride,
-    at::IntArrayRef dilation,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef output_padding,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef dilation,
     bool transposed,
-    int64_t groups,
+    c10::SymInt groups,
     ::std::array<bool, 2> output_mask) {
   if (!grad_output.defined()) {
     return std::tuple<Tensor, Tensor>();
   }
 
   // Just call the general backward and ignore the bias gradient part.
-  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward_symint(
       grad_output,
       self,
       weight,
