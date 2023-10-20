@@ -36,6 +36,7 @@ jobs:
         run: |
             # Create new folder with specified name so extracting the archive yields that
             rm -rf "/tmp/$PT_RELEASE_NAME"
+            mkdir "/tmp/$PT_RELEASE_NAME"
             cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
             mv "/tmp/$PT_RELEASE_NAME" .
             # Cleanup
