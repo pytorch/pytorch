@@ -467,15 +467,15 @@ class TestCustomOp(CustomOpTestCaseBase):
                 raise NotImplementedError()
 
     def test_unsupported_schemas(self):
-        with self.assertRaisesRegex(ValueError, "does not support non-functional"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a!) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "does not support view functions"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "no outputs"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(Tensor x) -> ()")(
                 foo
             )
