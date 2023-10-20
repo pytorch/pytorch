@@ -742,6 +742,10 @@ static std::tuple<Tensor, bool> batchify(
     const Tensor& input,
     const int64_t num_spatial_dims,
     const std::string& func_name) {
+  // assume NTs are always batched
+  if (input.is_nested()) {
+    return std::make_tuple(input, true);
+  }
   const auto dim_count_no_batch = num_spatial_dims + 1;
   const auto dim_count_batch = dim_count_no_batch + 1;
   const auto is_batched = (input.dim() == dim_count_batch);
@@ -1432,6 +1436,11 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::SlowTranspose2d:
       if (thnn_conv_use_channels_last(input, weight)) {
         backend_memory_format = at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Overrideable:
+      if (xpu_conv_use_channels_last(input, weight)) {
+        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
     default:

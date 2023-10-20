@@ -964,7 +964,8 @@ def configure_extension_build():
             extra_compile_args += ["-g"]
             extra_link_args += ["-g"]
 
-    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
+    # should be included in all wheels uploaded to pypi
     pytorch_extra_install_requirements = os.getenv(
         "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
     )
@@ -1215,6 +1216,7 @@ def main():
         "include/ATen/cpu/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
+        "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
         "include/ATen/core/*.h",
