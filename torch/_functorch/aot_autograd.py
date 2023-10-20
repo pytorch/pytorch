@@ -1601,7 +1601,7 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        for i, arg in enumerate(args_maybe_cloned):
+        for arg in args_maybe_cloned:
             if not isinstance(arg, Tensor):
                 continue
             sync_functional_tensor(arg)
