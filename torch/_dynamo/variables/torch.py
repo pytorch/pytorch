@@ -127,6 +127,10 @@ tensor_dunder_fns_remap = {
 }
 
 
+def is_torch_inplace_op(name: str):
+    return not name.startswith("_") and name.endswith("_")
+
+
 try:
     # Wed need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
@@ -235,6 +239,9 @@ class TorchVariable(VariableTracker):
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if self.value.__name__.endswith("_"):
+            options.update({"source": args[0].source})
 
         if self.value is torch._functorch.vmap.vmap_impl:
             return TorchHigherOrderOperatorVariable.make(

@@ -37,19 +37,19 @@ def _listlike_contains_helper(items, search, tx, options, check_hash_match=False
     must_check_hash = False
     if check_hash_match and isinstance(search, variables.TensorVariable):
         must_check_hash = True
-        # ID_MATCH of Tensor means ID_MATCH of proxies.
+        # Match of Tensor means match of source.
 
         # There are scenarios in which this could potentially fail. That is when:
         # 1. Previously unaliased is aliased e.g. f(x, y) -> f(x, x)
         # 2. Previously aliased is unaliased e.g. f(x, x) -> f(y, y)
         # Thankfully, we install guards which fail whenever the input tensors' alias matrix changes.
-        search = id(search.as_proxy().node)
+        search = search.source
 
     found = None
     for x in items:
         if must_check_hash:
             if isinstance(x, variables.TensorVariable):
-                if search == id(x.as_proxy().node):
+                if search == x.source:
                     return ConstantVariable.create(True)
             else:
                 unimplemented(
