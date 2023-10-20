@@ -25,11 +25,12 @@ from .mm_common import (
     mm_grid,
     mm_options,
 )
+from .block_pointer_templates import mm_block_pointer_template
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
-mm_template = TritonTemplate(
+base_mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
     source=r"""
@@ -90,6 +91,8 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """,
 )
+def get_mm_template():
+    return base_mm_template if not inductor_config.use_block_pointer_mm_kernel else mm_block_pointer_template
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
@@ -119,6 +122,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 @register_lowering(aten.mm)
 def tuned_mm(mat1, mat2, *, layout=None):
+    mm_template = get_mm_template()
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
@@ -162,6 +166,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten._int_mm)
 def tuned_int_mm(mat1, mat2, *, layout=None):
+    mm_template = get_mm_template()
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
@@ -183,6 +188,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    mm_template = get_mm_template()
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
@@ -270,6 +276,7 @@ aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
 
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
+    mm_template = get_mm_template()
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
     choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
     if mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous():
@@ -294,6 +301,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 # realization of the int32 _int_mm output by forcing fusion with the mul op.
 # This is only used when config.force_fuse_int_mm_with_mul = True
 def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
+    mm_template = get_mm_template()
     out_dtype = (
         torch.promote_types(mat3.get_dtype(), torch.int32)
         if out_dtype is None

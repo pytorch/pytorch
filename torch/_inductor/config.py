@@ -85,6 +85,13 @@ reorder_for_locality = True
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
+# this value is hard coded to 8 by default, this option lets us use 4 or 8 instead but
+# rought doubles the number of configs that need to be checked
+matmul_allow_group_m_of_4 = False
+
+# use block_pointer mm kernel instead of the regular mm kernel in mm.py
+use_block_pointer_mm_kernel = False
+
 # this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
 # but the mul gets fused with other pointwise ops instead.
 force_fuse_int_mm_with_mul = False

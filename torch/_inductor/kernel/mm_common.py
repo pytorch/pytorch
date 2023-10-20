@@ -66,13 +66,15 @@ def filtered_configs(
         num_warps = min(num_warps, block_m * block_n // 256)
         if (block_m, block_n, block_k, num_stages, num_warps) not in used:
             used.add((block_m, block_n, block_k, num_stages, num_warps))
-            yield triton_config(
-                BLOCK_M=block_m,
-                BLOCK_N=block_n,
-                BLOCK_K=block_k,
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
+            for group_m in [8] if not torch._inductor.config.matmul_allow_group_m_of_4 else [4,8]:
+                yield triton_config(
+                    GROUP_M=group_m,
+                    BLOCK_M=block_m,
+                    BLOCK_N=block_n,
+                    BLOCK_K=block_k,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                )
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
@@ -108,6 +110,9 @@ int8_mm_kernel_configs = [
     # {"config": (32, 32, 16, 1, 2), "cond": True},
     {"config": (128, 256, 128, 3, 8), "cond": torch.version.hip is None},
     {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
+    {"config": (128, 128, 64, 4, 4), "cond": True},
+    {"config": (64, 128, 64, 3, 2), "cond": True},
+    {"config": (256, 128, 64, 4, 8), "cond": True},
 ]
 
 # Create filtered list of configs based on cond evaluation
@@ -169,14 +174,13 @@ def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
         == config.kwargs["BLOCK_K"]
     )
     return dict(
-        GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
-        **config.kwargs,
+        **config.kwargs, # GROUP_M set by this
     )
 
 
