@@ -379,7 +379,7 @@ class TestAttributes(TestCase):
             try:
                 r = np.ndarray([size], dtype=int, buffer=x, offset=offset * x.itemsize)
             except Exception as e:
-                raise RuntimeError(e)
+                raise RuntimeError(e)  # noqa: TRY200
             r.strides = strides = strides * x.itemsize
             return r
 
@@ -3774,7 +3774,7 @@ class TestIO(TestCase):
         filename = tmp_path / "file"
         if request.param == "string":
             filename = str(filename)
-        yield filename
+        return filename
 
     def test_nofile(self):
         # this should probably be supported as a file
