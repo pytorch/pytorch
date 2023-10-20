@@ -528,8 +528,14 @@ def _multi_tensor_adamw(
                 if amsgrad:
                     device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
 
-        # update steps
-        torch._foreach_add_(device_state_steps, 1)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(device_state_steps, 1)
 
         # Perform stepweight decay
         if weight_decay != 0:
