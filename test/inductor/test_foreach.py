@@ -118,6 +118,7 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
         )
+
     def _test_single_scalar_tensor(self, op):
         def fn(a0, a1):
             return op([a0, a1], torch.tensor(3.3, device="cuda:0"))
@@ -146,6 +147,7 @@ class ForeachTests(TestCase):
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     @requires_cuda()
     @scalar_tensor_bin_ops
     def test_single_scalar_tensor(self, op):
