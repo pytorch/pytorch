@@ -52,7 +52,7 @@ def raise_hard_error_if_graph_break(reason):
             try:
                 return fn(*args, **kwargs)
             except Unsupported as e:
-                msg = " Scroll up to find out what canses the graph break."
+                msg = " Scroll up to find out what causes the graph break."
                 raise UncapturedHigherOrderOpError(reason + msg) from e
 
         return graph_break_as_hard_error
@@ -509,16 +509,17 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         # Let's say we capture cond(pred, true_fn, false_fn, (x,))
-        # and true_fn has lifted variables a, b, c
-        # and false_fn has lifted variables a, b, d
+        # With mannually_set_graph_input set to False,
+        # true_fn has lifted variables x, a, b, c
+        # false_fn has lifted variables x, a, b, d
         # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
         # - true_fn(x, a, b, c_true_branch, d_false_branch)
         # - false_fn(x, a, b, c_true_branch, d_false_branch)
         #
-        # More formally, you can think of it having three parts in the following order:
-        # - used in both branches: x, a, b
-        # - only used in true branches: c, suffixed with _true_branch
-        # - only used in false branches: d, suffixed with _false_branch
+        # More formally, the signature has three parts in the following order:
+        # 1. used in both branches: x, a, b
+        # 2. only used in true branches: c, suffixed with _true_branch
+        # 3. only used in false branches: d, suffixed with _false_branch
         # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
         def fixup_branch_inps(
             graph, lifted_freevars, shared, unique_true, unique_false

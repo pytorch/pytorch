@@ -1247,10 +1247,15 @@ class GraphModule(torch.nn.Module):
         )
 
         for node in backend.graphs[0].graph.nodes:
-            if node.op == "call_function" and node.target == control_flow.cond:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.higher_order.cond
+            ):
                 _, _, _, operands = node.args
-                # Each branch takes 5 inputs (x, true_buffer, true_z, false_buffer, false_z)
-                self.assertEqual(len(operands), 5)
+                # Each branch takes 4 inputs (x, z, buffer_true_branch, buffer_false_branch)
+                # TODO: we should be able to de-duplicate the buffer accessed from two branches so that
+                # operands become (x, z, buffer)
+                self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
