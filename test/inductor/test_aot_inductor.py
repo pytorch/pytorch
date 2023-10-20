@@ -796,14 +796,14 @@ class AOTInductorTestsTemplate:
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTInductorModelRunner.run(
-                Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
+                "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTInductorModelRunner.run(
-                Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
+                "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
             )
 
         self.assertTrue(same(result_cpu, result_cuda_0.cpu()))

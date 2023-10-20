@@ -434,8 +434,6 @@ vTensor::vTensor(
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
-  TORCH_CHECK(view_->image_, "vTensor has empty image texture!");
-
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
   return view_->image_;
 }
@@ -444,8 +442,6 @@ api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  TORCH_CHECK(view_->image_, "vTensor has empty image texture!");
-
   view_->transition(pipeline_barrier, stage, access);
   return view_->image_;
 }
@@ -453,8 +449,6 @@ api::VulkanImage& vTensor::image(
 api::VulkanBuffer& vTensor::buffer(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
-  TORCH_CHECK(view_->buffer_, "vTensor has empty buffer!");
-
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
   return view_->buffer_;
 }
@@ -463,8 +457,6 @@ api::VulkanBuffer& vTensor::buffer(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  TORCH_CHECK(view_->buffer_, "vTensor has empty buffer!");
-
   view_->transition(pipeline_barrier, stage, access);
   return view_->buffer_;
 }
