@@ -743,7 +743,7 @@ def mps_ops_modifier(ops):
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'multinomial': [torch.float32],  # random results
+        'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
