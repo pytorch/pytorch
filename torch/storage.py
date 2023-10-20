@@ -1050,14 +1050,16 @@ class TypedStorage:
         """
         from_file(filename, shared=False, size=0) -> Storage
 
-        If `shared` is `True`, then memory is shared between all processes.
-        All changes are written to the file. If `shared` is `False`, then the changes on
+        Creates a storage backed by a memory-mapped file.
+
+        If ``shared`` is ``True``, then memory is shared between all processes.
+        All changes are written to the file. If ``shared`` is ``False``, then the changes on
         the storage do not affect the file.
 
-        `size` is the number of elements in the storage. If `shared` is `False`,
-        then the file must contain at least `size * sizeof(Type)` bytes
-        (`Type` is the type of storage). If `shared` is `True` the file will be
-        created if needed.
+        ``size`` is the number of elements in the storage. If ``shared`` is ``False``,
+        then the file must contain at least :math:`size * sizeof(Type)` bytes
+        (``Type`` is the type of storage, in the case of an ``UnTypedStorage`` the file must contain at
+        least `size` bytes). If ``shared`` is ``True`` the file will be created if needed.
 
         Args:
             filename (str): file name to map
