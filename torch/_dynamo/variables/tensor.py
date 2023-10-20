@@ -348,13 +348,9 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
-        from .torch import is_torch_inplace_op
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-
-        if is_torch_inplace_op(name):  # inplace / self-propagating op
-            options.update({"source": self.source})
 
         if name in ("stride", "size"):
             dim_var = None

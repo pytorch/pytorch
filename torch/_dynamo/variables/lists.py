@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.fx
+from torch._subclasses.fake_tensor import is_fake
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -25,9 +26,16 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 
 
+def _get_fake_tensor(vt):
+    fake_tensor = vt.as_proxy().node.meta.get("example_value")
+    if not is_fake(fake_tensor):
+        unimplemented("Cannot check Tensor object identity without its fake value")
+    return fake_tensor
+
+
 def _listlike_contains_helper(items, search, tx, options, check_hash_match=False):
     if search.is_python_constant():
-        result = any(
+        found = any(
             x.is_python_constant()
             and x.as_python_constant() == search.as_python_constant()
             for x in items
@@ -39,24 +47,15 @@ def _listlike_contains_helper(items, search, tx, options, check_hash_match=False
     must_check_hash = False
     if check_hash_match and isinstance(search, variables.TensorVariable):
         must_check_hash = True
-        # Match of Tensor means match of source.
-
-        # There are scenarios in which this could potentially fail. That is when:
-        # 1. Previously unaliased is aliased e.g. f(x, y) -> f(x, x)
-        # 2. Previously aliased is unaliased e.g. f(x, x) -> f(y, y)
-        # Thankfully, we install guards which fail whenever the input tensors' alias matrix changes.
-        search = search.source
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
 
     found = None
     for x in items:
         if must_check_hash:
             if isinstance(x, variables.TensorVariable):
-                if search == x.source:
+                if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
-            else:
-                unimplemented(
-                    "Cannot test hash match of Tensor in collection containing non-Tensor"
-                )
         else:
             check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
             if found is None:
