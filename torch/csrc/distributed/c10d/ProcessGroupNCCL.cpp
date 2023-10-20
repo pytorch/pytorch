@@ -14,6 +14,7 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -1018,6 +1019,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         } else {
           it = workMetaList_.erase(it);
         }
+        at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -1834,8 +1836,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
@@ -2013,8 +2020,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Enqueue P2P op so that it can be cancelled by NCCL watchdog
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
+
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
