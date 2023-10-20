@@ -3572,6 +3572,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(), fn())
         self.assertEqual(cnt.frame_count, 2)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
