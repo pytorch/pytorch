@@ -181,8 +181,8 @@ class TensorVariable(VariableTracker):
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
-        except Exception:
-            raise NotImplementedError()
+        except Exception as exc:
+            raise NotImplementedError() from exc
 
         if _input_associated_real_value is None:
             raise NotImplementedError()
@@ -1075,7 +1075,7 @@ class NumpyNdarrayVariable(TensorVariable):
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         from ..utils import numpy_method_wrapper
 
-        if name in ["__len__", "size"]:
+        if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
         proxy = tx.output.create_proxy(

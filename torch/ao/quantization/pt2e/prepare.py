@@ -50,13 +50,13 @@ def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
     shared_with_map[edge_or_node] = root
     return root
 
-def _union(a: EdgeOrNode, b: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> None:
-    """Merge the subtree for `b` with `a`, the order is important here
+def _union(parent: EdgeOrNode, child: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> None:
+    """Merge the subtree for `child` with `parent`, the order is important here
     """
-    root_a = _find_root(a, shared_with_map)
-    root_b = _find_root(b, shared_with_map)
-    # union the two trees
-    shared_with_map[root_b] = root_a
+    root_parent = _find_root(parent, shared_with_map)
+    root_child = _find_root(child, shared_with_map)
+    # union the two trees by pointing the root of child to root of parent
+    shared_with_map[root_child] = root_parent
 
 def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
     """Update the `shared_with_map` based on the qspec, this applies the `SharedQuantizationSpec`
@@ -137,25 +137,33 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
         belongs to the same group should have the same id
 
     Example:
-        op1 -> op3
-           op2 /
-
+        op2 -> cat1 -> cat2
+           op1 /        /
+                     op3
         edge_or_node_to_qspec: {
-            op1: int8_qspec
-            op2: int8_qspec
-            (op1, op2): int8_qspc,
-            (op2, op3): SharedQuantizationSpec((op1, op2))
-            op3: int8_qspec
+            op1: int8_qspec,
+            op2: int8_qspec,
+            (op1, cat1): int8_qspc,
+            (op2, cat1): SharedQuantizationSpec((op1, cat1)),
+            cat1: SharedQuantizationSpec((op1, cat1)),
+            (op3, cat2): int8_qspec,
+            (cat1, cat2): SharedQuantizationSpec((op3, cat2)),
+            cat2: SharedQuantizationSpec((op3, cat2)),
         }
 
         edge_or_node_to_group_id = _get_edge_or_node_to_group_id(edge_or_node_to_qspec)
         edge_or_node_to_group_id: {
-            op1: 0,
+            op1: 1,
             op2: 1,
-            (op1, op2): 1,
-            (op2, op3): 1,
-            op3: 2
+            (op1, cat1): 1,
+            (op2, cat1): 1,
+            cat1: 1,
+            (op3, cat2): 1,
+            (cat1, cat2): 1,
+            cat2: 1,
         }
+        # everything are in the same group because (cat1) and (cat1, cat2) are implicitly shared, which
+        # connects the two sharing group around cat1 and cat2 op due to transitive sharing
     """
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself

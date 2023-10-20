@@ -90,6 +90,7 @@ select = [
     "PT026",
     "PYI",
     "RUF017",
+    "TRY200",
     "TRY302",
 ]
 
