@@ -2571,6 +2571,20 @@ class TestHelperModules:
             z = torch.cat([x, y], dim=1)
             return z
 
+    class Conv2dWithTwoCat(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = torch.nn.Conv2d(3, 3, 3)
+            self.conv2 = torch.nn.Conv2d(3, 3, 3)
+
+        def forward(self, x1, x2, x3, x4):
+            x1 = self.conv1(x1)
+            x2 = self.conv2(x2)
+            y = torch.cat([x1, x2], dim=1)
+            z = x3 + x4
+            w = torch.cat([z, y])
+            return w
+
     class EmbeddingModule(torch.nn.Module):
         def __init__(self):
             super().__init__()
