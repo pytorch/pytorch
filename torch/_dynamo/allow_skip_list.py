@@ -50,7 +50,6 @@ torch_ctx_manager_classes = {
     "torch.cuda.amp.autocast_mode.autocast",
     "torch.cuda.device",
     "torch.cuda.graphs.graph",
-    "torch.device",
     "torch.distributed.autograd.context",
     "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
     "torch.hub._Faketqdm",

@@ -28,7 +28,9 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_torch_ctx_manager_classes = set()
+ignored_torch_ctx_manager_classes = {
+    torch.device,
+}
 
 
 def gen_get_func_inlinelist(dummy_func_inlinelist):
