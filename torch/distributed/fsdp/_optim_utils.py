@@ -1334,7 +1334,7 @@ def _convert_all_state_info(
     gathered_state_info: List[Dict[str, StateInfo]],
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
-) -> Tuple[torch.dtype, Dict[str, List[Optional[torch.Tensor]]]]:
+) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
     the StateInfo into the original state if the state is not a non-scalar
@@ -1350,11 +1350,11 @@ def _convert_all_state_info(
             {n for state in state_info for n in state.tensors.keys()}
         )
         empty_ranks: Set[int] = set()
+        dtype: Optional[torch.dtype] = None
         # First check all the non-scalar states and get the information of
         # states on each rank.
         for state_name in all_tensor_states:
             numels = []
-            dtype: Optional[torch.dtype] = None
             _empty_ranks: Set[int] = set()
             for rank, object_state in enumerate(state_info):
                 numels.append(0)
@@ -1403,7 +1403,6 @@ def _convert_all_state_info(
                 ), f"Different ranks have different values for {name}."
                 gathered_state[name] = scalar_tensor_value
 
-    assert dtype is not None  # typing purpose
     return dtype, state_buffers
 
 
@@ -1481,6 +1480,9 @@ def _allgather_orig_param_states(
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states
     )
+
+    if len(state_buffers) == 0:
+        return output_states
 
     has_state_params: List[bool] = [
         True if fqn in output_states else False
