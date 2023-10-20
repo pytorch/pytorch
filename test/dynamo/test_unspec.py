@@ -343,6 +343,17 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, dim), fn(inputs, dim))
 
+    # https://github.com/pytorch/pytorch/issues/104812
+    def test_argmin_coerces_symint_to_intlist_spec(self):
+        def fn(x, dim):
+            # the python arg parser coerces dim into a vector<int>
+            return torch.amin(x, dim=dim, keepdim=True)
+
+        x = torch.randn(4, 4, 4)
+        dim = 2
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
+        self.assertEqual(compl_fn(x, dim), fn(x, dim))
+
     def test_exponential(self):
         def fn(inputs, op_inputs_dict):
             res = inputs.exponential_(**op_inputs_dict)
