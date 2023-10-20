@@ -18,7 +18,11 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -182,20 +186,33 @@ class TestDTensorCompileE2E(DTensorTestBase):
         return 4
 
     @with_comms
-    def test_tp_compile_fullgraph(self):
+    @parametrize("is_seq_parallel", [True, False])
+    def test_tp_compile_fullgraph(self, is_seq_parallel):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         model = SimpleModel(self.device_type)
+        colwise_style = (
+            ColwiseParallel(input_layouts=Shard(0))
+            if is_seq_parallel
+            else ColwiseParallel()
+        )
+        rowwise_style = (
+            RowwiseParallel(output_layouts=Shard(0))
+            if is_seq_parallel
+            else RowwiseParallel()
+        )
         model = parallelize_module(
             model,
             mesh,
             parallelize_plan={
-                "mlp_0.net1": ColwiseParallel(),
-                "mlp_0.net2": RowwiseParallel(),
-                "mlp_1.net1": ColwiseParallel(),
-                "mlp_1.net2": RowwiseParallel(),
+                "mlp_0.net1": colwise_style,
+                "mlp_0.net2": rowwise_style,
+                "mlp_1.net1": colwise_style,
+                "mlp_1.net2": rowwise_style,
             },
         )
+        rng_seed = self.rank if is_seq_parallel else 0
+        torch.manual_seed(rng_seed)
         inp = torch.rand(20, 10, device=self.device_type)
         out = model(inp)
         compiled_mod = torch.compile(model, backend="aot_eager", fullgraph=True)
@@ -275,6 +292,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(x_ref.grad, x.grad)
         self.assertEqual(y_ref.grad, y.grad)
 
+
+instantiate_parametrized_tests(TestDTensorCompileE2E)
 
 if __name__ == "__main__":
     run_tests()

@@ -5,7 +5,6 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel._utils import (
     _deprecate_warnings,
     _prepare_input_validate,
@@ -281,15 +280,21 @@ def make_output_reshard_tensor(
     return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined, misc]
 
 
-def _needs_redistribute(
-    dst_placements: Tuple[Placement, ...], dtensor: DTensor
-) -> bool:
-    """
-    Check DTensor placements to decide whether the DTensor redistribute
-    is needed to be called or not. If not, we can directly early return
-    and save CPU overhead.
-    """
-    return dtensor._spec.placements == dst_placements
+def _redistribute_per_both_layouts(t, input_layout, output_layout, device_mesh):
+    dst_placements = (output_layout,)
+    if isinstance(t, DTensor):
+        return t.redistribute(device_mesh, dst_placements)
+    elif isinstance(t, torch.Tensor):
+        dtensor = DTensor.from_local(t, device_mesh, (input_layout,), run_check=False)
+        return dtensor.redistribute(device_mesh, dst_placements)
+    else:
+        if input_layout is not None:
+            raise RuntimeError(
+                "Tensor parallel module expects DTensor or tensor"
+                f" when layout specified but received {type(t)}!"
+            )
+        else:
+            return t
 
 
 def _get_prepare_input(
@@ -298,32 +303,6 @@ def _get_prepare_input(
     """
     Get the prepare input function for this parallel style.
     """
-
-    def _redistribute_per_both_layouts(t, input_layout, output_layout, device_mesh):
-        dst_placements = (output_layout,)
-        if isinstance(t, DTensor):
-            return (
-                t
-                if _needs_redistribute(dst_placements, t)
-                else t.redistribute(device_mesh, dst_placements)
-            )
-        elif isinstance(t, torch.Tensor):
-            dtensor = DTensor.from_local(
-                t, device_mesh, [input_layout], run_check=False
-            )
-            return (
-                dtensor
-                if _needs_redistribute(dst_placements, dtensor)
-                else dtensor.redistribute(device_mesh, dst_placements)
-            )
-        else:
-            if input_layout is not None:
-                raise RuntimeError(
-                    "Tensor parallel module expects DTensor or tensor"
-                    f" when layout specified but received {type(t)}!"
-                )
-            else:
-                return t
 
     def make_input_redistribute_1d(
         input_layouts: LayoutsType,
@@ -347,15 +326,7 @@ def _get_prepare_input(
         Returns:
             A :class:`DTensor` replicated over ``device_mesh``.
         """
-        # Early return to save CPU overhead when there is only one input.
-        if not isinstance(inputs, tuple):
-            return _redistribute_per_both_layouts(
-                inputs, input_layouts, output_layouts, device_mesh
-            )
-
-        if not isinstance(input_layouts, tuple):
-            input_layouts = (input_layouts,)  # type: ignore[assignment]
-            output_layouts = (output_layouts,)  # type: ignore[assignment]
+        # Always assume layouts are tuples.
         results = []
         for input, input_layout, output_layout in zip(
             inputs, input_layouts, output_layouts  # type: ignore[arg-type]
@@ -370,30 +341,27 @@ def _get_prepare_input(
     return functools.partial(make_input_redistribute_1d, input_layouts, output_layouts)
 
 
+def _redistribute_per_layout(layout, use_local_output, t, device_mesh):
+    dst_placements = (layout,)
+    if isinstance(t, DTensor):
+        dtensor = t.redistribute(device_mesh, dst_placements)
+        return dtensor.to_local() if use_local_output else dtensor
+    else:
+        if layout is not None:
+            raise RuntimeError(
+                "Tensor parallel module expects DTensor or tensor"
+                f" when layout specified but received {type(t)}!"
+            )
+        else:
+            return t
+
+
 def _get_prepare_output(
     output_layouts: LayoutsType, use_local_output: bool
 ) -> Callable[[Any], Any]:
     """
     Get the prepare input function for this parallel style.
     """
-
-    def _redistribute_per_layout(t, layout, device_mesh, use_local_output):
-        dst_placements = (layout,)
-        if isinstance(t, DTensor):
-            dtensor = (
-                t
-                if _needs_redistribute(dst_placements, t)
-                else t.redistribute(device_mesh, dst_placements)
-            )
-            return dtensor.to_local() if use_local_output else dtensor
-        else:
-            if layout is not None:
-                raise RuntimeError(
-                    "Tensor parallel module expects DTensor or tensor"
-                    f" when layout specified but received {type(t)}!"
-                )
-            else:
-                return t
 
     def make_output_redistribute_1d(
         output_layouts: LayoutsType,
@@ -417,19 +385,12 @@ def _get_prepare_output(
         Returns:
             A :class:`DTensor` replicated over ``device_mesh``.
         """
-        # Early return to save CPU overhead when there is only one output.
-        if not isinstance(outputs, tuple):
-            return _redistribute_per_layout(
-                outputs, output_layouts, device_mesh, use_local_output
-            )
-
-        if not isinstance(output_layouts, tuple):
-            output_layouts = (output_layouts,)  # type: ignore[assignment]
+        # Always assume layouts are tuples.
         results = []
         for output, output_layout in zip(outputs, output_layouts):  # type: ignore[arg-type]
             results.append(
                 _redistribute_per_layout(
-                    output, output_layout, device_mesh, use_local_output
+                    output_layout, use_local_output, output, device_mesh
                 )
             )
         return tuple(results)
@@ -496,22 +457,22 @@ class RowwiseParallel(ParallelStyle):
 
         if _prepare_input is not None:
             prepare_input_fn = _prepare_input
-        if input_layouts == Shard(-1):
-            prepare_input_fn = make_input_shard_1d_last_dim
         else:
-            prepare_input_fn = _get_prepare_input(
+            prepare_input_fn = functools.partial(
+                lambda input_layouts, output_layouts, inputs, device_mesh: (
+                    _redistribute_per_both_layouts(
+                        inputs[0], input_layouts, output_layouts, device_mesh
+                    ),
+                ),
                 input_layouts,
                 Shard(-1),
             )
 
         if _prepare_output is not None:
             prepare_output_fn = _prepare_output
-        elif output_layouts == Replicate():
-            prepare_output_fn = make_output_tensor
         else:
-            prepare_output_fn = _get_prepare_output(
-                output_layouts,
-                use_local_output,
+            prepare_output_fn = functools.partial(
+                _redistribute_per_layout, output_layouts, use_local_output
             )
 
         super().__init__(
@@ -573,9 +534,6 @@ class ColwiseParallel(ParallelStyle):
         output_layouts=Shard(-1),
         use_local_output=True,
     ) -> None:
-        """
-
-        """
         if isinstance(input_layouts, tuple) or isinstance(output_layouts, tuple):
             raise NotImplementedError(
                 "ColwiseParallel only supports single input/output."
@@ -583,22 +541,22 @@ class ColwiseParallel(ParallelStyle):
 
         if _prepare_input is not None:
             prepare_input_fn = _prepare_input
-        if input_layouts == Replicate():
-            prepare_input_fn = make_input_replicate_1d
         else:
-            prepare_input_fn = _get_prepare_input(
+            prepare_input_fn = functools.partial(
+                lambda input_layouts, output_layouts, inputs, device_mesh: (
+                    _redistribute_per_both_layouts(
+                        inputs[0], input_layouts, output_layouts, device_mesh
+                    ),
+                ),
                 input_layouts,
                 Replicate(),
             )
 
         if _prepare_output is not None:
             prepare_output_fn = _prepare_output
-        elif output_layouts == Shard(-1):
-            prepare_output_fn = make_sharded_output_tensor
         else:
-            prepare_output_fn = _get_prepare_output(
-                output_layouts,
-                use_local_output,
+            prepare_output_fn = functools.partial(
+                _redistribute_per_layout, output_layouts, use_local_output
             )
 
         super().__init__(
@@ -656,6 +614,12 @@ class PrepareModuleInput(ParallelStyle):
             >>> )
             >>> ...
         """
+        if not isinstance(input_layouts, tuple):
+            input_layouts = (input_layouts,)  # type: ignore[assignment]
+
+        if not isinstance(output_layouts, tuple):
+            output_layouts = (output_layouts,)  # type: ignore[assignment]
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
@@ -702,6 +666,9 @@ class PrepareModuleOutput(ParallelStyle):
         output_layouts: LayoutsType = Shard(0),
         use_local_output: bool = True,
     ) -> None:
+        if not isinstance(output_layouts, tuple):
+            output_layouts = (output_layouts,)  # type: ignore[assignment]
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
