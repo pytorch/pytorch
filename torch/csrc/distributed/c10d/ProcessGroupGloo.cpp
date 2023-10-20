@@ -1541,6 +1541,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
   return work;
 }
 
+c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
+    std::vector<at::Tensor>& inputs,
+    const AllreduceOptions& opts) {
+  // all reduce sparse calls into default allreduce which
+  // implemented with all_gathering indices and values
+  // we do ths we do not have a native cuda implementation
+  return allreduce(inputs, opts);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
