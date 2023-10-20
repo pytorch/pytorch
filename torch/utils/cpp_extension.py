@@ -1449,7 +1449,7 @@ def _check_and_build_extension_h_precompiler_headers(
             raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
     extra_cflags_str = listToString(extra_cflags)
-    extra_include_paths_str = listToString(extra_include_paths)
+    extra_include_paths_str = " ".join([f'-I{include}' for include in extra_include_paths])
 
     lib_include = os.path.join(_TORCH_PATH, 'include')
     torch_include_dirs = [

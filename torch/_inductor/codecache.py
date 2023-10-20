@@ -790,7 +790,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -863,7 +863,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "CPU_CAPABILITY_AVX512"
+    _macro = "-DCPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
@@ -876,12 +876,25 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "CPU_CAPABILITY_AVX2"
+    _macro = "-DCPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         return "avx2"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecZVECTOR(VecISA):
+    _bit_width = 256
+    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
+    _arch_flags = "-mvx -mzvector"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "zvector"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -912,6 +925,9 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform != "linux":
         return []
+
+    if platform.machine() == "s390x":
+        return [VecZVECTOR()]
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
@@ -1048,7 +1064,7 @@ def get_include_and_linking_paths(
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
-) -> Tuple[str, str, str, str]:
+) -> Tuple[Any, str, str, str, str]:
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -1058,6 +1074,7 @@ def get_include_and_linking_paths(
     from torch.utils import cpp_extension
 
     macros = ""
+    build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
@@ -1107,8 +1124,6 @@ def get_include_and_linking_paths(
                         f"-D HAVE_{cap}_CPU_DEFINITION",
                     ]
                 )
-            else:
-                macros = f"-D{macros}"
 
         if aot_mode and cuda:
             if macros is None:
@@ -1120,6 +1135,7 @@ def get_include_and_linking_paths(
                 libs += ["cuda"]
             else:
                 libs += ["c10_cuda", "cuda", "torch_cuda"]
+        build_arch_flags = vec_isa.build_arch_flags()
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -1192,10 +1208,9 @@ def get_include_and_linking_paths(
         # For Meta internal cuda-12, it is recommended to static link cudart
         static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
-    ipaths_str = " ".join(["-I" + p for p in ipaths])
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
-    return ipaths_str, lpaths_str, libs_str, macros
+    return ipaths, lpaths_str, libs_str, macros, build_arch_flags
 
 
 def cpp_compile_command(
@@ -1210,11 +1225,12 @@ def cpp_compile_command(
     compile_only: bool = False,
     use_absolute_path: bool = False,
 ) -> str:
-    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+    ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
     if isinstance(input, str):
         input = [input]
+    ipaths_str = " ".join(["-I" + p for p in ipaths])
     if config.is_fbcode():
         if aot_mode and not use_absolute_path:
             inp_name = input
@@ -1237,7 +1253,8 @@ def cpp_compile_command(
             {cpp_compiler()} {inp_name_str} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
-            {ipaths} {lpaths} {libs} {macros} {linker_paths}
+            {ipaths_str} {lpaths} {libs} {build_arch_flags}
+            {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -1683,22 +1700,27 @@ class CppWrapperCodeCache:
                     _opt_flags = optimization_flags()
                     _shared = get_shared()
                     _warning_all_flag = get_warning_all_flag()
-                    _ipaths, _lpaths, _libs, _macros = get_include_and_linking_paths(
+                    (
+                        _ipaths,
+                        _lpaths,
+                        _libs,
+                        _macros,
+                        _build_arch_flags,
+                    ) = get_include_and_linking_paths(
                         vec_isa=pick_vec_isa(),
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
                     _cpp_wrapper_flags = cpp_wrapper_flags()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_cpp_wrapper_flags} \
-                    {_use_custom_generated_macros}"
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_build_arch_flags} {_macros} \
+                    {_cpp_wrapper_flags} {_use_custom_generated_macros}"
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.
                     # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
                     # will take effect in both compilation and linking.
                     extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
-                    extra_include_paths = f"{_ipaths}"
 
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
@@ -1707,7 +1729,7 @@ class CppWrapperCodeCache:
                         functions=[func_name],
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
-                        extra_include_paths=[extra_include_paths],
+                        extra_include_paths=_ipaths,
                         use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
