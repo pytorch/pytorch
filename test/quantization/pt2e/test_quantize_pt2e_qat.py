@@ -684,7 +684,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             if isinstance(child, torch.fx.GraphModule):
                 torch.ao.quantization.move_exported_model_to_eval(child)
                 converted_child = convert_pt2e(child)
-                model._modules[name] = converted_child
+                setattr(model, name, converted_child)
             else:
                 self._convert_qat_linears(child)
 
