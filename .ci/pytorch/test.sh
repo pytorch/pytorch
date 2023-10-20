@@ -233,12 +233,15 @@ test_python_shard() {
     exit 1
   fi
 
+  # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
+  # shellcheck disable=SC2086
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
 
 test_python() {
+  # shellcheck disable=SC2086
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 }
@@ -686,6 +689,7 @@ test_vulkan() {
 
 test_distributed() {
   echo "Testing distributed python tests"
+  # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 
