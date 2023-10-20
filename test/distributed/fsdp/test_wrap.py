@@ -547,16 +547,16 @@ class TestAutoWrap(TestCase):
             if use_uniform_kwargs
             else ShardingStrategy.NO_SHARD
         )
-        bn_prefetch = BackwardPrefetch.BACKWARD_PRE
+        bn_prefetch = BackwardPrefetch.BACKWARD_POST
         encoder_strategy = root_strategy = ShardingStrategy.FULL_SHARD
-        encoder_prefetch = root_prefetch = BackwardPrefetch.BACKWARD_PRE
+        encoder_prefetch = root_prefetch = BackwardPrefetch.BACKWARD_POST
         decoder_strategy = (
             ShardingStrategy.FULL_SHARD
             if use_uniform_kwargs
             else ShardingStrategy.SHARD_GRAD_OP
         )
         decoder_prefetch = (
-            BackwardPrefetch.BACKWARD_PRE
+            BackwardPrefetch.BACKWARD_POST
             if use_uniform_kwargs
             else BackwardPrefetch.BACKWARD_POST
         )
