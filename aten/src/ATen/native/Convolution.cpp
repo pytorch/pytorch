@@ -269,9 +269,9 @@ static bool xnnpack_use_convolution2d(
     const Tensor& weight,
     const at::OptionalSymIntArrayRef bias_sizes_opt,
     const SymIntArrayRef padding,
-    const IntArrayRef stride,
-    const IntArrayRef dilation,
-    const int64_t groups,
+    const SymIntArrayRef stride,
+    const SymIntArrayRef dilation,
+    const c10::SymInt groups,
     const bool transposed) {
   // Never use xnnpack for symbolic tracing
   return false;
