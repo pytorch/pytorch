@@ -9,7 +9,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/DeviceGuard.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/types.h>
 
 
 namespace at::native {
@@ -23,7 +22,9 @@ constexpr __host__ __device__ auto divDown(U a, V b) -> decltype(a + b) {
 template <typename U, typename V>
 constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
   static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
-  return (a + b - 1) / b;
+  // Overflow safe variant of (a + b - 1) / b
+  const uint64_t blocks = a / b + (a % b != 0);
+  return blocks;
 }
 
 template <typename U, typename V>
@@ -120,7 +121,7 @@ inline __host__ __device__ bool isPointerAligned(const void* p, int align) {
 template <int Align>
 inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   static_assert(isPowerOf2(Align), "");
-  uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
+  const uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
@@ -267,8 +268,8 @@ struct ALayout_RM {
       int32_t kTileStart,
       int32_t laneId,
       bf16x2x4_u32 out[KTilesToLoad]) {
-    auto mLane = mTile * kMTileSize + (laneId / 4);
-    auto kLane = kTileStart * kKTileSize + (laneId % 4) * 2;
+    const auto mLane = mTile * kMTileSize + (laneId / 4);
+    const auto kLane = kTileStart * kKTileSize + (laneId % 4) * 2;
 
     // access
     // [mTile * kMTileSize + (laneId / 4)]
@@ -316,8 +317,8 @@ struct ALayout_RM {
       // sum.z / sum.w are written at
       // [8 + (laneId / 4)], [(laneId % 4) * 2, (laneId % 4) * 2 + 1]
       // i.e., same columns, different row.
-      int outRow = mTile * kMTileSize + (laneId / 4);
-      int outCol = nTile * kNTileSize + (laneId % 4) * 2;
+      const int outRow = mTile * kMTileSize + (laneId / 4);
+      const int outCol = nTile * kNTileSize + (laneId % 4) * 2;
 
       // Pointer where sum.x / sum.y is written
       auto cPtr = reinterpret_cast<__nv_bfloat16*>(C) + outRow * n + outCol;
@@ -492,13 +493,13 @@ template <
 __global__
 __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     // Data for the A matrix, loaded as per ALayout
-    const void* __restrict__ A,
+    const void* const __restrict__ A,
 
     // Data for the B matrix, loaded as per BLayout
-    const void* __restrict__ B,
+    const void* const __restrict__ B,
 
     // Optional quantization data for dequantizing B, loaded as per BLayout
-    const void* __restrict__ B_quantizationInfo,
+    const void* const __restrict__ B_quantizationInfo,
 
     // Output data for the C matrix, stored as per CLayout
     void* __restrict__ C,
@@ -750,10 +751,10 @@ template <
     int Warps,
     int KTilesPerWarp>
 void launch_tinygemm_kernel(
-    const torch::Tensor& A,
-    const torch::Tensor& B,
-    const torch::Tensor* qScaleAndZeros, /* optional */
-    torch::Tensor& C_final,
+    const at::Tensor& A,
+    const at::Tensor& B,
+    const at::Tensor* qScaleAndZeros, /* optional */
+    at::Tensor& C_final,
     int32_t mTiles,
     int32_t nTiles,
     int32_t kTiles,
@@ -792,6 +793,7 @@ void launch_tinygemm_kernel(
       mTiles,
       nTiles,
       kTiles);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   cudaFuncAttributes funcAttr;
   C10_CUDA_CHECK(cudaFuncGetAttributes(
@@ -811,7 +813,6 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   // innermost k-tiles that we can use is 2.
   static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles), "");
 
-  constexpr int32_t kMTileSize = 16;
   constexpr int32_t kNTileSize = 8;
   constexpr int32_t kKTileSize = 16;
 
@@ -861,11 +862,11 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 #endif
 
 
-torch::Tensor _weight_int4pack_mm_cuda(
-    const torch::Tensor& A,
-    const torch::Tensor& B,
+at::Tensor _weight_int4pack_mm_cuda(
+    const at::Tensor& A,
+    const at::Tensor& B,
     int64_t qGroupSize,
-    const torch::Tensor& qScaleAndZeros) {
+    const at::Tensor& qScaleAndZeros) {
   c10::cuda::CUDAGuard g(A.device());
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -895,12 +896,12 @@ torch::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(B_innerKTiles == 2 || B_innerKTiles == 4 || B_innerKTiles == 8);
 
   // A is standard row major
-  TORCH_CHECK(A.dtype() == torch::kBFloat16);
+  TORCH_CHECK(A.dtype() == at::kBFloat16);
   TORCH_CHECK(A.is_contiguous());
   TORCH_CHECK(A.dim() == 2);
 
   // B has B_innerKTiles k-tiles in the innermost dimension
-  TORCH_CHECK(B.dtype() == torch::kInt32);
+  TORCH_CHECK(B.dtype() == at::kInt);
   TORCH_CHECK(B.is_contiguous());
   TORCH_CHECK(B.dim() == 4);
   TORCH_CHECK(B.size(1) == k / (B_innerKTiles * kKTileSize));
@@ -921,8 +922,8 @@ torch::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(qScaleAndZeros.size(2) == 2);
 
   // Output is a standard row-major matrix
-  auto C_final = torch::empty(
-      {m, n}, torch::TensorOptions().dtype(at::kBFloat16).device(A.device()));
+  auto C_final = at::empty(
+      {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
@@ -1036,14 +1037,14 @@ torch::Tensor _weight_int4pack_mm_cuda(
 
 // input is [n][k] (int32 dtype)
 // output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2]
-torch::Tensor _convert_weight_to_int4pack_cuda(
-    const torch::Tensor& in,
+at::Tensor _convert_weight_to_int4pack_cuda(
+    const at::Tensor& in,
     int64_t innerKTiles) {
   c10::cuda::CUDAGuard g(in.device());
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(in.dim() == 2);
-  TORCH_CHECK(in.dtype() == torch::kInt32);
+  TORCH_CHECK(in.dtype() == at::kInt);
   TORCH_CHECK(in.is_contiguous());
 
   // At least 2 k-tiles need to be packed back to back in the innermost
@@ -1053,7 +1054,6 @@ torch::Tensor _convert_weight_to_int4pack_cuda(
   // which is the maximum vectorized load/store size
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
-  constexpr int32_t kMTileSize = 16;
   constexpr int32_t kNTileSize = 8;
   constexpr int32_t kKTileSize = 16;
 
@@ -1067,9 +1067,9 @@ torch::Tensor _convert_weight_to_int4pack_cuda(
 
   // each block handles `innerKTiles` k-tiles.
   // 2 k-tiles are a single int32
-  auto out = torch::empty(
+  auto out = at::empty(
       {nTiles, kSuperTiles, 32, innerKTiles / 2},
-      torch::TensorOptions().dtype(torch::kInt32).device(in.device()));
+      at::TensorOptions().dtype(at::kInt).device(in.device()));
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
   dim3 grid(kSuperTiles, nTiles);
