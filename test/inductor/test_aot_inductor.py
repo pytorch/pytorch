@@ -769,7 +769,7 @@ class AOTInductorTestsTemplate:
         for i in range(torch.cuda.device_count()):
             with torch.cuda.device(i):
                 example_inputs = tuple(t.cuda(i) for t in inputs)
-                optimized = AOTInductorModelRunner.load(so_path, example_inputs)
+                optimized = AOTInductorModelRunner.load("cuda", so_path, example_inputs)
                 result_cuda = AOTInductorModelRunner.run_compiled(
                     optimized, exported, example_inputs
                 )
