@@ -1279,7 +1279,7 @@ Tensor convolution_jvp(
     at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    c10::SymInt groups) {
+    const c10::SymInt& groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
@@ -1317,7 +1317,7 @@ Tensor _convolution_jvp(
     at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    c10::SymInt groups,
+    const c10::SymInt& groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,
@@ -6693,7 +6693,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
           dilation,
           transposed,
           output_padding,
-          groups,
+          std::move(groups),
           {output_mask[0], output_mask[1], false});
   std::tuple<Tensor, Tensor> result =
       std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));

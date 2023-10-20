@@ -976,7 +976,7 @@ Tensor convolution_jvp(
     at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    c10::SymInt groups);
+    const c10::SymInt& groups);
 
 Tensor _convolution_jvp(
     const Tensor& input_p,
@@ -990,7 +990,7 @@ Tensor _convolution_jvp(
     at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    c10::SymInt groups,
+    const c10::SymInt& groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,
