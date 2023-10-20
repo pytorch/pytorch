@@ -916,7 +916,6 @@ class InvalidVecISA(VecISA):
 
 invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
-supported_vec_isa_list_s390x = [VecZVECTOR()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -928,7 +927,7 @@ def valid_vec_isa_list() -> List[VecISA]:
         return []
 
     if platform.machine() == "s390x":
-        return supported_vec_isa_list_s390x
+        return [VecZVECTOR()]
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
@@ -1065,7 +1064,7 @@ def get_include_and_linking_paths(
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
-) -> Tuple[str, str, str, str]:
+) -> Tuple[Any, str, str, str, str]:
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
