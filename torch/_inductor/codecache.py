@@ -863,7 +863,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "CPU_CAPABILITY_AVX512"
+    _macro = "-DCPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
@@ -876,7 +876,7 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "CPU_CAPABILITY_AVX2"
+    _macro = "-DCPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -889,18 +889,12 @@ class VecAVX2(VecISA):
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
     _bit_width = 256
-    _macro = "CPU_CAPABILITY_ZVECTOR"
+    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
     _arch_flags = "-mvx -mzvector"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "vx"
-
-    @functools.lru_cache(None)
-    def __bool__(self):
-        if platform.machine() != "s390x":
-            return False
-        return VecISA.__bool__(self)
+        return "zvector"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -921,7 +915,8 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecZVECTOR()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list_s390x = [VecZVECTOR()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -931,6 +926,9 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecZVECTOR()]
 def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform != "linux":
         return []
+
+    if platform.machine() == "s390x":
+        return supported_vec_isa_list_s390x
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
@@ -1127,8 +1125,6 @@ def get_include_and_linking_paths(
                         f"-D HAVE_{cap}_CPU_DEFINITION",
                     ]
                 )
-            else:
-                macros = f"-D{macros}"
 
         if aot_mode and cuda:
             if macros is None:
