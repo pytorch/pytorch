@@ -93,6 +93,10 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.after(variable_copy);
   saved.after(grad_copy);
 
+  TORCH_CHECK(
+      tensor_post_acc_grad_hooks() == nullptr,
+      "compiled_autograd does not support tensor_post_acc_grad_hooks");
+
   return variable_list();
 }
 
