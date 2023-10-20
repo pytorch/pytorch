@@ -1,0 +1,38 @@
+{
+  "num_warps": 4,
+  "warp_size": 64,
+  "num_ctas": 1,
+  "num_stages": 4,
+  "waves_per_eu": 0,
+  "enable_warp_specialization": false,
+  "enable_persistent": false,
+  "constants": {
+    "25": 1,
+    "26": 128,
+    "27": 64,
+    "28": 64,
+    "29": true
+  },
+  "debug": false,
+  "arch": [
+    "amdgcn-amd-amdhsa",
+    "gfx90a",
+    "",
+    64
+  ],
+  "AMDGCN_ENABLE_DUMP": false,
+  "DISABLE_FAST_REDUCTION": false,
+  "ENABLE_MMA_V3": false,
+  "ENABLE_TMA": false,
+  "LLVM_IR_ENABLE_DUMP": false,
+  "MLIR_ENABLE_DUMP": false,
+  "TRITON_DISABLE_LINE_INFO": false,
+  "device_type": "cuda",
+  "shared": 16384,
+  "name": "attn_fwd_0d1d2d3d4d5d6789101112131415161718192021222324",
+  "clusterDims": [
+    1,
+    1,
+    1
+  ]
+}
