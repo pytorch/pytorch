@@ -161,6 +161,9 @@ FUNC_INLINELIST = {
     "torch._constrain_as_value",
 }
 
+
+# These are legacy workarounds, don't add new modules to this list.
+# Please use the MOD_INLINELIST instead to force inline functions under particular modules.
 LEGACY_MOD_INLINELIST = {
     "torch._dynamo.external_utils",
     "torch._export.db.examples",
