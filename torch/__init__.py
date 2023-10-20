@@ -55,7 +55,7 @@ __all__ = [
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond',
 ]
 
@@ -390,6 +390,9 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __sym_ite__(self, then_val, else_val):
+        raise AssertionError("type stub not overridden")
+
     def __eq__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
@@ -455,6 +458,12 @@ def sym_min(a, b):
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
+
+def sym_ite(b, t, f):
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    if isinstance(b, SymBool):
+        return b.__sym_ite__(t, f)
+    return t if b else f
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.

@@ -276,6 +276,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_ite: lift(lambda b, t, f: t if b else f),
             sym_sqrt: lift(ops.sqrt),
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.

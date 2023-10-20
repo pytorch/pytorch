@@ -706,6 +706,7 @@ Symbolic Numbers
     sym_max
     sym_min
     sym_not
+    sym_ite
 
 Export Path
 -------------
