@@ -1939,7 +1939,7 @@ def forward(self, x_1, output_1):
                 (float, True),
                 (int, 1),
                 (int, False),
-                # (int, 1.0), # fails due to a >= 0 comparison
+                # (int, 1.0), # fails due to a >= 0 comparison in sym_int
             ]:  # , bool, complex]: no casting for sym_bool, no sym_complex
 
                 def fn(x):
@@ -1954,6 +1954,7 @@ def forward(self, x_1, output_1):
                 ref = opt_fn(x)
                 self.assertEqual(ref, res)
 
+                # Cannot handle non single-elem
                 with self.assertRaises(ValueError):
                     fn(torch.tensor([val] * 2))
                 with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
