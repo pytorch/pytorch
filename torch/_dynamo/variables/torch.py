@@ -267,12 +267,6 @@ class TorchCtxManagerClassVariable(VariableTracker):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
-        elif self.value is torch.cuda.stream:
-            log.warning(
-                "torch.cuda.stream() not fully supported, streams may be ignored"
-            )
-            assert len(args) == 1
-            return CUDAStreamContextVariable.create(tx, args[0], **options)
 
 
 class TorchVariable(VariableTracker):
@@ -496,6 +490,12 @@ class TorchVariable(VariableTracker):
             return ConstantVariable.create(
                 any(has_torch_function(a) for a in args), **options
             )
+        elif self.value is torch.cuda.stream:
+            log.warning(
+                "torch.cuda.stream() not fully supported, streams may be ignored"
+            )
+            assert len(args) == 1
+            return CUDAStreamContextVariable.create(tx, args[0], **options)
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
