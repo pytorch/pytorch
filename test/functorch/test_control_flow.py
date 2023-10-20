@@ -680,34 +680,20 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
 
-        # Brittle, yet, delicious
-        out = """
-        def forward(self, x_1, pred_1, pred2_1):
-            true_graph_0 = self.true_graph_0
-            false_graph_0 = self.false_graph_0
-            conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-            true_graph_1 = self.true_graph_1
-            false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-            add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-            return add
-        """  # noqa: B950
-        code = graph.code
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
-
-        code = graph.true_graph_0.code
-        out = """
-        def forward(self, arg0_1):
-            mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return mul
-        """
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
+        self.assertExpectedInline(graph.code.strip(), """\
+def forward(self, x_1, pred_1, pred2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+    return add""")  # noqa: B950
+        self.assertExpectedInline(graph.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    return mul""")
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -845,34 +831,20 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         graph = make_fx(f, tracing_mode="fake")(x, torch.tensor(False), torch.tensor(False))
 
-        # Brittle, yet, delicious
-        out = """
-            def forward(self, x_1, pred_1, pred2_1):
-                true_graph_0 = self.true_graph_0
-                false_graph_0 = self.false_graph_0
-                conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-                true_graph_1 = self.true_graph_1
-                false_graph_1 = self.false_graph_1
-                conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-                add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-                return add
-        """  # noqa: B950
-        code = graph.code
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
-
-        code = graph.true_graph_0.code
-        out = """
-        def forward(self, arg0_1):
-            mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return mul
-        """
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
+        self.assertExpectedInline(graph.code.strip(), """\
+def forward(self, x_1, pred_1, pred2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+    return add""")  # noqa: B950
+        self.assertExpectedInline(graph.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    return mul""")
 
     def test_raise_error_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
@@ -1300,6 +1272,7 @@ def forward(self, x_1):
         assert isinstance(args, (tuple, list))
         self.assertEqual(f(*args), exp_res)
         gm = make_fx(f)(*args)
+        gm.print_readable()
         self.assertEqual(gm(*args), exp_res)
 
         def cnt_placeholder(gm):
@@ -1353,32 +1326,19 @@ def forward(self, x_1):
         inp = torch.randn(2, 3)
 
         gm = make_fx(foo)(inp)
-        # normalization
-        actual = "".join(gm.code.split())
-        exp = """\
+
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, \
-_tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
-    return conditional
-"""
-        exp = "".join(exp.split())
-        self.assertEqual(exp, actual)
-
-        actual = gm.true_graph_0.code
-        # normalization
-        actual = "".join(actual.split())
-        exp = """
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, _tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
+    return conditional""")  # noqa: B950
+        self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    return add
-"""
-        # Normalization hack, cause .code makes some weird whitespace
-        exp = "".join(exp.split())
-        self.assertEqual(exp, actual)
+    return add""")
 
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
