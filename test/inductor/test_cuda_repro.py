@@ -28,7 +28,7 @@ try:
         import triton
         from triton import language as tl
     except ImportError:
-        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+        raise unittest.SkipTest("requires triton")
 
     try:
         from . import test_torchinductor
