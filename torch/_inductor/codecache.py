@@ -1209,10 +1209,9 @@ def get_include_and_linking_paths(
         # For Meta internal cuda-12, it is recommended to static link cudart
         static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
-    ipaths_str = " ".join(["-I" + p for p in ipaths])
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
-    return ipaths_str, lpaths_str, libs_str, macros, build_arch_flags
+    return ipaths, lpaths_str, libs_str, macros, build_arch_flags
 
 
 def cpp_compile_command(
@@ -1232,6 +1231,7 @@ def cpp_compile_command(
     )
     if isinstance(input, str):
         input = [input]
+    ipaths_str = " ".join(["-I" + p for p in ipaths])
     if config.is_fbcode():
         if aot_mode and not use_absolute_path:
             inp_name = input
@@ -1254,7 +1254,7 @@ def cpp_compile_command(
             {cpp_compiler()} {inp_name_str} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
-            {ipaths} {lpaths} {libs} {build_arch_flags}
+            {ipaths_str} {lpaths} {libs} {build_arch_flags}
             {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
@@ -1722,7 +1722,6 @@ class CppWrapperCodeCache:
                     # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
                     # will take effect in both compilation and linking.
                     extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
-                    extra_include_paths = f"{_ipaths}"
 
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
@@ -1731,7 +1730,7 @@ class CppWrapperCodeCache:
                         functions=[func_name],
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
-                        extra_include_paths=[extra_include_paths],
+                        extra_include_paths=_ipaths,
                         use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
