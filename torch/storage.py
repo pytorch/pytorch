@@ -1050,7 +1050,7 @@ class TypedStorage:
         """
         from_file(filename, shared=False, size=0) -> Storage
 
-        Creates a storage backed by a memory-mapped file.
+        Creates a CPU storage backed by a memory-mapped file.
 
         If ``shared`` is ``True``, then memory is shared between all processes.
         All changes are written to the file. If ``shared`` is ``False``, then the changes on

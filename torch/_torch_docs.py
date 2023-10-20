@@ -4517,7 +4517,6 @@ Keyword args:
     {device}
 
 Example::
-    >>>
     >>> t = torch.randn(2, 5, dtype=torch.float64)
     >>> t.numpy().tofile('storage.pt')
     >>> t_mapped = torch.from_file('storage.pt', shared=False, size=10, dtype=torch.float64)
