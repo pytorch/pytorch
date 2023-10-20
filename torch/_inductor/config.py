@@ -79,8 +79,8 @@ group_fusion = False
 # enable pattern match with batch fusion (using torch op)
 batch_fusion = True
 
-# enable reordering pass
-reordering = True
+# enable reordering pass for improving memory locality
+reorder_for_locality = True
 
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
@@ -99,14 +99,37 @@ force_mixed_mm = False
 # TODO: capture whether the graph is from export
 from_export = False
 
+# enable reordering pass for increasing overlap between compute and communication
+reorder_for_compute_comm_overlap = False
+
+# passes (in execution order) for increasing overlap between compute and communication
+# for built-in passes, use string name; for user-defined passes, pass in the function handle
+reorder_for_compute_comm_overlap_passes = [
+    "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
+]
+
+# runtime estimation function for ops
+# for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
+estimate_op_runtime = "default"
+
+# unit: GB/s, uni-directional P2P bandwidth per card
+# default value is NVLink
+intra_node_bw = 300
+
+# unit: GB/s, uni-directional P2P bandwidth per node
+# default value is InfiniBand
+inter_node_bw = 25
+
 # enable slow autotuning passes to select algorithms
-max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE", "1") == "1"
 
 # enable slow autotuning passes to select pointwise/reductions algorithms
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
 
 # enable slow autotuning passes to select gemm algorithms
-max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM", "1") == "1"
 
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS.
@@ -114,8 +137,12 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CUTLASS"
 ).upper()
+
+# the value used as a fallback for the unbacked SymInts
+# that can appear in the input shapes (e.g., in autotuning)
+unbacked_symint_fallback = 8192
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
@@ -461,12 +488,12 @@ class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch = None
+    arch = "90"
 
     # CUDA version to use for CUDA template kernel compilation.
     # e.g. "11.4", "12.1", etc.
     # When version is None, Inductor uses torch.version.cuda.
-    version = None
+    version = 12.2
 
     # Optimization level for the host compiler.
     compile_opt_level = "-O1"
@@ -508,7 +535,7 @@ class cuda:
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
     # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    cutlass_only_evt_capable_ops: bool = True
 
 
 # create a directory containing lots of debug information

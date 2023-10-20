@@ -256,6 +256,14 @@ def convert_shape_to_symint(
     ]
 
 
+def is_view(op: torch._ops.OpOverload):
+    """
+    Does this op overload have aliasing
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    return any(a.alias_info is not None for a in op._schema.arguments)
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
@@ -332,6 +340,22 @@ def pad_listlike(x, size):
         return type(x)([x[0]]) * size
     else:
         return x
+
+
+# Used to ensure that iterating over a set is deterministic
+def tuple_sorted(x):
+    if len(x) == 0:
+        return []
+
+    def sort_func(elem):
+        if isinstance(elem, str):
+            return elem
+        else:
+            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
+            # but we are not able to do isinstance assert because of circular dependency
+            return elem.get_name()
+
+    return sorted(x, key=sort_func)
 
 
 def cache_on_self(fn):
@@ -770,6 +794,10 @@ def use_triton_template(layout, *, enable_int32=False):
 
 def use_cutlass_template(layout):
     from .codegen.cuda.cutlass_utils import try_import_cutlass
+
+    # Do not use cutlass template on ROCm
+    if torch.version.hip:
+        return False
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
