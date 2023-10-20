@@ -26,5 +26,4 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     qconfig_equals,
     QConfigAny,
-    QConfigDynamic,
 )
