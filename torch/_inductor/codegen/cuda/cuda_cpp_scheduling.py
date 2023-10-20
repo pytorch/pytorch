@@ -4,13 +4,22 @@ from typing import cast, List
 from ... import config, ir
 from ...codecache import code_hash, get_path
 from ...ir import ComputedBuffer, CUDATemplateBuffer, Pointwise
-from ...scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode, BaseScheduling
+from ...scheduler import (
+    BaseSchedulerNode,
+    BaseScheduling,
+    FusedSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
 
 log = logging.getLogger(__name__)
-_cuda_epilogue_fusion_counter : int = 0 # used by unit tests to verify number of fused epilogues
+_cuda_epilogue_fusion_counter: int = (
+    0  # used by unit tests to verify number of fused epilogues
+)
+
 
 class CUDACPPScheduling(BaseScheduling):
     """
@@ -29,16 +38,20 @@ class CUDACPPScheduling(BaseScheduling):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     def is_cuda_cpp_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, SchedulerNode) and isinstance(node.node, CUDATemplateBuffer)
+        return isinstance(node, SchedulerNode) and isinstance(
+            node.node, CUDATemplateBuffer
+        )
 
     def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(node.get_template_node())
+        return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(
+            node.get_template_node()
+        )
 
     def _can_fuse_epilogue_impl(
-            self,
-            cuda_template_buffer: CUDATemplateBuffer,
-            epilogue_nodes: List[ir.IRNode],
-            additional_node: ir.IRNode,
+        self,
+        cuda_template_buffer: CUDATemplateBuffer,
+        epilogue_nodes: List[ir.IRNode],
+        additional_node: ir.IRNode,
     ) -> bool:
         """
 
@@ -75,7 +88,7 @@ class CUDACPPScheduling(BaseScheduling):
                 return False
         else:
             last_epilogue_node = epilogue_nodes[-1]
-            assert isinstance(last_epilogue_node, ir.ComputedBuffer) # for mypy
+            assert isinstance(last_epilogue_node, ir.ComputedBuffer)  # for mypy
             last_epilogue_name = (
                 last_epilogue_node.name
                 if last_epilogue_node.name is not None
@@ -102,15 +115,13 @@ class CUDACPPScheduling(BaseScheduling):
             if not_implemented_op.startswith("_op_"):
                 not_implemented_op = not_implemented_op[4:]
                 log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, likely due to unsupported operation: {not_implemented_op}"
-                    # noqa: G004, B950
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
             else:
                 # Likely due to unsupported dtype.
                 log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"
-                    # noqa: G004, B950
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
         return True
@@ -122,13 +133,22 @@ class CUDACPPScheduling(BaseScheduling):
         nodes.remove(template_node)
         return nodes
 
-    def can_fuse_vertical(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    def can_fuse_vertical(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
         if self.is_cuda_cpp_template(node1) and isinstance(node2, SchedulerNode):
-            return self._can_fuse_epilogue_impl(cast(CUDATemplateBuffer, node1.node), [], node2.node)
-        elif self.is_cuda_cpp_fused_template(node1) and isinstance(node2, SchedulerNode):
+            return self._can_fuse_epilogue_impl(
+                cast(CUDATemplateBuffer, node1.node), [], node2.node
+            )
+        elif self.is_cuda_cpp_fused_template(node1) and isinstance(
+            node2, SchedulerNode
+        ):
             fnode1 = cast(FusedSchedulerNode, node1)
-            return self._can_fuse_epilogue_impl(fnode1.get_template_node().node,
-                            self._unwrap_epilogue_nodes(fnode1), node2.node)
+            return self._can_fuse_epilogue_impl(
+                fnode1.get_template_node().node,
+                self._unwrap_epilogue_nodes(fnode1),
+                node2.node,
+            )
         return False
 
     def define_kernel(self, src_code: str, node_schedule) -> str:
@@ -192,6 +212,3 @@ class CUDACPPScheduling(BaseScheduling):
         kernel.call_kernel(kernel_name, ctb, epilogue_ir_nodes)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
-
-
-

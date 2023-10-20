@@ -1,8 +1,10 @@
 from typing import List
 
-from .triton import TritonScheduling
+from ..scheduler import BaseSchedulerNode, BaseScheduling, Scheduler
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
-from ..scheduler import BaseScheduling, Scheduler, BaseSchedulerNode, SchedulerNode
+
+from .triton import TritonScheduling
+
 
 class CUDACombinedScheduling(BaseScheduling):
     """
@@ -14,14 +16,16 @@ class CUDACombinedScheduling(BaseScheduling):
     this would also be the place to do it.
     """
 
-    def __init__(self, scheduler : Scheduler):
+    def __init__(self, scheduler: Scheduler):
         super().__init__()
         self._scheduler = scheduler
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
-        if self._cuda_cpp_scheduling.is_cuda_cpp_template(node) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
+        if self._cuda_cpp_scheduling.is_cuda_cpp_template(
+            node
+        ) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
             return self._cuda_cpp_scheduling
         return self._triton_scheduling
 
@@ -32,18 +36,28 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         for node in (node1, node2):
-            if self._cuda_cpp_scheduling.is_cuda_cpp_template(node) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
-                return self._cuda_cpp_scheduling.can_fuse_horizontal(node1, node2) # always False at the moment
+            if self._cuda_cpp_scheduling.is_cuda_cpp_template(
+                node
+            ) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
+                return self._cuda_cpp_scheduling.can_fuse_horizontal(
+                    node1, node2
+                )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
 
     def group_fn(self, sizes):
         return self._triton_scheduling.group_fn(sizes)
 
-    def codegen_template(self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]):
+    def codegen_template(
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+    ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
-            return self._cuda_cpp_scheduling.codegen_template(template_node, epilogue_nodes)
+            return self._cuda_cpp_scheduling.codegen_template(
+                template_node, epilogue_nodes
+            )
         else:
-            return self._triton_scheduling.codegen_template(template_node, epilogue_nodes)
+            return self._triton_scheduling.codegen_template(
+                template_node, epilogue_nodes
+            )
 
     def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
         return self._triton_scheduling.codegen_nodes(nodes)

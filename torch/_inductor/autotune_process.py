@@ -356,15 +356,15 @@ class TensorMeta:
             dtype=dtype,
             sizes=V.graph.sizevars.size_hints(
                 node.get_size(),
-                fallback=config.unbacked_symint_fallback,
+                fallback=config.unbacked_symint_fallback,  # type: ignore[attr-defined]
             ),
             strides=V.graph.sizevars.size_hints(
                 node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
+                fallback=config.unbacked_symint_fallback,  # type: ignore[attr-defined]
             ),
             offset=V.graph.sizevars.size_hint(
                 node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
+                fallback=config.unbacked_symint_fallback,  # type: ignore[attr-defined]
             ),
         )
 
