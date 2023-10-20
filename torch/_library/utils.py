@@ -2,6 +2,7 @@ import dataclasses
 import inspect
 import sys
 from typing import Any, Callable, Tuple
+
 import torch
 
 
@@ -74,6 +75,7 @@ def is_functional_schema(schema: Any) -> bool:
 
     # Lazy import because not all PyTorch builds have torchgen
     from torchgen.model import FunctionSchema, SchemaKind
+
     assert isinstance(schema, str) or isinstance(schema, FunctionSchema)
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)

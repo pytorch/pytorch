@@ -10,6 +10,7 @@ import re
 import typing
 
 import torch._custom_ops as custom_ops
+from torch._library.base_op import define_op, FunctionalBaseOp
 
 import torch.testing._internal.custom_op_db
 import torch.testing._internal.optests as optests
@@ -1768,6 +1769,122 @@ def forward(self, x_1):
     def test_impl_device_invalid(self):
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
+
+class TestBaseOp(CustomOpTestCaseBase):
+    test_ns = "_test_custom_op"
+
+    def _register_sin_op(self):
+        @define_op(f"{self.test_ns}::sin", lib=self.lib())
+        class Sin(FunctionalBaseOp):
+            schema = "(Tensor x) -> Tensor"
+
+            @staticmethod
+            def impl_cpu(x):
+                return x.sin()
+
+            @staticmethod
+            def abstract(x):
+                return torch.empty_like(x)
+
+    def test_basic(self):
+        self._register_sin_op()
+        x = torch.randn(3)
+        y = self.ns().sin(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_default(self):
+        @define_op("{self.test_ns}::sin", lib=self.lib())
+        class Sin(FunctionalBaseOp):
+            schema = "(Tensor x) -> Tensor"
+
+            @staticmethod
+            def impl_default(x):
+                return x.sin()
+
+        x = torch.randn(3)
+        y = self.ns().sin(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_default(self):
+        @define_op(f"{self.test_ns}::sin", lib=self.lib())
+        class Sin(FunctionalBaseOp):
+            schema = "(Tensor x) -> Tensor"
+
+            @staticmethod
+            def impl_default(x):
+                return x.sin()
+
+        x = torch.randn(3)
+        y = self.ns().sin(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_abstract(self):
+        @define_op(f"{self.test_ns}::sin", lib=self.lib())
+        class Sin(FunctionalBaseOp):
+            schema = "(Tensor x) -> Tensor"
+
+            @staticmethod
+            def abstract(x):
+                return x.sin()
+
+        def f(x):
+            y = self.ns().sin(x)
+            return y
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sin = torch.ops._test_custom_op.sin.default(x_1);  x_1 = None
+    return sin""")
+
+    def test_invalid(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            @define_op(f"{self.test_ns}::sin", lib=self.lib())
+            class Sin(FunctionalBaseOp):
+                schema = "(Tensor x) -> Tensor"
+
+                @staticmethod
+                def impl_CPU(x):
+                    return x.sin()
+
+        with self.assertRaisesRegex(RuntimeError, "functional"):
+            @define_op(f"{self.test_ns}::sin", lib=self.lib())
+            class Sin(FunctionalBaseOp):
+                schema = "(Tensor(a!) x) -> Tensor"
+
+                @staticmethod
+                def impl_cpu(x):
+                    return x.sin()
+
+        with self.assertRaisesRegex(RuntimeError, "functional"):
+            @define_op(f"{self.test_ns}::sin", lib=self.lib())
+            class Sin(FunctionalBaseOp):
+                schema = "(Tensor x) -> ()"
+
+                @staticmethod
+                def impl_cpu(x):
+                    return x.sin()
+
+        with self.assertRaisesRegex(RuntimeError, "You must provide a schema"):
+            @define_op(f"{self.test_ns}::sin", lib=self.lib())
+            class Sin(FunctionalBaseOp):
+
+                @staticmethod
+                def impl_cpu(x):
+                    return x.sin()
+
+    def test_autograd(self):
+        self._register_sin_op()
+        op = self.ns().sin
+
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "autograd kernel"):
+            op(x)
+
+        # No errors
+        with torch.no_grad():
+            op(x)
 
 
 def op_with_incorrect_schema(testcase, name):
