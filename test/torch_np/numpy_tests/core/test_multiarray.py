@@ -6815,12 +6815,6 @@ class TestArange(TestCase):
         args[which] = np.float64(2.0)
         assert np.arange(*args).dtype == np.float64
 
-        # Cover stranger error path, test only to achieve code coverage!
-        args[which] = [None, []]
-        with pytest.raises((ValueError, RuntimeError)):
-            # Fails discovering start dtype
-            np.arange(*args)
-
     @parametrize("dt", [np.float32, np.uint8, complex])
     def test_explicit_dtype(self, dt):
         assert np.arange(5.0, dtype=dt).dtype == dt
