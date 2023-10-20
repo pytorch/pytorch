@@ -1916,6 +1916,21 @@ def forward(self, x_1, output_1):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_listlike_of_tensors_contains_constant(self):
+        for listlike in [set, list]:
+
+            def fn(x):
+                x.add_(1)
+                s = listlike([x])
+                res = 1 in s
+                return res
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            x = torch.randn(1)
+            ref = opt_fn(x)
+            res = fn(x)
+            self.assertEqual(ref, res)
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
