@@ -27,8 +27,10 @@ from .functions import UserFunctionVariable, UserMethodVariable
 
 def _listlike_contains_helper(items, search, tx, options, check_hash_match=False):
     if search.is_python_constant():
-        found = any(
-            x.as_python_constant() == search.as_python_constant() for x in items
+        result = any(
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
         )
         return variables.ConstantVariable.create(found, **options)
 

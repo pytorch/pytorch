@@ -824,11 +824,11 @@ class ExportOutput:
             else:
                 try:
                     serializer.serialize(self, destination)
-                except ValueError:
+                except ValueError as exc:
                     raise ValueError(
                         "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
                         "External tensor data will be saved alongside the model on disk."
-                    )
+                    ) from exc
 
     @_beartype.beartype
     def save_diagnostics(self, destination: str) -> None:
