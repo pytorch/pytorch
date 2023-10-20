@@ -1730,7 +1730,7 @@ def forward(self, x_1):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
 
-        @torch.library.impl_device(f"{self.test_ns}::{name}", types)
+        @torch.library.impl(f"{self.test_ns}::{name}", types)
         def f(x):
             x_np = x.cpu().numpy()
             y = torch.from_numpy(np.sin(x_np))
@@ -1760,14 +1760,14 @@ def forward(self, x_1):
             y = torch.from_numpy(np.sin(x_np))
             return y.to(device=x.device)
 
-        torch.library.impl_device(f"{self.test_ns}::foo", "default", f, lib=lib)
+        torch.library.impl(f"{self.test_ns}::foo", "default", f, lib=lib)
         x = torch.randn(3)
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
 
     def test_impl_device_invalid(self):
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
-            torch.library.impl_device("blah::blah", "CPU")
+            torch.library.impl("blah::blah", "somethingsomething")
 
 
 def op_with_incorrect_schema(testcase, name):
