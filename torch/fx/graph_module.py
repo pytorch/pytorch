@@ -6,7 +6,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -85,12 +85,20 @@ def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
 
 
 def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
+    return _method_from_src(
+        method_name="forward", src=src, globals=globals, co_fields=co_fields
+    )
+
+
+def _method_from_src(
+    method_name: str, src: str, globals: Dict[str, Any], co_fields=None
+) -> Callable:
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
     _exec_with_source(src, globals_copy, co_fields)
-    forward_fn = globals_copy["forward"]
-    del globals_copy["forward"]
-    return forward_fn
+    fn = globals_copy[method_name]
+    del globals_copy[method_name]
+    return fn
 
 
 def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
@@ -302,7 +310,7 @@ class _WrappedCall:
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
                 )
-                raise e.with_traceback(None)
+                raise e.with_traceback(None)  # noqa: TRY200
             else:
                 raise e
 
