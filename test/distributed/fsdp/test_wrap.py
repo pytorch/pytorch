@@ -366,7 +366,8 @@ class TestFSDPWrap(FSDPTest):
         for module in modules_in_fsdp_graph_order:
             self.assertTrue(isinstance(module, FSDP))
             self._check_cpu_offload(module, cpu_offload)
-            self._check_backward_prefetch(module, backward_prefetch)
+            # Note: BACKWARD_POST and BACKWARD_PRE are now consolidated as BACKWARD_POST.
+            self._check_backward_prefetch(module, BackwardPrefetch.BACKWARD_POST)
             self._check_forward_prefetch(module, forward_prefetch)
 
         # Run model a few times for sanity check.

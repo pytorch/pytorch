@@ -141,7 +141,7 @@ class TestCommunication(FSDPTest):
             and sharding_strategy == ShardingStrategy.FULL_SHARD
         ):
             # Root does not free the full parameters at the end of the
-            # forward pass
+            # forward pass; neither does the last two FSDP modules
             num_all_gathers = max(num_fsdp - 3, 0)
         elif (
             pass_type == PassType.BWD
