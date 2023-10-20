@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 import torch
 
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement, Replicate
 
 log = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def with_xla(func: Callable) -> Callable:
         if TORCH_XLA_INITIALIZED:
             # TODO(yeounoh) replace this with xr.use_spmd() when we deprecate the flag.
             os.environ["XLA_USE_SPMD"] = "1"
-            func(self, *args, **kwargs)  # type: ignore[misc]
+            return func(self, *args, **kwargs)  # type: ignore[misc]
         else:
             raise ImportError(
                 "torch.distributed._tensor._xla API requires torch_xla package installation."
@@ -67,7 +67,7 @@ def convert_to_xla_mesh(dt_mesh: DeviceMesh) -> "Mesh":
     """
     assert dt_mesh.size() == xr.global_runtime_device_count()
     return Mesh(
-        dt_mesh.mesh.flatten(), list(dt_mesh.mesh.size()), dt_mesh.mesh_dim_names
+        dt_mesh.mesh.flatten(), tuple(dt_mesh.mesh.size()), dt_mesh.mesh_dim_names
     )
 
 
@@ -150,7 +150,7 @@ def xla_distribute_tensor(
 
     # convert to XLA device mesh
     xla_mesh = convert_to_xla_mesh(dt_mesh)
-    assert xla_mesh.mesh_shape == list(dt_mesh.mesh.size())
+    assert xla_mesh.mesh_shape == tuple(dt_mesh.mesh.size())
 
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:

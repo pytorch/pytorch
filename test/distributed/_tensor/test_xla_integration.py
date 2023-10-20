@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Tuple
 
 import numpy as np
 import torch
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Shard, Replicate
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -34,34 +34,38 @@ def with_xla(func: Callable) -> Callable:
 
 
 class DTensorXLAIntegrationTest(TestCase):
-
     @with_xla
     def test_xla_distribute_tensor_1d_shard(self):
         import torch_xla.runtime as xr  # type:ignore[import]
-        device_count = xr.global_runtime_device_count()
-        device_mesh = DeviceMesh("xla", list(range(device_count)))
-        shard_spec = [Shard(0)]
 
-        for requires_grad in [True, False]:
-            tensor_to_shard = torch.randn(
-                3 * device_count, 3, requires_grad=requires_grad
-            )
-            dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
-            # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
-            assert type(dist_tensor).__name__ == "XLAShardedTensor"
-            global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
-            self.assertEqual(
-                global_tensor.size(), torch.Size([3 * device_count, 3])
-            )
-            local_tensor = dist_tensor.local_shards[0].data
-            self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
-            if requires_grad:
-                self.assertTrue(dist_tensor.global_tensor.requires_grad)
-                self.assertTrue(dist_tensor.is_leaf)
+        device_count = xr.global_runtime_device_count()
+        if device_count > 1:
+            device_mesh = DeviceMesh("xla", list(range(device_count)))
+            shard_spec = [Shard(0)]
+
+            for requires_grad in [True, False]:
+                tensor_to_shard = torch.randn(
+                    3 * device_count, 3, requires_grad=requires_grad
+                )
+                dist_tensor = distribute_tensor(
+                    tensor_to_shard, device_mesh, shard_spec
+                )
+                # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
+                assert type(dist_tensor).__name__ == "XLAShardedTensor"
+                global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
+                self.assertEqual(
+                    global_tensor.size(), torch.Size([3 * device_count, 3])
+                )
+                local_tensor = dist_tensor.local_shards[0].data
+                self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
+                if requires_grad:
+                    self.assertTrue(dist_tensor.global_tensor.requires_grad)
+                    self.assertTrue(dist_tensor.is_leaf)
 
     @with_xla
     def test_xla_distribute_tensor_1d_replicate(self):
         import torch_xla.runtime as xr  # type:ignore[import]
+
         device_count = xr.global_runtime_device_count()
         device_mesh = DeviceMesh("xla", list(range(device_count)))
         shard_spec = [Replicate()]
@@ -74,9 +78,7 @@ class DTensorXLAIntegrationTest(TestCase):
             # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
             assert type(dist_tensor).__name__ == "XLAShardedTensor"
             global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
-            self.assertEqual(
-                global_tensor.size(), torch.Size([3 * device_count, 3])
-            )
+            self.assertEqual(global_tensor.size(), torch.Size([3 * device_count, 3]))
             local_tensor = dist_tensor.local_shards[0].data
             self.assertEqual(local_tensor.size(), torch.Size([3 * device_count, 3]))
             if requires_grad:
@@ -86,26 +88,33 @@ class DTensorXLAIntegrationTest(TestCase):
     @with_xla
     def test_xla_distribute_tensor_2d(self):
         import torch_xla.runtime as xr  # type:ignore[import]
-        device_count = xr.global_runtime_device_count()
-        device_mesh = DeviceMesh("xla", np.array(range(device_count)).reshape(2, device_count // 2))
-        shard_spec = [Replicate(), Shard(0)]
 
-        for requires_grad in [True, False]:
-            tensor_to_shard = torch.randn(
-                3 * device_count // 2, 3, requires_grad=requires_grad
+        device_count = xr.global_runtime_device_count()
+        if device_count > 1:
+            device_mesh = DeviceMesh(
+                "xla", np.array(range(device_count)).reshape(2, device_count // 2)
             )
-            dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
-            # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
-            assert type(dist_tensor).__name__ == "XLAShardedTensor"
-            global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
-            self.assertEqual(
-                global_tensor.size(), torch.Size([3 * device_count // 2, 3])
-            )
-            local_tensor = dist_tensor.local_shards[0].data
-            self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
-            if requires_grad:
-                self.assertTrue(dist_tensor.global_tensor.requires_grad)
-                self.assertTrue(dist_tensor.is_leaf)
+            shard_spec = [Replicate(), Shard(0)]
+
+            for requires_grad in [True, False]:
+                tensor_to_shard = torch.randn(
+                    3 * device_count // 2, 3, requires_grad=requires_grad
+                )
+                dist_tensor = distribute_tensor(
+                    tensor_to_shard, device_mesh, shard_spec
+                )
+                # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
+                assert type(dist_tensor).__name__ == "XLAShardedTensor"
+                global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
+                self.assertEqual(
+                    global_tensor.size(), torch.Size([3 * device_count // 2, 3])
+                )
+                local_tensor = dist_tensor.local_shards[0].data
+                self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
+                if requires_grad:
+                    self.assertTrue(dist_tensor.global_tensor.requires_grad)
+                    self.assertTrue(dist_tensor.is_leaf)
+
 
 if __name__ == "__main__":
     run_tests()
