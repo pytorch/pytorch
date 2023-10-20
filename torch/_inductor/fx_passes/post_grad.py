@@ -32,7 +32,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device, is_view
+from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
@@ -753,21 +753,6 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
-
-
-def is_pointwise_use(use):
-    if not use.op == "call_function":
-        return False
-
-    if not (
-        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
-    ):
-        return False
-
-    if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
-
-    return torch.Tag.pointwise in use.target.tags
 
 
 def should_prefer_unfused_addmm(match):
