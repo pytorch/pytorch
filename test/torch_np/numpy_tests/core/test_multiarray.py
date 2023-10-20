@@ -2466,7 +2466,7 @@ class TestMethods(TestCase):
                 )
 
     @xpassIfTorchDynamo  # (reason="TODO partition")
-    @parametrize("kth_dtype", 'Bbhil')
+    @parametrize("kth_dtype", "Bbhil")
     def test_argpartition_gh5524(self, kth_dtype):
         #  A test for functionality of argpartition on lists.
         kth = np.array(1, dtype=kth_dtype)[()]

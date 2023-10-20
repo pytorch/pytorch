@@ -108,7 +108,9 @@ class TestBuiltin(TestCase):
         with pytest.raises(TypeError):
             operation(np.dtype(np.int32), 7)
 
-    @skipif(np.__version__ < "1.24")   # older numpies emit DeprecationWarnings
+    @skipif(
+        np.__version__ < "1.24", reason="older numpies emit DeprecatioWarnings instead"
+    )
     @parametrize(
         "dtype",
         [
