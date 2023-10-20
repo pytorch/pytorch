@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
+    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     skip_but_pass_in_sandcastle,
@@ -456,6 +457,32 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             graph.replay()
             graph.replay()
             self.assertEqual(xs[0].item(), 8)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    @skipIfRocm()
+    def test_nccl_watchdog_cudagraph(self):
+        # test that the watchdog does not crash graphs with disallowed event query
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        rank = self.rank_to_GPU[self.rank][0]
+        with torch.cuda.device(rank):
+            for i in range(100):
+                xs = [torch.FloatTensor([1]).cuda(rank)]
+                ys = [torch.FloatTensor([4]).cuda(rank)]
+                for _ in range(30):
+                    pg.allreduce(xs[0]).wait()
+
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    xs[0] += 0.0
+                    pg.allreduce(xs[0]).wait()
+                    pg.allreduce(xs[0]).wait()
+                    pg.allreduce(xs[0]).wait()
+                    xs[0] += 0.0
+
+                for _ in range(1400):
+                    graph.replay()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
