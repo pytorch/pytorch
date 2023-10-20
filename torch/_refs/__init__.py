@@ -6186,7 +6186,7 @@ def _compute_sizes(seq, scalar_type):
         try:
             handle = seq[0]
         except Exception:
-            raise ValueError(
+            raise ValueError(  # noqa: TRY200
                 f"could not determine the shape of object type '{type(seq).__name__}'"
             )
         seq = handle

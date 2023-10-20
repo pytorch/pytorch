@@ -3,8 +3,7 @@
 #include <cpuinfo.h>
 #endif
 
-namespace at {
-namespace cpu {
+namespace at::cpu {
 
 bool is_cpu_support_vnni() {
 #if !defined(__s390x__)
@@ -14,5 +13,4 @@ bool is_cpu_support_vnni() {
 #endif
 }
 
-} // namespace cpu
-} // namespace at
+} // namespace at::cpu

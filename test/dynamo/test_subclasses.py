@@ -624,11 +624,17 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
 
     def test_binary_recompiles(self):
+        def binary(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
         # Binary recompiles because singleton ints no longer match
         nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
     def test_binary_recompiles_due_to_duck_sizing(self):
         # Even though the input is unused, we still guard due to duck sizing
