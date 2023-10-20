@@ -2199,15 +2199,17 @@ class BenchmarkRunner:
         return start, end
 
     def get_fsdp_auto_wrap_policy(self, model_name: str) -> Optional[ModuleWrapPolicy]:
-        from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+        from diffusers.models.transformer_2d import Transformer2DModel
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
+        from torchbenchmark.models.nanogpt.model import Block
+        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
-        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-        from diffusers.models.transformer_2d import Transformer2DModel
-        from torchbenchmark.models.nanogpt.model import Block
-
-        from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
