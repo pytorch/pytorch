@@ -318,12 +318,8 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-    # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-    # https://github.com/pytorch/pytorch/issues/96560
-    decorate('nn.functional.layer_norm', decorator=skipIfRocm),
     # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
@@ -482,11 +478,10 @@ class TestOperators(TestCase):
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
 
         # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -1035,11 +1030,8 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
 
         # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
@@ -1555,8 +1547,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
-        decorate('linalg.svd', decorator=skipIfRocm),  # https://github.com/pytorch/pytorch/issues/97256
-        decorate('svd', decorator=skipIfRocm),  # Flaky tensor-likes are not close error on ROCm, adjust tolerance?
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1781,13 +1771,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
 
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+       # https://github.com/pytorch/pytorch/issues/96560
         decorate('xlogy', decorator=skipIfRocm),
 
         # numerical inconsistencies, look like bugs
