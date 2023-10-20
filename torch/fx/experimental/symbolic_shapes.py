@@ -35,6 +35,7 @@ from torch import (  # noqa: F401
     sym_max,
     sym_min,
     sym_not,
+    sym_ite,
     SymBool,
     SymFloat,
     SymInt,
@@ -962,6 +963,9 @@ class SymNode:
     def sym_max(self, other) -> "SymNode":  # noqa: F811
         return self._sym_max(other)  # type: ignore[attr-defined]
 
+    def sym_ite(self, then_val, else_val) -> "SymNode":
+        return self._sym_ite(then_val, else_val)
+
     def sym_sqrt(self) -> "SymNode":  # noqa: F811
         return self._sym_sqrt()  # type: ignore[attr-defined]
 
@@ -1181,6 +1185,7 @@ magic_methods = {
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
+    'sym_ite': lambda a, t, f: sympy.Piecewise((t, a), (f, True)),
     'sym_sqrt': lambda a: sympy.sqrt(a),
     'abs': lambda a: sympy.Abs(a),
 }
@@ -1318,13 +1323,13 @@ unary_magic_methods = {
 
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
-only_bool_magic_methods = {"and", "or", "sym_not"}
+only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
 # Methods that are also on SymBool, in addition to on SymInt and SymFloat
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not", "sym_ite"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 def method_to_operator(method):
@@ -1463,6 +1468,36 @@ def _make_node_magic(method, func):
 
     if method in unary_magic_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
+    elif method == "sym_ite":
+
+        def sym_ite_impl(pred_node, then_node, else_node):
+            out_hint = then_node.hint if pred_node.hint else else_node.hint
+            if SYM_FUNCTION_MODE:
+                return to_node(
+                    pred_node,
+                    _handle_sym_dispatch(
+                        sym_ite,
+                        (wrap_node(pred_node), wrap_node(then_node), wrap_node(else_node)), {}
+                    )
+                )
+
+            try:
+                out = func(pred_node.expr, then_node.expr, else_node.expr)
+            except Exception:
+                log.warning("failed to eval %s(%s, %s, %s)", method, pred_node.expr, then_node.expr, else_node.expr)
+                raise
+
+            out = safe_expand(out)
+            fx_node, _ = pred_node.shape_env.create_fx_call_function(
+                sym_ite,
+                (
+                    pred_node.fx_node,
+                    then_node.fx_node,
+                    else_node.fx_node
+                )
+            )
+            return SymNode(out, pred_node.shape_env, then_node.pytype, out_hint, fx_node=fx_node)
+        setattr(SymNode, f"_{method_attr}", sym_ite_impl)
     else:
         setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
@@ -1602,6 +1637,19 @@ def _make_user_magic(method, user_type):
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
+    elif method == "sym_ite":
+
+        def sym_ite_magic_impl(pred, then_val, else_val):
+            pred_node = pred.node
+            then_node = to_node(pred_node, then_val)
+            else_node = to_node(pred_node, else_val)
+            if then_node is NotImplemented or else_node is NotImplemented:
+                return NotImplemented
+            assert isinstance(then_node, SymNode) and isinstance(else_node, SymNode) and then_node.pytype == else_node.pytype
+            ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
+            return get_constant(ret) if ret.node.is_constant() else ret
+
+        setattr(user_type, f"__{method}__", sym_ite_magic_impl)
     else:
         setattr(user_type, f"__{method}__", binary_magic_impl)
         if method in reflectable_magic_methods:
