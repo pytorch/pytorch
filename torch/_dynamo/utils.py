@@ -124,10 +124,9 @@ def cprofile_wrapper(func):
                 ],
                 stdout=subprocess.PIPE,
             )
-            subprocess.run(
+            subprocess.check_call(
                 ["dot", "-Tsvg", "-o", str(svg_path)],
                 stdin=gprof2dot_process.stdout,
-                check=True,
             )
             print(f"Generated SVG from profile at {str(svg_path)}")
         except FileNotFoundError:
