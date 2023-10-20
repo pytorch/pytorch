@@ -1767,11 +1767,9 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
         lambda: f"'shape' cannot have negative values, but got {tuple(shape)}")
 
     coefs = list(reversed(list(itertools.accumulate(reversed(shape[1:] + torch.Size([1])), func=operator.mul))))
-    res = indices.unsqueeze(-1).div(
-        torch.tensor(coefs, device=indices.device, dtype=torch.int64),
-        rounding_mode='trunc') % torch.tensor(shape, device=indices.device, dtype=torch.int64)
-
-    return res
+    return indices.unsqueeze(-1).floor_divide(
+        torch.tensor(coefs, device=indices.device, dtype=torch.int64)
+    ) % torch.tensor(shape, device=indices.device, dtype=torch.int64)
 
 def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
