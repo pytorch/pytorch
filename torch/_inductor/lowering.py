@@ -49,6 +49,7 @@ from .utils import (
     sympy_product,
 )
 from .virtualized import ops, V
+from torch._higher_order_ops import scan as hop_scan
 
 log = logging.getLogger(__name__)
 lowerings = {}
@@ -118,6 +119,17 @@ DTYPE_ID_LOOKUP = {
     # _(c10::quint4x2, QUInt4x2) /* 16 */
     # _(c10::quint2x4, QUInt2x4) /* 17 */
 }
+
+def fallback_handler(kernel, add_to_fallback_set=True):
+    if add_to_fallback_set:
+        fallbacks.add(kernel)
+
+    def handler(*args, **kwargs):
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        )
+
+    return handler
 
 
 def decode_dtype(dtype: int):
@@ -578,6 +590,25 @@ def register_foreach_pointwise(
     fn = _register_foreach_lowering(aten_fn, fn)
     return fn
 
+#fallback_scan = fallback_handler(torch.ops.scan_impl)
+
+#Some use the 'device' parameter.
+@register_lowering(torch.ops.scan_impl, broadcast=False, type_promotion_kind=None)
+def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
+    import pdb
+    pdb.set_trace()
+    device = xs[0].get_device()
+    dtype = xs[0].get_dtype()
+    size = [xs[0].get_size()[0]]
+    result = ir.Scan.create(device, dtype, size, f, init, xs, reverse=reverse)
+    #In a sense we don't have a fallback kernel here, so if this lowering fails, then we need to raise an error
+    # result = None
+    # if result is None:
+    #     #return fallback_scan(f, init, xs, reverse=reverse)
+    #     return fallback_handler(torch.ops.scan_impl)(f, init, xs, reverse=reverse)
+    import pdb
+    pdb.set_trace()
+    return result
 
 @register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
@@ -1165,18 +1196,6 @@ def register_onednn_fusion_ops():
 
 
 register_onednn_fusion_ops()
-
-
-def fallback_handler(kernel, add_to_fallback_set=True):
-    if add_to_fallback_set:
-        fallbacks.add(kernel)
-
-    def handler(*args, **kwargs):
-        return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
-        )
-
-    return handler
 
 
 @functools.lru_cache(None)

@@ -1209,7 +1209,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
-        if self.value.__name__ == "scan":
+        elif self.value.__name__ == "scan":
             #import pdb
             #pdb.set_trace()
             if len(args) != 3:
@@ -1291,9 +1291,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 tx.output.graph,
                 checkpoint,
             )
+            
             #import pdb
             #pdb.set_trace()
-
             body_name = add_subgraph(
                 "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
@@ -1301,15 +1301,13 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             body_node = make_attr(body_name)
             p_args = (
                 body_node,
-                *(arg.as_proxy() for arg in args[1:]),
-                *(arg for arg in body_lifted_freevars.keys()),
+                *(arg.as_proxy() for arg in args[1:])
             )
             example_value = pytree.tree_map_only(
                 torch.fx.Proxy,
                 lambda a: a.node.meta["example_value"],
                 body_r.as_proxy(),
             )
-            
         elif self.value.__name__ == "executorch_call_delegate":
             # This is operator for delegation within Executorch which calls a
             # specific function in the given lowered module with the given

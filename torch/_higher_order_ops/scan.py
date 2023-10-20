@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
     unwrap_proxy,
 )
+import torch.fx.traceback as fx_traceback
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
@@ -29,6 +30,17 @@ class ScanWrapper(HigherOrderOperator):
 
 scan = ScanWrapper("scan")
 scan_impl = HigherOrderOperator("scan_impl")
+
+def _maybe_run_with_interpreter(fn):
+    maybe_interpreted_fn = fn
+    if isinstance(fn, torch.fx.GraphModule) and fx_traceback.has_preserved_node_meta():
+        # Running graph with interpreter is needed for propagating the stack_trace
+        def graph_with_interpreter(*args):
+            with fx_traceback.preserve_node_meta():
+                return torch.fx.Interpreter(fn).run(*args)
+
+        maybe_interpreted_fn = graph_with_interpreter
+    return maybe_interpreted_fn
 
 dummy_aot_config = AOTConfig(fw_compiler=None,
                              bw_compiler=None,
@@ -390,33 +402,57 @@ class ScanAutogradOp(torch.autograd.Function):
             return None, None, None, *[grad[0] for grad in flat_carry_out_grads], *flat_out_grads
 
 def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
-    import pdb
-    pdb.set_trace()
+    #TODO: Put assertions here
+    
+    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+    
+    #import pdb
+    #pdb.set_trace()
     xs = flat_xs
     leading_dim = xs[0].shape[0]
-
-    example_input = _unstack_pytree(xs)[0]
+    num_init = len(flat_init)
+    example_input = _unstack_pytree(xs)
     body_graph = f
-    if not isinstance(body_graph, torch.fx.GraphModule):
-        #FW Expects BxF, BxF
-        #BW Expects BxF, TxBxF, BxF, TxBxF
-        body_graph = make_fx(body_graph)(*flat_init, *example_input)
 
     with disable_proxy_modes_tracing():
+        if not isinstance(body_graph, torch.fx.GraphModule):
+            #FW Expects BxF, BxF
+            #BW Expects BxF, BxF, BxF, BxF
+            body_graph = make_fx(_maybe_run_with_interpreter(body_graph))(*flat_init, *flat_xs)
+        
         #FW Expects BxF, BxF
-        #BW Expects BxF, TxBxF, BxF, TxBxF
-        example_outs = body_graph(*flat_init, *example_input)
+        #BW Expects BxF, BxF, BxF, BxF
+        example_outs = body_graph(*flat_init, *flat_xs)
 
-        def expand_tensor_carry(t):
-            if isinstance(t, torch.Tensor):
-                return t.expand(leading_dim+1, *t.shape)
-            return t
-        def expand_tensor_xs(t):
-            if isinstance(t, torch.Tensor):
-                return t.expand(leading_dim, *t.shape)
-            return t
-        expanded_outs = (pytree.tree_map(expand_tensor_carry, example_outs[:len(flat_init)]), pytree.tree_map(expand_tensor_xs, example_outs[len(flat_init):]))
+        # def expand_tensor_carry(t):
+        #     if isinstance(t, torch.Tensor):
+        #         return t.expand(leading_dim+1, *t.shape)
+        #     return t
+        # def expand_tensor_xs(t):
+        #     if isinstance(t, torch.Tensor):
+        #         return t.expand(leading_dim, *t.shape)
+        #     return t
+        # expanded_carries, expanded_outs = (pytree.tree_map(expand_tensor_carry, example_outs[:num_init]), pytree.tree_map(expand_tensor_xs, example_outs[num_init:]))
+        expanded_carries_out, expanded_outs = (example_outs[:num_init], example_outs[num_init:])
 
+        # import pdb
+        # pdb.set_trace()
+        # example_outs = []
+        # for node in body_graph.graph.nodes:
+        #     if node.op == "output":
+        #         example_outs.extend(node.args)
+
+        # example_outs, _ = pytree.tree_flatten(example_outs)
+
+    #The output of this operation is only a single carry, but all the outputs 
+    #import pdb
+    #pdb.set_trace()
+    #expanded_carries_out = [carry[-1, :] for carry in expanded_carries]
+    
+    expanded_outs_comb = (expanded_carries_out, expanded_outs)
+
+    #import pdb
+    #pdb.set_trace()
     next_name = None
     i = 0
     while not next_name:
@@ -426,16 +462,18 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
         else:
             next_name = candidate
 
+    #import pdb
+    #pdb.set_trace()
     proxy_mode.tracer.root.register_module(next_name, body_graph)
-    import pdb
-    pdb.set_trace()
+    #import pdb
+    #pdb.set_trace()
     node_args = (body_graph, flat_init, flat_xs)
     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {"reverse": reverse},
                                                name="scan_impl")
-    import pdb
-    pdb.set_trace()
-    return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    #import pdb
+    #pdb.set_trace()
+    return track_tensor_tree(expanded_outs_comb, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 def _unstack_and_flatten_tensors_or_lists(flat_xs):
     '''

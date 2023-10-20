@@ -6,6 +6,8 @@ import functorch.experimental.control_flow as control_flow
 
 import torch
 
+torch._functorch.config.functionalize_rng_ops=True
+
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.utils.checkpoint
@@ -256,6 +258,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3, 3)
 
+        #@torch.compile(backend='inductor', fullgraph=True)
         @torch.compile(backend=cnt, fullgraph=True)
         def cond_f(pred, pred2, x, y):
             def true_fn(pred2, x, y):
@@ -306,14 +309,17 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
         '''
-        def f(carry, x):
-            return carry+1, x+carry
         
+        @torch.compile(backend='inductor', fullgraph=True)
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            return carry+1, x+carry
+
         #import pdb
         #pdb.set_trace()
         #init = torch.rand(1)[0]#1, 2)
-        init = torch.rand(1, 2)
-        xs = torch.rand(10, 1, 2)
+        init = torch.rand(1, 2, device=torch.device('cuda'))
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda'))
         
         '''
         import pdb
@@ -328,6 +334,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         
         #import pdb
         #pdb.set_trace()
+        fc = torch.compile(f, backend='inductor', fullgraph=True)
         
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -335,7 +342,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         scan_comp = torch.compile(scan, backend='inductor', fullgraph=True)
         #import pdb
         #pdb.set_trace()
-        carry_out, ys = scan_comp(f, init, xs)
+        carry_out, ys = scan_comp(fc, init, xs)
+        #carry_out, ys = scan_comp(torch.mul, init, xs)
         import pdb
         pdb.set_trace()
         expected_carry_out, expected_ys = _fake_scan(f, init, xs)

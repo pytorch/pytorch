@@ -52,6 +52,8 @@ from .utils import (
 )
 from .virtualized import V
 
+from torch._higher_order_ops.scan import scan
+
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
@@ -464,6 +466,13 @@ class GraphLowering(torch.fx.Interpreter):
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
+        
+    def add_scan_fct(self, data):
+        print('Call the scan fct')
+        import pdb
+        pdb.set_trace()
+        return data
+        
 
     def constant_name(self, name: str, device_override: torch.device):
         """
@@ -519,6 +528,11 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
+        print(target)
+        if target == torch.ops.scan_impl or target == scan:
+            import pdb
+            pdb.set_trace()
+        
         if target is operator.getitem and isinstance(args[0], (list, tuple)):
             return super().call_function(target, args, kwargs)
 
@@ -527,6 +541,13 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
+            try:
+                name = target.name()
+            except:
+                print('Failed name')
+                import pdb
+                pdb.set_trace()
+            
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
@@ -558,9 +579,18 @@ class GraphLowering(torch.fx.Interpreter):
             ) from None
 
     def get_attr(self, target, args, kwargs):
+        #import pdb
+        #pdb.set_trace()
         # this is a constant
         value = getattr(self.module, target)
 
+        if isinstance(value, torch.fx.GraphModule):
+            print((value, target))
+            #import pdb
+            #pdb.set_trace()
+            return value
+            #return self.add_scan_fct(value)
+        
         if unsupported_output_tensor(value):
             return self.add_tensor_constant(value)
 
@@ -638,6 +668,8 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
+            #import pdb
+            #pdb.set_trace()
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem

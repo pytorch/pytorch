@@ -125,6 +125,8 @@ class Interpreter:
                     desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",
                     initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
+        print('Graph')
+        print(self.module.graph)
         for node in self.module.graph.nodes:
             pbar.update(1)
             if node in self.env:
@@ -188,6 +190,10 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        print((n, n.op, n.target, n.args))
+        #if n.name == 'scan' or n.name == 'body_graph_0':
+        #    import pdb
+        #    pdb.set_trace()
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)

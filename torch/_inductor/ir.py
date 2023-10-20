@@ -225,7 +225,12 @@ class OptionalList(OptionalAttr):
 class OptionalScalar(OptionalAttr):
     def __init__(self):
         self.name = "optional_scalar"
-
+        
+class ReductionHint(Enum):
+    INNER = 0
+    OUTER = 1
+    OUTER_TINY = 2
+    DEFAULT = 3
 
 def may_convert_to_optional(optional_value, value):
     return optional_value if not value and V.graph.cpp_wrapper else value
@@ -460,7 +465,183 @@ class Loops(IRNode):
                     self.make_loader(),
                     self.get_size(),
                 ).reads
+                
+@dataclasses.dataclass
+class Scan(Loops):
+    # scan_ranges: List[Expr]
+    size: List[Expr]
+    f: Callable[..., Any]
+    reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
+    reduction_hint: ReductionHint
+    axis: Any
+    xs: Any
+    init: Any
+    reverse: Any
 
+    # HACK we mimick reduction
+
+    def __post_init__(self):
+        import pdb
+        pdb.set_trace()
+        #assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
+        super().__post_init__()
+
+    def store_reduction(self, output_name, indexer, vars, scan_vars):
+        import pdb
+        pdb.set_trace()
+        return None
+
+    def get_reduction_type(self):
+        import pdb
+        pdb.set_trace()
+        # return self.scan_op
+        return "custom"
+
+    def get_reduction_size(self):
+        import pdb
+        pdb.set_trace()
+        return self.scan_ranges
+
+    def get_size(self):
+        return self.size
+
+    def get_pointwise_size(self):
+        import pdb
+        pdb.set_trace()
+        return self.ranges
+
+    def index_length(self):
+        import pdb
+        pdb.set_trace()
+        return len(self.ranges) + len(self.scan_ranges)
+
+    def inner_fn_str(self):
+        import pdb
+        pdb.set_trace()
+        index = self._index(self.ranges)
+        rindex = self._index(self.scan_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn,
+            index,
+            rindex,
+        )
+
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: Any,
+        f: Any,
+        init: Any,
+        xs: Any,
+        reverse=False
+    ) -> Optional["TensorBox"]:
+        
+        import pdb
+        pdb.set_trace()
+        
+        if device.type != "cuda":
+            # TODO: CPU support
+            return None
+
+        if torch.version.hip is not None:
+            # TODO: ROCm support
+            return None
+        
+        # sizevars = V.graph.sizevars
+        # scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+
+        # # Scan with a single element is just a copy
+        # if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
+        #     return Pointwise.create(
+        #         device=device,
+        #         dtype=dtype,
+        #         inner_fn=inner_fn,
+        #         ranges=size,
+        #     )
+
+        # reduction_hint, num_splits = cls.num_splits(
+        #     device=device,
+        #     dtype=dtype,
+        #     inner_fn=inner_fn,
+        #     axis=axis,
+        #     pointwise_ranges=pointwise_ranges,
+        #     scan_ranges=scan_ranges,
+        #     combine_fn=combine_fn,
+        #     scan_numel=scan_numel,
+        # )
+        # if num_splits > 1:
+        #     # TODO: Support splitting
+        #     return None
+    
+        reduction_hint = ReductionHint.DEFAULT
+        num_splits = 1
+        
+        
+
+        def reindex(index, scan_index):
+            import pdb
+            pdb.set_trace()
+            assert len(scan_index) == len(scan_ranges)
+            assert len(index) == len(pointwise_ranges)
+            return [*index[:axis], *scan_index, *index[axis:]]
+
+        import pdb
+        pdb.set_trace()
+        scan = Scan(device=device,
+                    dtype=dtype,
+                    inner_fn=xs[0].make_loader(),
+                    ranges=None,
+                    size=size,
+                    axis=0,
+                    f=f,
+                    init=init,
+                    xs=xs,
+                    reverse=reverse,
+                    reindex=reindex,
+                    reduction_hint=reduction_hint,
+                    )
+
+        result = TensorBox.create(
+            scan
+        )
+        
+        import pdb
+        pdb.set_trace()
+        result.realize()
+        return result
+        
+        return None
+
+    @classmethod
+    def num_splits(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        f: Any,
+        init: Any,
+        xs: Any,
+        reverse=False
+    ):
+        import pdb
+        pdb.set_trace()
+        
+        # TODO: custom splitting heuristic for scan
+        def wrapper_fn(idx, reduction_idx):
+            return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
+
+        return Reduction.num_splits(
+            device=device,
+            dst_dtype=dtype,
+            src_dtype=dtype,
+            inner_fn=wrapper_fn,
+            ranges=pointwise_ranges,
+            reduction_ranges=scan_ranges,
+            reduction_type="sum",
+            reduction_numel=scan_numel,
+        )
+        return None
 
 class Pointwise(Loops):
     def make_loader(self):
@@ -3364,6 +3545,8 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
+        import pdb
+        pdb.set_trace()
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -4299,7 +4482,10 @@ class StorageBox(MutableBox):
             ),
         ):
             return self.data.get_name()
-        assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
+        
+        import pdb
+        pdb.set_trace()
+        assert isinstance(self.data, (Pointwise, Reduction, Scan)), type(self.data)
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         self.data = ComputedBuffer(
@@ -4311,6 +4497,8 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
+        import pdb
+        pdb.set_trace()
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
