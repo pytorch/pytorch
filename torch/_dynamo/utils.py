@@ -1412,7 +1412,7 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(
+            raise UserError(  # noqa: TRY200
                 UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
@@ -2171,6 +2171,15 @@ def is_rng_state_getter_or_setter(value):
         torch.cuda.set_rng_state,
     )
     return value in (*setters, *getters)
+
+
+def is_tensor_base_attr_getter(value):
+    return (
+        isinstance(value, types.MethodWrapperType)
+        and value.__name__ == "__get__"
+        and isinstance(value.__self__, types.GetSetDescriptorType)
+        and value.__self__.__objclass__ is torch._C._TensorBase
+    )
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
