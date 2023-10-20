@@ -636,6 +636,7 @@ def reinplace_scatters(graph):
             # then skip over it
             if (
                 src.target == operator.getitem
+                and src.args[0].target == triton_kernel_wrapper_functional
                 and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
             ):
                 src = src.args[0]
