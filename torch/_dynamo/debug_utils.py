@@ -223,7 +223,9 @@ def _cuda_system_info_comment():
 
     model_str = "# CUDA Info: \n"
     try:
-        cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
+        cuda_version_out = subprocess.run(
+            ["nvcc", "--version"], stdout=subprocess.PIPE, check=True
+        )
         cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
         comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
         model_str += f"{comment}\n"

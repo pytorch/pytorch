@@ -48,7 +48,7 @@ def group_functions_by_op_name(
 def clang_format(cpp_file_path: str) -> None:
     import subprocess
 
-    subprocess.run(["clang-format", "-i", cpp_file_path])
+    subprocess.run(["clang-format", "-i", cpp_file_path], check=True)
 
 
 def write_cpp(cpp_ops: Sequence[str], file_path: str) -> None:
