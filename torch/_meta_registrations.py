@@ -1890,6 +1890,26 @@ def meta_mm(a, b):
     return a.new_empty(N, P)
 
 
+
+@register_meta([aten._scaled_mm.default])
+@out_wrapper("output", "output_amax")
+def meta__scaled_mm(a, b, bias, out_dtype, scale_a, scale_b, scale_result=None):
+    torch._check(a.dim() >=2, lambda: "a must > 2D")
+    torch._check(b.dim() >=2, lambda: "b must be 2D")
+    torch._check(scale_a.dtype == torch.float32, lambda: f"scale_a must be FP32, but get {scale_a.dtype}")
+    torch._check(scale_b.dtype == torch.float32, lambda: f"scale_b must be FP32, but get {scale_b.dtype}")
+    a_shape = a.shape
+    b_shape = b.shape
+    torch._check(
+        a_shape[-1] == b_shape[0],
+        lambda: f"a and b must have same reduction dim: but got {a_shape} {b_shape}"
+    )
+    new_shape = a_shape[:-1] + b_shape[1:]
+    res = torch.empty(new_shape, dtype=out_dtype, device=a.device)
+    res_amax = torch.empty(new_shape[:-1], dtype=out_dtype, device=a.device)
+    return res, res_amax
+
+
 def _compute_reduction_shape(self, dims, keepdim):
     if keepdim:
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
