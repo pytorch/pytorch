@@ -29,7 +29,7 @@
 #define CHECK_SHAPE(x, ...) \
   TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
-namespace fmha {
+namespace pytorch_fmha {
 
 void run_flash_fwd(LaunchParams<FlashFwdParams>& launch_params) {
   HEADDIM_SWITCH(launch_params.params.d, [&] {
