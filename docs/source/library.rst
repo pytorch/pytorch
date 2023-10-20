@@ -42,5 +42,4 @@ A tutorial that walks you through some examples on how to use this API is availa
 We have also added some function decorators to make it convenient to register functions for operators:
 
 * :func:`torch.library.impl`
-* :func:`torch.library.impl_device`
 * :func:`torch.library.define`
