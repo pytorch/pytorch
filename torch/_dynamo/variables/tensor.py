@@ -181,8 +181,8 @@ class TensorVariable(VariableTracker):
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
-        except Exception:
-            raise NotImplementedError()
+        except Exception as exc:
+            raise NotImplementedError() from exc
 
         if _input_associated_real_value is None:
             raise NotImplementedError()
@@ -348,9 +348,13 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
+        from .torch import is_torch_inplace_op
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if is_torch_inplace_op(name):  # inplace / self-propagating op
+            options.update({"source": self.source})
 
         if name in ("stride", "size"):
             dim_var = None
