@@ -3598,6 +3598,8 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
         xfail('addcdiv'),
@@ -3741,6 +3743,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('_softmax_backward_data'),
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # One or more of the overload doesn't have a Batch rule.
         xfail('bincount'),
