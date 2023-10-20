@@ -615,7 +615,7 @@ class NNModuleVariable(VariableTracker):
         ):
             # Inline the function
             fn = getattr(module, name).__func__
-            fn_source = AttrSource(self.source, "__func__")
+            fn_source = AttrSource(AttrSource(self.source, name), "__func__")
             options["source"] = fn_source
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, **options),
