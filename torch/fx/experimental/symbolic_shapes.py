@@ -68,7 +68,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY", "sym_ite",
+    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
