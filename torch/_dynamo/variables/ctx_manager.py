@@ -129,25 +129,26 @@ class GradModeVariable(ContextWrappingVariable):
     _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)}
 
     @staticmethod
-    def create(tx, target_value, should_initialize_once=True, **kwargs):
+    def create(tx, target_value, initialized=True, **kwargs):
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],
+            initialized=initialized,
             **kwargs,
         )
-        var._should_initialize_once = should_initialize_once
-        if var._should_initialize_once:
+        if var.initialized:
             var._call_func(tx, var.target_values)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, initialized=True, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.guards = self.guards | self._guards_singleton
+        self.initialized = initialized
 
     def enter(self, tx):
-        if not self._should_initialize_once:
+        if not self.initialized:
             self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(
             None, **VariableTracker.propagate(self)
