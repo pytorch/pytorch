@@ -276,10 +276,11 @@ def impl(qualname, types, func=None, *, lib=None):
         is_dispatch_key = torch._C._parse_dispatch_key(typ)
         if is_dispatch_key:
             # We also support passing a DispatchKey to impl. Please prefer using
-            # the higher-level torch.library APIs and pass DispatchKey to impls
-            # with caution (or even better, don't use this option and file an issue
-            # on GitHub for what you need) we don't advertise this to users because
-            # it is very easy to shoot yourself in the foot with.
+            # the higher-level torch.library APIs and only pass DispatchKey to
+            # torch.library.impl with caution (or even better, don't use this
+            # option and file an issue on GitHub for what you need).
+            # We don't advertise this to users because
+            # it is very easy to shoot yourself in the foot.
             keys.add(typ)
         else:
             keys.add(_device_type_to_key(typ))
@@ -308,8 +309,6 @@ def _device_type_to_key(device_type: str) -> str:
         # device_type. I don't really care that much about the difference.
         return "CompositeExplicitAutograd"
     return torch._C._dispatch_key_for_device(device_type)
-
-
 
 
 @impl.register
