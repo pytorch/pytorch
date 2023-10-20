@@ -13,7 +13,7 @@
 #include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
 #include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
 
-#define CUTLASS_STATUS_CHECK(status)                                    \
+#define CUTLASS_STATUS_CHECK(status)                                      \
   {                                                                       \
     TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
                 "Got CUTLASS error: ", cutlassGetStatusString(status));   \
