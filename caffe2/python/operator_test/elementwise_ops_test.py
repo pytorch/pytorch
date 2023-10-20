@@ -994,7 +994,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             gc, op, [X], 0, [0], stepsize=1e-3, threshold=0.05,
             ensure_outputs_are_inferred=True)
 
-    @given(X=hu.tensor(dtype=np.bool), **hu.gcs)
+    @given(X=hu.tensor(dtype=bool), **hu.gcs)
     @settings(deadline=10000)
     def test_not(self, X, gc, dc):
         def not_op(X):

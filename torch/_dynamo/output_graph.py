@@ -56,6 +56,7 @@ from .current_scope_id import enter_new_scope
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
+    SkipFrame,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -252,6 +253,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+
+        # Used to maintain an alias between real values variable tracker for tensors we have seen.
+        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
+        self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -1044,6 +1049,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
+        except SkipFrame as e:
+            # The backend compiler has requested that we skip the frame, instead of
+            # aborting execution.
+            raise e
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__

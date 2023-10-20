@@ -1274,12 +1274,12 @@ Tensor convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups) {
+    c10::SymInt groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
@@ -1312,12 +1312,12 @@ Tensor _convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups,
+    c10::SymInt groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,

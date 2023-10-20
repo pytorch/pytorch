@@ -956,16 +956,17 @@ def forward(self, primals_1):
             # Thanks to the detach_() AOT Autograd doesn't need to do anything.
             # `out` will show up as having OutputType.non_alias,
             # and ._is_view() == False
-            return out
+            return out, a + 1
         inp = [torch.ones(2, 4, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
         inp = [torch.ones(2, 4, requires_grad=True)]
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     t = torch.ops.aten.t.default(mul);  mul = None
-    return [t]""")
+    add = torch.ops.aten.add.Tensor(primals_1, 1);  primals_1 = None
+    return [t, add]""")
 
 
     def test_output_aliases_intermediate_inplace_view_and_view(self):
@@ -2736,6 +2737,22 @@ class TestPartitioning(AOTTestCase):
 
         assert torch.allclose(ref, res)
 
+    # https://github.com/pytorch/pytorch/issues/110666
+    def test_generate_gives_inference_graph(self):
+        # We expect this to give an inference graph
+        def generate(x):
+            with torch.no_grad():
+                return torch.mul(x, x)
+
+        inference_graph_cell = [None]
+        inference_compiler = make_boxed_compiler(partial(extract_graph, graph_cell=inference_graph_cell))
+        aot_fn = aot_function(generate, nop, inference_compiler=inference_compiler)
+        # Even though x requires grad, we should still get an inference graph
+        x = torch.randn(4, requires_grad=True)
+        res = aot_fn(x)
+        self.assertTrue(inference_graph_cell[0] is not None)
+
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self):
@@ -3334,7 +3351,6 @@ aot_autograd_failures = {
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -3348,8 +3364,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
-    xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -3511,8 +3525,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
