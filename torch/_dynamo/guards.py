@@ -1004,6 +1004,7 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
+            extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
                     if fs.filename not in uninteresting_files():
@@ -1013,7 +1014,7 @@ class CheckFunctionManager:
             elif guard.stack:
                 extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
-                guards_log.debug("%s", f"{code:<60}{extra}")
+            guards_log.debug("%s", f"{code:<60}{extra}")
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
