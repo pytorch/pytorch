@@ -111,3 +111,12 @@ def get_test_file_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any
     except Exception:
         print("Couldn't download test file ratings file, not reordering...")
         return {}
+
+
+def get_test_class_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any]]:
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_class_rating.json"
+    try:
+        return fetch_and_cache(dirpath, filename, url, lambda x: x)
+    except Exception:
+        print("Couldn't download test class ratings file, not reordering...")
+        return {}

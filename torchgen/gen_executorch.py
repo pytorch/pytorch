@@ -879,7 +879,7 @@ def main() -> None:
         "--manual_registration",
         "--manual-registration",
         action="store_true",
-        help="a boolean flag to indicate whether we want to maually call"
+        help="a boolean flag to indicate whether we want to manually call"
         "register_kernels() or rely on static init. ",
     )
     parser.add_argument(

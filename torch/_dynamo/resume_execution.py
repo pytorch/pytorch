@@ -365,11 +365,9 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            code_options["co_name"] = f"<resume in {code_options['co_name']}>"
+            code_options["co_name"] = f"resume_in_{code_options['co_name']}"
             if is_py311_plus:
-                code_options[
-                    "co_qualname"
-                ] = f"<resume in {code_options['co_qualname']}>"
+                code_options["co_qualname"] = f"resume_in_{code_options['co_qualname']}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars

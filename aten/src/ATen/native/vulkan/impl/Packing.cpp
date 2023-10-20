@@ -148,7 +148,7 @@ void record_nchw_to_image_op(
       params.buffer());
 }
 
-void record_image_to_nchw_op(
+bool record_image_to_nchw_op(
     api::Context* const context,
     api::ShaderInfo& compute_shader,
     vTensor& v_src,
@@ -192,7 +192,7 @@ void record_image_to_nchw_op(
   }
 
   api::UniformParamsBuffer params(context, block);
-  context->submit_compute_job(
+  return context->submit_compute_job(
       // shader descriptor
       compute_shader,
       // pipeline barrier
@@ -248,7 +248,7 @@ void record_nchw_to_buffer_op(
       cpu_buffer_metadata.buffer());
 }
 
-void record_buffer_to_nchw_op(
+bool record_buffer_to_nchw_op(
     api::Context* const context,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
@@ -262,7 +262,7 @@ void record_buffer_to_nchw_op(
   api::UniformParamsBuffer cpu_buffer_metadata(
       context, v_src.get_cpu_buffer_metadata());
 
-  context->submit_compute_job(
+  return context->submit_compute_job(
       // shader descriptor
       VK_KERNEL(buffer_to_buffer),
       // pipeline barrier
