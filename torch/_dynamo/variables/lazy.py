@@ -33,7 +33,6 @@ class LazyVariableTracker(VariableTracker):
         self._value = _value
         if self.mutable_local is None:
             self.mutable_local = LazyMutableLocal()
-        # TODO(voz) - Support SourcelessBuilder during realize
         assert (
             self.source
         ), "Illegal construction. LazyVariableTracker deferred creation utilizes VariableBuilder."
@@ -45,7 +44,6 @@ class LazyVariableTracker(VariableTracker):
             from .builder import VariableBuilder
 
             tx = InstructionTranslator.current_tx()
-            # TODO(voz) - Support SourcelessBuilder during realize
             self.mutable_local.vt = VariableBuilder(tx, self.source)(self._value)
             self._value = None
         return self.mutable_local.vt.add_options(self)
