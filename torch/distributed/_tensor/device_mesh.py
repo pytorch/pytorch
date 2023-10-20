@@ -414,7 +414,7 @@ def init_device_mesh(
         A :class:`DeviceMesh` object
 
     .. note: If no process group is found, init_device_mesh will initialize distributed process group/groups
-    behind the scene, which are requried for distributed communications.
+    behind the scene, which are required for distributed communications.
 
     Example:
         >>> # xdoctest: +SKIP
