@@ -556,7 +556,6 @@ std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
   VMAP_SUPPORT(tril, tril_batch_rule);
