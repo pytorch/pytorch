@@ -1059,7 +1059,7 @@ class TypedStorage:
         ``size`` is the number of elements in the storage. If ``shared`` is ``False``,
         then the file must contain at least :math:`size * sizeof(Type)` bytes
         (``Type`` is the type of storage, in the case of an ``UnTypedStorage`` the file must contain at
-        least `size` bytes). If ``shared`` is ``True`` the file will be created if needed.
+        least ``size`` bytes). If ``shared`` is ``True`` the file will be created if needed.
 
         Args:
             filename (str): file name to map
