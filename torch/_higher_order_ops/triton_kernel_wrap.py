@@ -138,8 +138,13 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
         assert isinstance(input_arg, Tensor)
 
         ctx.replace(input_arg, output_arg)
+        # indicate that above replace is hidden from autograd
+        ctx.mark_mutation_hidden_from_autograd(input_arg)
         ctx.commit_update(input_arg)
         ctx.sync(input_arg)
+        # sync calls replace_ under the hood, so again indicate that
+        # this indirect replace is hidden from autograd
+        ctx.mark_mutation_hidden_from_autograd(input_arg)
     return None
 
 
