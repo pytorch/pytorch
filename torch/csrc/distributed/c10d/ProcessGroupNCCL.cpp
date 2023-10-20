@@ -896,7 +896,9 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       LOG(INFO) << fmt::format(
-          "[Rank {}] main process destroyed cuda before watchdog loop exited, terminating watchdog. (Watchdog caught exception: {})",
+          "[Rank {}] "
+          "main process destroyed cuda before watchdog loop exited, terminating watchdog. "
+          "(Watchdog caught exception: {})",
           rank_,
           e.what());
     } else {
