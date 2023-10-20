@@ -176,6 +176,7 @@ class DeviceMesh:
         self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
 
         # Skip process group initialization if xla device.
+        # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
         if device_type != "xla":
             # always try to create default (world) pg, even if it is not initialized
             # already. The world pg is used for device mesh identity (rank) on each

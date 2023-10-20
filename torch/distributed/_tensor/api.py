@@ -452,7 +452,7 @@ def distribute_tensor(
     Note:
         When initialize the DeviceMesh with the `xla` device_type, `distribute_tensor`
         return `XLAShardedTensor` instead. see [link](https://github.com/pytorch/pytorch/issues/92909)
-        for more details.
+        for more details. The XLA integration is experimental and subject to change.
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")

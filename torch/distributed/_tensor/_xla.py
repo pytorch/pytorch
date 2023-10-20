@@ -114,7 +114,7 @@ def convert_to_xla_partition_spec(
 @with_xla
 def xla_distribute_tensor(
     tensor: torch.Tensor,
-    device_mesh: Optional[DeviceMesh] = None,
+    device_mesh: DeviceMesh,
     placements: Optional[Sequence[Placement]] = None,
 ) -> "XLAShardedTensor":
     """
@@ -140,13 +140,12 @@ def xla_distribute_tensor(
 
     .. note:: We return a XLAShardedTensor with a global view and access to local shards.
     The successive ops would be programmed as if on a single-device and without calling
-    any explicit collective ops. This is different from returning a DTensor with
-    local shard. The actual sharded computation on the sharding annotated tensor
+    any explicit collective ops. The actual sharded computation on the sharding annotated tensor
     happens lazily, is transparent to the user. In the future, we will introduce
     a new DTensor type for this kind of programming-mode (single-controller) and return.
     """
-    # get default device mesh if there's nothing specified
-    dt_mesh = device_mesh or mesh_resources.get_current_mesh()
+    # device_mesh is not optional in xla_distribute_tensor
+    dt_mesh = device_mesh
     assert dt_mesh.device_type == "xla"
 
     # convert to XLA device mesh
