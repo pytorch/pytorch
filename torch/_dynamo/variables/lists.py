@@ -28,7 +28,9 @@ from .functions import UserFunctionVariable, UserMethodVariable
 def _listlike_contains_helper(items, search, tx, options):
     if search.is_python_constant():
         result = any(
-            x.as_python_constant() == search.as_python_constant() for x in items
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
         )
         return variables.ConstantVariable.create(result, **options)
 
@@ -155,8 +157,6 @@ class BaseListVariable(VariableTracker):
         elif name == "index":
             from .builder import SourcelessBuilder
 
-            assert len(kwargs) == 0
-            assert len(args) > 0 and len(args) <= 3
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
             )
@@ -653,7 +653,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                unimplemented(f"NamedTupleVariable.{name}")
+                super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)].add_options(self)
 
