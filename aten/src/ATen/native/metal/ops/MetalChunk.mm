@@ -15,10 +15,15 @@ namespace metal {
 
 // Split the input tensor into two on channel dimension
 // TODO: [T87567124] Fully implement chunk in Metal shader
-std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
+std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim, bool redistribute, bool drop_remainder) {
   TORCH_CHECK(chunks == 2 && dim == 1);
   TORCH_CHECK(input.dim() == 4);
   TORCH_CHECK(input.size(0) == 1);
+  if (redistribute || drop_remainder) {
+    TORCH_CHECK(
+        false,
+        "torch.chunk w/ redistribute=True or drop_remainder=True not yet supported on MPS");
+  }
   int64_t dim_size = input.size(dim);
   int64_t split_size = (dim_size + chunks - 1) / chunks;
   int64_t num_splits = 1;
