@@ -275,6 +275,13 @@ class VulkanAPITest : public ::testing::Test {
   }
 };
 
+TEST_F(VulkanAPITest, zero_size_tensor) {
+  auto cpu = at::rand({1, 0, 0}, at::device(at::kCPU).dtype(at::kFloat));
+  auto vk = cpu.vulkan();
+  auto out_vk = vk.cpu();
+  ASSERT_TRUE(at::equal(out_vk, cpu));
+}
+
 TEST_F(VulkanAPITest, copy_to_texture) {
   using namespace at::native::vulkan;
   at::Tensor test_tensors[] = {
