@@ -93,7 +93,7 @@ static bool conv_benchmark_empty_cache = true;
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
-bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
+bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
   auto w = at::symint::size<T>(input, 3);  // same as h
   auto ch = at::symint::size<T>(input, 1);
   auto bs = at::symint::size<T>(input, 0);
@@ -216,7 +216,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 
 // simplified version for cudnn 8.2 and above
 template <typename T>
-bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int stride, const at::Tensor& weight) {
+bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
   // 1D conv
   if(at::symint::size<T>(input, 2) == 1 && stride == 1){
     return true;
@@ -284,12 +284,12 @@ static bool xnnpack_use_convolution2d(
 // int64_t
 template <typename T>
 struct ConvParams {
-  std::vector<int64_t> stride;
+  std::vector<T> stride;
   std::vector<T> padding;
-  std::vector<int64_t> dilation;
+  std::vector<T> dilation;
   bool transposed;
   std::vector<T> output_padding;
-  int groups;
+  T groups;
   bool benchmark;
   bool deterministic;
   bool cudnn_enabled;
@@ -644,7 +644,7 @@ static void check_shape_forward(const at::Tensor& input,
                                 const ConvParams<T>& params) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight_sizes.size();
-  int64_t groups = params.groups;
+  auto groups = params.groups;
   const auto& padding = params.padding;
   const auto& dilation = params.dilation;
   bool transposed = params.transposed;
@@ -1300,8 +1300,8 @@ ConvBackend _select_conv_backend(
 // Selects a backend for convolution based on the inputs and params.
 ConvBackend select_conv_backend(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride_, SymIntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, SymIntArrayRef output_padding_, int64_t groups_, const at::OptionalSymIntArrayRef bias_sizes_opt) {
+    SymIntArrayRef stride_, SymIntArrayRef padding_, SymIntArrayRef dilation_,
+    bool transposed_, SymIntArrayRef output_padding_, c10::SymInt groups_, const at::OptionalSymIntArrayRef bias_sizes_opt) {
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
