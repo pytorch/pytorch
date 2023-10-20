@@ -5,9 +5,7 @@
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/SparseBlas.h>
 
-namespace at {
-namespace mkl {
-namespace sparse {
+namespace at::mkl::sparse {
 
 namespace {
 
@@ -356,6 +354,4 @@ void trsm<c10::complex<double>>(
       ldy));
 }
 
-} // namespace sparse
-} // namespace mkl
-} // namespace at
+} // namespace at::mkl::sparse
