@@ -33,8 +33,7 @@ typedef void* MTLDevice_t;
 #endif
 
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 //-----------------------------------------------------------------
 //  MPSStream
@@ -131,5 +130,4 @@ class TORCH_API MPSStreamImpl
   MPSStreamImpl();
 };
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps
