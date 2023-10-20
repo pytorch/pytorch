@@ -52,7 +52,11 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .dependencies import extract_read_writes, var_builder
+from .dependencies import (
+    extract_input_node_reduction_ranges,
+    extract_read_writes,
+    var_builder,
+)
 from .utils import (
     argsort,
     cache_on_self,
@@ -619,6 +623,7 @@ class Reduction(Loops):
         reduction_ranges,
         reduction_type,
         reduction_numel,
+        input_node: Optional[IRNode] = None,
     ):
         def _is_static(x):
             return isinstance(x, (int, sympy.Integer))
@@ -724,9 +729,23 @@ class Reduction(Loops):
 
         # easy cases
         if numel_hint == 1:
-            return ReductionHint.INNER, inner_reduction_splits(
-                reduction_numel_hint, numel_hint
-            )
+            split = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            if split == 1:
+                # No need to split.
+                return ReductionHint.INNER, split
+            if input_node is not None and isinstance(input_node, TensorBox):
+                ranges, reduction_ranges = extract_input_node_reduction_ranges(
+                    input_node
+                )
+                if reduction_ranges is not None:
+                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
+                        sympy_product(ranges + reduction_ranges)
+                    )
+                    if reduction_numel_hint == extracted_numel_hint:
+                        # If the input_node or its dependent nodes are also Reduction nodes,
+                        # use reduction_sizes of this node or its dependent nodes directly.
+                        return ReductionHint.INNER, -1
+            return ReductionHint.INNER, split
         if (
             reduction_numel_hint <= min_elements_per_thread
             or numel_hint >= num_sm * 2 * 32
@@ -857,6 +876,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: Optional[IRNode] = None,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -935,13 +955,33 @@ class Reduction(Loops):
             reduction_ranges,
             reduction_type,
             reduction_numel,
+            input_node,
         )
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
-        if split > 1:
+        if split == -1:
+            assert input_node is not None
+            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                input_node
+            )
+            assert new_ranges is not None
+            assert new_reduction_ranges is not None
+            return cls.create_multilayer_existing_ranges(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                new_ranges,
+                new_reduction_ranges,
+                reduction_type,
+                reduction_hint,
+            )
+        elif split > 1:
             # triton doesn't support reduce to single element well, so break it up
             return cls.create_multilayer(
                 device,
@@ -1004,6 +1044,8 @@ class Reduction(Loops):
     def _multilayer_second_step_hint(
         split: int, numel_hint: int, reduction_hint: ReductionHint
     ) -> ReductionHint:
+        if split == -1:
+            return reduction_hint
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
             return ReductionHint.OUTER_TINY
         if (
@@ -1050,6 +1092,88 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
+    def _multilayer_wrap_loader_existing_ranges(
+        cls,
+        loader,
+        original_ranges,
+        original_reduction_ranges,
+        new_ranges,
+        new_reduction_ranges,
+        default,
+    ):
+        assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
+        reindex = View.dynamic_reshape_indexer(
+            original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
+        )
+
+        def wrapper_fn(index, reduction_index):
+            return loader([], reindex(tuple(index) + tuple(reduction_index)))
+
+        return wrapper_fn
+
+    @classmethod
+    def create_multilayer_helper(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        wrapper_fn: Callable[..., Any],
+        original_ranges: List[Expr],
+        original_reduction_ranges: List[Expr],
+        new_ranges: List[Expr],
+        new_reduction_ranges: List[Expr],
+        reduction_type: str,
+        split: int,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
+        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
+        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
+        intermediate_dtype = (
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
+        )
+        intermediate = Reduction.create(
+            device,
+            intermediate_dtype,
+            src_dtype,
+            wrapper_fn,
+            new_ranges,
+            new_reduction_ranges,
+            reduction_type,
+            reduction_hint,
+        )
+        intermediate.realize()
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(index, reduction_index):
+            return intermediate_loader([*index, *reduction_index])
+
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
+        reduction_hint = cls._multilayer_second_step_hint(
+            split, numel_hint, reduction_hint
+        )
+
+        assert original_ranges == new_ranges[: len(original_ranges)]
+        return TensorBox.create(
+            Reduction(
+                device,
+                dst_dtype,
+                intermediate_fn,
+                original_ranges,
+                new_ranges[len(original_ranges) :],
+                reduction_type,
+                src_dtype,
+                reduction_hint,
+            )
+        )
+
+    @classmethod
     def create_multilayer(
         cls,
         device: torch.device,
@@ -1074,45 +1198,59 @@ class Reduction(Loops):
             inner_fn, reduction_ranges, reduction_numel, split, block_size, default
         )
 
-        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
-        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
-        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
-        intermediate_dtype = (
-            dst_dtype
-            if dst_dtype not in (torch.float16, torch.bfloat16)
-            else torch.float
-        )
-        intermediate = Reduction.create(
+        return cls.create_multilayer_helper(
             device,
-            intermediate_dtype,
+            dst_dtype,
             src_dtype,
             wrapper_fn,
+            ranges,
+            reduction_ranges,
             [*ranges, split],
             [block_size],
             reduction_type,
+            split,
             reduction_hint,
         )
-        intermediate.realize()
-        intermediate_loader = intermediate.make_loader()
 
-        def intermediate_fn(index, reduction_index):
-            return intermediate_loader([*index, *reduction_index])
-
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-        reduction_hint = cls._multilayer_second_step_hint(
-            split, numel_hint, reduction_hint
+    @classmethod
+    def create_multilayer_existing_ranges(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        original_ranges: List[Expr],
+        original_reduction_ranges: List[Expr],
+        new_ranges: List[Expr],
+        new_reduction_ranges: List[Expr],
+        reduction_type: str,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        default = cls.default_value(reduction_type, dst_dtype)
+        wrapper_fn = cls._multilayer_wrap_loader_existing_ranges(
+            inner_fn,
+            original_ranges,
+            original_reduction_ranges,
+            new_ranges,
+            new_reduction_ranges,
+            default,
         )
-        return TensorBox.create(
-            Reduction(
-                device,
-                dst_dtype,
-                intermediate_fn,
-                ranges,
-                [split],
-                reduction_type,
-                src_dtype,
-                reduction_hint,
-            )
+        return cls.create_multilayer_helper(
+            device,
+            dst_dtype,
+            src_dtype,
+            wrapper_fn,
+            original_ranges,
+            original_reduction_ranges,
+            new_ranges,
+            new_reduction_ranges,
+            reduction_type,
+            -1,
+            reduction_hint,
         )
 
 
