@@ -16,16 +16,8 @@ Tensor sum_dim(
     bool keepdim,
     const optional<ScalarType> dtype) {
   TORCH_CHECK(
-      self.dim() >= 2 || self.dim() <= 4,
+      self.dim() >= 2 && self.dim() <= 4,
       "Vulkan sum.dim_IntList supports 2d, 3d, 4d tensors as input!");
-  TORCH_CHECK(
-      dim >= -self.dim() - 1 && dim <= self.dim(),
-      "Vulkan sum.dim_IntList dimension out of range expected to be in range of [",
-      -self.dim() - 1,
-      ",",
-      self.dim(),
-      "], but got ",
-      dim);
 
   // Get the global Vulkan context
   api::Context* const context = api::context();
@@ -111,7 +103,23 @@ Tensor sum_dim_IntList(
   if (opt_dim.has_value()) {
     auto dims = opt_dim.value();
     for (const auto& d : dims) {
-      dims_set.insert(d);
+      TORCH_CHECK(
+          d >= -self.dim() && d < self.dim(),
+          "Vulkan sum.dim_IntList dimension out of range expected to be in range of [",
+          -self.dim(),
+          ",",
+          self.dim() - 1,
+          "], but got ",
+          d);
+      int64_t dim_normalized = utils::normalize(d, self.dim());
+      if (dims_set.find(dim_normalized) != dims_set.end()) {
+        TORCH_CHECK(
+            false,
+            "dim ",
+            dim_normalized,
+            " appears multiple times in the list of dims")
+      }
+      dims_set.insert(dim_normalized);
     }
     Tensor result = self;
     for (auto it = dims_set.rbegin(); it != dims_set.rend(); ++it) {
