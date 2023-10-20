@@ -811,6 +811,76 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
+    def _test_transitive_sharing_with_cat_helper(self, quantizer):
+        m = TestHelperModules.Conv2dWithTwoCat().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5), torch.randn(1, 6, 3, 3), torch.randn(1, 6, 3, 3))
+
+        # program capture
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        # make sure the two input observers and output are shared
+        conv_output_obs = []
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
+                conv_output_obs.append(getattr(m, list(n.users)[0].target))
+            if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
+                inputs = n.args[0]
+                input0 = inputs[0]
+                input1 = inputs[1]
+                assert input0.op == "call_module"
+                assert input1.op == "call_module"
+                obs_ins0 = getattr(m, input0.target)
+                obs_ins1 = getattr(m, input1.target)
+                assert obs_ins0 == obs_ins1
+
+                output_obs = list(n.users)[0]
+                assert output_obs.op == "call_module"
+                obs_ins2 = getattr(m, output_obs.target)
+                assert obs_ins0 == obs_ins2, "input observer does not match output"
+
+        assert len(conv_output_obs) == 2, "expecting two observer that follows conv2d ops"
+        # checking that the output observers for the two convs are shared as well
+        assert conv_output_obs[0] == conv_output_obs[1]
+
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 7,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 9,
+        }
+        node_list = [
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(torch.ops.aten.cat.default),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(torch.ops.aten.cat.default),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
+        )
+
     def test_shared_qspec_transitivity(self):
         """This tests the transitivity of SharedQuantizationSpec, that is
         if A is shared with B, B is shared with C, then C should be shared with A as well
@@ -897,75 +967,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-
-        m = TestHelperModules.Conv2dWithTwoCat().eval()
-        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5), torch.randn(1, 6, 3, 3), torch.randn(1, 6, 3, 3))
-
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        # make sure the two input observers and output are shared
-        conv_output_obs = []
-        for n in m.graph.nodes:
-            if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
-                conv_output_obs.append(getattr(m, list(n.users)[0].target))
-            if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
-                inputs = n.args[0]
-                input0 = inputs[0]
-                input1 = inputs[1]
-                assert input0.op == "call_module"
-                assert input1.op == "call_module"
-                obs_ins0 = getattr(m, input0.target)
-                obs_ins1 = getattr(m, input1.target)
-                assert obs_ins0 == obs_ins1
-
-                output_obs = list(n.users)[0]
-                assert output_obs.op == "call_module"
-                obs_ins2 = getattr(m, output_obs.target)
-                assert obs_ins0 == obs_ins2, "input observer does not match output"
-
-        assert len(conv_output_obs) == 2, "expecting two observer that follows conv2d ops"
-        # checking that the output observers for the two convs are shared as well
-        assert conv_output_obs[0] == conv_output_obs[1]
-
-        m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
-
-        node_occurrence = {
-            # two for input of the first conv, one for output for the first conv
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 7,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ): 9,
-        }
-        node_list = [
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ),
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ),
-            ns.call_function(torch.ops.aten.cat.default),
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ),
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ),
-            ns.call_function(torch.ops.aten.cat.default),
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ),
-        ]
-        self.checkGraphModuleNodes(
-            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
-        )
+        self._test_transitive_sharing_with_cat_helper(BackendAQuantizer())
 
     def test_shared_qspec_transitivity_case_2(self):
         """This tests the transitivity of SharedQuantizationSpec, that is
@@ -1056,75 +1058,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-
-        m = TestHelperModules.Conv2dWithTwoCat().eval()
-        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5), torch.randn(1, 6, 3, 3), torch.randn(1, 6, 3, 3))
-
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        # make sure the two input observers and output are shared
-        conv_output_obs = []
-        for n in m.graph.nodes:
-            if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
-                conv_output_obs.append(getattr(m, list(n.users)[0].target))
-            if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
-                inputs = n.args[0]
-                input0 = inputs[0]
-                input1 = inputs[1]
-                assert input0.op == "call_module"
-                assert input1.op == "call_module"
-                obs_ins0 = getattr(m, input0.target)
-                obs_ins1 = getattr(m, input1.target)
-                assert obs_ins0 == obs_ins1
-
-                output_obs = list(n.users)[0]
-                assert output_obs.op == "call_module"
-                obs_ins2 = getattr(m, output_obs.target)
-                assert obs_ins0 == obs_ins2, "input observer does not match output"
-
-        assert len(conv_output_obs) == 2, "expecting two observer that follows conv2d ops"
-        # checking that the output observers for the two convs are shared as well
-        assert conv_output_obs[0] == conv_output_obs[1]
-
-        m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
-
-        node_occurrence = {
-            # two for input of the first conv, one for output for the first conv
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 7,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ): 9,
-        }
-        node_list = [
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ),
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ),
-            ns.call_function(torch.ops.aten.cat.default),
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ),
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ),
-            ns.call_function(torch.ops.aten.cat.default),
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ),
-        ]
-        self.checkGraphModuleNodes(
-            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
-        )
+        self._test_transitive_sharing_with_cat_helper(BackendAQuantizer())
 
     def test_int16(self):
         class Int16ActQuantizer(Quantizer):
