@@ -919,7 +919,7 @@ static void registerSDPAUtilities(PyObject* module) {
 
   py::enum_<sdp::SDPBackend>(
       m,
-      "SDPBackend",
+      "_SDPBackend",
       py::arithmetic(),
       "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
       .value("ERROR", sdp::SDPBackend::error)

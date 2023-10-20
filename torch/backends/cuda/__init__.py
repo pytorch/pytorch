@@ -20,6 +20,8 @@ __all__ = [
     "mem_efficient_sdp_enabled",
     "math_sdp_enabled",
     "enable_math_sdp",
+    "can_use_flash_attention",
+    "can_use_efficient_attention",
     "sdp_kernel",
 ]
 
@@ -198,7 +200,10 @@ def preferred_linalg_library(
     return torch._C._get_linalg_preferred_backend()
 
 
-from torch._C import _SDPAParams as SDPAParams, SDPBackend as SDPBackend
+from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
+
+# Set the __module__ attribute
+SDPBackend.__module__ = "torch.backends.cuda"
 
 
 def flash_sdp_enabled():
