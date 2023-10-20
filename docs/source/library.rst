@@ -11,17 +11,14 @@ registration APIs (e.g. aten operators).
 For a detailed guide on effectively using these APIs, please see
 `this gdoc <https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit>`_
 
-Higher level APIs
------------------
-
 Use :func:`torch.library.define` to define new custom operators. Use the
-impl methods, such as :func:`torch.library.impl_device` and
+impl methods, such as :func:`torch.library.impl` and
 func:`torch.library.impl_abstract`, to add implementations
 for any operators (they may have been created using :func:`torch.library.define` or
 via PyTorch's C++ operator registration APIs).
 
 .. autofunction:: define
-.. autofunction:: impl_device
+.. autofunction:: impl
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
 
@@ -34,7 +31,7 @@ operator registration APIs.
 .. warning::
    The low-level operator registration APIs and the PyTorch Dispatcher are a
    complicated PyTorch concept. We recommend you use the higher level APIs above
-   when possible.
+   (that do not require a torch.library.Library object) when possible.
    This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
    is a good starting point to learn about the PyTorch Dispatcher.
 
