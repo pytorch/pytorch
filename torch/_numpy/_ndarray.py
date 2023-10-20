@@ -370,10 +370,10 @@ class ndarray:
     def __index__(self):
         try:
             return operator.index(self.tensor.item())
-        except Exception as exc:
+        except Exception:
             raise TypeError(
                 "only integer scalar arrays can be converted to a scalar index"
-            ) from exc
+            )
 
     def __bool__(self):
         return bool(self.tensor)

@@ -185,9 +185,6 @@ class FunctionalTensor(torch.Tensor):
     def sync(self) -> None:
         torch._functionalize_sync(self.elem)
 
-    def mark_mutation_hidden_from_autograd(self) -> None:
-        torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
-
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self):
@@ -417,10 +414,6 @@ class BaseFunctionalizeAPI(ABC):
     def sync(self, tensor) -> None:
         pass
 
-    @abstractmethod
-    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
-        pass
-
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
@@ -452,10 +445,6 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         assert isinstance(tensor, FunctionalTensor)
         tensor.sync()
 
-    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
-        assert isinstance(tensor, FunctionalTensor)
-        tensor.mark_mutation_hidden_from_autograd()
-
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
@@ -486,9 +475,6 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def sync(self, tensor) -> None:
         torch._functionalize_sync(tensor)
-
-    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
-        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
 
 class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -528,6 +514,3 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def sync(self, tensor) -> None:
         torch._functionalize_sync(tensor)
-
-    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
-        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)

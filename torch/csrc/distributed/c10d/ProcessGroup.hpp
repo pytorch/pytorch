@@ -247,16 +247,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                 at::Tensor&,
                 at::Tensor&,
-                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                bool,
-                int64_t)>();
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
-        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-        opts.asyncOp,
-        opts.timeout.count()));
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this)));
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -378,14 +374,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
-                bool,
                 int64_t)>();
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
-        opts.asyncOp,
         opts.timeout.count()));
   }
 
