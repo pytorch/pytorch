@@ -247,7 +247,7 @@ std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, 
   return result;
 }
 
-std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, SymIntArrayRef split_sizes, int64_t dim, bool drop_remainder) {
+std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, c10::SymIntArrayRef split_sizes, int64_t dim, bool drop_remainder) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return split_with_sizes_symint(self, split_sizes, dim, drop_remainder);
