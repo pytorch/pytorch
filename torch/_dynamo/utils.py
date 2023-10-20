@@ -2173,6 +2173,15 @@ def is_rng_state_getter_or_setter(value):
     return value in (*setters, *getters)
 
 
+def is_tensor_base_attr_getter(value):
+    return (
+        isinstance(value, types.MethodWrapperType)
+        and value.__name__ == "__get__"
+        and isinstance(value.__self__, types.GetSetDescriptorType)
+        and value.__self__.__objclass__ is torch._C._TensorBase
+    )
+
+
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.tensor import TensorWithTFOverrideVariable
