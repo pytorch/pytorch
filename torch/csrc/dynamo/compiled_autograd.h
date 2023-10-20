@@ -469,7 +469,6 @@ struct TraceState {
   size_t sym_sizes_index;
   std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
-  std::vector<size_t> output_grad_targets;
 };
 
 class SwapSavedVariables {
@@ -619,17 +618,6 @@ class SwapSavedVariables {
   NO_OP_VISIT(bool);
   NO_OP_VISIT(double);
 #undef NO_OP_VISIT
-
-  // record the need to run `dst.mutable_grad() = src` after the graph
-  // dst is a real tensor, src is a fake tensor
-  void assign_mutable_grad(const at::Tensor& dst, const at::Tensor& src) {
-    const TensorArg& arg = compiler.tensor_args.lookup(dst);
-    TORCH_INTERNAL_ASSERT(arg.defined());
-    TORCH_INTERNAL_ASSERT(
-        state.outputs.size() == state.output_grad_targets.size());
-    state.outputs.emplace_back(src);
-    state.output_grad_targets.emplace_back(arg.index());
-  }
 
   SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
       : compiler(c), state(s) {}

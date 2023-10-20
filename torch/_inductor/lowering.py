@@ -4966,6 +4966,15 @@ def _realize(x):
     return clone(x)
 
 
+@register_lowering(torch.ops.inductor.accumulate_grad_)
+def accumulate_grad_(variable, new_grad):
+    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
+    variable.realize()
+    new_grad.realize()
+    ir.AccumulateGrad(variable, new_grad)
+    return variable
+
+
 try:
     import torch.distributed._functional_collectives
 

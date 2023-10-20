@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -83,14 +84,12 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
   saved.before(grad_copy);
-  accumulateGrad(
-      variable_copy,
-      grad_copy,
-      grads[0],
-      0 /* num_expected_refs, 0 disables aliased reuse */,
-      [&saved, this](const at::Tensor& grad_update) {
-        saved.assign_mutable_grad(variable, grad_update);
-      });
+  variable_copy.mutable_grad() = grad_copy;
+  // op is intentionally static
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("inductor::accumulate_grad_", "")
+                       .typed<void(const at::Tensor&, const at::Tensor&)>();
+  op.call(variable_copy, grads[0]);
   saved.after(variable_copy);
   saved.after(grad_copy);
 
