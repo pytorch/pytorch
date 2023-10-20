@@ -132,6 +132,7 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unravel_index
     unsqueeze
     vsplit
     vstack
