@@ -802,17 +802,16 @@ class CommonTemplate:
 
     @skipIfRocm
     def test_neg_index(self):
-        def test(fn, inps, has_assert: bool, has_wrapping=True):
+        def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
                     code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    if "Vectorize" not in code:
-                        # match ternary operator
-                        pattern = r"\?.*:"
-                        if re.findall(pattern, code):
-                            found = True
+                    # match ternary operator
+                    pattern = r"\?.*:"
+                    if re.findall(pattern, code):
+                        found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:
@@ -826,7 +825,7 @@ class CommonTemplate:
 
         a = torch.rand(1024, device=self.device)
         b = torch.zeros(4, dtype=torch.long, device=self.device)
-        test(indirect, (a, b), has_assert=True)
+        test(indirect, (a, b), has_assert=True, has_wrapping=True)
 
         def direct(x):
             return x[:, -1]
@@ -839,7 +838,7 @@ class CommonTemplate:
 
         a = torch.rand(1024, device=self.device)
         b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=self.device)
-        test(flip, (a, b), has_assert=True)
+        test(flip, (a, b), has_assert=True, has_wrapping=True)
 
         # Constant propagate a constant that's negative
         def flip_with_index_constant(a):
@@ -855,7 +854,7 @@ class CommonTemplate:
             return a[b]
 
         # It has wrapping but no assert
-        test(pos_and_neg, (a,), has_assert=False, has_wrapping=(self.device == "cuda"))
+        test(pos_and_neg, (a,), has_assert=False, has_wrapping=True)
 
         # We currently don't do constant propagation with float constants
         def flip_with_index(a):
