@@ -173,6 +173,7 @@ _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
 _aot_compilation = Virtualized("aot_compilation", NullHandler)
+_current_node = Virtualized("current_node", NullHandler)
 
 
 class OpsValue:
@@ -281,6 +282,8 @@ class _V:
     set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
     set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
+    set_current_node: Callable[[Any], Any] = _current_node._set_handler
+    get_current_node: Callable[[], Any] = _current_node._get_handler
 
     @property
     def ops(self) -> _MockHandler:
@@ -318,6 +321,10 @@ class _V:
     @property
     def aot_compilation(self):
         return _aot_compilation._get_handler()
+
+    @property
+    def current_node(self):
+        return _current_node._get_handler()
 
 
 V = _V()
