@@ -5,12 +5,12 @@ graph {
   node {
     input: "x"
     output: "onnx::Gather_1"
-    name: "Shape_0"
+    name: "Shape_7"
     op_type: "Shape"
   }
   node {
     output: "onnx::Gather_2"
-    name: "Constant_1"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -25,7 +25,7 @@ graph {
     input: "onnx::Gather_1"
     input: "onnx::Gather_2"
     output: "onnx::Unsqueeze_3"
-    name: "Gather_2"
+    name: "Gather_9"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -35,7 +35,7 @@ graph {
   }
   node {
     output: "onnx::Unsqueeze_7"
-    name: "Constant_3"
+    name: "Constant_10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -51,12 +51,12 @@ graph {
     input: "onnx::Unsqueeze_3"
     input: "onnx::Unsqueeze_7"
     output: "onnx::Concat_8"
-    name: "Unsqueeze_4"
+    name: "Unsqueeze_11"
     op_type: "Unsqueeze"
   }
   node {
     output: "onnx::Concat_25"
-    name: "Constant_5"
+    name: "Constant_12"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -70,7 +70,7 @@ graph {
   }
   node {
     output: "onnx::Concat_26"
-    name: "Constant_6"
+    name: "Constant_13"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -84,7 +84,7 @@ graph {
   }
   node {
     output: "onnx::Concat_27"
-    name: "Constant_7"
+    name: "Constant_14"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -102,7 +102,7 @@ graph {
     input: "onnx::Concat_26"
     input: "onnx::Concat_27"
     output: "onnx::Reshape_15"
-    name: "Concat_8"
+    name: "Concat_15"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -114,7 +114,7 @@ graph {
     input: "x"
     input: "onnx::Reshape_15"
     output: "onnx::Transpose_16"
-    name: "Reshape_9"
+    name: "Reshape_16"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -125,7 +125,7 @@ graph {
   node {
     input: "onnx::Transpose_16"
     output: "x.1"
-    name: "Transpose_10"
+    name: "Transpose_17"
     op_type: "Transpose"
     attribute {
       name: "perm"
@@ -139,7 +139,7 @@ graph {
   node {
     input: "x.1"
     output: "onnx::Reshape_18"
-    name: "Softmax_11"
+    name: "Softmax_18"
     op_type: "Softmax"
     attribute {
       name: "axis"
@@ -149,7 +149,7 @@ graph {
   }
   node {
     output: "onnx::Unsqueeze_19"
-    name: "Constant_12"
+    name: "Constant_19"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -165,12 +165,12 @@ graph {
     input: "onnx::Unsqueeze_3"
     input: "onnx::Unsqueeze_19"
     output: "onnx::Concat_20"
-    name: "Unsqueeze_13"
+    name: "Unsqueeze_20"
     op_type: "Unsqueeze"
   }
   node {
     output: "onnx::Concat_28"
-    name: "Constant_14"
+    name: "Constant_21"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -186,7 +186,7 @@ graph {
     input: "onnx::Concat_20"
     input: "onnx::Concat_28"
     output: "onnx::Reshape_23"
-    name: "Concat_15"
+    name: "Concat_22"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -198,7 +198,7 @@ graph {
     input: "onnx::Reshape_18"
     input: "onnx::Reshape_23"
     output: "24"
-    name: "Reshape_16"
+    name: "Reshape_23"
     op_type: "Reshape"
     attribute {
       name: "allowzero"

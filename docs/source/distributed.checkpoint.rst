@@ -70,3 +70,13 @@ can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor 
 
 .. autoclass:: torch.distributed.checkpoint.DefaultLoadPlanner
   :members:
+
+We provide a set of APIs to help users do get and set state_dict easily. This is
+an experimental feature and is subject to change.
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.get_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.set_state_dict
+
+.. autoclass:: torch.distributed.checkpoint.state_dict.StateDictOptions
+   :members:

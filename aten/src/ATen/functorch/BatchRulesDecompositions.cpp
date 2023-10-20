@@ -72,11 +72,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(atleast_3d);
   OP_DECOMPOSE2(atleast_3d, Sequence);
   OP_DECOMPOSE(batch_norm);
-  OP_DECOMPOSE2(bitwise_and_, Scalar);
-  OP_DECOMPOSE2(bitwise_or, Scalar);
-  OP_DECOMPOSE2(bitwise_or_, Scalar);
-  OP_DECOMPOSE2(bitwise_xor, Scalar);
-  OP_DECOMPOSE2(bitwise_xor_, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
   m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
@@ -129,7 +124,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
   OP_DECOMPOSE2(float_power, Scalar);
-  OP_DECOMPOSE2(floor_divide, Scalar);
   OP_DECOMPOSE(gather_backward);
   OP_DECOMPOSE(ger);
   OP_DECOMPOSE2(gradient, scalarint);
@@ -199,6 +193,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(min, other );
   OP_DECOMPOSE2(moveaxis, intlist);
   OP_DECOMPOSE2(movedim, int);
+  OP_DECOMPOSE2(movedim, intlist);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE(nanmean);
@@ -281,6 +276,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
   OP_DECOMPOSE(tensordot);
+  m.impl("tensor_split.indices", native::tensor_split_indices_symint);
+  m.impl("tensor_split.sections", native::tensor_split_sections_symint);
   OP_DECOMPOSE(_test_check_tensor);
   m.impl("tile", native::tile_symint);
   OP_DECOMPOSE2(trapezoid, x);
@@ -366,6 +363,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(less, Scalar);
   OP_DECOMPOSE2(not_equal, Scalar);
   m.impl("_has_compatible_shallow_copy_type", torch::CppFunction::makeFromBoxedFunction<&unsupportedData>());
+
+  // to.*
+  OP_DECOMPOSE2(to, device);
+  OP_DECOMPOSE2(to, dtype);
+  OP_DECOMPOSE2(to, dtype_layout);
+  OP_DECOMPOSE2(to, other);
 }
 
 }}

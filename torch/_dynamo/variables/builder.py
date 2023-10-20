@@ -8,6 +8,7 @@ import inspect
 import logging
 import operator
 import re
+import sys
 import types
 from typing import List, NamedTuple, Optional, Union
 
@@ -83,6 +84,7 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
+    PythonSysModulesVariable,
 )
 from .distributed import (
     DeviceMeshVariable,
@@ -400,7 +402,8 @@ class VariableBuilder:
                 for k in value.keys()
             }
             return ConstDictVariable(result, type(value))
-
+        elif value is sys.modules:
+            return PythonSysModulesVariable(source=self.source)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -478,14 +481,6 @@ class VariableBuilder:
             )
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
-        elif is_allowed(value):
-            if is_user_defined_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
-            return TorchVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -520,6 +515,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif isinstance(value, np.generic):
+            # numpy array scalars: convert to 0D arrays
+            return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
             assert np
             return NumpyVariable(
@@ -530,17 +528,6 @@ class VariableBuilder:
                     if callable(value)
                     else GuardBuilder.TYPE_MATCH
                 ),
-            )
-        elif (
-            istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
-            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-        ):
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
@@ -553,18 +540,6 @@ class VariableBuilder:
                 orig_source=old_source,
                 source=new_source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            return UserFunctionVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            return PythonModuleVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
             return AutogradFunctionVariable(
@@ -638,32 +613,6 @@ class VariableBuilder:
             and value in config.traceable_tensor_subclasses
         ):
             return TensorSubclassVariable(value, source=self.source)
-        elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, torch.nn.Module
-        ):
-            # don't let MethodTypes fall through to UserDefinedObject,
-            # which doesn't support 'CALL_FUNCTION'
-
-            # TODO(whc): Why do we limit this to methods on NNModules?
-            # I don't have a good reason for this, but it preserves the existing behavior
-            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
-            # I suspect we probably want to relax this check and dig deeper there.
-
-            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
-            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
-            # and then `__func__` gets wrapped inside UserMethodVariable.
-            self_obj = VariableBuilder(
-                self.tx, source=AttrSource(self.source, "__self__")
-            )(value.__self__)
-            assert self_obj and isinstance(
-                self_obj, VariableTracker
-            ), "Failed to produce a valid self obj"
-            return UserMethodVariable(
-                value.__func__,
-                self_obj,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif (
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
@@ -681,14 +630,6 @@ class VariableBuilder:
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
-            )
-        elif isinstance(value, types.GetSetDescriptorType):
-            return GetSetDescriptorVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
-        elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
@@ -725,14 +666,6 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
-            )
-        elif issubclass(type(value), type):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
@@ -781,6 +714,77 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
+            return TorchVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif (
+            istype(value, (type, types.FunctionType))
+            and skipfiles.check(value, allow_torch=True)
+            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+        ):
+            return SkipFilesVariable(
+                value,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+            return UserFunctionVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, types.MethodType) and isinstance(
+            value.__self__, torch.nn.Module
+        ):
+            # don't let MethodTypes fall through to UserDefinedObject,
+            # which doesn't support 'CALL_FUNCTION'
+
+            # TODO(whc): Why do we limit this to methods on NNModules?
+            # I don't have a good reason for this, but it preserves the existing behavior
+            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
+            # I suspect we probably want to relax this check and dig deeper there.
+
+            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
+            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
+            # and then `__func__` gets wrapped inside UserMethodVariable.
+            self_obj = VariableBuilder(
+                self.tx, source=AttrSource(self.source, "__self__")
+            )(value.__self__)
+            assert self_obj and isinstance(
+                self_obj, VariableTracker
+            ), "Failed to produce a valid self obj"
+            return UserMethodVariable(
+                value.__func__,
+                self_obj,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            return PythonModuleVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
+            )
+        elif isinstance(value, types.GetSetDescriptorType):
+            return GetSetDescriptorVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif issubclass(type(value), type):
+            return UserDefinedClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(
@@ -1036,6 +1040,23 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
+        # We have accessed the SAME tensor from a different source.  In some
+        # situations, it doesn't matter if you have the same tensor identity
+        # or not, but we are unable to do this fine-grained tracking.  So
+        # instead we just say, if x is y, then to successfully reuse this
+        # compiled tensor again, you must have x is y again.  Negative
+        # aliases, that is, that x is not y, are IMPLICITLY checked as part of
+        # the code cache matching process, you don't need to explicitly
+        # generate a guard for it (nor would you want to, you need O(n^2)
+        # pairwise 'is not' tests to do it.)
+        if value in self.tx.output.real_value_tensor_positive_aliases:
+            stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
+            # TODO(voz): Decently common pattern, refactor at some point.
+            dup_guard = self._make_dupe_guard(stored_value)
+            if dup_guard:
+                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
+            return stored_value
+
         # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
         # When we've discovered an untracked tensor, then we actually need
         # to get Dynamo to track the tensor (which is what this function does)
@@ -1098,7 +1119,15 @@ class VariableBuilder:
         assert isinstance(value, np.ndarray)
 
         source = NumpyTensorSource(self.get_source())
-        tensor_value = torch.as_tensor(value)
+
+        from torch._numpy import _util
+
+        try:
+            tensor_value = _util._try_convert_to_tensor(value)
+        except NotImplementedError as e:
+            # failed to convert to tensor, graph break
+            unimplemented(str(e))
+
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
         # that there's not another great way to do this atm.
