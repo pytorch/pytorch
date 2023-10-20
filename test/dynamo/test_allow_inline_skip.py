@@ -29,7 +29,7 @@ except ImportError:
 
 
 ignored_torch_ctx_manager_classes = {
-    torch.device,
+    torch.device,  # constant folding function
 }
 
 

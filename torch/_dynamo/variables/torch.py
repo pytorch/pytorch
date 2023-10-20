@@ -264,6 +264,15 @@ class TorchCtxManagerClassVariable(VariableTracker):
         ):
             log.warning("Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
+        elif self.value is torch._C.DisableTorchFunctionSubclass:
+            assert not (args or kwargs)
+            return TorchFunctionDisableVariable.create(tx, **options)
+        elif self.value is torch.cuda.stream:
+            log.warning(
+                "torch.cuda.stream() not fully supported, streams may be ignored"
+            )
+            assert len(args) == 1
+            return CUDAStreamContextVariable.create(tx, args[0], **options)
 
 
 class TorchVariable(VariableTracker):
@@ -479,29 +488,6 @@ class TorchVariable(VariableTracker):
             return ConstantVariable.create(
                 tx.output.torch_function_enabled, **options
             ).add_guards(TorchFunctionDisableVariable._guards_singleton)
-        elif self.value is torch._C.DisableTorchFunctionSubclass:
-            assert not (args or kwargs)
-            return TorchFunctionDisableVariable.create(tx, **options)
-        elif any(
-            self.value is method
-            for method in [
-                interface_elem.stream for interface_elem in device_interfaces.values()
-            ]
-        ):
-            assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0], **options)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
-            return wrap_fx_proxy_cls(
-                StreamVariable,
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    (),
-                    {},
-                ),
-                **options,
-            )
         elif self.value in (
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,
