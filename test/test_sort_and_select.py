@@ -1131,7 +1131,7 @@ class TestSortAndSelect(TestCase):
             x = torch.full((32768,), low, dtype=dtype, device=device)
             x[:100] = torch.iinfo(x.dtype).max
             torch.set_num_threads(1)
-            uv=x.sort().values.unique()
+            uv = x.sort().values.unique()
             self.assertEqual(uv.size(0), 2)
         finally:
             torch.set_num_threads(prev_num_threads)
