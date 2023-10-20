@@ -5,7 +5,6 @@ from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.op_schema import (
-    ArgsType,
     DTensorSpec,
     OpSchema,
     OutputSharding,
@@ -56,7 +55,7 @@ class TensorParallelTransformPass(PassBase):
     ) -> None:
         super().__init__()
         self.rank = rank
-        self.mesh = DeviceMesh("cuda:" + str(rank), torch.arange(world_size))
+        self.mesh = DeviceMesh("cuda", torch.arange(world_size))
         self.state_dict: Dict[str, torch.Tensor] = state_dict
         self.graph_signiture = graph_signiture
 
@@ -161,20 +160,12 @@ def mark_sharding(
                 )
                 node.meta["sharding"] = placement_strategies[node]
             else:
-                op_overload = cast(torch._ops.OpOverload, node.target)
-                op_schema = OpSchema(
-                    op=op_overload,
-                    args_schema=_get_arg_schema(node, placement_strategies),
-                    kwargs_schema={},
-                )
+                op_schema = _get_op_schema(node, placement_strategies)
 
                 # get DTensor specs for inputs and outputs
                 output_sharding = DTensor._propagator.propagate_op_sharding(
                     op_schema,
                 )
-                # The stride from output_sharding may be incorrect for addmm (https://fburl.com/code/kb1ko758),
-                # so fix it based on the metadata from fake tensor.
-                _populate_tensor_meta(node, output_sharding.output_spec)
 
                 placement_strategies[node] = PlacementStrategy(
                     output_spec=_get_output_spec_from_output_sharding(output_sharding),
@@ -196,6 +187,7 @@ def _get_output_spec_from_output_sharding(
     if isinstance(output_sharding.output_spec, DTensorSpec):
         return output_sharding.output_spec
     else:
+        # For ops that return multiple outputs, the outputs should have the same output spec
         assert isinstance(output_sharding.output_spec, Sequence)
         output_spec_set = set(output_sharding.output_spec)
         assert len(output_spec_set) == 1
@@ -248,10 +240,6 @@ def partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         node_sharding = node.meta["sharding"]
         if node.op == "placeholder":
             out_spec = node_sharding.output_spec
-            if not hasattr(out_spec, "from_local"):
-                local_val = _partition_val(node.meta["val"], out_spec)
-                # update node value
-                node.meta["val"] = local_val
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
             # check if there's misaligned sharding, insert reshard if there is
@@ -382,9 +370,9 @@ def _get_input_node_specs(
     return tuple(input_specs_list)
 
 
-def _get_arg_schema(
+def _get_op_schema(
     node: Node, placement_strategies: Dict[Node, PlacementStrategy]
-) -> ArgsType:
+) -> OpSchema:
     args_schema_list: List[object] = []
     for arg in node.args:
         if isinstance(arg, Node):
@@ -395,7 +383,13 @@ def _get_arg_schema(
         else:
             # Appending the arg as it is for non-tensor arguments. E.g.: int/float/tuple
             args_schema_list.append(arg)
-    return tuple(args_schema_list)
+
+    op_schema = OpSchema(
+        op=cast(torch._ops.OpOverload, node.target),
+        args_schema=tuple(args_schema_list),
+        kwargs_schema={},
+    )
+    return op_schema
 
 
 def shard_state_dict(

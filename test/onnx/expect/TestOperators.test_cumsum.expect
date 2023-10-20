@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::CumSum_1"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -19,7 +19,7 @@ graph {
     input: "onnx::CumSum_0"
     input: "onnx::CumSum_1"
     output: "2"
-    name: "CumSum_1"
+    name: "CumSum_2"
     op_type: "CumSum"
   }
   name: "main_graph"

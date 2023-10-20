@@ -857,11 +857,6 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
-#ifndef C10_MOBILE
-      if (fuser::cuda::isEnabled()) {
-        return false;
-      }
-#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;

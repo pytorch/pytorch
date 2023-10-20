@@ -20,9 +20,9 @@ class MLPListModule(torch.nn.Module):
         for _ in range(num_mlps):
             self.mlps.append(
                 torch.nn.Sequential(
-                    torch.nn.Linear(6, 8),
+                    torch.nn.Linear(6, 18),
                     torch.nn.ReLU(),
-                    torch.nn.Linear(8, 6),
+                    torch.nn.Linear(18, 6),
                 )
             )
 
@@ -44,7 +44,6 @@ class TensorParallelTest(DTensorTestBase):
         inputs = (torch.randn((10, 12)).to(device=self.device_type),)
         with torch.inference_mode():
             res = model(*inputs)
-        self.assertTrue(1)
         exported_program = torch._export.export(
             model,
             inputs,
