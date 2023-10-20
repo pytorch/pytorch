@@ -3459,7 +3459,7 @@ class TestQuantile(TestCase):
         assert_array_equal(p, p0)
 
     @xpassIfTorchDynamo  # (reason="TODO: make quantile preserve integers")
-    @parametrize("dtype", "Bbhil")  #  np.typecodes["AllInteger"])
+    @parametrize("dtype", "Bbhil")  # np.typecodes["AllInteger"])
     def test_quantile_preserve_int_type(self, dtype):
         res = np.quantile(np.array([1, 2], dtype=dtype), [0.5], method="nearest")
         assert res.dtype == dtype
