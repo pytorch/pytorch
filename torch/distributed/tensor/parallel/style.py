@@ -133,8 +133,8 @@ class SequenceParallel(PairwiseParallel):
             "SequenceParallel", "Use ColwiseParallel and RowwiseParallel instead."
         )
         super().__init__(  # type: ignore[misc]
-            _prepare_input,
-            _prepare_output,
+            make_input_reshard_replicate,
+            make_output_reshard_tensor,
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
@@ -464,20 +464,20 @@ class RowwiseParallel(ParallelStyle):
         remove them from ctor soon. Please use ``input_layouts`` and ``output_layouts`` instead.
 
     Example::
-    >>> # xdoctest: +SKIP(failing)
-    >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
-    >>> ...
-    >>> parallelize_plan = {
-    >>>     "wo": RowwiseParallel(),   # The input of Linear will be converted to Sharded DTensor
-    >>>                                # and we will return a replicate :class:`torch.Tensor` as output.
-    >>>     ...
-    >>> }
-    >>> parallelize_module(
-    >>>     module=block, # this can be a submodule or module
-    >>>     ...,
-    >>>     parallelize_plan=parallelize_plan,
-    >>> )
-    >>> ...
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+        >>> ...
+        >>> parallelize_plan = {
+        >>>     "wo": RowwiseParallel(),   # The input of Linear will be converted to Sharded DTensor
+        >>>                                # and we will return a replicate :class:`torch.Tensor` as output.
+        >>>     ...
+        >>> }
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan=parallelize_plan,
+        >>> )
+        >>> ...
     """
 
     def __init__(
@@ -494,19 +494,32 @@ class RowwiseParallel(ParallelStyle):
                 "RowwiseParallel only supports single input/output."
             )
 
+        if _prepare_input is not None:
+            prepare_input_fn = _prepare_input
+        if input_layouts == Shard(-1):
+            prepare_input_fn = make_input_shard_1d_last_dim
+        else:
+            prepare_input_fn = _get_prepare_input(
+                input_layouts,
+                Shard(-1),
+            )
+
+        if _prepare_output is not None:
+            prepare_output_fn = _prepare_output
+        elif output_layouts == Replicate():
+            prepare_output_fn = make_output_tensor
+        else:
+            prepare_output_fn = _get_prepare_output(
+                output_layouts,
+                use_local_output,
+            )
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
-            _prepare_input=_prepare_input
-            if _prepare_input is not None
-            else _get_prepare_input(
-                input_layouts,
-                Shard(-1),
-            ),
-            _prepare_output=_prepare_output
-            if _prepare_output is not None
-            else _get_prepare_output(output_layouts, use_local_output),
+            _prepare_input=prepare_input_fn,
+            _prepare_output=prepare_output_fn,
         )
 
 
@@ -535,20 +548,20 @@ class ColwiseParallel(ParallelStyle):
         remove them from ctor soon. Please use ``input_layouts`` and ``output_layouts`` instead.
 
     Example::
-    >>> # xdoctest: +SKIP(failing)
-    >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
-    >>> ...
-    >>> parallelize_plan = {
-    >>>     "w1": ColwiseParallel(),   # The input of Linear will be converted to Replicated DTensor
-    >>>                                # and we will return a sharded :class:`torch.Tensor` as output.
-    >>>     ...
-    >>> }
-    >>> parallelize_module(
-    >>>     module=block, # this can be a submodule or module
-    >>>     ...,
-    >>>     parallelize_plan=parallelize_plan,
-    >>> )
-    >>> ...
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+        >>> ...
+        >>> parallelize_plan = {
+        >>>     "w1": ColwiseParallel(),   # The input of Linear will be converted to Replicated DTensor
+        >>>                                # and we will return a sharded :class:`torch.Tensor` as output.
+        >>>     ...
+        >>> }
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan=parallelize_plan,
+        >>> )
+        >>> ...
     """
 
     def __init__(
@@ -568,21 +581,32 @@ class ColwiseParallel(ParallelStyle):
                 "ColwiseParallel only supports single input/output."
             )
 
+        if _prepare_input is not None:
+            prepare_input_fn = _prepare_input
+        if input_layouts == Replicate():
+            prepare_input_fn = make_input_replicate_1d
+        else:
+            prepare_input_fn = _get_prepare_input(
+                input_layouts,
+                Replicate(),
+            )
+
+        if _prepare_output is not None:
+            prepare_output_fn = _prepare_output
+        elif output_layouts == Shard(-1):
+            prepare_output_fn = make_sharded_output_tensor
+        else:
+            prepare_output_fn = _get_prepare_output(
+                output_layouts,
+                use_local_output,
+            )
+
         super().__init__(
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
-            _prepare_input=_prepare_input
-            if _prepare_input is not None
-            else _get_prepare_input(
-                input_layouts,
-                [Replicate()] * len(input_layouts)  # type: ignore[arg-type]
-                if isinstance(input_layouts, tuple)
-                else Replicate(),
-            ),
-            _prepare_output=_prepare_output
-            if _prepare_output is not None
-            else _get_prepare_output(output_layouts, use_local_output),
+            _prepare_input=prepare_input_fn,
+            _prepare_output=prepare_output_fn,
         )
 
 
@@ -617,20 +641,20 @@ class PrepareModuleInput(ParallelStyle):
             None.
 
         Example::
-        >>> # xdoctest: +SKIP(failing)
-        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
-        >>> ...
-        >>> parallelize_plan = {
-        >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor
-        >>>                                     # and and redistributed to Replicated DTensor.
-        >>>     ...
-        >>> }
-        >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan=parallelize_plan,
-        >>> )
-        >>> ...
+            >>> # xdoctest: +SKIP(failing)
+            >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+            >>> ...
+            >>> parallelize_plan = {
+            >>>     "attn": PrepareModuleInput(),   # The input of attn will be converted to Sharded DTensor
+            >>>                                     # and and redistributed to Replicated DTensor.
+            >>>     ...
+            >>> }
+            >>> parallelize_module(
+            >>>     module=block, # this can be a submodule or module
+            >>>     ...,
+            >>>     parallelize_plan=parallelize_plan,
+            >>> )
+            >>> ...
         """
         super().__init__(
             input_layouts=input_layouts,
@@ -656,20 +680,20 @@ class PrepareModuleOutput(ParallelStyle):
     a no-op. Otherwise, it will throw an error.
 
     Example::
-    >>> # xdoctest: +SKIP(failing)
-    >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
-    >>> ...
-    >>> parallelize_plan = {
-    >>>     "submodule": PrepareModuleOutput(),   # The output of submodule will be converted to Replicated DTensor
-    >>>                                           # if it's not a DTensor, then redistributed to Sharded local tensor
-    >>>     ...
-    >>> }
-    >>> parallelize_module(
-    >>>     module=block, # this can be a submodule or module
-    >>>     ...,
-    >>>     parallelize_plan=parallelize_plan,
-    >>> )
-    >>> ...
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
+        >>> ...
+        >>> parallelize_plan = {
+        >>>     "submodule": PrepareModuleOutput(),   # The output of submodule will be converted to Replicated DTensor
+        >>>                                           # if it's not a DTensor, then redistributed to Sharded local tensor
+        >>>     ...
+        >>> }
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan=parallelize_plan,
+        >>> )
+        >>> ...
     """
 
     def __init__(
