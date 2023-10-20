@@ -12,6 +12,7 @@ import numpy as np
 import sympy
 import torch
 from torch._C import FileCheck
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import codecache, config, metrics
@@ -1261,8 +1262,17 @@ class CPUReproTests(TestCase):
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
                         metrics.reset()
-                        self.common(fn, (value, mask))
-                        assert metrics.generated_cpp_vec_kernel_count >= 1
+                        # fp16 inputs are not supported for C++ wrappers on CPU yet
+                        if cpp_wrapper_flag and dtype == torch.float16:
+                            with self.assertRaisesRegex(
+                                BackendCompilerFailed,
+                                "Unsupported input dtype torch.float16",
+                            ):
+                                self.common(fn, (value, mask))
+                            assert metrics.generated_cpp_vec_kernel_count == 0
+                        else:
+                            self.common(fn, (value, mask))
+                            assert metrics.generated_cpp_vec_kernel_count >= 1
 
     def test_load_same_bool_tensor_twice(self):
         @torch._dynamo.optimize("inductor")
@@ -1399,8 +1409,17 @@ class CPUReproTests(TestCase):
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
                         metrics.reset()
-                        self.common(fn, (x,))
-                        assert metrics.generated_cpp_vec_kernel_count == 1
+                        # fp16 inputs are not supported for C++ wrappers on CPU yet
+                        if cpp_wrapper_flag and dtype == torch.float16:
+                            with self.assertRaisesRegex(
+                                BackendCompilerFailed,
+                                "Unsupported input dtype torch.float16",
+                            ):
+                                self.common(fn, (x,))
+                            assert metrics.generated_cpp_vec_kernel_count == 0
+                        else:
+                            self.common(fn, (x,))
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
