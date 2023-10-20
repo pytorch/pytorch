@@ -7,20 +7,22 @@
 
 #include <mutex>
 
+#include <fmt/format.h>
+
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != c10::nullopt
-        ? c10::str(" Original reason for failure was: ", *commFailureReason_)
+        ? fmt::format(
+              " Original reason for failure was: {}", *commFailureReason_)
         : "";
     TORCH_CHECK(
         false,
-        c10::str(
-            "NCCL communicator was aborted on rank ",
+        fmt::format(
+            "NCCL communicator was aborted on rank {}. {}",
             rank_,
-            ". ",
             commFailureMsg));
   }
   return ncclComm_;
