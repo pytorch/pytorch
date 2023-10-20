@@ -33,9 +33,20 @@ void Backend::init() {
 }
 
 void Backend::callbackStartEvent(const Work& work) {
+  EventInfo evt;
+  commonEventinit(evt, *this, work);
+
+  evt.event_kind = ::c10d::EventKind::CollectiveStart;
+  details::call_collective_callbacks(std::move(evt));
 }
 
 void Backend::callbackEndEvent(const Work& work) {
+  EventInfo evt;
+  commonEventinit(evt, *this, work);
+
+  evt.event_kind = ::c10d::EventKind::CollectiveEnd;
+  evt.duration_ms = work.getDuration();
+  details::call_collective_callbacks(std::move(evt));
 }
 
 } // namespace c10d
