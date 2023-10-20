@@ -120,6 +120,7 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
+        torch.resize_as_,
     ]
 
     # extract all dtypes from torch
