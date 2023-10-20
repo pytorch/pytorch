@@ -497,6 +497,7 @@ class _ValgrindWrapper:
                 self._commands_available[cmd] = not subprocess.run(
                     ["which", cmd],
                     capture_output=True,
+                    check=False,
                 ).returncode
 
         self._build_type: Optional[str] = None
@@ -599,6 +600,7 @@ class _ValgrindWrapper:
                     args,
                     stdout=f_stdout_stderr,
                     stderr=subprocess.STDOUT,
+                    check=True,
                     **kwargs,
                 )
                 with open(stdout_stderr_log) as f:
