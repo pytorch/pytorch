@@ -950,6 +950,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
 class AOTInductorTestNonABICompatibleCpu(TestCase):
     device = "cpu"
     abi_compatible = False
@@ -975,6 +976,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
 class AOTInductorTestNonABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = False
