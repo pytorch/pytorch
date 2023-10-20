@@ -519,7 +519,7 @@ class ContinueExecutionCache:
                     # to determine where in the original code the PUSH_EXC_INFO offset
                     # replaced.
                     prefix_blocks = []
-                    for idx, inst in enumerate(instructions):
+                    for inst in instructions:
                         if len(prefix_blocks) == len(
                             meta.prefix_block_target_offset_remap
                         ):

@@ -52,7 +52,7 @@ def aot_autograd_check(
     def func_no_tensors(args):
         reconstructed_flat_args = []
         args = iter(args)
-        for idx, v in enumerate(flat_args):
+        for v in flat_args:
             if isinstance(v, torch.Tensor):
                 reconstructed_flat_args.append(next(args))
             else:
