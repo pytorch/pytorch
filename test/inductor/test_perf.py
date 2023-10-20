@@ -189,6 +189,24 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
+        def f(a, b, c):
+            return torch.cat((a + 1, b + 2, c + 3)) + 10
+
+        inp = (T(10, 10), T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
+
+        def f(a, b, c, d, e):
+            return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
+
+        inp = [T(10, 10) for _ in range(5)]
+        self.assertExpectedInline(count_numel(f, *inp), """2000""")
+
+        def f(a, b):
+            return torch.cat([a.sum(dim=0), b.sum(dim=0)]) + 10
+
+        inp = [T(10, 10, 10), T(10, 10, 10)]
+        self.assertExpectedInline(count_numel(f, *inp), """2600""")
+
     def test_index(self):
         def f(a, b):
             return a[b]

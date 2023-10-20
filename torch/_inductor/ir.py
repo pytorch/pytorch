@@ -3236,6 +3236,16 @@ class ConcatKernel(NopKernel):
         return kernel
 
     @classmethod
+    def can_realize_into_without_copy(cls, src):
+        if isinstance(src, TensorBox):
+            # unwrap a TensorBox
+            return cls.can_realize_into_without_copy(src.data)
+
+        return isinstance(src.data.layout, FlexibleLayout) and not isinstance(
+            src.data, ExternKernelAlloc
+        )
+
+    @classmethod
     def realize_into(cls, src, dst):
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
@@ -3252,9 +3262,7 @@ class ConcatKernel(NopKernel):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
-            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
-                src.data, ExternKernelAlloc
-            ):
+            if cls.can_realize_into_without_copy(src):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
         # introduce a copy
