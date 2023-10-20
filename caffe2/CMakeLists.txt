@@ -955,6 +955,7 @@ endif()
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+  target_link_libraries(torch_hip PRIVATE /docker_m/pytorch/aten/src/ATen/native/transformers/hip/oort/kernels/liboort.so)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
