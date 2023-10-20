@@ -170,8 +170,8 @@ def linalg_cross(self, other, *, dim=-1):
 @out_wrapper()
 def linalg_matrix_exp(self):
     squareCheckInputs(self, "linalg.matrix_exp")
-    checkFloatingOrComplex(self, "matrix_exp")
-    return torch.empty_like(self)
+    checkFloatingOrComplex(self, "linalg.matrix_exp")
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(
@@ -3016,6 +3016,39 @@ def meta__foreach_binop__list(self, other, alpha=1):
 
 @register_meta(
     [
+        aten._foreach_add.Tensor,
+    ]
+)
+def meta__foreach_binop_tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.Tensor,
+    ]
+)
+def meta__foreach_binop__tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+
+
+@register_meta(
+    [
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
@@ -3214,6 +3247,41 @@ def meta__int_mm(a, b):
         ),
     )
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
+
+
+@register_meta([aten._convert_weight_to_int4pack])
+def meta__convert_weight_to_int4pack(w, inner_k_tiles):
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    n = w.size(0)
+    k = w.size(1)
+    return w.new_empty(
+        (
+            n // 8,
+            k // (inner_k_tiles * 16),
+            32,
+            inner_k_tiles // 2,
+        ),
+        dtype=torch.int32,
+    )
+
+
+@register_meta([aten._weight_int4pack_mm])
+def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
+    torch._check(
+        x.dtype is torch.bfloat16,
+        lambda: f"expected x to be bf16, got {x.dtype}",
+    )
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
 
 
 @register_meta(aten._cdist_forward.default)

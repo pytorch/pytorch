@@ -39,9 +39,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
-    _ops.profiler._record_function_exit,
-    _ops.inductor.accumulate_grad_.default,
-}
+    _ops.profiler._record_function_exit}
 
 
 @compatibility(is_backward_compatible=False)
