@@ -1271,22 +1271,12 @@ def find_matching_merge_rule(
     if not rules:
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
+
     checks = pr.get_checkrun_conclusions()
-    base_rev = None
-    try:
-        # is allowed to fail if git is not available
-        base_rev = pr.get_merge_base()
-    except Exception as e:
-        print(
-            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
-            f"{type(e)}\n{e}"
-        )
     checks = get_classifications(
         pr.pr_num,
         pr.project,
         checks,
-        pr.last_commit()["oid"],
-        base_rev,
         ignore_current_checks=ignore_current_checks,
     )
 
@@ -1569,34 +1559,33 @@ def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
 
 
 def is_broken_trunk(
-    head_job: Optional[Dict[str, Any]], base_jobs: Optional[Dict[str, Dict[str, Any]]]
+    name: str,
+    drci_classifications: Any,
 ) -> bool:
-    if not head_job or not base_jobs:
+    if not name or not drci_classifications:
         return False
 
+    # Consult the list of broken trunk failures from Dr.CI
     return any(
-        head_job["conclusion"] == base_job["conclusion"]
-        and head_job["failure_captures"] == base_job["failure_captures"]
-        for base_job in base_jobs.values()
+        name == broken_trunk["name"]
+        for broken_trunk in drci_classifications.get("BROKEN_TRUNK", [])
     )
 
 
 def is_flaky(
-    head_job: Optional[Dict[str, Any]],
+    name: str,
     drci_classifications: Any,
 ) -> bool:
-    if not head_job or not drci_classifications:
+    if not name or not drci_classifications:
         return False
 
     # Consult the list of flaky failures from Dr.CI
-    return any(
-        head_job.get("full_name", "") == flaky["name"]
-        for flaky in drci_classifications.get("FLAKY", [])
-    )
+    return any(name == flaky["name"] for flaky in drci_classifications.get("FLAKY", []))
 
 
 def is_invalid_cancel(
-    head_job: Optional[Dict[str, Any]],
+    name: str,
+    conclusion: Optional[str],
     drci_classifications: Any,
 ) -> bool:
     """
@@ -1604,18 +1593,18 @@ def is_invalid_cancel(
     signals have been removed from HUD and Dr.CI. The same needs to be done
     here for consistency
     """
-    if not head_job or not drci_classifications:
-        return False
-
-    full_name = head_job.get("full_name", "")
-    if head_job.get("conclusion", "") != "cancelled" or not full_name:
+    if (
+        not name
+        or not drci_classifications
+        or not conclusion
+        or conclusion.upper() != "CANCELLED"
+    ):
         return False
 
     # If a job is cancelled and not listed as a failure by Dr.CI, it's an
     # invalid signal and can be ignored
     return all(
-        full_name != failure["name"]
-        for failure in drci_classifications.get("FAILED", [])
+        name != failure["name"] for failure in drci_classifications.get("FAILED", [])
     )
 
 
@@ -1623,62 +1612,8 @@ def get_classifications(
     pr_num: int,
     project: str,
     checks: Dict[str, JobCheckState],
-    head_sha: str,
-    merge_base: Optional[str],
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
-    # Group by job name without shard id and suffix to correctly identify broken
-    # trunk failures, i.e. linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)
-    head_sha_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
-    merge_base_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
-
-    if merge_base is not None:
-
-        def insert(
-            d: Dict[str, Dict[str, Dict[str, Any]]],
-            key: str,
-            val: Dict[str, Any],
-            overwrite_failed_run_attempt: bool,
-        ) -> None:
-            key_no_suffix = remove_job_name_suffix(key)
-            if key not in d[key_no_suffix]:
-                d[key_no_suffix][key] = val
-                return
-
-            # When overwrite_failed_run_attempt is set to True, always overwrite
-            # the job with the result from the latest attempt. This option is for
-            # jobs from the pull request head_sha where the latest retry is used
-            # when merging
-            #
-            # When overwrite_failed_run_attempt is False, only overwrite the job
-            # with the result from the latest attempt if the latest retry failed.
-            # This option is for jobs from the merger_base where we want to record
-            # failures for broken trunk
-            if d[key_no_suffix][key]["id"] < val["id"] and (
-                overwrite_failed_run_attempt or not is_passing_status(val["conclusion"])
-            ):
-                d[key_no_suffix][key] = val
-
-        rockset_results = get_rockset_results(head_sha, merge_base)
-        for rockset_result in rockset_results:
-            name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
-            rockset_result["full_name"] = name
-
-            if rockset_result["head_sha"] == head_sha:
-                insert(
-                    head_sha_jobs,
-                    name,
-                    rockset_result,
-                    overwrite_failed_run_attempt=True,
-                )
-            else:
-                insert(
-                    merge_base_jobs,
-                    name,
-                    rockset_result,
-                    overwrite_failed_run_attempt=False,
-                )
-
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
@@ -1686,7 +1621,7 @@ def get_classifications(
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
-        if check.status == "SUCCESS":
+        if check.status == "SUCCESS" or check.status == "NEUTRAL":
             continue
 
         if "unstable" in name:
@@ -1700,13 +1635,9 @@ def get_classifications(
             )
             continue
 
-        name_no_suffix = remove_job_name_suffix(name)
-        head_sha_job = head_sha_jobs.get(name_no_suffix, {}).get(name)
-
         # NB: It's important to note that when it comes to ghstack and broken trunk classification,
-        # the current implementation of trymerge uses the base of the current PR in the stack, i.e.
-        # gh/user/xx/base, while Dr.CI uses the base of the whole stack. Both works though
-        if is_broken_trunk(head_sha_job, merge_base_jobs.get(name_no_suffix)):
+        # Dr.CI uses the base of the whole stack
+        if is_broken_trunk(name, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1717,12 +1648,13 @@ def get_classifications(
             )
             continue
 
-        elif is_flaky(head_sha_job, drci_classifications):
+        elif is_flaky(name, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id, check.title
             )
             continue
-        elif is_invalid_cancel(head_sha_job, drci_classifications):
+
+        elif is_invalid_cancel(name, check.status, drci_classifications):
             # NB: Create a new category here for invalid cancelled signals because
             # there are usually many of them when they happen. So, they shouldn't
             # be counted toward ignorable failures threshold
@@ -2059,8 +1991,6 @@ def merge(
                 pr.pr_num,
                 pr.project,
                 checks,
-                pr.last_commit()["oid"],
-                pr.get_merge_base(),
                 ignore_current_checks=ignore_current_checks,
             )
             pending, failing, _ = categorize_checks(
