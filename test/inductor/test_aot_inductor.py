@@ -69,27 +69,21 @@ class AOTInductorModelRunner:
         return so_path, exported
 
     @classmethod
-    def load(cls, so_path, example_inputs):
-        is_cpu = all(x.device.type == "cpu" for x in example_inputs)
+    def load(cls, device, so_path, example_inputs):
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind
 
             optimized = test_aot_inductor_model_runner_pybind.Runner(
-                so_path, is_cpu
+                so_path, device == "cpu"
             ).run
         else:
-            launcher = aot_inductor_launcher
-            if is_cpu:
-                launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
-
             optimized = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
-                cpp_sources=[launcher],
+                cpp_sources=[aot_inductor_launcher(so_path, device)],
                 # use a unique build directory to avoid test interference
                 build_directory=tempfile.mkdtemp(),
                 functions=["run"],
-                extra_ldflags=[so_path],
-                with_cuda=not is_cpu,
+                with_cuda=(device == "cuda"),
             ).run
 
         return optimized
@@ -103,16 +97,17 @@ class AOTInductorModelRunner:
         return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
 
     @classmethod
-    def run(cls, model, example_inputs, options=None, constraints=None):
+    def run(cls, device, model, example_inputs, options=None, constraints=None):
         so_path, exported = AOTInductorModelRunner.compile(
             model, example_inputs, options=options, constraints=constraints
         )
-        optimized = AOTInductorModelRunner.load(so_path, example_inputs)
+        optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
         return AOTInductorModelRunner.run_compiled(optimized, exported, example_inputs)
 
     @classmethod
     def run_multiple(
         cls,
+        device,
         model,
         list_example_inputs,
         options=None,
@@ -124,7 +119,7 @@ class AOTInductorModelRunner:
             options=options,
             constraints=constraints,
         )
-        optimized = AOTInductorModelRunner.load(so_path, list_example_inputs[0])
+        optimized = AOTInductorModelRunner.load(device, so_path, list_example_inputs[0])
         list_output_tensors = []
         for example_inputs in list_example_inputs:
             list_output_tensors.append(
@@ -150,7 +145,9 @@ def check_model(
         expected = ref_model(*ref_inputs)
 
         torch.manual_seed(0)
-        actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
+        actual = AOTInductorModelRunner.run(
+            self.device, model, example_inputs, options, constraints
+        )
 
     self.assertTrue(same(actual, expected))
 
@@ -173,7 +170,7 @@ def check_model_with_multiple_inputs(
 
         torch.manual_seed(0)
         list_actual = AOTInductorModelRunner.run_multiple(
-            model, list_example_inputs, options, constraints
+            self.device, model, list_example_inputs, options, constraints
         )
 
     self.assertTrue(same(list_actual, list_expected))
@@ -772,7 +769,7 @@ class AOTInductorTestsTemplate:
         for i in range(torch.cuda.device_count()):
             with torch.cuda.device(i):
                 example_inputs = tuple(t.cuda(i) for t in inputs)
-                optimized = AOTInductorModelRunner.load(so_path, example_inputs)
+                optimized = AOTInductorModelRunner.load("cuda", so_path, example_inputs)
                 result_cuda = AOTInductorModelRunner.run_compiled(
                     optimized, exported, example_inputs
                 )
@@ -799,14 +796,14 @@ class AOTInductorTestsTemplate:
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTInductorModelRunner.run(
-                Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
+                "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTInductorModelRunner.run(
-                Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
+                "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
             )
 
         self.assertTrue(same(result_cpu, result_cuda_0.cpu()))
