@@ -8,7 +8,6 @@
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm_universal.h>
-#include <cutlass/gemm/device/gemm_universal_streamk_with_broadcast.h>
 #include <cutlass/epilogue/thread/activation.h>
 #include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
 #include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
@@ -30,7 +29,7 @@ namespace native {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
 template<typename ElementInputA, typename ElementInputB, bool use_scale,
-        bool use_bias, Activation activation = Activation::NONE>
+        bool use_bias, Activation activation>
 Tensor mixed_dtypes_linear_cutlass(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
     const Tensor& bias) {

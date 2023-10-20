@@ -425,7 +425,6 @@ class ExportedProgram:
         root: Union[torch.nn.Module, Dict[str, Any]],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        call_spec: Any,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: Dict[sympy.Symbol, Any],
         equality_constraints: List[Tuple[Any, Any]],
@@ -557,7 +556,7 @@ class ExportedProgram:
                 )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise TypeError(
+                raise TypeError(  # noqa: TRY200
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -594,7 +593,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(
+                raise error.InternalError(  # noqa: TRY200
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
@@ -772,7 +771,6 @@ class ExportedProgram:
             gm,
             gm.graph,
             new_graph_signature,
-            copy.deepcopy(self.call_spec),
             self.state_dict,
             new_range_constraints,
             new_equality_constraints,
@@ -889,7 +887,6 @@ class ExportedProgram:
             transformed_gm,
             transformed_gm.graph,
             _get_updated_graph_signature(self.graph_signature, transformed_gm),
-            copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
