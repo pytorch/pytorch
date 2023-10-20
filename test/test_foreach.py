@@ -778,15 +778,14 @@ class TestForeach(TestCase):
     def test_0dim_tensor_overload_exception(self):
         # check exceptions of fast path
         tensors = [make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)]
-
-        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
-            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
             torch._foreach_mul(tensors, torch.tensor(1.0, device="cpu"))
 
         tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
             torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
+            torch._foreach_add(tensors, torch.tensor([1.0, 1.0], device="cuda"))
 
     @onlyCUDA
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))

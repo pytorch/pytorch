@@ -481,14 +481,6 @@ class VariableBuilder:
             )
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
-        elif is_allowed(value):
-            if is_user_defined_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
-            return TorchVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -537,17 +529,6 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
-        elif (
-            istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
-            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-        ):
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
@@ -559,18 +540,6 @@ class VariableBuilder:
                 orig_source=old_source,
                 source=new_source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            return UserFunctionVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            return PythonModuleVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
             return AutogradFunctionVariable(
@@ -644,32 +613,6 @@ class VariableBuilder:
             and value in config.traceable_tensor_subclasses
         ):
             return TensorSubclassVariable(value, source=self.source)
-        elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, torch.nn.Module
-        ):
-            # don't let MethodTypes fall through to UserDefinedObject,
-            # which doesn't support 'CALL_FUNCTION'
-
-            # TODO(whc): Why do we limit this to methods on NNModules?
-            # I don't have a good reason for this, but it preserves the existing behavior
-            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
-            # I suspect we probably want to relax this check and dig deeper there.
-
-            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
-            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
-            # and then `__func__` gets wrapped inside UserMethodVariable.
-            self_obj = VariableBuilder(
-                self.tx, source=AttrSource(self.source, "__self__")
-            )(value.__self__)
-            assert self_obj and isinstance(
-                self_obj, VariableTracker
-            ), "Failed to produce a valid self obj"
-            return UserMethodVariable(
-                value.__func__,
-                self_obj,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif (
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
@@ -687,14 +630,6 @@ class VariableBuilder:
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
-            )
-        elif isinstance(value, types.GetSetDescriptorType):
-            return GetSetDescriptorVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
-        elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
@@ -731,14 +666,6 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
-            )
-        elif issubclass(type(value), type):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
@@ -787,6 +714,77 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
+            return TorchVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif (
+            istype(value, (type, types.FunctionType))
+            and skipfiles.check(value, allow_torch=True)
+            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+        ):
+            return SkipFilesVariable(
+                value,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+            return UserFunctionVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, types.MethodType) and isinstance(
+            value.__self__, torch.nn.Module
+        ):
+            # don't let MethodTypes fall through to UserDefinedObject,
+            # which doesn't support 'CALL_FUNCTION'
+
+            # TODO(whc): Why do we limit this to methods on NNModules?
+            # I don't have a good reason for this, but it preserves the existing behavior
+            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
+            # I suspect we probably want to relax this check and dig deeper there.
+
+            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
+            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
+            # and then `__func__` gets wrapped inside UserMethodVariable.
+            self_obj = VariableBuilder(
+                self.tx, source=AttrSource(self.source, "__self__")
+            )(value.__self__)
+            assert self_obj and isinstance(
+                self_obj, VariableTracker
+            ), "Failed to produce a valid self obj"
+            return UserMethodVariable(
+                value.__func__,
+                self_obj,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            return PythonModuleVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
+            )
+        elif isinstance(value, types.GetSetDescriptorType):
+            return GetSetDescriptorVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif issubclass(type(value), type):
+            return UserDefinedClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

@@ -1596,6 +1596,34 @@ utils_device.CURRENT_DEVICE == None""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_tolist(self):
+        def fn(x):
+            return x.tolist()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = np.arange(5)
+        r = opt_fn(x)
+
+        self.assertEqual(r, [0, 1, 2, 3, 4])
+        self.assertEqual(type(r), list)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_size_attr(self):
+        def fn(x):
+            return x.size + x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = np.arange(5)
+        r = opt_fn(x)
+
+        self.assertEqual(r, fn(x))
+        self.assertEqual(type(r), np.ndarray)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_no_raise(self):
         def _inf_nan_preprocess(t, t_np):
             t_np = np.nan_to_num(t_np)
