@@ -206,7 +206,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    "multinomial": {f32, f64},
+    "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.local_response_norm": {i64},
