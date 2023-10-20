@@ -85,7 +85,6 @@ class DispatchKey(Enum):
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
     NestedTensor = auto()
-    Dense = auto()
 
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()

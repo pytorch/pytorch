@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch._C._distributed_c10d import (
+    AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
     AllToAllOptions,
@@ -421,19 +422,6 @@ _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
 
-class _HookState:
-    def __init__(self):
-        self.creation_hooks = []
-
-    def register_creation_hook(self, hook) -> None:
-        self.creation_hooks.append(hook)
-
-    def fire_creation_hook(self, pg, name) -> None:
-        for hook in self.creation_hooks:
-            try:
-                hook(pg, name)
-            except Exception as e:
-                logger.info("hook %s failed with %s", hook, e)
 
 class _World:
     """
@@ -447,8 +435,6 @@ class _World:
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
         self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
-        self._hook_state = _HookState()
-        self.enable_collectives_timing = False
 
     @property
     def default_pg(self):
@@ -545,22 +531,25 @@ class _World:
         and configurations (types and ranks).
         """
         config_info = []
+        default_pg_size = _get_group_size(None)
         for pg, backend in self.pg_map.items():
             # backend is a tuple with the first element being the backend type ("nccl", etc.)
             backend_type = Backend.backend_type_map[backend[0]]
+            ranks = self.pg_group_ranks[pg]
             config_info.append(
                 {
-                    "pg_id": pg._id(),
+                    "pg_name": self.pg_names[pg],
                     "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
-                    "ranks": self.pg_group_ranks[pg],
+                    "ranks": list(ranks.values())
+                    if len(ranks) != default_pg_size
+                    else [],  # 'ranks' is an empty list when all ranks are involved in a pg
+                    "group_size": len(ranks),
+                    "group_count": self.group_count,
                 }
             )
         return config_info
 
-    @property
-    def pg_hook_state(self) -> _HookState:
-        return self._hook_state
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -698,7 +687,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise DistStoreError(
+                raise DistStoreError(  # noqa: TRY200
                     "Timed out initializing process group in store based barrier on "
                     "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
                         rank, store_key, world_size, worker_count, timeout
@@ -1382,9 +1371,6 @@ def _new_process_group_helper(
     pg._set_group_name(group_name)
 
     _world.pg_backend_config[pg] = str(backend_config)
-    if _world.enable_collectives_timing:
-        pg._enable_collectives_timing()
-
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
         pg_tag = f"ptd:{group_name}"
@@ -1394,8 +1380,6 @@ def _new_process_group_helper(
 
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
-    _world.pg_hook_state.fire_creation_hook(pg, group_name)
-
     return pg, prefix_store
 
 def destroy_process_group(group: Optional[ProcessGroup] = None):
@@ -2916,6 +2900,9 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else torch.view_as_real(input_tensor)
     )
 
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+
     group = group or _get_default_group()
 
     if group in _world.pg_coalesce_state.keys():
@@ -2927,7 +2914,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor)
+    work = group._allgather_base(output_tensor, input_tensor, opts)
 
     if async_op:
         return work
@@ -3392,6 +3379,7 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
 
     group = group or _get_default_group()
 
@@ -4338,11 +4326,3 @@ dynamo_unsupported_distributed_c10d_ops = [
     reduce_scatter_tensor,
     send,
 ]
-
-def _register_creation_hook(hook):
-    _world.pg_hook_state.register_creation_hook(hook)
-
-def _enable_collectives_timing():
-    _world.enable_collectives_timing = True
-    for pg in _world.pg_map:
-        pg._enable_collectives_timing()
