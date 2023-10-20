@@ -30,15 +30,13 @@ except ImportError:
         tree_unflatten,
     )
 
+aten = torch.ops.aten
 
-def _is_random_op(op):
-    aten = torch.ops.aten
-    random_ops = [
-        aten.native_dropout.default,
-        aten.normal_.default,
-        aten.uniform_.default,
-    ]
-    return op in random_ops
+_random_ops = {
+    aten.native_dropout.default,
+    aten.normal_.default,
+    aten.uniform_.default,
+}
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
@@ -278,7 +276,7 @@ def _operator_dispatch(
 
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-        if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
+        if op_call in _random_ops and is_rng_supported_mesh(mesh):
             if not random._rng_tracker:
                 raise RuntimeError(
                     "A CudaRNGStateTracker instance must be instantiated "
@@ -296,7 +294,7 @@ def _operator_dispatch(
 
     # communicate the result to all ranks for some operators that return scalar value
     if output_sharding.output_spec is None:
-        if op_call == torch.ops.aten.equal.default:
+        if op_call == aten.equal.default:
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
             obj_list = list(filter(lambda x: x is not None, obj_list))

@@ -13,8 +13,8 @@
 
 namespace c10 {
 
-OptionalTypePtr OptionalType::create(TypePtr contained) {
-  return OptionalTypePtr(new OptionalType(std::move(contained)));
+OptionalTypePtr OptionalType::create(const TypePtr& contained) {
+  return OptionalTypePtr(new OptionalType(contained));
 }
 
 TypePtr OptionalType::ofTensor() {
@@ -130,7 +130,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
     }
   }
   // Cut off the vector's tail so that `end` is the real last element
-  types->erase(types->begin() + end_idx + 1, types->end());
+  types->erase(types->begin() + static_cast<std::ptrdiff_t>(end_idx) + 1, types->end());
 
 }
 
@@ -166,7 +166,7 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
   *to_flatten = std::move(to_fill);
 }
 
-OptionalType::OptionalType(TypePtr contained)
+OptionalType::OptionalType(const TypePtr& contained)
                            : UnionType({contained, NoneType::get()}, TypeKind::OptionalType) {
   bool is_numbertype = false;
   if (auto as_union = contained->cast<UnionType>()) {
@@ -238,7 +238,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
   bool complex_found = false;
   bool nonetype_found = false;
 
-  auto update_is_opt_flags = [&](TypePtr t) {
+  auto update_is_opt_flags = [&](const TypePtr& t) {
     if (t == IntType::get()) {
       int_found = true;
     } else if (t == FloatType::get()) {
@@ -264,7 +264,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
       auto not_none = union_type->containedTypes()[0] != NoneType::get()
                       ? union_type->containedTypes()[0]
                       : union_type->containedTypes()[1];
-      return OptionalType::create(std::move(not_none));
+      return OptionalType::create(not_none);
     }
   }
 
@@ -305,7 +305,7 @@ bool UnionType::equals(const Type& rhs) const {
                        [&](TypePtr lhs_type) {
                          return std::any_of(union_rhs->containedTypes().begin(),
                                             union_rhs->containedTypes().end(),
-                                            [&](TypePtr rhs_type) {
+                                            [&](const TypePtr& rhs_type) {
                                               return *lhs_type == *rhs_type;
                                             });
                        });
@@ -366,7 +366,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
 
   std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
 
-  auto is_numbertype = [&](TypePtr lhs) {
+  auto is_numbertype = [&](const TypePtr& lhs) {
     for (const auto& rhs : number_types) {
       if (*lhs == *rhs) {
         return true;
@@ -459,7 +459,7 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
       return true;
     }
   } else {
-    // NOLINTNEXTLINE(bugprone-argument-comment)
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return Type::isSubtypeOfExt(rhs, why_not);
   }
 }
