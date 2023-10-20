@@ -351,6 +351,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
+                inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()

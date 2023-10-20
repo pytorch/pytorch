@@ -3765,6 +3765,33 @@ class InplaceBernoulliFallback(ExternKernel):
         self.name = V.graph.register_buffer(self)
 
 
+class AccumulateGrad(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    kernel = "inductor_ops.accumulate_grad_"
+
+    def codegen(self, wrapper):
+        (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
+        wrapper.writeline(f"{self.kernel}({variable}, {new_grad})")
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, variable, new_grad):
+        super().__init__(
+            None,
+            MutationLayout(variable),
+            self.unwrap_storage([variable, new_grad]),
+        )
+        self.name = V.graph.register_buffer(self)
+
+
 class ScatterFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly.
