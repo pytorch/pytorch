@@ -268,12 +268,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.source.make_guard(fn)
         raise NotImplementedError()
 
-    def replace_guards(self, guards, *fns):
-        name = self.source.name()
-        new_guards = {g for g in (guards or []) if g.name != name}
-        new_guards.update(self.source.make_guard(fn) for fn in fns)
-        return new_guards
-
     def const_getattr(self, tx, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError()

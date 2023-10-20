@@ -1916,7 +1916,7 @@ class TestMisc(TestCase):
             pid = os.fork()
         except (OSError, AttributeError):
             # fork failed, or not running on POSIX
-            raise SkipTest("Not POSIX or fork failed.")
+            raise SkipTest("Not POSIX or fork failed.")  # noqa: TRY200
 
         if pid == 0:
             # child; close i/o file handles

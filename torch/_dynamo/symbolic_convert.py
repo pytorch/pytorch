@@ -89,6 +89,7 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .variables.lazy import LazyMutableLocal
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -585,7 +586,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return oldvar.mutable_local not in v.recursively_contains
+            return oldvar.mutable_local not in v.recursively_contains and not any(
+                # recursively_contains will miss things for LazyVariableTracker
+                (isinstance(x, LazyMutableLocal) and x.vt is not None)
+                for x in v.recursively_contains
+            )
 
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
@@ -2305,7 +2310,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
-            raise ArgsMismatchError(
+            raise ArgsMismatchError(  # noqa: TRY200
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
