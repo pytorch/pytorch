@@ -8,6 +8,7 @@ __all__ = [
     "allow_in_graph",
     "list_backends",
     "disable",
+    "cudagraph_mark_step_begin",
 ]
 
 def compile(*args, **kwargs):
@@ -92,3 +93,9 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+def cudagraph_mark_step_begin():
+    "Indicates that a new iteration of inference or training is about to begin."
+    import torch._inductor
+
+    torch._inductor.cudagraph_trees.mark_step_begin()
