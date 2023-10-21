@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <structmember.h> // For PyMemberDef
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -335,10 +336,25 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   }
 
   //// Part 1: Basic type checks
+  // Ensure we have Tensors and their c++ structs are the same size
   TORCH_CHECK(THPVariable_Check(a_));
   TORCH_CHECK(THPVariable_Check(b_));
-  // TODO?: Add a check to make sure the user didn't subclass
-  // THPVariable from C and added new fields. That should be very rare though.
+  TORCH_CHECK(Py_TYPE(a_)->tp_basicsize == Py_TYPE(b_)->tp_basicsize, "The two Tensors cannot be swapped, are you using slots and, if so, are they the same number of them?");
+
+  // Check that slots match if any
+  PyMemberDef* a_mp = Py_TYPE(a_)->tp_members;
+  PyMemberDef* b_mp = Py_TYPE(b_)->tp_members;
+
+  int i = 0, j = 0;
+  while (a_mp[i].name != NULL && b_mp[j].name != NULL) {
+    TORCH_CHECK(strcmp(a_mp[i].name, b_mp[j].name) == 0, "Non matching slots for swap function ", a_mp[i].name, " and ", b_mp[j].name);
+    i++;
+    j++;
+  }
+
+  if (a_mp[i].name != NULL || b_mp[j].name != NULL) {
+    TORCH_CHECK(false, "Different number of slots is not allowed in swap function");
+  }
 
   //// Part 2: Compute real PyObject size in memory
   // The code below ensures that from CPython feature point of view, the two
@@ -346,60 +362,36 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   // flags
 
   // Managed dict was introduced in 3.11.a3
-  // https://github.com/python/cpython/pull/29879 Managed weakref was introduced
-  // in 3.12.a1 https://github.com/python/cpython/pull/95996 The Tensor class
-  // uses both as soon as they're available.
+  // in https://github.com/python/cpython/pull/29879
+
+  // Managed weakref was introduced in 3.12.a1
+  // in https://github.com/python/cpython/pull/95996
+
+  // The Tensor class uses both as soon as they're available.
   auto start_pyobj_offset = 0;
-  auto end_offset = 0;
 #if PY_VERSION_HEX > 0x030B00A3
   // Always use managed dict here
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_DICT));
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(b_), Py_TPFLAGS_MANAGED_DICT));
   start_pyobj_offset += 1;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
-      "Bad dict offset for object for the swap function");
 #if PY_VERSION_HEX > 0x030C00A1
   // Only use managed weakref when available
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_WEAKREF));
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(b_), Py_TPFLAGS_MANAGED_WEAKREF));
   start_pyobj_offset += 1;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
-      "Bad weaklist offset for object for the swap function");
-#else
-  end_offset += 1;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset != 0,
-      "Bad weaklist offset for object for the swap function");
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
-      "Bad weaklist offset for object for the swap function");
 #endif // PY_VERSION_HEX > 0x030B00A1
-
-#else
-  // No custom object before PyObject* in older versions
-  // But they are at the end
-  end_offset += 1;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset != 0,
-      "Bad weaklist offset for object for the swap function");
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
-      "Inconsistent dict offset for object for the swap function");
-  end_offset += 1;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
-      "Inconsistent weaklist offset for object for the swap function");
 #endif // PY_VERSION_HEX > 0x030A00A3
 
-  // Don't handle vectorcall at the end in any case
+  // dict, weaklist and vectorcall should always be at the same place
   TORCH_CHECK(
-      Py_TYPE(a_)->tp_vectorcall_offset == 0,
-      "Swap doesn't support vectorcall object for the swap function");
+      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
+      "Inconsistent weaklist offset for object for the swap function");
   TORCH_CHECK(
-      Py_TYPE(b_)->tp_vectorcall_offset == 0,
-      "Swap doesn't support vectorcall object for the swap function");
+      Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
+      "Inconsistent dict offset for object for the swap function");
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_vectorcall_offset == Py_TYPE(b_)->tp_vectorcall_offset,
+      "Inconsistent vectorcall offset for object for the swap function");
 
   // There always is a PyGC_Head just before the PyObject*
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_HAVE_GC));
@@ -410,8 +402,8 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
       (void*)((char*)a_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
   void* b =
       (void*)((char*)b_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
-  auto actual_size = sizeof(THPVariable) +
-      (start_pyobj_offset + end_offset) * sizeof(PyObject*) +
+  auto actual_size = Py_TYPE(a_)->tp_basicsize +
+      start_pyobj_offset * sizeof(PyObject*) +
       2 * sizeof(PyGC_Head);
 
   //// Part 4: Swap the full content of the PyObjects

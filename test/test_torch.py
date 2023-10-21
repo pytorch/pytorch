@@ -9691,6 +9691,40 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             del t1, holder
             self.assertIs(t1_ref(), None)
 
+    def test_swap_fail_slots(self):
+        class MyTwoTensor(TwoTensor):
+            __slots__ = ("a", "b")
+
+        class MyTwoTensor2(TwoTensor):
+            __slots__ = ("b", "a")
+
+        class MyTwoTensor3(TwoTensor):
+            __slots__ = ("a", "b", "c")
+
+        class MyTwoTensor4(TwoTensor):
+            __slots__ = ("a", "b", "d")
+
+        t1 = torch.rand(4)
+        t2 = TwoTensor(torch.rand(4), torch.rand(4))
+        t3 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
+        t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t7 = MyTwoTensor4(torch.rand(4), torch.rand(4))
+
+        torch.utils.swap_tensors(t1, t2)
+        with self.assertRaisesRegex(RuntimeError, "are you using slots?"):
+            torch.utils.swap_tensors(t1, t3)
+        with self.assertRaisesRegex(RuntimeError, "are you using slots?"):
+            torch.utils.swap_tensors(t2, t3)
+        torch.utils.swap_tensors(t3, t4)
+        # This works as slot names get sorted!
+        torch.utils.swap_tensors(t3, t5)
+        with self.assertRaisesRegex(RuntimeError, "the same number"):
+            torch.utils.swap_tensors(t3, t6)
+        with self.assertRaisesRegex(RuntimeError, "c and d"):
+            torch.utils.swap_tensors(t6, t7)
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
