@@ -25,9 +25,9 @@ from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
-    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch_function import TensorWithTFOverrideVariable
 
 
 @dataclasses.dataclass
