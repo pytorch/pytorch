@@ -1210,7 +1210,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
         TypePtr typePtr,
         std::vector<c10::Device> devices)
         : srcFutures(srcs),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
+          dstFuture(make_intrusive<ivalue::Future>(std::move(typePtr), std::move(devices))) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;

@@ -44,7 +44,7 @@ namespace {
 
 CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
-  , cpp_signature_(std::move(cpp_signature))
+  , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
   , debug_()
   {}
@@ -172,7 +172,7 @@ Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& na
       std::move(name),
       dispatch_key,
       std::move(f.func_),
-      std::move(f.cpp_signature_),
+      f.cpp_signature_,
       std::move(f.schema_),
       debugString(std::move(f.debug_), file_, line_)
     )
@@ -223,7 +223,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f, _RegisterOrVerify
           std::move(name),
           dispatch_key,
           std::move(f.func_),
-          std::move(f.cpp_signature_),
+          f.cpp_signature_,
           std::move(f.schema_),
           debugString(std::move(f.debug_), file_, line_)
         )
