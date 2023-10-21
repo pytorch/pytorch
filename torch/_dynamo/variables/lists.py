@@ -33,7 +33,7 @@ def _get_fake_tensor(vt):
     return fake_tensor
 
 
-def _listlike_contains_helper(items, search, tx, options, check_hash_match=False):
+def _listlike_contains_helper(items, search, tx, options, check_tensor_identity=False):
     if search.is_python_constant():
         found = any(
             x.is_python_constant()
@@ -44,15 +44,15 @@ def _listlike_contains_helper(items, search, tx, options, check_hash_match=False
 
     from .builtin import BuiltinVariable
 
-    must_check_hash = False
-    if check_hash_match and isinstance(search, variables.TensorVariable):
-        must_check_hash = True
+    must_check_tensor_id = False
+    if check_tensor_identity and isinstance(search, variables.TensorVariable):
+        must_check_tensor_id = True
         # Match of Tensor means match of FakeTensor
         search = _get_fake_tensor(search)
 
     found = None
     for x in items:
-        if must_check_hash:
+        if must_check_tensor_id:
             if isinstance(x, variables.TensorVariable):
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
@@ -905,7 +905,7 @@ class SetVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
             return _listlike_contains_helper(
-                self.items, args[0], tx, options, check_hash_match=True
+                self.items, args[0], tx, options, check_tensor_identity=True
             )
         else:
             return super().call_method(tx, name, args, kwargs)
