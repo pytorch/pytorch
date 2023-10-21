@@ -1517,12 +1517,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& input,
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias_opt,
-         at::IntArrayRef stride_,
+         at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
-         at::IntArrayRef dilation_,
+         at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         int64_t groups_) {
+         c10::SymInt groups_) {
         return at::native::select_conv_backend(
             input,
             weight,
@@ -1532,7 +1532,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_,
+            std::move(groups_),
             c10::nullopt);
       },
       py::arg("input"),
@@ -1551,12 +1551,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& input,
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias,
-         at::IntArrayRef stride_,
+         at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
-         at::IntArrayRef dilation_,
+         at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         int64_t groups_,
+         c10::SymInt groups_,
          c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
@@ -1571,7 +1571,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_,
+            std::move(groups_),
             ref);
       },
       py::arg("input"),
