@@ -79,7 +79,7 @@ def build_triton(
             triton_repo = "https://github.com/ROCmSoftwarePlatform/triton"
             triton_pkg_name = "pytorch-triton-rocm"
         else:
-            triton_repo = "https://github.com/openai/triton"
+            triton_repo = "https://github.com/aakhundov/triton"
             triton_pkg_name = "pytorch-triton"
         check_call(["git", "clone", triton_repo], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
