@@ -608,11 +608,25 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
-                and args[0].is_python_constant()
             ):
+                all_ndarray = True
                 for x in args[0].items:
-                    if isinstance(x.value, np.generic):
+                    if not isinstance(x, variables.NumpyNdarrayVariable):
+                        all_ndarray = False
+                    if x.is_python_constant() and isinstance(x.as_python_constant(), np.generic):
                         x.value = x.value.item()
+                if all_ndarray and kwargs == {}:
+                    # Stack FakeTensor
+                    stacked = wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function",
+                            torch.stack,
+                            *proxy_args_kwargs(args, kwargs),
+                        ),
+                        **options,
+                    )
+                    args[0] = stacked
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination

@@ -1633,8 +1633,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_numpy_list(self):
         @torch._dynamo.disable
         def rand_gen():
