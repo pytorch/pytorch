@@ -69,10 +69,7 @@ class LazyVariableTracker(VariableTracker):
         return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item):
-        vt = self.realize()
-        if item not in vt.__dict__:
-            raise AttributeError(item)
-        return vt.__dict__[item]
+        return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
     add_options = VariableTracker.add_options
