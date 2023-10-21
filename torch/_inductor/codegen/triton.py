@@ -58,6 +58,7 @@ from .triton_utils import config_of, signature_of, signature_to_meta
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 class TritonPrinter(PythonPrinter):
@@ -2256,16 +2257,38 @@ class TritonScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
 
         if node1.is_reduction() and node2.is_reduction():
-            return numel1 == numel2 and rnumel1 == rnumel2
+            reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
+            if not reduction_can_fuse:
+                fusion_log.debug(
+                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%d, %d), (%d, %d)",
+                    numel1,
+                    numel2,
+                    rnumel1,
+                    rnumel2,
+                )
+            return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
+                fusion_log.debug(
+                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%d, %d), (%d, %d)",
+                    numel1,
+                    numel2,
+                    rnumel1,
+                    rnumel2,
+                )
                 return False
 
             if node1.is_template():
                 # Only allow fusion for TritonTemplates for now.
                 # Fusion for CUDATemplates are not supported.
-                return isinstance(node1.node, TritonTemplateBuffer)
+                is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
+                if not is_triton_template:
+                    fusion_log.debug(
+                        "cannot fuse (triton:3): is not TritonTemplateBuffer %s",
+                        node1,
+                    )
+                return is_triton_template
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -2274,13 +2297,22 @@ class TritonScheduling(BaseScheduling):
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
             if config.triton.tiling_prevents_pointwise_fusion:
+                cond = True
                 if len(tiling1) > 2:
                     if len(tiling2) > 2:
-                        return tiling1 == tiling2 == tiling3
+                        cond = tiling1 == tiling2 == tiling3
                     else:
-                        return tiling1 == tiling3
+                        cond = tiling1 == tiling3
                 elif len(tiling2) > 2:
-                    return tiling2 == tiling3
+                    cond = tiling2 == tiling3
+                if not cond:
+                    fusion_log.debug(
+                        "cannot fuse (triton:4): tiling mismatch (%s, %s, %s)",
+                        tiling1,
+                        tiling2,
+                        tiling3,
+                    )
+                    return cond
 
             return True
 
@@ -2291,15 +2323,25 @@ class TritonScheduling(BaseScheduling):
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
                 ):
+                    fusion_log.debug(
+                        "cannot fuse (triton:5): nodes numel/rnumel incompatibility"
+                    )
                     return False
                 if (
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    return self.select_tiling(node1.get_nodes(), numel1) in (
+                    is_reduction_tiling_valid = self.select_tiling(
+                        node1.get_nodes(), numel1
+                    ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
                     )
+                    if not is_reduction_tiling_valid:
+                        fusion_log.debug(
+                            "cannot fuse (triton:6): invalid tiling for reduction"
+                        )
+                    return is_reduction_tiling_valid
                 return True
 
             return numel1 == numel2

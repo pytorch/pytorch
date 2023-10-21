@@ -311,7 +311,8 @@ struct ExponentialKernel {
 
 template<typename RNG>
 void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generator) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+  self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
@@ -328,7 +329,8 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generato
         return static_cast<self_t>(bernoulli(generator));
       });
     } else {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
+      p->scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
         using p_t = scalar_t;
         cpu_serial_kernel(iter, [&](const p_t p_val) -> self_t {
           at::bernoulli_distribution<float> bernoulli(p_val);
@@ -341,7 +343,8 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generato
 
 template<typename RNG>
 void bernoulli_kernel(const TensorBase &self, double p, RNG generator) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+  self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     auto iter = TensorIterator::borrowing_nullary_op(self);

@@ -3,6 +3,7 @@ from typing import Any, Optional, Set, List
 import traceback
 import torch
 import weakref
+import functools
 
 __all__ = [
     'Library',
@@ -166,21 +167,130 @@ def _del_library(captured_impls, op_impls, registration_handles):
         handle.destroy()
 
 
-# decorator to register python functions for library ops
-# Note: this decorator API should remain consistent with `Library.impl` API
-def impl(lib, name, dispatch_key=""):
-    def wrap(f):
-        lib.impl(name, f, dispatch_key)
-        return f
-    return wrap
+_keep_alive = []
 
 
-def define(lib, schema, alias_analysis=""):
+@functools.singledispatch
+def define(qualname, schema, *, lib=None):
+    r"""Defines a new operator.
+
+    In PyTorch, defining an op (short for "operator") is a two step-process:
+    - we need to define the op (by providing an operator name and schema)
+    - we need to implement behavior for how the operator interacts with
+      various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
+
+    This entrypoint defines the custom operator (the first step)
+    you must then perform the second step by calling various
+    ``impl_*`` APIs.
+
+    Args:
+        qualname (str): The qualified name for the operator. Should be
+            a string that looks like "namespace::name", e.g. "aten::sin".
+            Operators in PyTorch need a namespace to
+            avoid name collisions; a given operator may only be created once.
+            If you are writing a Python library, we recommend the namespace to
+            be the name of your top-level module.
+        schema (str): The schema of the operator
+        lib (Optional[Library]): If provided, the lifetime of this operator
+            will be tied to the lifetime of the Library object.
+
+    Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
+        >>> import torch
+        >>> import numpy as np
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for DispatchKey::CPUj
+        >>> @torch.library.impl("mylibrary::sin", "CPU")
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> # Call the new operator from torch.ops.
+        >>> x = torch.randn(3)
+        >>> y = torch.ops.mylib.sin(x)
+        >>> assert torch.allclose(y, x)
+
+    """
+    if not isinstance(qualname, str):
+        raise ValueError(
+            f"define(qualname, schema): expected qualname "
+            f"to be instance of str, got {type(qualname)}")
+    namespace, name = torch._library.utils.parse_namespace(qualname)
+    if lib is None:
+        lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(lib)
+    lib.define(name + schema, alias_analysis="")
+
+
+@define.register
+def _(lib: Library, schema, alias_analysis=""):
+    """The old torch.library.define.
+    We're keeping this around for BC reasons
+    """
     def wrap(f):
         name = lib.define(schema, alias_analysis)
         lib.impl(name, f)
         return f
     return wrap
+
+
+@functools.singledispatch
+def impl(qualname, dispatch_key, func=None, *, lib=None):
+    """Register an implementation for a DispatchKey for this operator.
+
+    torch.library.impl is a low-level API to directly register
+    an implementation for an operator for some DispatchKey in PyTorch.
+
+    This API may be used as a function or a decorator (see examples)
+
+    Args:
+        qualname (str): Should be a string that looks like "namespace::operator_name".
+        dispatch_key (str): The DispatchKey to register an impl for
+        lib (Optional[Library]): If provided, the lifetime of this registration
+            will be tied to the lifetime of the Library object.
+
+    Examples::
+        >>> import torch
+        >>> import numpy as np
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for DispatchKey::CPU
+        >>> @torch.library.impl("mylibrary::sin", "CPU")
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = torch.ops.mylibrary.sin(x)
+        >>> assert torch.allclose(y, x.sin())
+    """
+
+    def register(func):
+        namespace, _ = torch._library.utils.parse_namespace(qualname)
+        if lib is None:
+            use_lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(use_lib)
+        else:
+            use_lib = lib
+        use_lib.impl(qualname, func, dispatch_key)
+
+    if func is None:
+        return register
+    else:
+        register(func)
+
+
+@impl.register
+def _(lib: Library, name, dispatch_key=""):
+    """Legacy torch.library.impl API. Kept around for BC"""
+    def wrap(f):
+        lib.impl(name, f, dispatch_key)
+        return f
+    return wrap
+
 
 
 def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
