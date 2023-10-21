@@ -2290,10 +2290,17 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             res = m(x)
             m.train()
             res2 = m(x)
-            return res, res2
+            m.train(False)
+            res3 = m(x)
+            m.train(mode=True)
+            res4 = m(x)
+            return res, res2, res3, res4
 
         f_opt = torch.compile(f, fullgraph=True)
         x = torch.tensor([1.0, 2.0])
+
+        r = f_opt(x)
+        print(r)
 
         self.assertEqual(f_opt(x), f(x))
 

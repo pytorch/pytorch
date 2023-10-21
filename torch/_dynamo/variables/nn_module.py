@@ -415,11 +415,12 @@ class NNModuleVariable(VariableTracker):
             )
 
         if name in ["eval", "train"]:
-            if len(args) > 0:
+            if len(args) == 1:
                 mode = args[0]
             elif "mode" in kwargs:
                 mode = kwargs.pop("mode")
             else:
+                assert not (args or kwargs)
                 mode = ConstantVariable.create(name == "train")
             assert isinstance(mode.as_python_constant(), bool)
 
