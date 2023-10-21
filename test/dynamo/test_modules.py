@@ -2221,10 +2221,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = Mod()
         foo(mod, torch.rand([4]))
-        print(mod.buffer.storage().nbytes())
         self.assertEqual(compiles_without_buffers, 1)
-        print(mod.buffer.dtype)
-        print(mod.buffer.storage().nbytes())
 
         foo(mod, torch.rand([4], dtype=torch.half))
         self.assertEqual(compiles_without_buffers, 2)
