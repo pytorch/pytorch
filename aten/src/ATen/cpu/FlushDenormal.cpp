@@ -4,7 +4,7 @@
 #include <cpuinfo.h>
 #endif
 
-namespace at { namespace cpu {
+namespace at::cpu {
 
 #if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
 static constexpr unsigned int DENORMALS_ZERO = 0x0040;
@@ -34,4 +34,4 @@ bool set_flush_denormal(bool on) {
 }
 #endif
 
-}}  // namespace at::cpu
+}  // namespace at::cpu

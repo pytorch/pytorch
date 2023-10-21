@@ -40,6 +40,35 @@ C10_DIAGNOSTIC_POP()
 
 namespace torch::jit {
 
+static std::string get_little_endian_data(const at::Tensor& t) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return std::string(
+      static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  const size_t element_size = t.element_size();
+  const size_t num_elements = t.numel();
+
+  std::vector<char> data_copy{
+      static_cast<char*>(t.data_ptr()),
+      static_cast<char*>(t.data_ptr()) + element_size * num_elements};
+
+  for (size_t i = 0; i < num_elements; ++i) {
+    char* start_byte = data_copy.data() + i * element_size;
+    char* end_byte = start_byte + element_size - 1;
+    /* keep swapping */
+    for (size_t count = 0; count < element_size / 2; ++count) {
+      std::swap(*start_byte, *end_byte);
+      ++start_byte;
+      --end_byte;
+    }
+  }
+
+  return std::string(data_copy.data(), element_size * num_elements);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+}
+
 void writeArchiveAndTensors(
     const std::string& archive_name,
     const char* data,
@@ -207,7 +236,8 @@ void CreateExternalFile(
         std::string("ONNX export failed. Could not open file or directory: ") +
         fullFilePath);
   }
-  fwrite(tensor.data_ptr(), tensor.element_size(), tensor.numel(), fp.get());
+  std::string s = get_little_endian_data(tensor);
+  fwrite(s.c_str(), tensor.element_size(), tensor.numel(), fp.get());
 } // fclose() called here through CloseFile(), if FILE* is not a null pointer.
 
 class GraphEncoder {
@@ -297,6 +327,9 @@ class GraphEncoder {
   unsigned long long int GetGraphProtoSize(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
+      bool add_node_names,
+      bool use_external_data_format,
+      const std::string& onnx_file_path,
       const std::map<std::string, at::Tensor>& initializers =
           std::map<std::string, at::Tensor>());
 
@@ -525,8 +558,13 @@ GraphEncoder::GraphEncoder(
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
   if (!use_external_data_format &&
-      GetGraphProtoSize(model_proto_->mutable_graph(), graph, initializers) >
-          INT_MAX) {
+      GetGraphProtoSize(
+          model_proto_->mutable_graph(),
+          graph,
+          add_node_names,
+          use_external_data_format,
+          onnx_file_path,
+          initializers) > INT_MAX) {
     GRAPH_DEBUG(
         "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
     use_external_data_format = true;
@@ -844,7 +882,13 @@ void GraphEncoder::AddInitializersIntoGraphProto(
 unsigned long long int GraphEncoder::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
+    bool add_node_names,
+    bool use_external_data_format,
+    const std::string& onnx_file_path,
     const std::map<std::string, at::Tensor>& initializers) {
+  // Model size = sum(size(initializers)) + sum(size(onnx_constant_nodes))
+
+  // Add up all Initializers
   onnx::GraphProto graph_proto_copy = onnx::GraphProto(*graph_proto);
   unsigned long long int size = graph_proto_copy.ByteSizeLong();
   for (auto input : graph->inputs()) {
@@ -863,6 +907,30 @@ unsigned long long int GraphEncoder::GetGraphProtoSize(
     // All we actually need is its size.
     size += tensor_proto->ByteSizeLong();
     size += tensor.element_size() * tensor.numel();
+  }
+
+  // Add up all onnx::Constant nodes that are Tensors
+  for (const auto& node : graph->nodes()) {
+    if (node->kind() == ::c10::onnx::Constant &&
+        node->hasAttribute(attr::value) &&
+        node->kindOf(attr::value) == AttributeKind::t) {
+      at::Tensor tensor = node->t(attr::value);
+
+      // Don't actually copy the buffer into n_proto since that is expensive.
+      // All we actually need is its size.
+      auto* n_proto = graph_proto_copy.add_node();
+      EncodeNode(
+          &graph_proto_copy,
+          n_proto,
+          node,
+          add_node_names,
+          use_external_data_format,
+          onnx_file_path);
+
+      // Calculate the size of the tensor in bytes
+      size += n_proto->ByteSizeLong();
+      size += tensor.element_size() * tensor.numel();
+    }
   }
   return size;
 }
@@ -1222,35 +1290,6 @@ void GraphEncoder::EncodeTypeProto(
     auto elem_type = list_type->getElementType();
     EncodeTypeProto(seq_type->mutable_elem_type(), elem_type, name);
   }
-}
-
-static std::string get_little_endian_data(const at::Tensor& t) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  return std::string(
-      static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-  const size_t element_size = t.element_size();
-  const size_t num_elements = t.numel();
-
-  std::vector<char> data_copy{
-      static_cast<char*>(t.data_ptr()),
-      static_cast<char*>(t.data_ptr()) + element_size * num_elements};
-
-  for (size_t i = 0; i < num_elements; ++i) {
-    char* start_byte = data_copy.data() + i * element_size;
-    char* end_byte = start_byte + element_size - 1;
-    /* keep swapping */
-    for (size_t count = 0; count < element_size / 2; ++count) {
-      std::swap(*start_byte, *end_byte);
-      ++start_byte;
-      --end_byte;
-    }
-  }
-
-  return std::string(data_copy.data(), element_size * num_elements);
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
 }
 
 void GraphEncoder::EncodeTensor(
