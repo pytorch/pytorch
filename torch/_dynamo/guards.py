@@ -123,7 +123,9 @@ CLOSURE_VARS = collections.OrderedDict(
         (
             "___from_numpy",
             # If not numpy array, piggy back on e.g. tensor guards to check type
-            lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a,
+            lambda a: torch.as_tensor(a)
+            if isinstance(a, (np.generic, np.ndarray))
+            else a,
         ),
     ]
 )
