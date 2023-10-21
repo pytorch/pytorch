@@ -32,7 +32,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device
+from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
@@ -62,7 +62,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if is_inference and config.reordering:
+    if is_inference and config.reorder_for_locality:
         reorder_for_locality(gm.graph)
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
@@ -92,6 +92,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     reinplace_scatters(gm.graph)
     gm.recompile()
     gm.graph.lint()
+
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(
+            "Print graph after recompile in post grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
+        )
 
 
 @init_once_fakemode
@@ -518,10 +526,14 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     return False
 
 
+@register_noop_decomp(aten.repeat)
+def repeat_noop(self, repeats):
+    return all(r == 1 for r in repeats)
+
+
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
-    if all(p == 0 for p in padding):
-        return True
+    return all(p == 0 for p in padding)
 
 
 @register_noop_decomp(torch.ops.prims.convert_element_type)
@@ -741,21 +753,6 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
-
-
-def is_pointwise_use(use):
-    if not use.op == "call_function":
-        return False
-
-    if not (
-        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
-    ):
-        return False
-
-    if use.target is operator.getitem or use.target.is_view:
-        return all(is_pointwise_use(u) for u in use.users)
-
-    return torch.Tag.pointwise in use.target.tags
 
 
 def should_prefer_unfused_addmm(match):

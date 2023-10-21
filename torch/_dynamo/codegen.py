@@ -25,9 +25,9 @@ from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
-    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch_function import TensorWithTFOverrideVariable
 
 
 @dataclasses.dataclass
@@ -104,7 +104,9 @@ class PyCodegen:
             tensor_variable = value.tensor_variable
             graph_outputs_key = self.add_graph_output(tensor_variable)
             output.append(
-                self.create_load_global(value.global_class_name(), True, add=True)
+                self.create_load_global(
+                    value.global_mangled_class_name(), True, add=True
+                )
             )
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.extend(create_call_function(1, True))

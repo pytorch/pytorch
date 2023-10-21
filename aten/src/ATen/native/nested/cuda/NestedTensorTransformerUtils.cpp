@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/cuda/NestedTensorTransformerUtils.h>
+#include <ATen/native/nested/NestedTensorTransformerUtils.h>
 #include <iostream>
 #include <tuple>
 namespace at {

@@ -320,11 +320,10 @@ def _multi_tensor_adagrad(
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
     for ((device_params, device_grads, device_state_sums, device_state_steps), _) in grouped_tensorlists.values():
-
-        device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
+        device_has_sparse_grad = has_sparse_grad and any(grad.is_sparse for grad in device_grads)
 
         if device_has_sparse_grad:
-            return _single_tensor_adagrad(
+            _single_tensor_adagrad(
                 device_params,
                 device_grads,
                 device_state_sums,
@@ -337,19 +336,26 @@ def _multi_tensor_adagrad(
                 maximize=False,
                 differentiable=differentiable,
             )
+            continue
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_state_sums = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_state_sums
-        ]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        for i in range(len(device_params)):
+            if torch.is_complex(device_params[i]):
+                device_params[i] = torch.view_as_real(device_params[i])
+                device_grads[i] = torch.view_as_real(device_grads[i])
+                device_state_sums[i] = torch.view_as_real(device_state_sums[i])
 
         # Update steps
-        torch._foreach_add_(device_state_steps, 1)
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize

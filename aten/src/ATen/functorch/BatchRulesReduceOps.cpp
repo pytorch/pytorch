@@ -472,7 +472,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("dist", dist_decomp);
   REDUCTION_BOXED_ARGS(kthvalue, 2, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2, KEEPDIM_CASE_VARIABLE, 3);
-  REDUCTION_NO_KEEPDIM_ARG(log_softmax.int);
   REDUCTION_NO_KEEPDIM_ARG(logcumsumexp);
   REDUCTION_WITH_KEEPDIM_ARG(logsumexp);
   m.impl("max", max_decomp);
