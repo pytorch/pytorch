@@ -1861,42 +1861,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    def test_is_tuple_list(self):
-        def fn(x, y):
-            if x.size(0) is y:
-                return x * 2
-            else:
-                return x + 1
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
-
-        x = torch.zeros(1, 2)
-        y = [1, 2]
-
-        self.assertEqual(fn(x, y), fn_opt(x, y))
-
-    def test_is_object_object(self):
-        class MyClass:
-            pass
-
-        def fn(x, y, z):
-            if y is z:
-                return x * 2
-            else:
-                return x + 1
-
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
-
-        x = torch.zeros(1, 2)
-        y = MyClass()
-        z = MyClass()
-
-        self.assertEqual(fn(x, y, z), fn_opt(x, y, z))
-        self.assertEqual(fn(x, y, y), fn_opt(x, y, y))
-
-        torch._dynamo.reset()
-        self.assertEqual(fn(x, y, y), fn_opt(x, y, y))
-        self.assertEqual(fn(x, y, z), fn_opt(x, y, z))
 
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
