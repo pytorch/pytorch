@@ -11,6 +11,7 @@ import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
+from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher
 
 from torch.testing import FileCheck
@@ -142,10 +143,13 @@ def check_model(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
+        torch.manual_seed(0)
         model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
+
+        torch.manual_seed(0)
         actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
 
     self.assertTrue(same(actual, expected))
@@ -161,10 +165,13 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
+        torch.manual_seed(0)
         model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(list_example_inputs)
         list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
         list_actual = AOTInductorModelRunner.run_multiple(
             model, list_example_inputs, options, constraints
         )
@@ -833,6 +840,67 @@ class AOTInductorTestsTemplate:
                     exactly=True,
                 ).run(src_code)
 
+    def test_fake_tensor_device_validation(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
+
+        # Export on CPU
+        exported_program = torch._export.export(
+            Model(),
+            example_inputs,
+            constraints=[],
+        )
+
+        # Compile exported model on CUDA
+        gm = exported_program.graph_module.to(self.device)
+        with self.assertRaisesRegex(ValueError, "Device mismatch between fake input"):
+            torch._inductor.aot_compile(
+                gm, tuple(i.to(self.device) for i in example_inputs)
+            )
+
+    @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
+    def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
+        supported_dtype_of_cpp_wrapper_mock.return_value = False
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10).to(self.device),
+            torch.randn(10, 10).to(self.device),
+        )
+        with self.assertRaisesRegex(
+            CppWrapperCodeGenError, "Unsupported input dtype torch.float32"
+        ):
+            torch._export.aot_compile(Model(), example_inputs)
+
+        supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
+            torch.float32, self.device == "cuda"
+        )
+
+    def test_normal_functional(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.normal_functional.default(x)
+
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -855,6 +923,7 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
@@ -875,9 +944,13 @@ copy_tests(
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+    },
 )
 
 
+@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
 class AOTInductorTestNonABICompatibleCpu(TestCase):
     device = "cpu"
     abi_compatible = False
@@ -903,6 +976,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
 class AOTInductorTestNonABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = False

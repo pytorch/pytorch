@@ -208,7 +208,6 @@ FILE_INLINELIST |= {
     str(obj.__module__) for obj in torch.optim.__dict__.values() if inspect.isclass(obj)
 }
 
-
 # TODO: consolidate SUBMODULE_INLINELIST and FILE_INLINELIST into one list
 # Force inline functions under these modules, even the modules is in *_SKIPLIST.
 SUBMODULE_INLINELIST = {
@@ -227,6 +226,7 @@ SUBMODULE_INLINELIST = {
 
 
 if torch.distributed.is_available():
+    SUBMODULE_INLINELIST.add("torch.distributed")
     SUBMODULE_INLINELIST.add("torch.distributed._functional_collectives")
 
 
