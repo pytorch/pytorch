@@ -8,7 +8,8 @@
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
-namespace at::mps {
+namespace at {
+namespace mps {
 
 //-----------------------------------------------------------------
 //  MPSStream
@@ -263,4 +264,5 @@ MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
 }
 
-} // namespace at::mps
+} // namespace mps
+} // namespace at

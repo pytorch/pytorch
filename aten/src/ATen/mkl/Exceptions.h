@@ -6,7 +6,7 @@
 #include <mkl_dfti.h>
 #include <mkl_spblas.h>
 
-namespace at::native {
+namespace at { namespace native {
 
 static inline void MKL_DFTI_CHECK(MKL_INT status)
 {
@@ -17,9 +17,11 @@ static inline void MKL_DFTI_CHECK(MKL_INT status)
   }
 }
 
-}  // namespace at::native
+}}  // namespace at::native
 
-namespace at::mkl::sparse {
+namespace at {
+namespace mkl {
+namespace sparse {
 static inline const char* _mklGetErrorString(sparse_status_t status) {
   if (status == SPARSE_STATUS_SUCCESS) {
     return "SPARSE_STATUS_SUCCESS";
@@ -44,7 +46,9 @@ static inline const char* _mklGetErrorString(sparse_status_t status) {
   }
   return "<unknown>";
 }
-} // namespace at::mkl::sparse
+} // namespace sparse
+} // namespace mkl
+} // namespace at
 
 #define TORCH_MKLSPARSE_CHECK(EXPR)                 \
   do {                                              \

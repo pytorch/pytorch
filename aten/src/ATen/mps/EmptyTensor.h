@@ -3,7 +3,8 @@
 #pragma once
 #include <ATen/core/TensorBase.h>
 
-namespace at::detail {
+namespace at {
+namespace detail {
 
 C10_EXPORT TensorBase empty_mps(
     IntArrayRef size,
@@ -26,4 +27,5 @@ C10_EXPORT TensorBase empty_strided_mps(
     IntArrayRef stride,
     const TensorOptions &options);
 
-} // namespace at::detail
+} // namespace detail
+} // namespace at

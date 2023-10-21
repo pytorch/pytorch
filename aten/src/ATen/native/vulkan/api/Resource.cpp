@@ -106,11 +106,6 @@ VulkanBuffer::VulkanBuffer(
       allocator_(vma_allocator),
       allocation_(VK_NULL_HANDLE),
       handle_(VK_NULL_HANDLE) {
-  // Only allocate memory if the buffer has non-zero size
-  if (size == 0) {
-    return;
-  }
-
   const VkBufferCreateInfo buffer_create_info{
       VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, // sType
       nullptr, // pNext
@@ -185,9 +180,7 @@ MemoryMap::MemoryMap(const VulkanBuffer& buffer, const uint8_t access)
       allocation_(buffer.allocation()),
       data_(nullptr),
       data_len_{buffer.mem_size()} {
-  if (allocation_) {
-    VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
-  }
+  VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
 }
 
 MemoryMap::MemoryMap(MemoryMap&& other) noexcept
@@ -205,21 +198,18 @@ MemoryMap::~MemoryMap() {
     return;
   }
 
-  if (allocation_) {
-    if (access_ & MemoryAccessType::WRITE) {
-      // Call will be ignored by implementation if the memory type this
-      // allocation belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is
-      // the behavior we want. Don't check the result here as the destructor
-      // cannot throw.
-      vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE);
-    }
-
-    vmaUnmapMemory(allocator_, allocation_);
+  if (access_ & MemoryAccessType::WRITE) {
+    // Call will be ignored by implementation if the memory type this allocation
+    // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
+    // we want. Don't check the result here as the destructor cannot throw.
+    vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE);
   }
+
+  vmaUnmapMemory(allocator_, allocation_);
 }
 
 void MemoryMap::invalidate() {
-  if (access_ & MemoryAccessType::READ && allocation_) {
+  if (access_ & MemoryAccessType::READ) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
@@ -356,13 +346,6 @@ VulkanImage::VulkanImage(
           sampler,
       },
       layout_(layout) {
-  // If any dims are zero, then no memory will be allocated for the image.
-  if (image_props.image_extents.width == 0 ||
-      image_props.image_extents.height == 0 ||
-      image_props.image_extents.depth == 0) {
-    return;
-  }
-
   const VkImageCreateInfo image_create_info{
       VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, // sType
       nullptr, // pNext

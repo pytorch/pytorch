@@ -422,19 +422,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def subtracer(self, source_target, prior_tracer):
+    def new_subtracer(self, source_target):
         new_scope_ctx = enter_new_scope()
         try:
-            if prior_tracer:
-                # Lineage MUST stay preserved
-                assert prior_tracer.parent is self.current_tracer
             new_scope_ctx.__enter__()
-            tracer = (
-                prior_tracer
-                if prior_tracer
-                else SubgraphTracer(
-                    self, parent=self.current_tracer, source_target=source_target
-                )
+            tracer = SubgraphTracer(
+                self, parent=self.current_tracer, source_target=source_target
             )
             self.tracers.append(tracer)
             yield tracer
@@ -1548,7 +1541,7 @@ class SubgraphTracer(fx.Tracer):
 # (possibly nested) SubgraphTracers, one per body function.
 #
 # Mechanically, we do the introspection by:
-# - Creating a new SubgraphTracer via OutputGraph.subtracer
+# - Creating a new SubgraphTracer via OutputGraph.new_subtracer
 # - Executing the body function.
 # This constructs the graph of the body function in the new SubgraphTracer
 # while modifying the state of the OutputGraph. For example:
