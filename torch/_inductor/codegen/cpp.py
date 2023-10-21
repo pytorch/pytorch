@@ -2868,9 +2868,14 @@ class KernelGroup:
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        
+        args_num = len(arg_defs)
+        print("{},args_num:{}".format(kernel_name, args_num))        
+        
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)
         code = BracesBuffer()
+        
         # TODO: support kernel profile on other platforms
         enable_kernel_profile = (
             config.cpp.enable_kernel_profile and sys.platform == "linux"
