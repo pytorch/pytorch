@@ -1986,6 +1986,21 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    def test_is_mutated_tensor_tensor_across_graph_break(self):
+        def fn(x):
+            y = x.add_(1)
+            cond = x is y
+            x.add_(1)
+            torch._dynamo.graph_break()
+            x.add_(1)
+            return x is y, cond
+
+        fn_opt = torch.compile(backend="eager", dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
     def test_is_mutated_tensor_tensor(self):
         def fn(x):
             y = x.add_(1)
