@@ -1991,6 +1991,8 @@ def forward(self, x_1, output_1):
             y = x.add_(1)
             cond = x is y
             x.add_(1)
+            # The real tensor values are recovered when graph breaking. 
+            # Hence we recover the invariant.
             torch._dynamo.graph_break()
             x.add_(1)
             return x is y, cond
