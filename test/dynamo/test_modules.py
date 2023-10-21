@@ -2221,7 +2221,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = Mod()
         foo(mod, torch.rand([4]))
+        print(mod.buffer.storage().nbytes())
         self.assertEqual(compiles_without_buffers, 1)
+        print(mod.buffer.dtype)
+        print(mod.buffer.storage().nbytes())
 
         foo(mod, torch.rand([4], dtype=torch.half))
         self.assertEqual(compiles_without_buffers, 2)
@@ -2232,7 +2235,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
-        self.assertTrue(compiles_without_buffers >= 3)
+        self.assertTrue(compiles_without_buffers >= 4)
 
     def test_unspec_non_inlinable_module(self):
         mod = UnspecNonInlinableModule()
