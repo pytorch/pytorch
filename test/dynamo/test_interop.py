@@ -32,8 +32,9 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         self._common(lambda a, b: trace_fn(a, b) + 1)
 
     def test_vmap_in_graph(self):
-        from torch._dynamo import allow_in_graph
         from functools import wraps
+
+        from torch._dynamo import allow_in_graph
 
         def traceable(f):
             f = allow_in_graph(f)
