@@ -1,6 +1,8 @@
 #pragma once
 
+#define Py_BUILD_CORE
 #include <torch/csrc/utils/python_compat.h>
+#undef Py_BUILD_CORE
 
 // Functions that need to be copied from the CPython source
 // should go in cpython_defs.c. Copying is required when, e.g.,

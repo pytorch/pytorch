@@ -34,22 +34,22 @@ PyCode_GetNFreevars(PyCodeObject* code) {
 
 // CPython hides these structured since
 // https://github.com/python/cpython/pull/19494
-#if PY_VERSION_HEX > 0x030900A6
+#if PY_VERSION_HEX > 0x030900A6 && !defined(Py_BUILD_CORE)
 /* GC information is stored BEFORE the object structure. */
 typedef struct {
-    // Pointer to next object in the list.
-    // 0 means the object is not tracked
-    uintptr_t _gc_next;
+  // Pointer to next object in the list.
+  // 0 means the object is not tracked
+  uintptr_t _gc_next;
 
-    // Pointer to previous object in the list.
-    // Lowest two bits are used for flags documented later.
-    uintptr_t _gc_prev;
+  // Pointer to previous object in the list.
+  // Lowest two bits are used for flags documented later.
+  uintptr_t _gc_prev;
 } PyGC_Head;
 
 /* Get an object's GC head */
-static inline PyGC_Head* _Py_AS_GC(PyObject *op) {
-    char *gc = ((char*)op) - sizeof(PyGC_Head);
-    return (PyGC_Head*)gc;
+static inline PyGC_Head* _Py_AS_GC(PyObject* op) {
+  char* gc = ((char*)op) - sizeof(PyGC_Head);
+  return (PyGC_Head*)gc;
 }
 #endif
 

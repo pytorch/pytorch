@@ -9688,6 +9688,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(t1.foo, "bar")
             self.assertIs(t1_ref(), t1)
             self.assertIsNot(t1_ref(), t2)
+            del t1, holder
+            self.assertIs(t1_ref(), None)
 
 
 # The following block extends TestTorch with negative dim wrapping tests

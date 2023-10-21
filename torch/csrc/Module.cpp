@@ -327,74 +327,103 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
 }
 
 PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
   PyObject* a_ = nullptr;
   PyObject* b_ = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &a_, &b_)) {
     return nullptr;
   }
 
+  //// Part 1: Basic type checks
   TORCH_CHECK(THPVariable_Check(a_));
   TORCH_CHECK(THPVariable_Check(b_));
   // TODO?: Add a check to make sure the user didn't subclass
-  // THPVariable from C and added new fields.
-  // Not sure how but that should be rare
+  // THPVariable from C and added new fields. That should be very rare though.
 
-  // Managed dict was introduced in https://github.com/python/cpython/pull/29879
-#if PY_VERSION_HEX > 0x031100A3
-  // Make sure we use managed dict for our type otherwise we would read out of
-  // bound!
+  //// Part 2: Compute real PyObject size in memory
+  // The code below ensures that from CPython feature point of view, the two
+  // objects do have the same size in memory by checking the appropriate type
+  // flags
+
+  // Managed dict was introduced in 3.11.a3
+  // https://github.com/python/cpython/pull/29879 Managed weakref was introduced
+  // in 3.12.a1 https://github.com/python/cpython/pull/95996 The Tensor class
+  // uses both as soon as they're available.
+  auto start_pyobj_offset = 0;
+  auto end_offset = 0;
+#if PY_VERSION_HEX > 0x030B00A3
+  // Always use managed dict here
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_DICT));
-  // We have 4 objects before PyObject* here:
-  // gc prev, gc next, __dict__ and weakref list.
-  const auto start_offset = 4;
-  auto end_offset = 0;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset == 0, "Bad weaklist offset for object");
-  TORCH_CHECK(Py_TYPE(a_)->tp_dictoffset == 0, "Bad dict offset for object");
-  TORCH_CHECK(
-      Py_TYPE(b_)->tp_weaklistoffset == 0, "Bad weaklist offset for object");
-  TORCH_CHECK(Py_TYPE(b_)->tp_dictoffset == 0, "Bad dict offset for object");
-#else
-  // Only gc prev and gc next are before the PyObject* in older versions.
-  const auto start_offset = 2;
-  // Objects
-  auto end_offset = 0;
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
-      "Inconsistent dict offset for object");
-  if (Py_TYPE(a_)->tp_weaklistoffset) {
-    end_offset += 1;
-  }
+  TORCH_CHECK(PyType_HasFeature(Py_TYPE(b_), Py_TPFLAGS_MANAGED_DICT));
+  start_pyobj_offset += 1;
   TORCH_CHECK(
       Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
-      "Inconsistent weaklist offset for object");
-  if (Py_TYPE(a_)->tp_dictoffset) {
-    end_offset += 1;
-  }
-#endif
+      "Bad dict offset for object for the swap function");
+#if PY_VERSION_HEX > 0x030C00A1
+  // Only use managed weakref when available
+  TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_WEAKREF));
+  TORCH_CHECK(PyType_HasFeature(Py_TYPE(b_), Py_TPFLAGS_MANAGED_WEAKREF));
+  start_pyobj_offset += 1;
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
+      "Bad weaklist offset for object for the swap function");
+#else
+  end_offset += 1;
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset != 0,
+      "Bad weaklist offset for object for the swap function");
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
+      "Bad weaklist offset for object for the swap function");
+#endif // PY_VERSION_HEX > 0x030B00A1
+
+#else
+  // No custom object before PyObject* in older versions
+  // But they are at the end
+  end_offset += 1;
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset != 0,
+      "Bad weaklist offset for object for the swap function");
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
+      "Inconsistent dict offset for object for the swap function");
+  end_offset += 1;
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
+      "Inconsistent weaklist offset for object for the swap function");
+#endif // PY_VERSION_HEX > 0x030A00A3
+
+  // Don't handle vectorcall at the end in any case
   TORCH_CHECK(
       Py_TYPE(a_)->tp_vectorcall_offset == 0,
-      "Swap doesn't support vectorcall objects");
+      "Swap doesn't support vectorcall object for the swap function");
   TORCH_CHECK(
       Py_TYPE(b_)->tp_vectorcall_offset == 0,
-      "Swap doesn't support vectorcall objects");
+      "Swap doesn't support vectorcall object for the swap function");
 
+  // There always is a PyGC_Head just before the PyObject*
+  TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_HAVE_GC));
+
+  //// Part 3: Get raw pointer and sizes
   // PyObject should be PyDictOrValues but we don't have access to it
-  void* a = (void*)((char*)a_ - start_offset * sizeof(PyObject*));
-  void* b = (void*)((char*)b_ - start_offset * sizeof(PyObject*));
-  auto actual_size =
-      sizeof(THPVariable) + (start_offset + end_offset) * sizeof(PyObject*);
+  void* a =
+      (void*)((char*)a_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
+  void* b =
+      (void*)((char*)b_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
+  auto actual_size = sizeof(THPVariable) +
+      (start_pyobj_offset + end_offset) * sizeof(PyObject*) +
+      2 * sizeof(PyGC_Head);
 
-  // Swap the full content of the PyObjects
+  //// Part 4: Swap the full content of the PyObjects
   std::vector<char> tmp(actual_size);
   memcpy(tmp.data(), a, actual_size);
   memcpy(a, b, actual_size);
   memcpy(b, tmp.data(), actual_size);
   tmp.clear();
 
-  // The only thing that we must preserve is the gc stuff!
+  //// Part 5: Put back the gc informations (ref count and linked list)
   // To make sure that everyone holding a PyObject* reference
-  // to this is still correct.
+  // to this is still correct, we put everything back.
   Py_ssize_t tmp_refcnt = Py_REFCNT(a_);
   Py_SET_REFCNT(a_, Py_REFCNT(b_));
   Py_SET_REFCNT(b_, tmp_refcnt);
@@ -409,7 +438,18 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   a_gc->_gc_prev = b_gc->_gc_prev;
   b_gc->_gc_prev = tmp_gc_head;
 
+//// Part 6: Put back weakrefs
+// Note that the tp_weaklistoffset is always correct, even in the managed case
+#define GET_WR_OBJECT(obj) \
+  (PyObject**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset)
+
+  PyObject* wr_tmp = *GET_WR_OBJECT(a_);
+  *GET_WR_OBJECT(a_) = *GET_WR_OBJECT(b_);
+  *GET_WR_OBJECT(b_) = wr_tmp;
+#undef GET_WR_OBJECT
+
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
