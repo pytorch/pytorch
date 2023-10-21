@@ -413,7 +413,11 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
       (input_memory_format  == at::MemoryFormat::ChannelsLast) || (
        weight_memory_format == at::MemoryFormat::ChannelsLast));
 
-  return can_use_thnn_channels_last_2d;
+  bool can_use_thnn_channels_last_3d = input.device().is_cpu() && (
+      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) || (
+       weight_memory_format == at::MemoryFormat::ChannelsLast3d));
+
+  return can_use_thnn_channels_last_2d || can_use_thnn_channels_last_3d;
 }
 
 static inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
