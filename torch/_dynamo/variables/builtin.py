@@ -27,7 +27,7 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
-    get_fake_example_value,
+    extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
@@ -1434,8 +1434,8 @@ class BuiltinVariable(VariableTracker):
 
             if op is operator.is_ and isinstance(right, TensorVariable):
                 return ConstantVariable.create(
-                    id(get_fake_example_value(left.as_proxy().node))
-                    == id(get_fake_example_value(right.as_proxy().node))
+                    id(extract_fake_example_value(left.as_proxy().node))
+                    == id(extract_fake_example_value(right.as_proxy().node))
                 )
 
             if op not in supported_tensor_comparison_ops.values():

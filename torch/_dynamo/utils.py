@@ -1337,11 +1337,11 @@ def get_debug_dir():
     return _get_debug_dir(debug_root)
 
 
-def get_fake_example_value(node, required=True):
+def extract_fake_example_value(node, required=True):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
-        unimplemented("example_value was required but not available")
+        unimplemented("`FakeTensor` example value was required but not available")
     else:
         return None
 
