@@ -326,24 +326,6 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
-// BAD COPY PASTE
-/* GC information is stored BEFORE the object structure. */
-typedef struct {
-    // Pointer to next object in the list.
-    // 0 means the object is not tracked
-    uintptr_t _gc_next;
-
-    // Pointer to previous object in the list.
-    // Lowest two bits are used for flags documented later.
-    uintptr_t _gc_prev;
-} PyGC_Head;
-
-/* Get an object's GC head */
-static inline PyGC_Head* _Py_AS_GC(PyObject *op) {
-    char *gc = ((char*)op) - sizeof(PyGC_Head);
-    return (PyGC_Head*)gc;
-}
-
 PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   PyObject* a_ = nullptr;
   PyObject* b_ = nullptr;
@@ -353,26 +335,62 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
 
   TORCH_CHECK(THPVariable_Check(a_));
   TORCH_CHECK(THPVariable_Check(b_));
-  // TODO: Add a check to make sure the user didn't subclass
+  // TODO?: Add a check to make sure the user didn't subclass
   // THPVariable from C and added new fields.
   // Not sure how but that should be rare
 
-  // Make sure we use managed dict otherwise we would read out of bound!
+  // Managed dict was introduced in https://github.com/python/cpython/pull/29879
+#if PY_VERSION_HEX > 0x031100A3
+  // Make sure we use managed dict for our type otherwise we would read out of
+  // bound!
   TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_DICT));
+  // We have 4 objects before PyObject* here:
+  // gc prev, gc next, __dict__ and weakref list.
+  const auto start_offset = 4;
+  auto end_offset = 0;
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset == 0, "Bad weaklist offset for object");
+  TORCH_CHECK(Py_TYPE(a_)->tp_dictoffset == 0, "Bad dict offset for object");
+  TORCH_CHECK(
+      Py_TYPE(b_)->tp_weaklistoffset == 0, "Bad weaklist offset for object");
+  TORCH_CHECK(Py_TYPE(b_)->tp_dictoffset == 0, "Bad dict offset for object");
+#else
+  // Only gc prev and gc next are before the PyObject* in older versions.
+  const auto start_offset = 2;
+  // Objects
+  auto end_offset = 0;
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
+      "Inconsistent dict offset for object");
+  if (Py_TYPE(a_)->tp_weaklistoffset) {
+    end_offset += 1;
+  }
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
+      "Inconsistent weaklist offset for object");
+  if (Py_TYPE(a_)->tp_dictoffset) {
+    end_offset += 1;
+  }
+#endif
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_vectorcall_offset == 0,
+      "Swap doesn't support vectorcall objects");
+  TORCH_CHECK(
+      Py_TYPE(b_)->tp_vectorcall_offset == 0,
+      "Swap doesn't support vectorcall objects");
 
-  // A bunch of stuff is before the pointer: the gc prev/next, __dict__
-  // and weakref list. So we offset back by 4
   // PyObject should be PyDictOrValues but we don't have access to it
-  void* a = (void*)a_ - 4*sizeof(PyObject*);
-  void* b = (void*)b_ - 4*sizeof(PyObject*);
-  auto actual_size = sizeof(THPVariable) + 4*sizeof(PyObject*);
+  void* a = (void*)((char*)a_ - start_offset * sizeof(PyObject*));
+  void* b = (void*)((char*)b_ - start_offset * sizeof(PyObject*));
+  auto actual_size =
+      sizeof(THPVariable) + (start_offset + end_offset) * sizeof(PyObject*);
 
   // Swap the full content of the PyObjects
-  void* tmp = malloc(actual_size);
-  memcpy(tmp, a, actual_size);
+  std::vector<char> tmp(actual_size);
+  memcpy(tmp.data(), a, actual_size);
   memcpy(a, b, actual_size);
-  memcpy(b, tmp, actual_size);
-  free(tmp);
+  memcpy(b, tmp.data(), actual_size);
+  tmp.clear();
 
   // The only thing that we must preserve is the gc stuff!
   // To make sure that everyone holding a PyObject* reference
@@ -381,10 +399,10 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   Py_SET_REFCNT(a_, Py_REFCNT(b_));
   Py_SET_REFCNT(b_, tmp_refcnt);
 
+  // We didn't move gc trackers
   PyGC_Head* a_gc = _Py_AS_GC(a_);
   PyGC_Head* b_gc = _Py_AS_GC(b_);
-  uintptr_t tmp_gc_head;
-  tmp_gc_head = a_gc->_gc_next;
+  uintptr_t tmp_gc_head = a_gc->_gc_next;
   a_gc->_gc_next = b_gc->_gc_next;
   b_gc->_gc_next = tmp_gc_head;
   tmp_gc_head = a_gc->_gc_prev;
