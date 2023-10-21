@@ -20,11 +20,8 @@ from ..utils import make_cell
 from .base import typestr, VariableTracker
 
 
-def wrap_bound_arg(tx, val, options, source=None):
+def wrap_bound_arg(tx, val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
-    assert (
-        "source" not in options
-    ), "Source needs to be separate from options due to recursive calls for lists/dicts"
     if isinstance(val, VariableTracker):
         return val
     elif not source:

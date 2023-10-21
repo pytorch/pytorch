@@ -580,7 +580,6 @@ class BuiltinVariable(VariableTracker):
                     (args[0].as_proxy(),),
                     {},
                 ),
-                **options,
             )
             return out
 
@@ -596,7 +595,7 @@ class BuiltinVariable(VariableTracker):
                 self.fn, args[0], args[1]
             )
             if binop_handler:
-                res = binop_handler(tx, args[0], args[1], options)
+                res = binop_handler(tx, args[0], args[1], {})
                 if res is not None:
                     return res
 
@@ -632,7 +631,6 @@ class BuiltinVariable(VariableTracker):
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
-                **options,
             )
 
         if self.fn is round:
@@ -932,11 +930,11 @@ class BuiltinVariable(VariableTracker):
         if args[0].has_unpack_var_sequence(tx):
             items = [
                 variables.TupleVariable(
-                    [variables.ConstantVariable.create(idx, **options), var],
+                    [variables.ConstantVariable.create(idx), var],
                 )
                 for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
             ]
-            return variables.TupleVariable(items, **options)
+            return variables.TupleVariable(items)
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)

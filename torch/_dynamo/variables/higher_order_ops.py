@@ -266,7 +266,7 @@ def speculate_subgraph(
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
         if isinstance(f, UserFunctionVariable):
-            f_name = f.get_name()
+            f_name = f.unwrap().get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
             f"to trace function `{f_name}` into a single graph. This means "
@@ -380,6 +380,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
         from .builder import wrap_fx_proxy
+
+        args = VariableTracker.apply(lambda x: x.realize(), args)
+        kwargs = VariableTracker.apply(lambda x: x.realize(), kwargs)
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -588,8 +591,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
-        assert type(args[1]) is TensorVariable
+        assert type(args[0].realize()) in (
+            UserFunctionVariable,
+            NestedUserFunctionVariable,
+        )
+        assert type(args[1].realize()) is TensorVariable
 
         sample_shape = args[1].get_real_value().size()
         if len(sample_shape) < 1 or sample_shape[0] == 0:

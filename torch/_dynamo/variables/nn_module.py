@@ -432,21 +432,19 @@ class NNModuleVariable(VariableTracker):
                         key,
                         name,
                         source=NNModuleSource(gen_source(self.source, name)),
-                        **options,
                     )
                 )
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
 
         def named_embed(name, obj):
             return TupleVariable(
                 [
-                    ConstantVariable.create(name, **options),
+                    ConstantVariable.create(name),
                     tx.output.register_attr_or_module(
                         obj,
                         key,
                         name,
                         source=NNModuleSource(gen_source(self.source, name)),
-                        **options,
                     ),
                 ]
             )
@@ -465,28 +463,28 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_parameters":
             result = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
             ):
                 result.append(named_embed(name, param))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_buffers":
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
             ):
                 result.append(named_embed(name, buffer))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
             ):
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "children":
             assert not (args or kwargs)
             return wrap_values(module.named_children())
@@ -500,8 +498,8 @@ class NNModuleVariable(VariableTracker):
             assert not (args or kwargs)
             result = []
             for name in module.keys():
-                result.append(ConstantVariable.create(name, **options))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+                result.append(ConstantVariable.create(name))
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
@@ -510,10 +508,10 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name, submod in module.items():
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "__len__":
             assert not (args or kwargs)
-            return ConstantVariable.create(len(module), **options)
+            return ConstantVariable.create(len(module))
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
@@ -521,7 +519,7 @@ class NNModuleVariable(VariableTracker):
             and args[0].is_python_constant()
         ):
             return ConstantVariable.create(
-                args[0].as_python_constant() in module._modules, **options
+                args[0].as_python_constant() in module._modules
             )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
@@ -543,7 +541,7 @@ class NNModuleVariable(VariableTracker):
 
                 src = AttrSource(AttrSource(self.source, name), "__func__")
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=src, **options),
+                    variables.UserFunctionVariable(fn, source=src),
                     [self] + list(args),
                     kwargs,
                 )
@@ -565,7 +563,6 @@ class NNModuleVariable(VariableTracker):
                             submod,
                             key,
                             source=src,
-                            **options,
                         )
                     )
                     submods.append(submod)
@@ -577,7 +574,6 @@ class NNModuleVariable(VariableTracker):
                     source=NNModuleSource(
                         GetItemSource(self.source, args[0].as_python_constant())
                     ),
-                    **options,
                 )
                 return new_module_variable
 
@@ -588,7 +584,6 @@ class NNModuleVariable(VariableTracker):
                 self.module_key,
                 key,
                 source=NNModuleSource(GetItemSource(self.source, key)),
-                **options,
             )
         elif (
             name == "_get_abs_string_index"
@@ -604,9 +599,8 @@ class NNModuleVariable(VariableTracker):
             # Inline the function
             fn = getattr(module, name).__func__
             fn_source = AttrSource(AttrSource(self.source, name), "__func__")
-            options["source"] = fn_source
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
+                variables.UserFunctionVariable(fn, source=fn_source),
                 [self] + args,
                 kwargs,
             )

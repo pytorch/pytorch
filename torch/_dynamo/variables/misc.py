@@ -776,7 +776,7 @@ class SkipFilesVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal(), **options
+                value, mutable_local=MutableLocal()
             )
         elif (
             self.value is itertools.product
@@ -786,10 +786,8 @@ class SkipFilesVariable(VariableTracker):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = []
             for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item), **options))
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+                items.append(variables.TupleVariable(list(item)))
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is itertools.chain
             and not kwargs
@@ -799,9 +797,7 @@ class SkipFilesVariable(VariableTracker):
             items = []
             for item in itertools.chain(*seqs):
                 items.append(item)
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
 

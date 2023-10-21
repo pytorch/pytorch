@@ -379,18 +379,17 @@ class TensorVariable(VariableTracker):
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
-                **options,
             )
 
         elif name in ("numel", "nelement"):
             if self.size is not None:
-                return ConstantVariable.create(product(self.size), **options)
+                return ConstantVariable.create(product(self.size))
 
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 fake_r = fake.numel()
                 if not free_symbols(fake_r):
-                    return ConstantVariable.create(int(fake_r), **options)
+                    return ConstantVariable.create(int(fake_r))
 
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
 
@@ -402,22 +401,19 @@ class TensorVariable(VariableTracker):
                     "numel",
                     *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
-                **options,
             )
 
         elif name in ("ndimension", "dim") and self.ndim is not None:
-            constant_result = ConstantVariable.create(self.ndim, **options)
+            constant_result = ConstantVariable.create(self.ndim)
         elif name == "is_floating_point" and self.dtype is not None:
-            constant_result = ConstantVariable.create(
-                self.dtype.is_floating_point, **options
-            )
+            constant_result = ConstantVariable.create(self.dtype.is_floating_point)
         elif name == "is_contiguous" and self.is_contiguous is not None:
             if "memory_format" in kwargs:
                 memory_format = kwargs.pop("memory_format").as_python_constant()
             else:
                 memory_format = torch.contiguous_format
             constant_result = ConstantVariable.create(
-                memory_format in self.is_contiguous, **options
+                memory_format in self.is_contiguous
             )
         elif (
             name == "type"
@@ -430,11 +426,11 @@ class TensorVariable(VariableTracker):
             ]
             if self.device.type == "cuda":
                 constant_result = ConstantVariable.create(
-                    f"torch.cuda.{tensortype.__name__}", **options
+                    f"torch.cuda.{tensortype.__name__}"
                 )
             else:
                 constant_result = ConstantVariable.create(
-                    f"torch.{tensortype.__name__}", **options
+                    f"torch.{tensortype.__name__}"
                 )
         elif (
             name == "type"
@@ -445,7 +441,7 @@ class TensorVariable(VariableTracker):
             # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
             # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
             tensor_type = args[0].as_python_constant()
-            tensor_type_const = ConstantVariable.create(fqn(tensor_type), **options)
+            tensor_type_const = ConstantVariable.create(fqn(tensor_type))
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -453,11 +449,10 @@ class TensorVariable(VariableTracker):
                     name,
                     *proxy_args_kwargs([self, tensor_type_const], kwargs),
                 ),
-                **options,
             )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
-            constant_result = ConstantVariable.create(index, **options)
+            constant_result = ConstantVariable.create(index)
         else:
             constant_result = None
 
@@ -467,9 +462,7 @@ class TensorVariable(VariableTracker):
             if len(args) == 1:
                 return constant_result.getitem_const(args[0])
             elif args:
-                return TupleVariable(
-                    [constant_result.getitem_const(a) for a in args], **options
-                )
+                return TupleVariable([constant_result.getitem_const(a) for a in args])
             return constant_result
         elif name == "numpy":
             if not config.trace_numpy:
@@ -496,7 +489,7 @@ class TensorVariable(VariableTracker):
                 proxy = tx.output.create_proxy(
                     "call_method", "cpu", *proxy_args_kwargs([self], {})
                 )
-            return NumpyNdarrayVariable.create(tx, proxy, **options)
+            return NumpyNdarrayVariable.create(tx, proxy)
         elif name == "tolist":
             from .builder import SourcelessBuilder
 

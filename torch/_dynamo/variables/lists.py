@@ -434,7 +434,6 @@ class DequeVariable(CommonListMethodsVariable):
                 self,
                 DequeVariable(
                     [args[0]] + list(self.items),
-                    **options,
                 ),
             )
         else:
