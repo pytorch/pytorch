@@ -16,7 +16,7 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4
+  numpy==1.24.2
 
 # ONNXRuntime should be installed before installing
 # onnx-weekly. Otherwise, onnx-weekly could be
@@ -29,10 +29,10 @@ pip_install \
   transformers==4.32.1
 
 pip_install coloredlogs packaging
-retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230912006
+retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.17.0.dev20231005006
 
-pip_install onnx==1.14.1
-pip_install onnxscript==0.1.0.dev20230912 --no-deps
+pip_install -i https://test.pypi.org/simple/ onnx==1.15.0rc1
+pip_install onnxscript==0.1.0.dev20231006 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/

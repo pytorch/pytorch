@@ -1,4 +1,4 @@
-.. _control_flow_cond:
+.. _cond:
 
 Control Flow - Cond
 ====================

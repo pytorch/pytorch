@@ -32,7 +32,7 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_constant
+from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -572,12 +572,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inner_fn = fn.value
         if hasattr(fn, "fn"):
             inner_fn = fn.fn
-        if (
-            inner_fn
-            and callable(inner_fn)
-            and hasattr(inner_fn, "_dynamo_forbidden")
-            and inner_fn._dynamo_forbidden
-        ):
+        if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
@@ -1193,6 +1188,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         kwargs = dict(zip(argnames, kwargs_list))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
+
+    def LOAD_METHOD_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        if sys.version_info < (3, 11):
+            self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
+        else:
+            self.LOAD_METHOD(dataclasses.replace(inst, argval=argval))
+
+    def LOAD_ATTR_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
 
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
@@ -2247,7 +2257,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
+        result = skipfiles.check_verbose(func, extra_check=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
@@ -2291,7 +2301,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
-            raise ArgsMismatchError(
+            raise ArgsMismatchError(  # noqa: TRY200
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",

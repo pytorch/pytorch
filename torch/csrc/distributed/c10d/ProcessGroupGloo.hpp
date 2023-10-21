@@ -289,6 +289,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override;
+
   c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =

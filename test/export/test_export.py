@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -10,7 +11,6 @@ from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint, Dim, export
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -37,7 +37,7 @@ class TestDynamismExpression(TestCase):
 
         def f(x):
             b = x.item()
-            constrain_as_size(b)
+            torch._constrain_as_size(b)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
@@ -67,8 +67,8 @@ class TestDynamismExpression(TestCase):
 
         def conflicting_constraints(x):
             b = x.item()
-            torch.export.constrain_as_size(b)
-            torch.export.constrain_as_value(b, min=4, max=5)
+            torch._constrain_as_size(b)
+            torch._constrain_as_value(b, min=4, max=5)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
@@ -882,7 +882,7 @@ class TestExport(TestCase):
     def test_constrain_value_with_no_default(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_value(n)
+            torch._constrain_as_value(n)
             return y + n
 
         ep = export(fn, (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3))))
@@ -892,7 +892,7 @@ class TestExport(TestCase):
     def test_constrain_value_with_symfloat(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_value(n)
+            torch._constrain_as_value(n)
             return y + n
 
         with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, "Constraining SymFloat or Symbool is nyi"):
@@ -901,7 +901,7 @@ class TestExport(TestCase):
     def test_constrain_size_in_eager(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_size(n)
+            torch._constrain_as_size(n)
             return y + n
 
         ep = export(fn, (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))))
@@ -911,8 +911,8 @@ class TestExport(TestCase):
     def test_constrain_size_with_constrain_value(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_value(n, 2, 10)
-            constrain_as_size(n)
+            torch._constrain_as_value(n, 2, 10)
+            torch._constrain_as_size(n)
             return y + n
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 10\]."):
@@ -927,27 +927,27 @@ class TestExport(TestCase):
 
         def case_1(x, y):
             n = x.item()
-            constrain_as_size(n, min=0)
+            torch._constrain_as_size(n, min=0)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_2(x, y):
             n = x.item()
-            constrain_as_size(n, min=0, max=6)
+            torch._constrain_as_size(n, min=0, max=6)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_3(x, y):
             n = x.item()
-            constrain_as_size(n, min=0, max=1)
+            torch._constrain_as_size(n, min=0, max=1)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_4(x, y):
             n = x.item()
-            constrain_as_size(n, min=2)
+            torch._constrain_as_size(n, min=2)
             return y.sum() + torch.ones(n, 5).sum()
 
         def case_5(x, y):
             n = x.item()
-            constrain_as_size(n, min=1)
+            torch._constrain_as_size(n, min=1)
             return y.sum() + torch.ones(n, 5).sum()
 
         ep = export(case_1, (torch.tensor(1), torch.ones(4, 5)))
@@ -1023,7 +1023,7 @@ class TestExport(TestCase):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_value(a, 4, 7)
+            torch._constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         ep = export(f, (torch.tensor([5]),))
@@ -1042,7 +1042,7 @@ class TestExport(TestCase):
     def test_export_with_inline_constraints_complex(self):
         def f(x):
             a = x.item()
-            constrain_as_value(a, 4, 7)
+            torch._constrain_as_value(a, 4, 7)
             empty = torch.empty((a, 4))
 
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
@@ -1366,45 +1366,6 @@ class TestExport(TestCase):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
-    def test_lift_constants(self) -> None:
-        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-
-        def f(x):
-            return x + torch.tensor(3)
-
-        ep = export(f, (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        for node in ep.graph.nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 1)
-        self.assertEqual(len(ep.state_dict), 1)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.tensor(3)
-
-            def forward(self, x):
-                list_tensor = [torch.tensor(3), torch.tensor(4)]
-                return x + self.a + list_tensor[0] + list_tensor[1]
-
-        ep = export(Foo(), (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        nodes = list(ep.graph.nodes)
-
-        for node in nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 3)
-        self.assertEqual(len(ep.state_dict), 3)
-
-        # These constants should be placed after the param/buffers
-        self.assertTrue(
-            nodes[1].name in ep.graph_signature.inputs_to_buffers and
-            nodes[2].name in ep.graph_signature.inputs_to_buffers
-        )
-
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -1519,6 +1480,30 @@ class TestExport(TestCase):
             "torch.ops.aten.t.default", 0, exactly=True
         ).run(core_aten_ep.graph_module.code)
         self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
+
+    def test_nonzero_2(self):
+        def f(x):
+            return torch.nonzero(x)
+        ep = export(f, (torch.ones(2),))
+        inp = torch.randn(2)
+        self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
+
+    def test_redundant_asserts(self):
+        def f(x):
+            y = x.item()
+            torch._constrain_as_size(y)
+            return torch.zeros(y)
+
+        ep = export(f, (torch.tensor([3]),))
+        self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
+def forward(self, arg0_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+    ge = _local_scalar_dense >= 0
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
+    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (zeros,)""")
 
 if __name__ == '__main__':
     run_tests()

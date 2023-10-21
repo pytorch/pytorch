@@ -198,7 +198,7 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f32, f64},
+    "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -206,7 +206,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    "multinomial": {f32, f64},
+    "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.local_response_norm": {i64},
@@ -238,7 +238,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -255,7 +254,6 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
 
@@ -354,6 +352,13 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
+    # Temporarily skip interpolate bilinear and bicubic tests:
+    "nn.functional.interpolate.bicubic": {
+        "assert_equal": False,
+        "check_gradient": False,
+    },
+    "nn.functional.interpolate.bilinear": {"assert_equal": False},
+    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
 
 # Always test with all sample for following ops

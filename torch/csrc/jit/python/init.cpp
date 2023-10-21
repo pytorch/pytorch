@@ -1283,6 +1283,11 @@ void initJITBindings(PyObject* module) {
           "singleton_int",
           [](const c10::SymNode& node) {
             return node->singleton_int();
+          })
+      .def(
+          "singleton_coeff",
+          [](const c10::SymNode& node) {
+            return node->singleton_coeff();
           });
 
   // clang-format on
@@ -1450,6 +1455,7 @@ void initJITBindings(PyObject* module) {
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
           int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
+          Py_DECREF(res);
           if (i > 0) {
             return i;
           }

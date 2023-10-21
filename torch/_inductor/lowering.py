@@ -44,7 +44,14 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    is_dynamic,
+    is_pointwise_use,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -423,13 +430,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(*args):
-            return any(
-                isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-                for t in args
-            )
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -748,16 +748,19 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    # TODO: It would be better to realize the input if any of its sizes
-    # are unbacked, because typically the size will be non-zero.  However,
-    # this cannot be done directly as below as we'll choke on the size_hint
-    # here
-    if x_size_product > 0 and not any(
-        V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-    ):
-        # maybe realize input before broadcasting it
-        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
+    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        # TODO: It would be better to realize the input if any of its sizes
+        # are unbacked, because typically the size will be non-zero.  However,
+        # this cannot be done directly as below as we'll choke on the size_hint
+        # here
+        if x_size_product > 0 and not any(
+            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
+        ):
+            # maybe realize input before broadcasting it
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+            )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -947,6 +950,76 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
+def pointwise_cat(inputs, dim=0):
+    # (inclusive, exclusive)
+    inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
+    prev_end = 0
+    for inp in inputs:
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
+        prev_end = inputs_ranges[-1][-1]
+
+    inputs_loaders = [inp.make_loader() for inp in inputs]
+
+    def inner_fn(idx):
+        idx_dim = ops.index_expr(idx[dim], torch.int64)
+
+        masks = []
+        masked_loads = []
+        for i in range(len(inputs)):
+            start = (
+                ops.constant(0, torch.int64)
+                if i == 0
+                else ops.index_expr(inputs_ranges[i][0], torch.int64)
+            )
+            end = ops.index_expr(inputs_ranges[i][1], torch.int64)
+
+            start_cond = ops.ge(idx_dim, start)
+            end_cond = ops.lt(idx_dim, end)
+            if i == 0:
+                mask = end_cond
+            elif i == len(inputs) - 1:
+                mask = start_cond
+            else:
+                mask = ops.and_(start_cond, end_cond)
+
+            masks.append(mask)
+            idx_load = list(idx)
+
+            # if we're concatting [4], [2]
+            # when we index the second tensor for 5 we want to index 5 - 4
+            idx_load[dim] -= inputs_ranges[i][0]
+
+            masked_loads.append(
+                ops.masked(
+                    mask,
+                    lambda: inputs_loaders[i](idx_load),
+                    0.0,  # this value should be unused
+                ),
+            )
+
+        def get_masked_val(i):
+            if i != len(inputs) - 1:
+                return ops.where(
+                    masks[i],
+                    masked_loads[i],
+                    get_masked_val(i + 1),
+                )
+            else:
+                return masked_loads[-1]
+
+        return get_masked_val(0)
+
+    new_size = list(inputs[0].get_size())
+    new_size[dim] = inputs_ranges[-1][-1]
+
+    return Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=inputs[0].get_dtype(),
+        inner_fn=inner_fn,
+        ranges=new_size,
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if all(input.get_dtype() is torch.uint8 for input in inputs):
@@ -966,6 +1039,36 @@ def cat(inputs, dim=0):
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
+
+    def should_lower_cat_input(x) -> bool:
+        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # them in case we want to fuse
+        if ir.is_storage_and_layout(x):
+            storage, _ = ir.as_storage_and_layout(x, freeze=False)
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+
+        if isinstance(x, TensorBox):
+            if isinstance(x.data, ir.BaseView):
+                return should_lower_cat_input(x.data.unwrap_view())
+            else:
+                return should_lower_cat_input(x.data)
+
+        if isinstance(x, ir.StorageBox):
+            return should_lower_cat_input(x.data)
+
+        if isinstance(x, ir.Pointwise):
+            return True
+
+        return False
+
+    if len(inputs) <= config.max_pointwise_cat_inputs:
+        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+            return pointwise_cat(inputs, dim)
+
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
@@ -2571,63 +2674,112 @@ def check_and_broadcast_indices(indices, device):
         if x.get_device() != device:
             raise NotImplementedError("Fallback when indices is on a different device")
         new_indices[i] = x
-        output_dim = len(x.get_size())
-    start_offset = 0
-    # only support None at start or end for now
-    tmp = list(new_indices)
-    while tmp and tmp[-1] is None:
-        tmp.pop()
-    while tmp and tmp[0] is None:
-        tmp.pop(0)
-        start_offset += 1
-    if any((i is None) for i in tmp):
-        raise NotImplementedError("Fallback when None is in the middle of indices")
+    return new_indices, valid_idxs
 
-    end_offset = output_dim + start_offset
-    return new_indices, start_offset, end_offset
+
+def index_output_size_and_inner_fn(
+    x_size,
+    indices,
+    tensor_indices,
+    tensor_size,
+    indices_loaders,
+    indexed_size,
+    x_loader,
+):
+    # Note that behavior of indexing differs when there are non consecutive
+    # tensors. In this case, the tensor index is pulled to the beginning.
+    #
+    # Suppose a = torch.arange(3 * 4 * 5 * 6 * 7).view(3, 4, 5, 6, 7)
+    #         x = torch.tensor[1,2]
+    # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
+    # be pulled to the front.
+    non_consecutive_tensors = False
+    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+        if current - previous != 1:
+            non_consecutive_tensors = True
+
+    output_size = [x_size[i] for i, val in enumerate(indices) if val is None]
+    output_size = [*output_size, *x_size[len(output_size) + len(tensor_indices) :]]
+
+    first_tensor_index = tensor_indices[0]
+    if non_consecutive_tensors:
+        output_size = tensor_size + output_size
+    else:
+        output_size = (
+            output_size[:first_tensor_index]
+            + tensor_size
+            + output_size[first_tensor_index:]
+        )
+
+    def fn(idx):
+        assert len(idx) == len(output_size)
+        assert len(indices_loaders) == len(indexed_size)
+
+        rank = len(tensor_size)
+        new_index = []
+        first_tensor_index = tensor_indices[0]
+        start_offset = 0 if non_consecutive_tensors else first_tensor_index
+        next_idx = 0
+        for i in range(tensor_indices[-1] + 1):
+            if i == start_offset:
+                next_idx += rank
+            if indices[i] is None:
+                assert next_idx < len(idx)
+                new_index.append(idx[next_idx])
+                next_idx += 1
+            else:
+                loader = indices_loaders[i]
+                assert loader is not None
+                size = indexed_size[i]
+                new_index.append(
+                    ops.indirect_indexing(
+                        loader(idx[start_offset : start_offset + rank]),
+                        size,
+                        check=check,
+                    )
+                )
+        new_index = [
+            *new_index,
+            *idx[next_idx:],
+        ]
+        return new_index if x_loader is None else x_loader(new_index)
+
+    return output_size, fn
 
 
 def index_impl(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices, start_offset, end_offset = check_and_broadcast_indices(
-        indices, x.get_device()
-    )
+    indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
+    assert len(tensor_indices) > 0, "Must have at least one valid idx"
 
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
     # no guards on output size, all the guards are set in broadcast_tensors
 
-    output_size = list(indices_sizes[0])
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
 
     x_size = x.get_size()
 
     indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
-    if 0 in indexed_size and 0 not in output_size:
+    if 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
-    output_size = [
-        *x_size[:start_offset],
-        *output_size,
-        *x_size[start_offset + len(indices_loaders) :],
-    ]
-
-    def fn(idx):
-        assert len(idx) == len(output_size)
-        assert len(indices_loaders) == len(indexed_size)
-        new_index = [
-            ops.indirect_indexing(
-                loader(idx[start_offset:end_offset]), size, check=check
-            )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
-        new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
-        return x_loader(new_index)
+    indexed_size = [x_size[i] for i in range(len(indices))]
+    output_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        x_loader,
+    )
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        inner_fn=fn,
+        inner_fn=inner_fn,
         ranges=output_size,
     )
 
@@ -2722,14 +2874,16 @@ def index_put_impl_(self, indices, values, accumulate, check):
         return self
 
     values = to_dtype(values, self.get_dtype())
+
     try:
-        indices, start_offset, end_offset = check_and_broadcast_indices(
+        # Note that code will only get here when dtype is uint32
+        indices, tensor_indices = check_and_broadcast_indices(
             indices, self.get_device()
         )
     except NotImplementedError:
         return index_put_fallback(self, indices, values, accumulate)
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
 
     assert isinstance(self, TensorBox)
     self.realize()
@@ -2738,34 +2892,29 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if x_ndim == 0:
         self = view(self, [1])
 
-    output_size = list(indices_sizes[0])
-    expected_vals_size = [
-        *x_size[:start_offset],
-        *output_size,
-        *x_size[start_offset + len(indices_sizes) :],
-    ]
-    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
+    indexed_size = [x_size[i] for i in range(len(indices))]
+
+    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        None,
+    )
 
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
-
-    def output_indexer(index):
-        assert len(index) == len(expected_vals_size)
-        new_index = [
-            ops.indirect_indexing(
-                loader(index[start_offset:end_offset]), size, check=check
-            )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
-        new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
-        return new_index
 
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
-        output_indexer=output_indexer,
+        output_indexer=inner_fn,
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
@@ -3176,14 +3325,12 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.evaluate_static_shape(h)
-    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
-        size = ops.constant(size - 1, torch.int32)
+        size = ops.index_expr(size - 1, torch.int32)
         x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.constant(offset, torch.int32))
+        x = ops.sub(x, ops.index_expr(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
         return ops.indirect_indexing(x, size_num, check=False)
 
@@ -3197,7 +3344,7 @@ def reflection_pad2d(x, padding):
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+        ranges=[*batch, h + top + bot, w + left + right],
     )
 
 
@@ -4170,7 +4317,6 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
             assert len(index) == len(size)
-            assert all(index[i] == 0 for i in reduced_idx)
             index = [index[i] for i in kept_idx]
         assert len(index) == len(kept_idx)
         new_index = [None] * (len(index) + len(reduction_index))
@@ -4207,7 +4353,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
             dtype=dtype,
             override_return_dtype=override_return_dtype,
         )
-        result = Reduction.create(reduction_type=reduction_type, **kwargs)
+        result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
             result.data.data, Reduction
         ):  # Only realize if reduction isn't unrolled
@@ -4688,6 +4834,8 @@ sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
+register_lowering(aten._neg_view)(neg)
+
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
@@ -4713,6 +4861,7 @@ register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
