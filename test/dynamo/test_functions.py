@@ -1862,8 +1862,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(fn(z), fn_opt(z))
 
 
-
-
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
 if __name__ == "__main__":
