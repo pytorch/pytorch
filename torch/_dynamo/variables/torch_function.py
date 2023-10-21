@@ -2,6 +2,7 @@ from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
 from ..utils import is_tensor_base_attr_getter
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
 
@@ -48,8 +49,6 @@ def call_torch_function(
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
-    from .tensor import TensorWithTFOverrideVariable
-
     if tx.output.torch_function_enabled:
         all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
         return any(isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args)
@@ -59,7 +58,6 @@ def can_dispatch_torch_function(tx, args, kwargs):
 
 def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
-    from .tensor import TensorWithTFOverrideVariable
 
     all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
     overloaded_args = _get_overloaded_args(
@@ -82,3 +80,89 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     unimplemented(
         f"All __torch_function__ overrides for call {fn} with args {args} and kwargs {kwargs} returned NotImplemented"
     )
+
+
+class TensorWithTFOverrideVariable(VariableTracker):
+    """
+    Represents a tensor subclass instance with a __torch_function__ override.
+    """
+
+    @staticmethod
+    def create(
+        tx,
+        tensor_variable,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        var = TensorWithTFOverrideVariable(
+            tensor_variable,
+            torch_function_fn,
+            subclass_type,
+            **kwargs,
+        )
+        # stash the subclass type to rewrap an output tensor if needed
+        if var.global_mangled_class_name() not in tx.output.global_scope:
+            tx.output.install_global(var.global_mangled_class_name(), subclass_type)
+
+        return var
+
+    def __init__(
+        self,
+        tensor_variable,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.tensor_variable = tensor_variable
+        self.torch_function_fn = torch_function_fn
+        self.subclass_type = subclass_type
+
+    def as_proxy(self):
+        return self.tensor_variable.as_proxy()
+
+    def python_type(self):
+        return self.subclass_type
+
+    def subclass_type_var(self):
+        from ..source import GlobalSource
+        from .user_defined import UserDefinedClassVariable
+
+        return UserDefinedClassVariable(
+            self.subclass_type, source=GlobalSource(self.global_mangled_class_name())
+        )
+
+    def global_mangled_class_name(self):
+        return f"__subclass_{self.subclass_type.__name__}_{id(self.subclass_type)}"
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        return call_torch_function(
+            tx,
+            self.subclass_type_var(),
+            self.torch_function_fn,
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This code block implements inlining the __torch_function__ override
+        # of `call_method`.
+        if tx.output.torch_function_enabled:
+            import torch
+            from .builder import SourcelessBuilder
+
+            # [Note: __torch_function__] Currently we only support methods that are defined on tensor
+            # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
+            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
+            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
+        else:
+            return self.tensor_variable.call_method(tx, name, args, kwargs)
