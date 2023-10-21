@@ -1,6 +1,7 @@
 #pragma once
 
-namespace at::mps {
+namespace at {
+namespace mps {
 
 static const char * indexing_metal_shaders = R"INDEX_METAL(
 #include <metal_stdlib>
@@ -570,4 +571,5 @@ kernel void gather_kernel_1(uint linear_index               [[thread_position_in
     dst[linear_index] = src[strided_index];
 }}
 )METAL_GATHER";
-} // namespace at::mps
+}
+}
