@@ -148,7 +148,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 {},
             )
         else:
-            return self.tensor_variable.var_getattr(tx, name)
+            return super().var_getattr(tx, name)
 
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
