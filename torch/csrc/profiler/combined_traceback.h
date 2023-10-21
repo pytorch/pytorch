@@ -18,7 +18,10 @@ struct TORCH_API SymbolizedTracebacks {
 
 struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   struct PyFrame {
-    void* code; // PyCodeObject*, but python headers not present
+    void* filename; // PyObject* (strong reference)
+    void* funcname; // PyObject* (strong reference)
+    int lineno;
+
     int lasti;
   };
 

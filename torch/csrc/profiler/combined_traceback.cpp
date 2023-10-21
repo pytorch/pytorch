@@ -45,7 +45,8 @@ CapturedTraceback::~CapturedTraceback() {
 
 struct PyFrameHash {
   std::size_t operator()(const CapturedTraceback::PyFrame& f) const {
-    return std::hash<void*>()(f.code) ^ std::hash<int>()(f.lasti);
+    return std::hash<void*>()(f.filename) ^ std::hash<void*>()(f.funcname) ^
+        std::hash<int>()(f.lineno) ^ std::hash<int>()(f.lasti);
   }
 };
 
@@ -53,7 +54,8 @@ struct PyFrameEq {
   std::size_t operator()(
       const CapturedTraceback::PyFrame& lhs,
       const CapturedTraceback::PyFrame& rhs) const {
-    return lhs.code == rhs.code && lhs.lasti == rhs.lasti;
+    return lhs.filename == rhs.filename && lhs.funcname == rhs.funcname &&
+        lhs.lineno == rhs.lineno && lhs.lasti == rhs.lasti;
   }
 };
 

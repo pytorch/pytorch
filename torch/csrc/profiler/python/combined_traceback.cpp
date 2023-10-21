@@ -30,15 +30,24 @@ struct PythonTraceback : public CapturedTraceback::Python {
     {
       std::lock_guard<std::mutex> lock(to_free_frames_mutex);
       for (CapturedTraceback::PyFrame f : to_free_frames) {
-        Py_XDECREF(f.code);
+        Py_XDECREF(f.filename);
+        Py_XDECREF(f.funcname);
       }
       to_free_frames.clear();
     }
     PyFrameObject* f = PyEval_GetFrame();
     Py_XINCREF(f);
     while (f) {
-      frames.emplace_back(
-          CapturedTraceback::PyFrame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+      PyCodeObject* code = PyFrame_GetCode(f);
+      Py_INCREF(code->co_filename);
+      Py_INCREF(code->co_name);
+      int lasti = PyFrame_GetLasti(f);
+      frames.emplace_back(CapturedTraceback::PyFrame{
+          code->co_filename,
+          code->co_name,
+          PyCode_Addr2Line(code, lasti),
+          lasti});
+      Py_DECREF(code);
       auto f_back = PyFrame_GetBack(f);
       Py_XDECREF(f);
       f = f_back;
@@ -54,14 +63,12 @@ struct PythonTraceback : public CapturedTraceback::Python {
       std::vector<CapturedTraceback::PyFrame>& frames,
       void_visitproc visit,
       void* arg) override {
-    for (auto& f : frames) {
-      Py_VISIT(f.code);
-    }
     return 0;
   }
   int clear(std::vector<CapturedTraceback::PyFrame>& frames) override {
     for (auto& f : frames) {
-      Py_CLEAR(f.code);
+      Py_CLEAR(f.filename);
+      Py_CLEAR(f.funcname);
     }
     return 0;
   }
@@ -84,17 +91,15 @@ struct PythonTraceback : public CapturedTraceback::Python {
       }
     }
     for (const auto& f : to_symbolize) {
-      auto f_code = (PyCodeObject*)f.code;
-      py::handle filename = f_code->co_filename;
-      py::handle funcname = f_code->co_name;
-      auto lineno = PyCode_Addr2Line(f_code, f.lasti);
+      py::handle filename = (PyObject *)f.filename;
+      py::handle funcname = (PyObject *)f.funcname;
+      auto lineno = f.lineno;
       result.tracebacks.emplace_back();
       result.tracebacks.back().push_back(result.all_frames.size());
       result.all_frames.emplace_back(unwind::Frame{
           py::cast<std::string>(filename),
           py::cast<std::string>(funcname),
           (uint64_t)lineno});
-      Py_DECREF(f_code);
       // find all the additional frames associated with inductor generated
       // code
       if (stack_frames_for_code.ptr()) {
@@ -162,7 +167,8 @@ std::vector<py::object> py_symbolize(
 void freeDeadCapturedTracebackFrames() {
   std::lock_guard<std::mutex> lock(to_free_frames_mutex);
   for (CapturedTraceback::PyFrame f : to_free_frames) {
-    Py_XDECREF(f.code);
+    Py_XDECREF(f.filename);
+    Py_XDECREF(f.funcname);
   }
   to_free_frames.clear();
 }
