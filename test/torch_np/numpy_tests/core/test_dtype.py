@@ -32,6 +32,8 @@ else:
     import torch._numpy as np
     from torch._numpy.testing import assert_, assert_equal
 
+import numpy
+
 
 def assert_dtype_equal(a, b):
     assert_equal(a, b)
@@ -109,7 +111,7 @@ class TestBuiltin(TestCase):
             operation(np.dtype(np.int32), 7)
 
     @skipif(
-        np.__version__ < "1.24", reason="older numpies emit DeprecatioWarnings instead"
+        numpy.__version__ < "1.24", reason="older numpies emit DeprecatioWarnings instead"
     )
     @parametrize(
         "dtype",
