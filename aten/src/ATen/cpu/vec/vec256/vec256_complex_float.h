@@ -11,7 +11,8 @@
 #include <sleef.h>
 #endif
 
-namespace at::vec {
+namespace at {
+namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -465,4 +466,4 @@ inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
 
 #endif
 
-}} // namespace at::vec::CPU_CAPABILITY
+}}}
