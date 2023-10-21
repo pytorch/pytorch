@@ -1973,6 +1973,115 @@ def forward(self, x_1, output_1):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_is_tensor_tensor(self):
+        def fn(x, y):
+            if x is y:
+                return x * 2
+            else:
+                return x + y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return x is y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_mutated_tensor_tensor_across_graph_break(self):
+        def fn(x):
+            y = x.add_(1)
+            cond = x is y
+            x.add_(1)
+            # The real tensor values are recovered when graph breaking.
+            # Hence we recover the invariant.
+            torch._dynamo.graph_break()
+            x.add_(1)
+            return x is y, cond
+
+        fn_opt = torch.compile(backend="eager", dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_mutated_tensor_tensor(self):
+        def fn(x):
+            z = x.clone()
+            y = z.add_(1)
+            return y is z
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
+        def fn(z):
+            x = z.clone()
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            _ = y is z
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_vmapped_mutated_tensor_tensor(self):
+        def fn(x):
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
+        def fn(y, z):
+            a = y.clone()
+            b = z.clone()
+
+            def g(a, b):
+                return a.acos_(), b.acos_()
+
+            c, d = torch.vmap(g)(a, b)
+            return a is c is b is d
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        y = torch.ones(4, 2)
+        z = torch.ones(4, 10)
+
+        self.assertEqual(fn(y, z), fn_opt(y, z))
+        self.assertEqual(fn(y, y), fn_opt(y, y))
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
