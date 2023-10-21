@@ -495,7 +495,7 @@ class AutogradFunctionVariable(VariableTracker):
     ):
         if name == "apply":
             options = VariableTracker.propagate(self, args, kwargs.values())
-            return self.call_apply(tx, args, kwargs).add_options(options)
+            return self.call_apply(tx, args, kwargs)
         elif name == "backward":
             with tx.strict_translation_mode():
                 if isinstance(self.fn_cls.backward, types.FunctionType):
@@ -591,7 +591,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name == "save_for_backward":
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
+            )
         if name == "saved_tensors":
             return variables.TupleVariable(list(self._saved_tensors))
         return super().var_getattr(tx, name)
@@ -605,7 +605,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs).add_options(self)
+        return self.fn(*args, **kwargs)
 
 
 class GetAttrVariable(VariableTracker):
@@ -644,7 +644,7 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def call_method(
         self,

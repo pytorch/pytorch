@@ -692,9 +692,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         ):
             assert self.source
             return [
-                VariableBuilder(tx, source=GetItemSource(self.source, idx))(
-                    item
-                ).add_options(self)
+                VariableBuilder(tx, source=GetItemSource(self.source, idx))(item)
                 for idx, item in enumerate(self.value)
             ]
 
@@ -764,9 +762,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 items = []
                 for name, value in self.value.named_parameters():
                     items.append(
-                        VariableBuilder(tx, AttrSource(self.source, name))(
-                            value
-                        ).add_options(options)
+                        VariableBuilder(tx, AttrSource(self.source, name))(value)
                     )
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options

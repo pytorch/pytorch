@@ -74,7 +74,8 @@ class PlacementClassVariable(DistributedVariable):
             new_obj = object.__new__(self.value)
             var = PlacementVariable(new_obj, **options)
             if inspect.getattr_static(self.value, "__init__", None):
-                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+                var.call_method(tx, "__init__", args, kwargs)
+                return var
 
         return super().call_function(tx, args, kwargs)
 
@@ -201,7 +202,7 @@ class ProcessGroupVariable(DistributedVariable):
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
+            )
         # TODO should this just raise unimplemented?
         return super().var_getattr(tx, name)
 
