@@ -879,19 +879,21 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
 }
 
 void ProcessGroupNCCL::shutdown() {
+  // Don't join threads here since the purpose of this method is to abort all
+  // communicators and signal the threads to exit. Joining on the threads could
+  // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
 
-  // Abort all NCCL Communicators first, then join threads. Otherwise, the
-  // workCleanupLoop could get stuck when NCCL kernels run into errors.
   std::string abortReason =
-      fmt::format("Process Group destroyed on rank {}", rank_);
+      fmt::format("Process Group shutdown on rank {}", rank_);
   abort(abortReason);
 
   workMetaListCV_.notify_one();
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  shutdown();
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclCommWatchdogThread_.joinable()) {
@@ -901,6 +903,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   if (onCompletionHookThread_.joinable())
     onCompletionHookThread_.join();
+
+  // Abort communicators after all threads have exited to avoid having the
+  // threads dying due to aborted communicator and raising a SIGABRT
+  std::string abortReason =
+      fmt::format("Process Group destroyed on rank {}", rank_);
+  abort(abortReason);
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
