@@ -1087,15 +1087,9 @@ class VariableBuilder:
             torch_fn = VariableBuilder(
                 self.tx,
                 AttrSource(AttrSource(self.source, "__torch_function__"), "__func__"),
-            )(value.__torch_function__.__func__).add_guards(
-                self.make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
+            )(value.__torch_function__.__func__)
             return TensorWithTFOverrideVariable.create(
-                self.tx,
-                tensor_variable,
-                torch_fn,
-                type(value),
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+                self.tx, tensor_variable, torch_fn, type(value)
             )
 
         return tensor_variable
