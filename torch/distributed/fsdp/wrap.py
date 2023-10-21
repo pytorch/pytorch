@@ -557,6 +557,9 @@ def _recursive_wrap(
         if not only_wrap_children and auto_wrap_policy(
             module=module, recurse=False, nonwrapped_numel=remainder
         ):
+            # Set the parameters to omit from sharding in the wrapping class
+            if len(ignored_params) > 0:
+                kwargs["ignored_states"] = ignored_params
             # Leaf node or final wrapping of the remainder both happen here.
             return _wrap(module, wrapper_cls, **kwargs), nonwrapped_numel
         else:
