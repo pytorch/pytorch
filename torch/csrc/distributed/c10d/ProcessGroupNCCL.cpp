@@ -878,24 +878,29 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
 }
 
-void ProcessGroupNCCL::close() {
+void ProcessGroupNCCL::shutdown() {
   terminateProcessGroup_.store(true);
 
+  // Abort all NCCL Communicators first, then join threads. Otherwise, the
+  // workCleanupLoop could get stuck when NCCL kernels run into errors.
+  std::string abortReason =
+      fmt::format("Process Group destroyed on rank {}", rank_);
+  abort(abortReason);
+
   workMetaListCV_.notify_one();
+}
+
+ProcessGroupNCCL::~ProcessGroupNCCL() {
+  shutdown();
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  ncclCommWatchdogThread_.join();
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+  }
 #endif
 
   if (onCompletionHookThread_.joinable())
     onCompletionHookThread_.join();
-
-  // Abort all NCCL Communicators on Process Group Destruction
-  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
-  abort(abortReason);
-}
-
-ProcessGroupNCCL::~ProcessGroupNCCL() {
-  close();
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {

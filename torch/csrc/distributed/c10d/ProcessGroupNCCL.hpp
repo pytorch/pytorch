@@ -497,7 +497,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
 
-  void close();
+  void shutdown();
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
