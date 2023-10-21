@@ -1351,6 +1351,10 @@ def get_fake_value(node, tx):
 
     op = node.op
 
+    # FX Node should always return the same value
+    if 'example_value' in node.meta:
+        return node.meta.get('example_value')
+
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
             assert is_fake(e)
