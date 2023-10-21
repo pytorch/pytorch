@@ -545,7 +545,7 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.CLOSURE_MATCH),
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             # The autograd.function context
@@ -738,7 +738,7 @@ class VariableBuilder:
             return UserFunctionVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                guards=make_guards(GuardBuilder.CLOSURE_MATCH),
             )
         elif isinstance(value, types.MethodType) and isinstance(
             value.__self__, torch.nn.Module
