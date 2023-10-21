@@ -195,14 +195,10 @@ void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
     // cmd_mutex_ must be manually managed by the calling thread.
     std::unique_lock<std::mutex> context_lock(context->dispatch_lock());
 
-    bool submitted_to_gpu = utils::pack_vtensor_to_staging(
+    utils::pack_vtensor_to_staging(
         src, staging.buffer(), fence.get_submit_handle());
 
-    // Only wait on the fence if work was actually submitted to the GPU.
-    // Otherwise, it will hang indefinitely.
-    if (submitted_to_gpu) {
-      fence.wait();
-    }
+    fence.wait();
 
     context->flush();
     // cmd_mutex_ will be released when exiting this scope.

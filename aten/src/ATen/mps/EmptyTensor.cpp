@@ -17,7 +17,7 @@
 #define MPS_ERROR_DOUBLE_NOT_SUPPORTED "Cannot convert a MPS Tensor to float64 dtype " \
   "as the MPS framework doesn't support float64. Please use float32 instead."
 
-namespace at::detail {
+namespace at { namespace detail {
 TensorBase empty_mps(
     IntArrayRef size,
     c10::optional<ScalarType> dtype_opt,
@@ -135,4 +135,5 @@ TensorBase empty_strided_mps(
       options.pinned_memory_opt());
 }
 
-} // namespace at::detail
+} // namespace detail
+} // namespace at
