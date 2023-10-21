@@ -1890,10 +1890,29 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-make_fallback(aten._scaled_dot_product_efficient_attention)
-make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
-make_fallback(aten._scaled_dot_product_flash_attention_backward)
+
+# sdpa kernels require dense last dimension, just use fx strides
+make_fallback(
+    aten._scaled_dot_product_efficient_attention.default,
+    constrain_to_fx_strides,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_efficient_attention_backward.default,
+    constrain_to_fx_strides,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention.default,
+    constrain_to_fx_strides,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_backward.default,
+    constrain_to_fx_strides,
+    warn=False,
+)
+
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
