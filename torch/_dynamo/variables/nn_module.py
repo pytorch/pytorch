@@ -651,10 +651,7 @@ class NNModuleVariable(VariableTracker):
             )
         ):
             return generic_call_method_helper(name)
-        elif name in ["eval", "train"]:
-            return generic_call_method_helper(name)
         else:
-            print("CALLING ", name, module.__class__.__dict__)
             return super().call_method(tx, name, args, kwargs)
 
 
