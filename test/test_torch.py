@@ -9718,12 +9718,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         with self.assertRaisesRegex(RuntimeError, "are you using slots?"):
             torch.utils.swap_tensors(t2, t3)
         torch.utils.swap_tensors(t3, t4)
-        # This works as slot names get sorted!
         torch.utils.swap_tensors(t3, t5)
-        with self.assertRaisesRegex(RuntimeError, "the same number"):
+        with self.assertRaisesRegex(RuntimeError, "same number of them"):
             torch.utils.swap_tensors(t3, t6)
-        with self.assertRaisesRegex(RuntimeError, "c and d"):
-            torch.utils.swap_tensors(t6, t7)
+        t6.c = "foo"
+        t7.d = "bar"
+        torch.utils.swap_tensors(t6, t7)
+        self.assertEqual(t7.c, "foo")
+        self.assertEqual(t6.d, "bar")
 
 
 # The following block extends TestTorch with negative dim wrapping tests

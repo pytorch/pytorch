@@ -23,6 +23,10 @@ else:
 
 def swap_tensors(t1, t2):
     """
-    This just swaps the two Tensors while preserving all their old respective references
+    This function swaps the content of the two Tensor objects.
+    At a high level, this will make t1 have the content of t2 while preserving
+    its identity.
+
+    This will not work if t1 and t2 have different number of slots.
     """
     torch._C._swap(t1, t2)

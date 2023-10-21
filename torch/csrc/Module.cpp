@@ -2,7 +2,6 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include <structmember.h> // For PyMemberDef
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -339,22 +338,9 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   // Ensure we have Tensors and their c++ structs are the same size
   TORCH_CHECK(THPVariable_Check(a_));
   TORCH_CHECK(THPVariable_Check(b_));
-  TORCH_CHECK(Py_TYPE(a_)->tp_basicsize == Py_TYPE(b_)->tp_basicsize, "The two Tensors cannot be swapped, are you using slots and, if so, are they the same number of them?");
-
-  // Check that slots match if any
-  PyMemberDef* a_mp = Py_TYPE(a_)->tp_members;
-  PyMemberDef* b_mp = Py_TYPE(b_)->tp_members;
-
-  int i = 0, j = 0;
-  while (a_mp[i].name != NULL && b_mp[j].name != NULL) {
-    TORCH_CHECK(strcmp(a_mp[i].name, b_mp[j].name) == 0, "Non matching slots for swap function ", a_mp[i].name, " and ", b_mp[j].name);
-    i++;
-    j++;
-  }
-
-  if (a_mp[i].name != NULL || b_mp[j].name != NULL) {
-    TORCH_CHECK(false, "Different number of slots is not allowed in swap function");
-  }
+  TORCH_CHECK(
+      Py_TYPE(a_)->tp_basicsize == Py_TYPE(b_)->tp_basicsize,
+      "The two Tensors cannot be swapped, are you using slots and, if so, are they the same number of them?");
 
   //// Part 2: Compute real PyObject size in memory
   // The code below ensures that from CPython feature point of view, the two
@@ -403,8 +389,7 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   void* b =
       (void*)((char*)b_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
   auto actual_size = Py_TYPE(a_)->tp_basicsize +
-      start_pyobj_offset * sizeof(PyObject*) +
-      2 * sizeof(PyGC_Head);
+      start_pyobj_offset * sizeof(PyObject*) + 2 * sizeof(PyGC_Head);
 
   //// Part 4: Swap the full content of the PyObjects
   std::vector<char> tmp(actual_size);
