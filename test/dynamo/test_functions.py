@@ -2050,6 +2050,22 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
+        def fn(y, z):
+            a = y.clone()
+            b = z.clone()
+            def g(a, b):
+                return a.acos_(), b.acos_()
+            c, d = torch.vmap(g)(a, b)
+            return a is c is b is d
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        y = torch.ones(4, 2)
+        z = torch.ones(4, 10)
+
+        self.assertEqual(fn(y, z), fn_opt(y, z))
+        self.assertEqual(fn(y, y), fn_opt(y, y))
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
