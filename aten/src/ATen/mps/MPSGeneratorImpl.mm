@@ -5,7 +5,8 @@
 #include <algorithm>
 
 namespace at {
-namespace mps::detail {
+namespace mps {
+namespace detail {
 
 const Generator& getDefaultMPSGenerator() {
   static auto default_gen_mps = createMPSGenerator(c10::detail::getNonDeterministicRandom());
@@ -18,7 +19,8 @@ Generator createMPSGenerator(uint64_t seed_val) {
   return gen;
 }
 
-} // namespace mps::detail
+} // namespace detail
+} // namespace mps
 
 MPSGeneratorImpl::MPSGeneratorImpl(uint64_t seed_in)
     : c10::GeneratorImpl{Device(DeviceType::MPS), DispatchKeySet(c10::DispatchKey::MPS)},

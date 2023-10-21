@@ -233,7 +233,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend std::ostream& operator<<(
         std::ostream& output,
         const WorkNCCL& workNCCL);
-    friend std::string getWorkInfo(const WorkNCCL& workNCCL);
 
    private:
     // Helper function for synchronize

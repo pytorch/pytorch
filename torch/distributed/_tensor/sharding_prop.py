@@ -88,7 +88,7 @@ class ShardingPropagator:
 
         elif isinstance(fake_out, (tuple, list)):
             tensor_meta_list = []
-            for fake_out_item in fake_out:
+            for i, fake_out_item in enumerate(fake_out):
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
                         TensorMeta(

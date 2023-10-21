@@ -85,13 +85,11 @@ def rebase_ghstack_onto(
 ) -> None:
     if (
         subprocess.run(
-            [sys.executable, "-m", "ghstack", "--help"],
-            capture_output=True,
-            check=False,
+            [sys.executable, "-m", "ghstack", "--help"], capture_output=True
         ).returncode
         != 0
     ):
-        subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
 
     repo.fetch(orig_ref, orig_ref)
@@ -118,7 +116,7 @@ def rebase_ghstack_onto(
     if dry_run:
         print("Don't know how to dry-run ghstack")
     else:
-        ghstack_result = subprocess.run(["ghstack"], capture_output=True, check=True)
+        ghstack_result = subprocess.run(["ghstack"], capture_output=True)
         push_result = ghstack_result.stdout.decode("utf-8")
         print(push_result)
         if ghstack_result.returncode != 0:

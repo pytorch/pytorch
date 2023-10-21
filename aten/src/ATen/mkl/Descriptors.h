@@ -4,7 +4,7 @@
 #include <mkl_dfti.h>
 #include <ATen/Tensor.h>
 
-namespace at::native {
+namespace at { namespace native {
 
 struct DftiDescriptorDeleter {
   void operator()(DFTI_DESCRIPTOR* desc) {
@@ -41,4 +41,4 @@ private:
 };
 
 
-} // namespace at::native
+}}  // at::native
