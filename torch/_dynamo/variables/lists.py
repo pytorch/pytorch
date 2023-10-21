@@ -805,8 +805,12 @@ class SetVariable(VariableTracker):
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            tensor_node = vt.as_proxy().node
-            return SetVariable.SetElement(vt, tensor_node)
+            fake_tensor = vt.as_proxy().node.meta.get("example_value")
+            if fake_tensor is None:
+                unimplemented(
+                    "Cannot check Tensor object identity without its fake value"
+                )
+            return SetVariable.SetElement(vt, fake_tensor)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
 

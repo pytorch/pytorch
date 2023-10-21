@@ -1960,6 +1960,19 @@ def forward(self, x_1, output_1):
                 with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
                     opt_fn(torch.tensor([val] * 2))
 
+    def test_set_construction(self):
+        def fn(x):
+            y = x.add_(1)
+            s = set({x})
+            s.add(y)
+            return len(s)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
