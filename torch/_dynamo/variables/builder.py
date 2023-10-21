@@ -1817,6 +1817,10 @@ class SourcelessBuilder:
                 dict,
                 mutable_local=MutableLocal(),
             )
+        elif isinstance(value, set):
+            return SetVariable(
+                [self(tx, x) for x in value], mutable_local=MutableLocal()
+            )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())

@@ -222,6 +222,7 @@ SUBMODULE_INLINELIST = {
     "torch.testing",
     "torch.utils._contextlib",
     "torch.utils._pytree",
+    "torch._tensor",
 }
 
 
