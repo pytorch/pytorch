@@ -333,6 +333,8 @@ class ScanAutogradOp(torch.autograd.Function):
     
     @staticmethod
     def forward(ctx, fw_graph, bw_graph, num_init_args, *flat_args):
+        #import pdb
+        #pdb.set_trace()
         ctx._bw_graph = bw_graph
         ctx._num_input_args = len(flat_args)
         ctx._num_init_args = num_init_args
@@ -371,6 +373,8 @@ class ScanAutogradOp(torch.autograd.Function):
             flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
             ctx.save_for_backward(*flat_args, *flat_carries_chunk)
             ctx._num_out_args = len(flat_out)
+            #import pdb
+            #pdb.set_trace()
             return (*flat_carries_out_chunk, *flat_out)
 
     @staticmethod
@@ -402,8 +406,6 @@ class ScanAutogradOp(torch.autograd.Function):
             return None, None, None, *[grad[0] for grad in flat_carry_out_grads], *flat_out_grads
 
 def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
-    #TODO: Put assertions here
-    
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
     
     #import pdb
@@ -422,6 +424,8 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
         
         #FW Expects BxF, BxF
         #BW Expects BxF, BxF, BxF, BxF
+        #import pdb
+        #pdb.set_trace()
         example_outs = body_graph(*flat_init, *flat_xs)
 
         # def expand_tensor_carry(t):
@@ -583,20 +587,21 @@ def scan_dense(f, flat_init, flat_xs, reverse=False):
     for inp in _unstack_and_flatten_tensors_or_lists(flat_xs)[::direction]:
         # saves the initial carry input for each iteration
         out_carries.append(carry)
-        try:
-            print('--------------------------------------')
-            print(carry)
-            print(inp)
-            flattened_out = f(*carry, *inp)
-            print(flattened_out)
-            print('======================================')
-            #import pdb
-            #pdb.set_trace()
-        except:
-            print('Failed dense')
-            import pdb
-            pdb.set_trace()
-            #flattened_out = f(*carry, *inp)
+        flattened_out = f(*carry, *inp)
+        # try:
+        #     print('--------------------------------------')
+        #     print(carry)
+        #     print(inp)
+        #     flattened_out = f(*carry, *inp)
+        #     print(flattened_out)
+        #     print('======================================')
+        #     #import pdb
+        #     #pdb.set_trace()
+        # except:
+        #     print('Failed dense')
+        #     import pdb
+        #     pdb.set_trace()
+        #     #flattened_out = f(*carry, *inp)
         # flattened_out_includes carry and output
         out_pytrees.append(flattened_out[carry_length:])
         carry = flattened_out[:carry_length]
@@ -721,26 +726,46 @@ def scan_func(f, init, xs, reverse=False):
     unwrapped_xs = _unwrap_all_tensors_from_functional(xs, reapply_views=reapply_views)
     mode = 'mutations_and_views' if reapply_views else 'mutations'
 
+    leading_dim = unwrapped_xs[0].shape[0]
+    num_init = len(unwrapped_init)
+
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         functional_map_fn = functionalize(f, remove=mode)
-        with disable_proxy_modes_tracing():
-            example_inputs = (unwrapped_init[0], unwrapped_xs[0])
+        # with disable_proxy_modes_tracing():
+        #     example_inputs = (unwrapped_init[0], unwrapped_xs[0])
 
-        if _has_potential_branch_input_mutation(f, example_inputs):
-            raise UnsupportedAliasMutationException(
-                "torch._higher_order_ops.scan is mutating the input!"
-            )
+        # if _has_potential_branch_input_mutation(f, example_inputs):
+        #     raise UnsupportedAliasMutationException(
+        #         "torch._higher_order_ops.scan is mutating the input!"
+        #     )
 
-        if _has_potential_branch_input_alias(f, example_inputs):
-            raise UnsupportedAliasMutationException(
-                "torch._higher_order_ops.scan is aliasing the input!"
-            )
+        # if _has_potential_branch_input_alias(f, example_inputs):
+        #     raise UnsupportedAliasMutationException(
+        #         "torch._higher_order_ops.scan is aliasing the input!"
+        #     )
 
         #import pdb
         #pdb.set_trace()
-        scan_return = scan_impl(functional_map_fn, unwrapped_init, unwrapped_xs, reverse=reverse)
-        return _wrap_all_tensors_to_functional(scan_return, level=0)
+        example_outs = scan_impl(functional_map_fn, unwrapped_init, unwrapped_xs, reverse=reverse)
+        #import pdb
+        #pdb.set_trace()
+        #TODO: This may need adjustment for different scenarios of the carry, e.g. nested lists
+        expanded_carries_out, expanded_outs = (example_outs[:num_init], example_outs[num_init:])
+        #flat_carries = _unstack_pytree(expanded_carries_out)
+        flat_carries = [carry_entry for carry in expanded_carries_out for carry_entry in carry]
+        # flat_carries_chunk = flat_carries[:-len(flat_carries)//leading_dim]
+        # #flat_carries_out_chunk = flat_carries[-len(flat_carries)//leading_dim:]
+        # flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
+        flat_carries_chunk = [carry_entry[-1, :] for carry_entry in flat_carries]
+        
+        # expanded_carries_out, expanded_outs = (example_outs[:num_init], example_outs[num_init:])
+        # expanded_outs_comb = (expanded_carries_out[-1, :], expanded_outs)
+        example_outs_new = (tuple(flat_carries_chunk), expanded_outs[0])
+        #import pdb
+        #pdb.set_trace()
+        return _wrap_all_tensors_to_functional(example_outs, level=0)
 
+#TODO: This is just a replication from the map functionalization and needs to be adapted
 @scan_impl.py_impl(torch._C._functorch.TransformType.Functionalize)
 def scan_functionalize(f, init, xs, reverse=False):
     """

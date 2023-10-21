@@ -468,8 +468,9 @@ class Loops(IRNode):
                 
 @dataclasses.dataclass
 class Scan(Loops):
-    # scan_ranges: List[Expr]
+    scan_ranges: List[Expr]
     size: List[Expr]
+    inner_fn_xs: Callable[..., Any]
     f: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
@@ -481,25 +482,34 @@ class Scan(Loops):
     # HACK we mimick reduction
 
     def __post_init__(self):
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         #assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
         super().__post_init__()
 
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         import pdb
         pdb.set_trace()
-        return None
-
-    def get_reduction_type(self):
+        #TODO: Hack, see if this works out
+        #Expectation is that d0 = first dim of xs, but it could also be the first dim of init
+        #idx = self.reindex(vars, scan_vars)
+        value_init = self.inner_fn([0, scan_vars[0]])
+        value_xs = self.inner_fn_xs(vars)
+        result_carry = ops.scan(self.dtype, self.f, value_init, value_xs, self.reverse)
         import pdb
         pdb.set_trace()
+        #TODO: This clearly is not correct!
+        return (ops.store(output_name + '_carry', indexer([vars[0], vars[-1], scan_vars[0]]), result_carry), ops.store(output_name + '_init', indexer([vars[0], vars[-1], scan_vars[0]]), result_carry))
+
+    def get_reduction_type(self):
+        #import pdb
+        #pdb.set_trace()
         # return self.scan_op
         return "custom"
 
     def get_reduction_size(self):
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         return self.scan_ranges
 
     def get_size(self):
@@ -532,14 +542,17 @@ class Scan(Loops):
         device: torch.device,
         dtype: torch.dtype,
         size: Any,
+        scan_ranges: Any,
+        inner_fn: Any,
+        inner_fn_xs: Any,
         f: Any,
         init: Any,
         xs: Any,
         reverse=False
     ) -> Optional["TensorBox"]:
         
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         
         if device.type != "cuda":
             # TODO: CPU support
@@ -577,42 +590,39 @@ class Scan(Loops):
     
         reduction_hint = ReductionHint.DEFAULT
         num_splits = 1
-        
-        
 
         def reindex(index, scan_index):
             import pdb
             pdb.set_trace()
             assert len(scan_index) == len(scan_ranges)
-            assert len(index) == len(pointwise_ranges)
+            #assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *scan_index, *index[axis:]]
 
-        import pdb
-        pdb.set_trace()
-        scan = Scan(device=device,
-                    dtype=dtype,
-                    inner_fn=xs[0].make_loader(),
-                    ranges=None,
-                    size=size,
-                    axis=0,
-                    f=f,
-                    init=init,
-                    xs=xs,
-                    reverse=reverse,
-                    reindex=reindex,
-                    reduction_hint=reduction_hint,
-                    )
+        #import pdb
+        #pdb.set_trace()
 
         result = TensorBox.create(
-            scan
+            Scan(device=device,
+                 dtype=dtype,
+                 inner_fn=inner_fn,
+                 ranges=None,
+                 size=size,
+                 scan_ranges=scan_ranges,
+                 axis=0,
+                 inner_fn_xs=inner_fn_xs,
+                 f=f,
+                 init=init,
+                 xs=xs,
+                 reverse=reverse,
+                 reindex=reindex,
+                 reduction_hint=reduction_hint,
+                 )
         )
         
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         result.realize()
         return result
-        
-        return None
 
     @classmethod
     def num_splits(
@@ -770,6 +780,8 @@ class Reduction(Loops):
         return self.reduction_type
 
     def store_reduction(self, output_name, indexer, vars, reduction_vars):
+        import pdb
+        pdb.set_trace()
         return ops.reduction(
             output_name,
             self.dtype,
@@ -1034,6 +1046,8 @@ class Reduction(Loops):
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
+        import pdb
+        pdb.set_trace()
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -2050,6 +2064,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
+            #import pdb
+            #pdb.set_trace()
             assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
@@ -2307,7 +2323,11 @@ class Buffer(IRNode):
         self.layout = self.layout.as_same_order(stride)
 
     def make_loader(self):
+        #import pdb
+        #pdb.set_trace()
         def loader(index):
+            #import pdb
+            #pdb.set_trace()
             indexer = self.layout.make_indexer()
             return ops.load(self.name, indexer(index))
 
@@ -2453,6 +2473,13 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
+                if isinstance(self.data, Scan):
+                    import pdb
+                    pdb.set_trace()
+                    indices = self.data.reindex(index_vars, reduction_vars)
+                else:
+                    indices = index_vars
+                
                 stride_lengths = [
                     V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads
                 ]
@@ -4483,8 +4510,8 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         assert isinstance(self.data, (Pointwise, Reduction, Scan)), type(self.data)
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
@@ -4497,8 +4524,8 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
@@ -4759,6 +4786,20 @@ class LoopBodyBlock:
                 self.body.subblocks[name] = subblock
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}
+                )
+                
+            @staticmethod
+            def scan(
+                dtype_proxy, combine_fn: Callable[..., Any], value_proxy, init_proxy
+            ):
+                import pdb
+                pdb.set_trace()
+                def shim(dtype, value, init):
+                    return V.ops.scan(dtype, combine_fn, value, init)
+
+                name = self.body.add_submodule(shim, "scan")
+                return tracer.create_proxy(
+                    "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
                 )
 
             @staticmethod

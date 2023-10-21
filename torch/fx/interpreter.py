@@ -127,6 +127,10 @@ class Interpreter:
 
         print('Graph')
         print(self.module.graph)
+        #tx.symbolic_locals[sym_args[1][0].value]
+        #import pdb
+        #pdb.set_trace()
+        #print(self.module.graph.symbolic_lo)
         for node in self.module.graph.nodes:
             pbar.update(1)
             if node in self.env:
@@ -190,7 +194,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        print((n, n.op, n.target, n.args))
+        print((n, n.op, n.target, n.args))#, n.stack_trace))
         #if n.name == 'scan' or n.name == 'body_graph_0':
         #    import pdb
         #    pdb.set_trace()

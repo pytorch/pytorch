@@ -595,19 +595,24 @@ def register_foreach_pointwise(
 #Some use the 'device' parameter.
 @register_lowering(torch.ops.scan_impl, broadcast=False, type_promotion_kind=None)
 def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
-    import pdb
-    pdb.set_trace()
+    #import pdb
+    #pdb.set_trace()
     device = xs[0].get_device()
     dtype = xs[0].get_dtype()
-    size = [xs[0].get_size()[0]]
-    result = ir.Scan.create(device, dtype, size, f, init, xs, reverse=reverse)
+    size = xs[0].get_size()
+    scan_ranges = [xs[0].get_size()[0]]
+    #import pdb
+    #pdb.set_trace()
+    inner_fn = init[0].make_loader()
+    inner_fn_xs = xs[0].make_loader()
+    result = ir.Scan.create(device, dtype, size, scan_ranges, inner_fn, inner_fn_xs, f, init, xs, reverse=reverse)
     #In a sense we don't have a fallback kernel here, so if this lowering fails, then we need to raise an error
     # result = None
     # if result is None:
     #     #return fallback_scan(f, init, xs, reverse=reverse)
     #     return fallback_handler(torch.ops.scan_impl)(f, init, xs, reverse=reverse)
-    import pdb
-    pdb.set_trace()
+    #import pdb
+    #pdb.set_trace()
     return result
 
 @register_lowering(aten.where, broadcast=False, type_promotion_kind=None)

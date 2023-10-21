@@ -529,11 +529,13 @@ class GraphLowering(torch.fx.Interpreter):
 
     def call_function(self, target, args, kwargs):
         print(target)
-        if target == torch.ops.scan_impl or target == scan:
-            import pdb
-            pdb.set_trace()
+        #if target == torch.ops.scan_impl or target == scan:
+        #    import pdb
+        #    pdb.set_trace()
         
         if target is operator.getitem and isinstance(args[0], (list, tuple)):
+            import pdb
+            pdb.set_trace()
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -544,9 +546,19 @@ class GraphLowering(torch.fx.Interpreter):
             try:
                 name = target.name()
             except:
-                print('Failed name')
-                import pdb
-                pdb.set_trace()
+                print('Trying to call getitem on a TensorBox')
+                #TODO: Get the output from the StorageBox for further processing in the graph. 
+                # Make a read to the storage box
+                # import pdb
+                # pdb.set_trace()
+                # #read_writes = cb.get_read_writes().reads
+                # #args[0].realize_hint()
+                # #rw = args[0].data.get_read_writes()
+                # import pdb
+                # pdb.set_trace()
+                # #rw.writes
+                # #val = super().call_function(target, [[[args[0].data], [args[0].data]], args[1]], kwargs)
+                # return val
             
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
@@ -651,6 +663,8 @@ class GraphLowering(torch.fx.Interpreter):
                 except ValueError:
                     pass
 
+        import pdb
+        pdb.set_trace()
         self.finalize()
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
