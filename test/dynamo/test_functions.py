@@ -2067,8 +2067,10 @@ def forward(self, x_1, output_1):
         def fn(y, z):
             a = y.clone()
             b = z.clone()
+
             def g(a, b):
                 return a.acos_(), b.acos_()
+
             c, d = torch.vmap(g)(a, b)
             return a is c is b is d
 
@@ -2079,6 +2081,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(y, z), fn_opt(y, z))
         self.assertEqual(fn(y, y), fn_opt(y, y))
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
