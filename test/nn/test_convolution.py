@@ -2437,7 +2437,16 @@ class TestConvolutionNNDeviceType(NNTestCase):
             nn.ConvTranspose2d(8, 4, 3),
             nn.BatchNorm2d(4)).to(device).float()
         for memory_format in [torch.channels_last, torch.contiguous_format]:
-            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
+            model = nn.utils.convert_conv_weight_memory_format(model, memory_format)
+            out = model(input)
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+
+        input = torch.randint(1, 10, (2, 8, 4, 4, 4), dtype=torch.float32, device=device)
+        model = nn.Sequential(
+            nn.ConvTranspose3d(8, 4, 3),
+            nn.BatchNorm3d(4)).to(device).float()
+        for memory_format in [torch.channels_last_3d, torch.contiguous_format]:
+            model = nn.utils.convert_conv_weight_memory_format(model, memory_format)
             out = model(input)
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
