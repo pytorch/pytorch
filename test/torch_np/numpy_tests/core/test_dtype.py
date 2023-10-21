@@ -219,6 +219,7 @@ class TestPickling(TestCase):
 
 
 @skip(reason="XXX: value-based promotions, we don't have.")
+@instantiate_parametrized_tests
 class TestPromotion(TestCase):
     """Test cases related to more complex DType promotions.  Further promotion
     tests are defined in `test_numeric.py`
@@ -354,6 +355,7 @@ class TestFromDTypeAttribute(TestCase):
 
 @skip(reason="Parameteric dtypes, our stuff is simpler.")
 @skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
+@instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:
         alias = np.dtype[Any]
