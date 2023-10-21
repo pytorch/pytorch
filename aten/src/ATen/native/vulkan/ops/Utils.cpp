@@ -214,7 +214,7 @@ void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
   pack_buffer_to_vtensor(staging, v_self, pipeline_barrier);
 }
 
-bool pack_vtensor_to_staging(
+void pack_vtensor_to_staging(
     vTensor& v_self,
     api::VulkanBuffer& staging,
     const VkFence fence_handle) {
@@ -222,11 +222,11 @@ bool pack_vtensor_to_staging(
   api::PipelineBarrier pipeline_barrier{};
 
   if (v_self.storage_type() == api::StorageType::BUFFER) {
-    return packing::record_buffer_to_nchw_op(
+    packing::record_buffer_to_nchw_op(
         context, v_self, staging, pipeline_barrier, fence_handle);
   } else {
     api::ShaderInfo compute_shader = packing::get_image_to_nchw_shader(v_self);
-    return packing::record_image_to_nchw_op(
+    packing::record_image_to_nchw_op(
         context,
         compute_shader,
         v_self,

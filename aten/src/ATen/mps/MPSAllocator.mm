@@ -10,7 +10,8 @@
 
 #include <iostream>
 
-namespace at::mps {
+namespace at {
+namespace mps {
 
 C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 
@@ -853,9 +854,9 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
   return nullptr;
 }
 
-} // namespace at::mps
+} // namespace mps
 
-namespace at::native {
+namespace native {
 
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
@@ -880,4 +881,5 @@ Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device) {
   return tensor;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

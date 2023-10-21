@@ -24,7 +24,8 @@
 #include <c10/util/intrusive_ptr.h>
 
 
-namespace at::mps {
+namespace at {
+namespace mps {
 
 typedef MPSEvent* mpsEvent_t;
 
@@ -171,4 +172,4 @@ struct OptionalMPSGuard {
 
 C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl);
 
-} // namespace at::mps
+}} // namespace at::mps

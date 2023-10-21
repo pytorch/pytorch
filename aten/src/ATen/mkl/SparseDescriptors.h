@@ -18,7 +18,9 @@
 
 #include <mkl_spblas.h>
 
-namespace at::mkl::sparse {
+namespace at {
+namespace mkl {
+namespace sparse {
 
 template <typename T, sparse_status_t (*destructor)(T*)>
 struct MklSparseDescriptorDeleter {
@@ -143,4 +145,6 @@ class MklSparseCsrDescriptor
   c10::MaybeOwned<Tensor> values_;
 };
 
-} // namespace at::mkl::sparse
+} // namespace sparse
+} // namespace mkl
+} // namespace at
