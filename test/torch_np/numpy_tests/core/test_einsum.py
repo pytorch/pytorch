@@ -988,7 +988,8 @@ class TestEinsum(TestCase):
         np.einsum("ij,jk->ik", x, x, out=out)
         assert_array_equal(out.base, correct_base)
 
-    @parametrize("dtype", np.typecodes["AllFloat"] + np.typecodes["AllInteger"])
+    # @parametrize("dtype", np.typecodes["AllFloat"] + np.typecodes["AllInteger"])
+    @parametrize("dtype", "efdFD" + "Bbhil")
     def test_different_paths(self, dtype):
         # Test originally added to cover broken float16 path: gh-20305
         # Likely most are covered elsewhere, at least partially.

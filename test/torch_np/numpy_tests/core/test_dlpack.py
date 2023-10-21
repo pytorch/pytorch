@@ -5,6 +5,8 @@ import sys
 
 from unittest import skipIf as skipif
 
+import numpy
+
 import pytest
 
 import torch
@@ -32,6 +34,7 @@ skip = functools.partial(skipif, True)
 IS_PYPY = False
 
 
+@skipif(numpy.__version < "1.24", reason="numpy.dlpack is new in numpy 1.23")
 @instantiate_parametrized_tests
 class TestDLPack(TestCase):
     @xpassIfTorchDynamo  # (reason="pytorch seems to handle refcounts differently")

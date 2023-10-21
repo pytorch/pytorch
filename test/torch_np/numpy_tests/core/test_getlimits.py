@@ -86,7 +86,7 @@ class TestFinfo(TestCase):
         with assert_raises((TypeError, ValueError)):
             finfo("i4")
 
-    @xfail  # (reason="These attributes are not implemented yet.")
+    @xpassIfTorchDynamo  # (reason="These attributes are not implemented yet.")
     def test_basic_missing(self):
         dt = np.float32
         for attr in [
