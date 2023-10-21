@@ -547,6 +547,43 @@ static PyObject* THPVariable__disable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_replace(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_replace(Tensor t, Tensor o)"}, /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto other = r.tensor(1);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  TORCH_INTERNAL_ASSERT(
+      !at::functionalization::impl::isFunctionalTensor(other));
+  at::functionalization::impl::replace_(self_, other);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__functionalize_commit_update(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_commit_update(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  at::functionalization::impl::commit_update(self_);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_sync(
     PyObject* self,
     PyObject* args,
@@ -561,6 +598,47 @@ static PyObject* THPVariable__functionalize_sync(
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
   at::functionalization::impl::sync(self_);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__functionalize_mark_mutation_hidden_from_autograd(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_mark_mutation_hidden_from_autograd(Tensor t)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  at::functionalization::impl::mark_mutation_hidden_from_autograd(self_);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject*
+THPVariable__functionalize_are_all_mutations_hidden_from_autograd(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_are_all_mutations_hidden_from_autograd(Tensor t)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  if (at::functionalization::impl::are_all_mutations_hidden_from_autograd(
+          self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -602,6 +680,14 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__freeze_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_functionalize_replace",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_replace),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_commit_update",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_commit_update),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"_functionalize_sync",
      castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
@@ -617,6 +703,16 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_has_metadata_mutation",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_has_metadata_mutation),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_mark_mutation_hidden_from_autograd",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_mark_mutation_hidden_from_autograd),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_are_all_mutations_hidden_from_autograd",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_enable_reapply_views",

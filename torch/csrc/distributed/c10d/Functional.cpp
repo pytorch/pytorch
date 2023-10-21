@@ -110,8 +110,8 @@ std::shared_mutex pg_registry_lock;
 namespace c10d_functional {
 
 void register_process_group(
-    const std::string& tag,
-    c10::intrusive_ptr<c10d::ProcessGroup> pg) {
+    const std::string& group_name,
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
   const auto fwd_thread_id = get_fwd_thread_id();
   TORCH_CHECK(
       fwd_thread_id == at::RecordFunction::currentThreadId(),
@@ -119,34 +119,34 @@ void register_process_group(
 
   {
     std::unique_lock write_lock(pg_registry_lock);
-    auto it = pg_registry.find(std::make_pair(tag, fwd_thread_id));
+    auto it = pg_registry.find(std::make_pair(group_name, fwd_thread_id));
     TORCH_CHECK(
         it == pg_registry.end(),
-        "A process group is already registered for tag ",
-        tag);
-    pg_registry.emplace(std::make_pair(tag, fwd_thread_id), pg);
+        "A process group is already registered under the name",
+        group_name);
+    pg_registry.emplace(std::make_pair(group_name, fwd_thread_id), group);
   }
 
   WorkRegistry::maybe_init_for_current_thread();
 }
 
 c10::intrusive_ptr<c10d::ProcessGroup> resolve_process_group(
-    const std::string& tag) {
+    const std::string& group_name) {
   const auto fwd_thread_id = get_fwd_thread_id();
   std::shared_lock lock(pg_registry_lock);
-  auto it = pg_registry.find(std::make_pair(tag, fwd_thread_id));
+  auto it = pg_registry.find(std::make_pair(group_name, fwd_thread_id));
   TORCH_CHECK(
       it != pg_registry.end(),
-      "Could not resolve the process group registered for tag ",
-      tag);
+      "Could not resolve the process group registered under the name ",
+      group_name);
 
-  auto pg = it->second.lock();
+  auto group = it->second.lock();
   TORCH_CHECK(
-      pg != nullptr,
-      "Process group registered for tag ",
-      tag,
+      group != nullptr,
+      "Process group registered under the name ",
+      group_name,
       " has already been destroyed.");
-  return pg;
+  return group;
 }
 
 } // namespace c10d_functional
@@ -176,13 +176,13 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
 at::Tensor all_reduce_(
     at::Tensor input,
     const std::string& reduce_op,
-    const std::string& tag) {
+    const std::string& group_name) {
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
   std::vector<at::Tensor> inputs{input};
-  auto pg = c10d_functional::resolve_process_group(tag);
-  auto work = pg->allreduce(inputs, opts);
+  auto group = c10d_functional::resolve_process_group(group_name);
+  auto work = group->allreduce(inputs, opts);
   WorkRegistry::get().register_work(input, work);
   return input;
 }
@@ -190,20 +190,20 @@ at::Tensor all_reduce_(
 at::Tensor all_reduce(
     const at::Tensor& input,
     const std::string& reduce_op,
-    const std::string& tag) {
+    const std::string& group_name) {
   auto output = input.clone();
-  return all_reduce_(output, reduce_op, tag);
+  return all_reduce_(output, reduce_op, group_name);
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     const std::string& reduce_op,
-    const std::string& tag) {
+    const std::string& group_name) {
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
-  auto pg = c10d_functional::resolve_process_group(tag);
-  auto work = pg->allreduce_coalesced(inputs, opts);
+  auto group = c10d_functional::resolve_process_group(group_name);
+  auto work = group->allreduce_coalesced(inputs, opts);
   for (const auto& tensor : inputs) {
     WorkRegistry::get().register_work(tensor, work);
   }
@@ -213,12 +213,12 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 std::vector<at::Tensor> all_reduce_coalesced(
     const std::vector<at::Tensor>& inputs,
     const std::string& reduce_op,
-    const std::string& tag) {
+    const std::string& group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(tensor.clone());
   }
-  return all_reduce_coalesced_(outputs, reduce_op, tag);
+  return all_reduce_coalesced_(outputs, reduce_op, group_name);
 }
 
 at::Tensor allocate_all_gather_output(
@@ -234,14 +234,14 @@ at::Tensor allocate_all_gather_output(
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     const std::vector<at::Tensor>& inputs,
     const int64_t group_size,
-    const std::string& tag) {
+    const std::string& group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
-  auto pg = c10d_functional::resolve_process_group(tag);
-  auto work = pg->allgather_into_tensor_coalesced(
+  auto group = c10d_functional::resolve_process_group(group_name);
+  auto work = group->allgather_into_tensor_coalesced(
       outputs, const_cast<std::vector<at::Tensor>&>(inputs));
   for (const auto& tensor : outputs) {
     WorkRegistry::get().register_work(tensor, work);
@@ -252,9 +252,9 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     const int64_t group_size,
-    const std::string& tag) {
+    const std::string& group_name) {
   std::vector<at::Tensor> inputs{input};
-  return all_gather_into_tensor_coalesced(inputs, group_size, tag)[0];
+  return all_gather_into_tensor_coalesced(inputs, group_size, group_name)[0];
 }
 
 at::Tensor allocate_reduce_scatter_output(
@@ -276,7 +276,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     const std::vector<at::Tensor>& inputs,
     const std::string& reduce_op,
     const int64_t group_size,
-    const std::string& tag) {
+    const std::string& group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
@@ -284,8 +284,8 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
-  auto pg = c10d_functional::resolve_process_group(tag);
-  auto work = pg->reduce_scatter_tensor_coalesced(
+  auto group = c10d_functional::resolve_process_group(group_name);
+  auto work = group->reduce_scatter_tensor_coalesced(
       outputs, const_cast<std::vector<at::Tensor>&>(inputs), opts);
   for (const auto& tensor : outputs) {
     WorkRegistry::get().register_work(tensor, work);
@@ -297,9 +297,10 @@ at::Tensor reduce_scatter_tensor(
     at::Tensor input,
     const std::string& reduce_op,
     const int64_t group_size,
-    const std::string& tag) {
+    const std::string& group_name) {
   std::vector<at::Tensor> inputs{input};
-  return reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, tag)[0];
+  return reduce_scatter_tensor_coalesced(
+      inputs, reduce_op, group_size, group_name)[0];
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
@@ -311,52 +312,52 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
 
 TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
-      "all_reduce(Tensor input, str reduce_op, str tag) -> Tensor",
+      "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce));
 
   m.def(
-      "all_reduce_(Tensor(a!) input, str reduce_op, str tag) -> Tensor(a!)",
+      "all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_));
 
   m.def(
-      "all_reduce_coalesced(Tensor[] inputs, str reduce_op, str tag) -> Tensor[]",
+      "all_reduce_coalesced(Tensor[] inputs, str reduce_op, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced));
 
   m.def(
-      "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str tag) -> Tensor[](a!)",
+      "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_reduce_coalesced_));
 
   m.def(
-      "all_gather_into_tensor(Tensor input, int group_size, str tag) -> Tensor",
+      "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_gather_into_tensor));
 
   m.def(
-      "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str tag) -> Tensor[]",
+      "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_gather_into_tensor_coalesced));
 
   m.def(
-      "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str tag) -> Tensor",
+      "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::reduce_scatter_tensor));
 
   m.def(
-      "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str tag) -> Tensor[]",
+      "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::reduce_scatter_tensor_coalesced));
 
   m.def(
-      "wait_tensor(Tensor self) -> Tensor",
+      "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor));
 }

@@ -24,6 +24,7 @@ from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    has_torch_function,
     is_rng_state_getter_or_setter,
     istype,
     product,
@@ -40,7 +41,11 @@ from .ctx_manager import (
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
-from .tensor import TensorWithTFOverrideVariable
+from .torch_function import (
+    can_dispatch_torch_function,
+    dispatch_torch_function,
+    TensorWithTFOverrideVariable,
+)
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +86,7 @@ constant_fold_functions = [
     torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
+    torch.promote_types,
     torch._C._get_privateuse1_backend_name,
 ]
 
@@ -359,6 +365,14 @@ class TorchVariable(VariableTracker):
             )
             assert len(args) == 1
             return CUDAStreamContextVariable.create(tx, args[0], **options)
+        elif self.value in (
+            torch.overrides.has_torch_function_variadic,
+            torch.overrides.has_torch_function_unary,
+        ):
+            assert not kwargs
+            return ConstantVariable.create(
+                any(has_torch_function(a) for a in args), **options
+            )
         elif self.value is torch.cuda.streams.Stream:
             return wrap_fx_proxy_cls(
                 CUDAStreamVariable,
@@ -396,36 +410,26 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
-        elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
-            # This code block implements inlining the __torch_function__
-            # override of a tensor.
-
-            tensor_with_tf_override = args[0]
-
-            # TODO(future PR): make this implement the full __torch_function__ API
-            # instead of assuming the relevant override is in the first argument.
-            args[0] = args[0].tensor_variable
-
-            unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-                tx,
-                self,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
-                options,
-                args,
-                kwargs,
-            )
-
+        elif can_dispatch_torch_function(tx, args, kwargs):
+            unwrapped = dispatch_torch_function(tx, self, args, kwargs)
             # The wrapping here follows the logic in
             # `torch.Tensor.__torch_function__`.
+            # TODO: This shouldn't be here as well, this should be traced in the base torch function
+            # impl
             if self.value in torch.overrides.get_default_nowrap_functions():
                 return unwrapped
-            return TensorWithTFOverrideVariable(
+
+            # TODO: It's not correct to always rewrap args[0]; with multiple subclasses the dispatch
+            # may be on the second or later argument. Fix this to respect what dispatch_torch_function says
+            # the dispatch should be.
+            # TODO: We also should not be rewrapping unconditionally, it's possible that
+            # the return value *MAY NOT* be a torch function override tensor.
+            # The solution here is to trace the base torch function impl
+            return TensorWithTFOverrideVariable.create(
+                tx,
                 unwrapped,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
+                args[0].torch_function_fn,
+                args[0].subclass_type,
             )
         elif self.value in [
             torch.amp.autocast_mode.autocast,
@@ -538,7 +542,7 @@ class TorchVariable(VariableTracker):
             invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
             # the space of invoking functions in the middle of the guard chain is very iffy. As such,
-            # guard propagaiton via options is the best we can do.
+            # guard propagation via options is the best we can do.
             from .builder import SourcelessBuilder
 
             return SourcelessBuilder()(tx, invocation_result).add_options(options)

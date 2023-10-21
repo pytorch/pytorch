@@ -144,21 +144,11 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# If a PyTorch module is in this allowlist, torchdynamo will be allowed
-# to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-    torch.testing,
-    torch.ao.nn,
-    torch._refs,
-    torch._prims,
-    torch._decomp,
-    torch.utils._contextlib,
-    torch.utils._pytree,
-    torch.fx._pytree,
-    torch.sparse,
-}
+# Get a cprofile trace of Dynamo
+cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
+
+# legacy config, does nothing now!
+skipfiles_inline_module_allowlist = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -243,8 +233,6 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
-# TODO(janimesh) - Remove as once internal is not reliant on this flag. This
-# flag has no meaning now after nn_module_guard is introduced.
 skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
@@ -252,6 +240,10 @@ raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
+
+# If true, error if you torch.jit.trace over a dynamo-optimized function.
+# If false, silently suppress dynamo
+error_on_nested_jit_trace = True
 
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
@@ -267,6 +259,9 @@ error_on_recompile = False
 # reports why guards fail. Useful to identify the guards failing frequently and
 # causing recompilations.
 report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
+
+# Whether to report all guard failures or just the first one that fails
+report_all_guard_failures = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
@@ -295,6 +290,9 @@ check_shape_env_recorded_events = False
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
+
+# Trace through torch.distributed code
+trace_distributed = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
@@ -355,10 +353,10 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
+
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
-
 
 from .config_utils import install_config_module
 

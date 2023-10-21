@@ -2,7 +2,6 @@
 
 import copy
 import math
-import unittest
 
 import torch
 
@@ -349,7 +348,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             list(torch._dynamo.utils.counters["graph_break"].values()), [1]
         )
 
-    @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
             @staticmethod
@@ -653,6 +651,54 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, y_ref)
         self.assertEqual(x.grad, x_ref.grad)
+
+    def test_smuggle_symint_issue_111031(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x0 = x.size(0)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * ctx.x0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def foo(x):
+            return Foo.apply(x)
+
+        foo(torch.randn(2, requires_grad=True))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_smuggle_tensor_and_complex_structures(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x0 = x
+                ctx.x1 = [1, 2, 3]
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x0mul = grad_out * ctx.x0
+                for i in ctx.x1:
+                    x0mul = (x0mul * i) + x0mul
+                return x0mul
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def foo(x):
+            return Foo.apply(x)
+
+        foo(torch.randn(2, requires_grad=True))
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":

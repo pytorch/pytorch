@@ -15,8 +15,6 @@ def get_disabled_issues() -> List[str]:
     return issue_numbers
 
 
-IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
-
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 
@@ -88,9 +86,10 @@ def get_disabled_tests(
 ) -> Optional[Dict[str, Any]]:
     def process_disabled_test(the_response: Dict[str, Any]) -> Dict[str, Any]:
         # remove re-enabled tests and condense even further by getting rid of pr_num
+        disabled_issues = get_disabled_issues()
         disabled_test_from_issues = dict()
         for test_name, (pr_num, link, platforms) in the_response.items():
-            if pr_num not in IGNORE_DISABLED_ISSUES:
+            if pr_num not in disabled_issues:
                 disabled_test_from_issues[test_name] = (
                     link,
                     platforms,
@@ -111,4 +110,13 @@ def get_test_file_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
         print("Couldn't download test file ratings file, not reordering...")
+        return {}
+
+
+def get_test_class_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any]]:
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_class_rating.json"
+    try:
+        return fetch_and_cache(dirpath, filename, url, lambda x: x)
+    except Exception:
+        print("Couldn't download test class ratings file, not reordering...")
         return {}
