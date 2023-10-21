@@ -2026,8 +2026,6 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    # Failure for now due to not handling FakeTensor identity when tracing vmap
-    @unittest.expectedFailure
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
