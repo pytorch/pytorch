@@ -8,7 +8,7 @@ import warnings
 
 # from numpy.core.getlimits import _discovered_machar, _float_ma
 
-from unittest import expectedFailure as xfail, skipIf
+from unittest import skipIf
 
 from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
@@ -199,7 +199,7 @@ class TestMisc(TestCase):
                 # This test may fail on some platforms
                 assert len(w) == 0
 
-    @xfail  # (reason="None of nmant, minexp, maxexp is implemented.")
+    @xpassIfTorchDynamo  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):
         # Assert that finfo returns reasonable results for all types
         for ftype in np.sctypes["float"] + np.sctypes["complex"]:

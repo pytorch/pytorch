@@ -5,6 +5,8 @@ import itertools
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
+import numpy
+
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -988,6 +990,10 @@ class TestEinsum(TestCase):
         np.einsum("ij,jk->ik", x, x, out=out)
         assert_array_equal(out.base, correct_base)
 
+    @skipif(
+        numpy.__version__ < "1.23",
+        reason="https://github.com/numpy/numpy/issues/20305 is in NumPy 1.22",
+    )
     # @parametrize("dtype", np.typecodes["AllFloat"] + np.typecodes["AllInteger"])
     @parametrize("dtype", "efdFD" + "Bbhil")
     def test_different_paths(self, dtype):

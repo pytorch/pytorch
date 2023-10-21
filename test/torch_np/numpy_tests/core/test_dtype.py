@@ -231,10 +231,12 @@ class TestPromotion(TestCase):
         [
             (2**16 - 1, np.complex64, None),
             (2**32 - 1, np.complex128, np.complex64),
-            (np.float16(2), np.complex64, None),
-            (np.float32(2), np.complex64, None),
+            subtest((np.float16(2), np.complex64, None), name="float16_complex64_None"),
+            subtest((np.float32(2), np.complex64, None), name="float32_complex64_None"),
             # repeat for complex scalars:
-            (np.complex64(2), np.complex64, None),
+            subtest(
+                (np.complex64(2), np.complex64, None), name="complex64_complex64_None"
+            ),
         ],
     )
     def test_complex_other_value_based(
