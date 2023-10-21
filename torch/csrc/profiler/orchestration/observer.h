@@ -73,7 +73,7 @@ struct TORCH_API ExperimentalConfig {
    * their child events) and delaying CPU event start times (to
    * prevent overlaps), so this should not be used unless Vulkan events are
    * being profiled and it is ok to use this modified timestamp/duration
-   * information instead of the the original information.
+   * information instead of the original information.
    */
   bool adjust_timestamps;
 };

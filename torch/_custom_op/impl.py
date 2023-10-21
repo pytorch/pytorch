@@ -782,7 +782,6 @@ def validate_function_matches_schema(
     compare(kwargonly, schema.arguments.flat_kwarg_only)
 
 
-
 def infer_schema(prototype_function: typing.Callable) -> str:
     sig = inspect.signature(prototype_function)
 

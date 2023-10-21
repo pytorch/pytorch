@@ -37,7 +37,7 @@ class TestDropout(serial.SerializedTestCase):
         # No sense in checking gradients for test phase
 
         def reference_dropout_test(x):
-            return x, np.ones(x.shape, dtype=np.bool)
+            return x, np.ones(x.shape, dtype=bool)
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_test,
             # The 'mask' output may be uninitialized
@@ -69,7 +69,7 @@ class TestDropout(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
         def reference_dropout_ratio0(x):
-            return (x,) if is_test else (x, np.ones(x.shape, dtype=np.bool))
+            return (x,) if is_test else (x, np.ones(x.shape, dtype=bool))
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_ratio0,
             # Don't check the mask with cuDNN because it's packed data
@@ -101,7 +101,7 @@ class TestDropout(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
         def reference_dropout_ratio1(x):
-            return (x,) if is_test else (np.zeros(x.shape, dtype=np.float), np.zeros(x.shape, dtype=np.bool))
+            return (x,) if is_test else (np.zeros(x.shape, dtype=np.float), np.zeros(x.shape, dtype=bool))
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_ratio1,
             # Don't check the mask with cuDNN because it's packed data

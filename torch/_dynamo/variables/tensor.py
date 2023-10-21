@@ -1,3 +1,4 @@
+import functools
 import inspect
 import operator
 import types
@@ -15,10 +16,12 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
+from torch._dynamo import compiled_autograd
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
+from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -178,8 +181,8 @@ class TensorVariable(VariableTracker):
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
-        except Exception:
-            raise NotImplementedError()
+        except Exception as exc:
+            raise NotImplementedError() from exc
 
         if _input_associated_real_value is None:
             raise NotImplementedError()
@@ -305,7 +308,7 @@ class TensorVariable(VariableTracker):
         return self.ndim > 0
 
     def unpack_var_sequence(self, tx, idxes=None):
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy_cls
 
         options = VariableTracker.propagate(self)
         if idxes is None:
@@ -323,7 +326,12 @@ class TensorVariable(VariableTracker):
                 else:
                     length = dyn_length.value
             idxes = range(length)
-        return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
+        return [
+            wrap_fx_proxy_cls(
+                target_cls=type(self), tx=tx, proxy=self.as_proxy()[i], **options
+            )
+            for i in idxes
+        ]
 
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
@@ -665,6 +673,19 @@ class TensorVariable(VariableTracker):
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
+            if not isinstance(
+                fn_var,
+                (
+                    variables.functions.FunctoolsPartialVariable,
+                    variables.UserFunctionVariable,
+                    variables.TorchVariable,
+                    variables.NNModuleVariable,
+                ),
+            ):
+                unimplemented("Unexpected callable type passed to register_hook")
+
+            # Guards from the fn_var
+            options.update(VariableTracker.propagate(fn_var))
 
             if isinstance(fn_var, variables.NestedUserFunctionVariable):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
@@ -681,13 +702,61 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
+
             if not self.source:
                 # Intermediary
-                unimplemented("Intermediary tensors with registered hooks - NYI")
-            else:
-                assert (
-                    fn_var.source
-                ), "Unreachable - See unimplemented for lambdas above"
+                src = fn_var.source
+                if (
+                    not src
+                    and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
+                    and fn_var.func.source
+                ):
+                    src = fn_var.func.source
+
+                if not src:
+                    unimplemented("No source for register_hook target fn")
+
+                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+
+                if not compiled_autograd.compiled_autograd_enabled:
+                    # TODO(voz):
+                    # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
+                    # python state.
+                    # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
+                    # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
+                    #
+                    # Discussion point 1 - Should we bypass this if nopython/fullgraph = True?
+                    #   No. Because this was going to be a graph break anyway - this check does not
+                    # introduce new graph breaks where there were none.
+                    #
+                    # Discussion point 2 - Should we defer this check to backwards?
+                    #   No. Because compiled autograd is not yet ready for prime time. As such, if we defer, a user
+                    # would have no recourse - their forward traces just fine, but will fail at backwards unless
+                    # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
+                    # then they have nothing they can do except disable compile.
+                    unimplemented(
+                        "Compilation of intermediate hooks requires compiled autograd"
+                    )
+
+                # This wraps our user provided fn with a function that intercedes and
+                # uses our `invoke` higher order op to record a hook invocation in bwd graph.
+                fn = functools.partial(trace_wrapped, fn=fn)
+
+                def _register_hook_trampoline(tensor):
+                    tensor.register_hook(fn)
+                    return tensor
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        _register_hook_trampoline,
+                        (self.as_proxy(),),
+                        {},
+                    ),
+                    **options,
+                )
+
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
@@ -774,148 +843,6 @@ class SymNodeVariable(VariableTracker):
             ),
             **options,
         )
-
-
-class TensorWithTFOverrideVariable(VariableTracker):
-    """
-    Represents a tensor subclass instance with a __torch_function__ override.
-    """
-
-    @staticmethod
-    def create(
-        tx,
-        tensor_variable,
-        orig_tensor_variable_source,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        var = TensorWithTFOverrideVariable(
-            tensor_variable,
-            orig_tensor_variable_source,
-            torch_function_fn,
-            subclass_type,
-            **kwargs,
-        )
-        # stash the subclass type to rewrap an output tensor if needed
-        tx.output.install_global(var.global_class_name(), subclass_type)
-        return var
-
-    def __init__(
-        self,
-        tensor_variable,
-        orig_tensor_variable_source,
-        subclass_torch_function__func,
-        subclass_type,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.tensor_variable = tensor_variable
-        self.orig_tensor_variable_source = orig_tensor_variable_source
-        self.subclass_torch_function__func = subclass_torch_function__func
-        self.subclass_type = subclass_type
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        # This code block implements inlining the __torch_function__ override
-        # of `call_method`.
-        from . import GetAttrVariable
-
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        # insert unwrapped version of self as the first argument
-        # TODO: This is wrong!  When you call the internal __torch_function__,
-        # you still get the wrapped version of self, and if you call functions
-        # inside __torch_function__, they should come back here.  If we unwrap
-        # the tensor immediately, that will not happen.
-        # See https://github.com/pytorch/torchdynamo/issues/1951
-        args = list(args)
-        args.insert(0, self.tensor_variable)
-        func_var = GetAttrVariable(self.tensor_variable, name)
-
-        unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-            tx,
-            func_var,
-            self.orig_tensor_variable_source,
-            self.subclass_torch_function__func,
-            self.subclass_type,
-            options,
-            args,
-            kwargs,
-        )
-
-        # TODO(future PR): implement rewrapping conditional on method presence
-        # in `torch.overrides.get_default_nowrap_function()`. It's unclear how
-        # to do this easily in the current codebase since the resolution of
-        # `GetAttrVariable` depends on the type of the underlying object.
-
-        return TensorWithTFOverrideVariable(
-            unwrapped,
-            self.orig_tensor_variable_source,
-            self.subclass_torch_function__func,
-            self.subclass_type,
-        )
-
-    def global_class_name(self):
-        return f"__subclass_{self.subclass_type.__name__}"
-
-    @staticmethod
-    def inline_torch_function_unwrapped(
-        tx,
-        original_func_var,
-        tensor_with_tf_override_source,
-        tf_func,
-        subclass_type,
-        options,
-        args,
-        kwargs,
-    ):
-        """
-        This function inlines the `__torch_function__` override for `original_func_var`.
-        For example, if the user code is
-
-           x1 = torch.sigmoid(x0)
-
-        And `x0` has an override, then:
-        * `original_func_var` will be a `VariableTracker` object wrapping `torch.sigmoid`
-        * `tensor_with_tf_override_source` will be the `Source` object from
-          the original tensor override instance in the beginning of the program
-        * `tf_func` will be the custom `__torch_function__` function
-        * `subclass_type` will be `type(x0)`
-
-        The caller is expected to properly massage args and kwargs before
-        passing them into this function.
-
-        The caller is responsible for wrapping the return value, if needed.
-        """
-        from . import UserDefinedClassVariable
-        from .builder import TupleVariable, VariableBuilder
-
-        source = AttrSource(
-            AttrSource(tensor_with_tf_override_source, "__torch_function__"),
-            "__func__",
-        )
-        tf_func_var = VariableBuilder(tx, source)(tf_func)
-        type_var = UserDefinedClassVariable(subclass_type, **options)
-
-        # signature:
-        # def __torch_function__(cls, func, types, args=(), kwargs=None):
-        tf_args = (
-            type_var,  # cls
-            original_func_var,  # func
-            (type_var,),  # types
-            TupleVariable(args),  # args
-            kwargs,  # kwargs
-        )
-
-        # Disable __torch_function__ here to prevent the clone of the
-        # example tensor from going into the override.
-        with torch._C.DisableTorchFunctionSubclass():
-            return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
 class NumpyNdarrayVariable(TensorVariable):
@@ -1006,7 +933,7 @@ class NumpyNdarrayVariable(TensorVariable):
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         from ..utils import numpy_method_wrapper
 
-        if name in ["__len__", "size"]:
+        if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
         proxy = tx.output.create_proxy(
@@ -1076,11 +1003,16 @@ class TensorSubclassVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
+            from .builder import VariableBuilder
+            from .torch_function import TensorWithTFOverrideVariable
+
+            torch_fn = VariableBuilder(
+                tx, AttrSource(self.source, "__torch_function__")
+            )(self.value.__torch_function__)
             return TensorWithTFOverrideVariable.create(
                 tx,
                 args[0],
-                args[0].source,
-                self.value.__torch_function__.__func__,
+                torch_fn,
                 self.value,
             )
 

@@ -772,7 +772,7 @@ class OpOverloadPacket:
 # correct one at runtime and always calls into the boxed version of the method
 # Autograd codegen creates VariableType, TracerType,
 # inplace or view type and python bindings.
-# Aten codegen generates tensor methods for the the tensor class.
+# Aten codegen generates tensor methods for the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
