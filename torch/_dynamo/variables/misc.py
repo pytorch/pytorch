@@ -14,7 +14,12 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    identity,
+    is_tensor_base_attr_getter,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 from .functions import (
@@ -122,13 +127,22 @@ class SuperVariable(VariableTracker):
         if is_original_tensor_torch_function:
             # Instead of tracing inside torch.Tensor.__torch_function__,
             # record the `call_function` or `call_method` call into the graph.
-            from . import TorchVariable
+            from . import ConstantVariable, ConstDictVariable, TorchVariable
             from .builder import wrap_fx_proxy
 
             original_torch_or_getattr_variable = args[0]
             new_args = args[2].items
-            new_kwargs = args[3].items
-            options = VariableTracker.propagate(self, new_args, new_kwargs.values())
+            # TODO (mlazos): this is a hack to handle kwargs properly for a test
+            # we assume that kwargs is either a dict or None.
+            # Rather than inserting the base torch function impl into the graph
+            # we should trace it properly. We should be able to remove all of this
+            # code starting from "is_original_tensor_torch_function" above.
+            if not isinstance(args[3], ConstantVariable):
+                new_kwargs = args[3].items
+                options = VariableTracker.propagate(self, new_args, new_kwargs)
+            else:
+                new_kwargs = ConstDictVariable(dict(), dict).items
+                options = VariableTracker.propagate(self, new_args, [args[3]])
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
             with torch._C.DisableTorchFunctionSubclass():
@@ -441,8 +455,15 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
+            fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                tx.output,
+                parent=tx.output.current_tracer,
+                source_target="autograd.Function",
+            )
             higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
+                trampoline_autograd_fwd,
+                source=AttrSource(module_source, "forward"),
+                fwd_bwd_tracer=fwd_bwd_tracer,
             )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
@@ -456,6 +477,7 @@ class AutogradFunctionVariable(VariableTracker):
                 TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_bwd,
                     source=AttrSource(module_source, "backward"),
+                    fwd_bwd_tracer=fwd_bwd_tracer,
                 ),
                 bwd_args,
             )
@@ -463,7 +485,8 @@ class AutogradFunctionVariable(VariableTracker):
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
             return TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_apply
+                trampoline_autograd_apply,
+                fwd_bwd_tracer=None,
             ).call_function(tx, args, kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -673,11 +696,8 @@ class MethodWrapperVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if (
-            self.method_wrapper.__name__ == "__get__"
-            and isinstance(self.method_wrapper.__self__, types.GetSetDescriptorType)
-            and self.method_wrapper.__self__.__objclass__ is torch._C._TensorBase
-            and isinstance(args[0], variables.TensorVariable)
+        if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
+            args[0], variables.TensorVariable
         ):
             assert len(args) == 1 and len(kwargs) == 0
 

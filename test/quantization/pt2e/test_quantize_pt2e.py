@@ -811,6 +811,255 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
+    def _test_transitive_sharing_with_cat_helper(self, quantizer):
+        m = TestHelperModules.Conv2dWithTwoCat().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5), torch.randn(1, 6, 3, 3), torch.randn(1, 6, 3, 3))
+
+        # program capture
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        # make sure the two input observers and output are shared
+        conv_output_obs = []
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
+                conv_output_obs.append(getattr(m, list(n.users)[0].target))
+            if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
+                inputs = n.args[0]
+                input0 = inputs[0]
+                input1 = inputs[1]
+                assert input0.op == "call_module"
+                assert input1.op == "call_module"
+                obs_ins0 = getattr(m, input0.target)
+                obs_ins1 = getattr(m, input1.target)
+                assert obs_ins0 == obs_ins1
+
+                output_obs = list(n.users)[0]
+                assert output_obs.op == "call_module"
+                obs_ins2 = getattr(m, output_obs.target)
+                assert obs_ins0 == obs_ins2, "input observer does not match output"
+
+        assert len(conv_output_obs) == 2, "expecting two observer that follows conv2d ops"
+        # checking that the output observers for the two convs are shared as well
+        assert conv_output_obs[0] == conv_output_obs[1]
+
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 7,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 9,
+        }
+        node_list = [
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(torch.ops.aten.cat.default),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(torch.ops.aten.cat.default),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
+        )
+
+    def test_shared_qspec_transitivity(self):
+        """This tests the transitivity of SharedQuantizationSpec, that is
+        if A is shared with B, B is shared with C, then C should be shared with A as well
+
+        x1 -> conv1 -> cat1 -----> cat2
+        x2 -> conv2 -/            /
+                       x3 -> add /
+                       x4  /
+
+        both cat has shared input and output, and because of cat and (cat1 -> cat2) is the same Tensor
+        so there is an implicit sharing here, all tensors connect to cat1 and cat2 are in the same
+        sharing group after transitive sharing
+        """
+        # TODO: refactor this to a common util
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.conv2d.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_weight_observer,
+                        )
+                        bias_qspec = QuantizationSpec(
+                            dtype=torch.float32,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                                bias: bias_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+                    elif node.target is torch.ops.aten.cat.default:
+                        cat_node = node
+                        input_nodes = cat_node.args[0]
+                        first_input_node = input_nodes[0]
+                        input_qspec_map = {}
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        input_qspec_map[first_input_node] = act_qspec
+                        share_qparams_with_input_act0_qspec = SharedQuantizationSpec((first_input_node, cat_node))
+                        for input_node in input_nodes[1:]:
+                            input_qspec_map[input_node] = share_qparams_with_input_act0_qspec
+
+                        cat_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            output_qspec=share_qparams_with_input_act0_qspec,
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        self._test_transitive_sharing_with_cat_helper(BackendAQuantizer())
+
+    def test_shared_qspec_transitivity_case_2(self):
+        """This tests the transitivity of SharedQuantizationSpec, that is
+        if A is shared with B, B is shared with C, then C should be shared with A as well
+
+        x1 -> conv1 -> cat1 -----> cat2
+        x2 -> conv2 -/            /
+                       x3 -> add /
+                       x4  /
+
+        both cat has shared input and output, and because of cat and (cat1 -> cat2) is the same Tensor
+        so there is an implicit sharing here, all tensors connect to cat1 and cat2 are in the same
+        sharing group after transitive sharing
+
+        the difference is that for this one, all edges and nodes are shared with the second input edge of cat
+        instead of the first input edge of cat as in previous example
+        """
+        # TODO: refactor this to a common util
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.conv2d.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_weight_observer,
+                        )
+                        bias_qspec = QuantizationSpec(
+                            dtype=torch.float32,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                                bias: bias_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+                    elif node.target is torch.ops.aten.cat.default:
+                        cat_node = node
+                        input_nodes = cat_node.args[0]
+                        first_input_node = input_nodes[0]
+                        second_input_node = input_nodes[1]
+                        input_qspec_map = {}
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        input_qspec_map[second_input_node] = act_qspec
+                        share_qparams_with_input_act1_qspec = SharedQuantizationSpec((second_input_node, cat_node))
+                        input_qspec_map[first_input_node] = share_qparams_with_input_act1_qspec
+
+                        cat_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            output_qspec=share_qparams_with_input_act1_qspec,
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        self._test_transitive_sharing_with_cat_helper(BackendAQuantizer())
+
     def test_int16(self):
         class Int16ActQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
