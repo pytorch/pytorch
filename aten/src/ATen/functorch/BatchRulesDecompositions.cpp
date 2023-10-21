@@ -314,10 +314,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("conv1d", native::conv1d_symint);
   m.impl("conv2d", native::conv2d_symint);
   m.impl("conv3d", native::conv3d_symint);
-  OP_DECOMPOSE2(conv1d, padding);
-  OP_DECOMPOSE2(conv2d, padding);
-  OP_DECOMPOSE2(conv3d, padding);
-  OP_DECOMPOSE(_convolution_mode);
+  m.impl("conv1d.padding", native::conv1d_padding_symint);
+  m.impl("conv2d.padding", native::conv2d_padding_symint);
+  m.impl("conv3d.padding", native::conv3d_padding_symint);
+  m.impl("_convolution_mode", native::_convolution_mode_symint);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
