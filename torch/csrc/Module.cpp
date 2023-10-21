@@ -438,8 +438,8 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   a_gc->_gc_prev = b_gc->_gc_prev;
   b_gc->_gc_prev = tmp_gc_head;
 
-//// Part 6: Put back weakrefs
-// Note that the tp_weaklistoffset is always correct, even in the managed case
+  //// Part 6: Put back weakrefs
+  // Note that the tp_weaklistoffset is always correct, even in the managed case
 #define GET_WR_OBJECT(obj) \
   (PyObject**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset)
 
