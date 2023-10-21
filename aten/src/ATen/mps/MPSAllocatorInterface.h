@@ -8,7 +8,7 @@
 
 #define MB(x) (x * 1048576UL)
 
-namespace at::mps {
+namespace at { namespace mps {
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
@@ -58,4 +58,4 @@ C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
 
-} // namespace at::mps
+}} // namespace at::mps

@@ -2,7 +2,8 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 
-namespace at::vec {
+namespace at {
+namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -47,4 +48,5 @@ static inline float half2float_scalar(uint16_t val) {
 #endif
 
 } // namespace CPU_CAPABILITY
-} // namespace at::vec
+} // namespace vec
+} // namespace at
