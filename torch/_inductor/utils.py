@@ -264,6 +264,21 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    if use.target is operator.getitem or is_view(use.target):
+        return all(is_pointwise_use(u) for u in use.users)
+
+    return torch.Tag.pointwise in use.target.tags
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
