@@ -414,6 +414,22 @@ class NNModuleVariable(VariableTracker):
                 **options,
             )
 
+        if name in ["eval", "train"]:
+            if len(args) > 0:
+                mode = args[0]
+            elif "mode" in kwargs:
+                mode = kwargs.pop("mode")
+            else:
+                mode = ConstantVariable.create(name == "train")
+            assert isinstance(mode.as_python_constant(), bool)
+
+            mod = tx.output.get_submodule(self.module_key)
+            mod.training = mode.as_python_constant()
+
+            for child in self.call_method(tx, "children", [], {}).items:
+                child.call_method(tx, "train", [mode], {})
+            return self
+
         if constant:
             fn = getattr(module, name)
             name = f"{module.__class__.__name__}_{name}_result"
@@ -634,7 +650,10 @@ class NNModuleVariable(VariableTracker):
             )
         ):
             return generic_call_method_helper(name)
+        elif name in ["eval", "train"]:
+            return generic_call_method_helper(name)
         else:
+            print("CALLING ", name, module.__class__.__dict__)
             return super().call_method(tx, name, args, kwargs)
 
 

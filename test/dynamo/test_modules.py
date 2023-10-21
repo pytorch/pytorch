@@ -2271,6 +2271,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_module_eval_and_train(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                if hasattr(self, "my_module"):
+                    x = self.my_module(x)
+                if self.training:
+                    return x + 1
+                else:
+                    return x**2
+
+        m = Model()
+
+        m.add_module("my_module", Model())
+
+        def f(x):
+            m.eval()
+            res = m(x)
+            m.train()
+            res2 = m(x)
+            return res, res2
+
+        f_opt = torch.compile(f, fullgraph=True)
+        x = torch.tensor([1.0, 2.0])
+
+        self.assertEqual(f_opt(x), f(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
