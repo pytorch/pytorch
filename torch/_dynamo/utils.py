@@ -1337,6 +1337,15 @@ def get_debug_dir():
     return _get_debug_dir(debug_root)
 
 
+def get_fake_example_value(node, required=True):
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+        return node.meta["example_value"]
+    elif required:
+        unimplemented("example_value was required but not available")
+    else:
+        return None
+
+
 def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
@@ -1352,9 +1361,8 @@ def get_fake_value(node, tx):
     op = node.op
 
     # FX Node should always return the same value
-    example_value = node.meta.get("example_value")
-    if example_value is not None and is_fake(example_value):
-        return example_value
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+        return node.meta["example_value"]
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
