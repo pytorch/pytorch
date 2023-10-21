@@ -980,7 +980,7 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(builder, builder)
+            guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
