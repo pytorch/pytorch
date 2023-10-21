@@ -1477,16 +1477,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, UserDefinedObjectVariable) and isinstance(
             right, UserDefinedObjectVariable
         ):
-            ret = op(left.value, right.value)
-            if op is operator.is_ and not ret:
-                guard = left.source.make_guard(
-                    functools.partial(
-                        GuardBuilder.UNALIASED_NONTENSOR, source_b=right.source
-                    )
-                )
-                return ConstantVariable.create(ret, guards=set({guard}))
-            else:
-                return ConstantVariable.create(ret)
+            return ConstantVariable.create(op(left.value, right.value))
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):

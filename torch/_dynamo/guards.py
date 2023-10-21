@@ -512,16 +512,6 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref_b} is {ref_a}"]
         self._produce_guard_code(guard, code)
 
-    # Used to guard on objects that should not be aliased
-    # Will be used lazily for things like `operator.is_`
-    # and `set.__contains__`
-    def UNALIASED_NONTENSOR(self, guard, source_b):
-        ref_a = self.arg_ref(guard)
-        ref_b = self.arg_ref(source_b.name())
-
-        code = [f"{ref_a} is not {ref_b}"]
-        self._produce_guard_code(guard, code)
-
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
