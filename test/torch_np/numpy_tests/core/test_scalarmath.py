@@ -332,6 +332,7 @@ class TestModulus(TestCase):
 
     def test_float_modulus_roundoff(self):
         # gh-6127
+        # dt = np.typecodes["Float"]
         dt = "efd"
         for op in [floordiv_and_mod, divmod]:
             for dt1, dt2 in itertools.product(dt, dt):
