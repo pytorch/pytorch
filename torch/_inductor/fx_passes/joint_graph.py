@@ -1,7 +1,7 @@
 import logging
 import typing
 from collections import Counter
-from typing import Dict, Set
+from typing import Dict, List, Set
 
 import torch
 import torch._guards
@@ -112,6 +112,65 @@ def remove_no_ops(
             replace_no_op(node, 0)
 
 
+@torch.utils._python_dispatch._disable_current_modes()
+def remove_redundant_complex_views(gm: torch.fx.GraphModule):
+    """
+    Removes redundant complex views by reusing existing ones.
+    """
+
+    # A dictionary mapping a tensor to all aliased views.
+    complex_views: Dict[torch.fx.Node, List[torch.fx.Node]] = {}
+    graph = gm.graph
+
+    for node in graph.nodes:
+        if node.op != "call_function":
+            continue
+
+        if node.target != torch.ops.aten.view.dtype:
+            continue
+
+        src = node.args[0]
+        from_type = src.meta["val"].dtype
+        to_type = node.args[1]
+
+        # Only handle complex views.
+        if not from_type.is_complex and not to_type.is_complex:
+            continue
+
+        existing_views = complex_views.get(src)
+        is_needed = True
+
+        if existing_views:
+            # Replace the view with the an existing view if available.
+            for alias in existing_views:
+                if alias.meta["val"].dtype == to_type:
+                    is_needed = False
+                    node.replace_all_uses_with(alias)
+                    alias.meta.update(node.meta)
+                    graph.erase_node(node)
+                    break
+        else:
+            existing_views = [src]
+            complex_views[src] = existing_views
+
+        if is_needed:
+            # Save the new alias.
+            existing_views.append(node)
+            complex_views[node] = existing_views
+
+    # Clean up unused complex_views.
+    while True:
+        unused_views = []
+        for alias in complex_views:
+            if not alias.users:
+                unused_views.append(alias)
+        if len(unused_views) == 0:
+            break
+        for unused in unused_views:
+            complex_views.pop(unused)
+            graph.erase_node(unused)
+
+
 class UniformValueConstantFolder(ConstantFolder):
     """
     Runs constant folding and replaces tensors that have a unifrom value
@@ -202,6 +261,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 ones.add(new_node)
 
     remove_no_ops(gm, zeros, ones)
+    remove_redundant_complex_views(gm)
 
 
 def joint_graph_passes(graph: torch.fx.GraphModule):
