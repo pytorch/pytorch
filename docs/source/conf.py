@@ -1285,7 +1285,8 @@ coverage_ignore_functions = [
     # torch.nn.utils.init
     "skip_init",
     # torch.nn.utils.memory_format
-    "convert_conv2d_weight_memory_format",
+    "convert_con2d_weight_memory_format",
+    "convert_conv3d_weight_memory_format",
     # torch.nn.utils.parametrizations
     "weight_norm",
     # torch.nn.utils.parametrize
