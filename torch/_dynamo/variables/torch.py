@@ -613,7 +613,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 for x in args[0].items:
                     if not isinstance(x, variables.NumpyNdarrayVariable):
                         all_ndarray = False
-                    if x.is_python_constant() and isinstance(x.as_python_constant(), np.generic):
+                    if x.is_python_constant() and isinstance(
+                        x.as_python_constant(), np.generic
+                    ):
                         x.value = x.value.item()
                 if all_ndarray and kwargs == {}:
                     # Stack FakeTensor
