@@ -3,7 +3,6 @@ import contextlib
 import copy
 import itertools
 import math
-import platform
 import sys
 import unittest
 from typing import Callable
@@ -1196,8 +1195,7 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
-        "Does not support vectorization or not x86_64 machine",
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):

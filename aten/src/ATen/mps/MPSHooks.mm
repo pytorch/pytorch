@@ -8,7 +8,8 @@
 #include <ATen/mps/MPSStream.h>
 #include <c10/util/Logging.h>
 
-namespace at::mps {
+namespace at {
+namespace mps {
 
 void MPSHooks::initMPS() const {
   C10_LOG_API_USAGE_ONCE("aten.init.mps");
@@ -116,4 +117,5 @@ using at::RegistererMPSHooksRegistry;
 
 REGISTER_MPS_HOOKS(MPSHooks);
 
-} // namespace at::mps
+} // namespace mps
+} // namespace at

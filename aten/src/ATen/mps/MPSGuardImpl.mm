@@ -3,7 +3,8 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGuardImpl.h>
 
-namespace at::mps {
+namespace at {
+namespace mps {
 
 void MPSGuardImpl::createEvent(mpsEvent_t* event, const EventFlag flag) const {}
 
@@ -42,4 +43,5 @@ bool MPSGuardImpl::queryEvent(void* event) const {
   return mps_event->query();
 }
 
-} // namespace at::mps
+}
+}

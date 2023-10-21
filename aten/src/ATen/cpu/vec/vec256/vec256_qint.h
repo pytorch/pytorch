@@ -38,7 +38,8 @@
 // point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
 // iterations.
 
-namespace at::vec {
+namespace at {
+namespace vec {
 inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
@@ -1270,4 +1271,4 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 }
 
 #endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-}} // namespace at::vec::CPU_CAPABILITY
+}}}
