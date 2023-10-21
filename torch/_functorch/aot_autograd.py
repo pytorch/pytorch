@@ -4167,7 +4167,15 @@ def create_aot_dispatcher_function(
                 if is_traceable_wrapper_subclass(x):
                     attrs, _ = x.__tensor_flatten__()
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                        assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
+                        try:
+                            assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
+                        except Exception as e:
+                            print(f"Checking against fake_mode={fake_mode}")
+                            for attr in attrs:
+                                if getattr(x, attr).fake_mode is not fake_mode:
+                                    print(f"attr={attr}")
+                                    print(f"attr_fake_mode={getattr(x, attr).fake_mode}")
+                            raise e
                         return x
                 # TODO: Ensure that this codepath is never exercised from
                 # Dynamo

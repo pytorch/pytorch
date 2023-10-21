@@ -905,7 +905,7 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
             # Returns (TwoTensor, Tensor)
             return x * y, y + y
         x_a = torch.zeros(4)
-        x_b = torch.zeros(4)
+        x_b = torch.zeros(4, 1)
         y = torch.ones(4)
 
         # make_fx() is not responsible for unwrapping tensor subclass inputs,
