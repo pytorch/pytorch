@@ -1088,11 +1088,16 @@ class TensorSubclassVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
+            from .builder import VariableBuilder
+            from .torch_function import TensorWithTFOverrideVariable
+
+            torch_fn = VariableBuilder(
+                tx, AttrSource(self.source, "__torch_function__")
+            )(self.value.__torch_function__)
             return TensorWithTFOverrideVariable.create(
                 tx,
                 args[0],
-                args[0].source,
-                self.value.__torch_function__.__func__,
+                torch_fn,
                 self.value,
             )
 
