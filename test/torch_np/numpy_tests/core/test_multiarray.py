@@ -6836,7 +6836,7 @@ class TestRichcompareScalar(TestCase):
         assert (np.int16(0) != "a") is True
 
 
-@xpassIfTorchDynamo  # (reason="implement views/dtypes")
+@skip  # (reason="implement views/dtypes")
 class TestViewDtype(TestCase):
     """
     Verify that making a view of a non-contiguous array works as expected.

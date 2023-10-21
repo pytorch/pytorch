@@ -5,6 +5,8 @@
 """
 import functools
 import warnings
+import numpy
+
 
 # from numpy.core.getlimits import _discovered_machar, _float_ma
 
@@ -66,6 +68,7 @@ class TestDouble(TestCase):
 
 
 class TestFinfo(TestCase):
+    @skipIf(numpy.__version__ < "1.23", reason=".smallest_normal is new")
     def test_basic(self):
         dts = list(
             zip(
