@@ -126,6 +126,30 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def global_mangled_class_name(self):
         return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}"
 
+    def var_getattr(self, tx, name):
+        # [Note: __torch_function__] We currently only support attributes that are defined on
+        # base tensors, custom attribute accesses will graph break. We will need to track setting
+        # attrs on this object.
+        import torch
+        from .builder import SourcelessBuilder
+
+        if name in banned_attrs:
+            unimplemented(
+                f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
+            )
+
+        if tx.output.torch_function_enabled:
+            get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
+            return self.call_torch_function(
+                tx,
+                get_fn,
+                TupleVariable([self.subclass_type_var()]),
+                [self],
+                {},
+            )
+        else:
+            return self.tensor_variable.var_getattr(tx, name)
+
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
             tx,

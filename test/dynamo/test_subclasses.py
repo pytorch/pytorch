@@ -17,7 +17,10 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
 class MockSubclass(torch.Tensor):
@@ -26,6 +29,30 @@ class MockSubclass(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+class DummyNDim(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.Tensor.ndim.__get__:
+            return 10
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class SigmoidToExpSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.Tensor.sigmoid:
+            return super().__torch_function__(torch.Tensor.exp, types, args, kwargs)
+
+        return super().__torch_function__(func, types, args, kwargs)
 
 
 class EagerRecordGraphAndInputs:
@@ -39,11 +66,15 @@ class EagerRecordGraphAndInputs:
         return gm
 
 
+GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
+
+
 @contextlib.contextmanager
 def preserve_subclass_config():
     old_subclass_set = set(torch._dynamo.config.traceable_tensor_subclasses)
     try:
-        torch._dynamo.config.traceable_tensor_subclasses.add(MockSubclass)
+        torch._dynamo.config.traceable_tensor_subclasses.clear()
+        torch._dynamo.config.traceable_tensor_subclasses.update(GLOBAL_TEST_SUBCLASSES)
         yield
     finally:
         torch._dynamo.config.traceable_tensor_subclasses.clear()
@@ -125,6 +156,40 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         res = fn(input)
         self.assertIsInstance(res, LocalSubclass)
+
+    def test_torch_function_call_on_method(self):
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2)
+        z = torch.ones(2, 2)
+        wrapped = x.as_subclass(SigmoidToExpSubclass)
+        wrapped2 = y.as_subclass(SigmoidToExpSubclass)
+
+        def fn(w):
+            return w.sigmoid()
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped2)
+        res_exp2 = z.exp()
+
+        self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_exp, res_exp2)
+
+    def test_torch_function_call_on_attr(self):
+        x = torch.ones(2, 2)
+        wrapped = x.as_subclass(DummyNDim)
+
+        def fn(w):
+            return w.ndim + torch.ones(2)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+
+        self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_exp, torch.ones(2) + 10)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
