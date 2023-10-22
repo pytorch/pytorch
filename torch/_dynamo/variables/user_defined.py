@@ -227,7 +227,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
-    def sym_type(self):
+    def var_type(self):
         return self.type_tracker
 
     @staticmethod

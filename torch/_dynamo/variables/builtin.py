@@ -1261,7 +1261,7 @@ class BuiltinVariable(VariableTracker):
         from .builder import VariableBuilder
 
         try:
-            return obj.sym_type()
+            return obj.var_type()
         except NotImplementedError:
             pass
 
