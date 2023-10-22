@@ -1,10 +1,13 @@
 import collections
+import inspect
 import logging
 
 import math
 import re
 import types
 from typing import Dict, List
+
+from torch._streambase import _StreamBase
 
 try:
     import numpy as np
@@ -20,6 +23,7 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
+from ..device_interface import device_interfaces
 from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
@@ -223,12 +227,12 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
-            CUDAStreamContextVariable,
-            CUDAStreamVariable,
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             InferenceModeVariable,
+            StreamContextVariable,
+            StreamVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -359,12 +363,26 @@ class TorchVariable(VariableTracker):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
-        elif self.value is torch.cuda.stream:
-            log.warning(
-                "torch.cuda.stream() not fully supported, streams may be ignored"
-            )
+        elif any(
+            self.value is method
+            for method in [
+                interface_elem.stream for interface_elem in device_interfaces.values()
+            ]
+        ):
             assert len(args) == 1
-            return CUDAStreamContextVariable.create(tx, args[0], **options)
+            return StreamContextVariable.create(tx, args[0], **options)
+        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+            return wrap_fx_proxy_cls(
+                StreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    (),
+                    {},
+                ),
+                **options,
+            )
         elif self.value in (
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,
@@ -372,18 +390,6 @@ class TorchVariable(VariableTracker):
             assert not kwargs
             return ConstantVariable.create(
                 any(has_torch_function(a) for a in args), **options
-            )
-        elif self.value is torch.cuda.streams.Stream:
-            return wrap_fx_proxy_cls(
-                CUDAStreamVariable,
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    torch.cuda.streams.Stream,
-                    (),
-                    {},
-                ),
-                **options,
             )
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
