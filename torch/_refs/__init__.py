@@ -1073,8 +1073,8 @@ def add(
             raise ValueError(msg)
         b = prims.mul(b, alpha)
 
-    return prims.add(a, b)
-
+    output = prims.add(a, b)
+    return handle_noncontiguous_outputs([a, b], output)
 
 # TODO: add docstring
 @_make_elementwise_binary_reference(
