@@ -227,7 +227,7 @@ cudaError_t SetDevice(int device) {
 }
 
 cudaError_t MaybeSetDevice(int device) {
-  if (hasPrimaryContext(static_cast<DeviceIndex>(device))) {
+  if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
   targetDeviceIndex = device;
@@ -257,7 +257,7 @@ int MaybeExchangeDevice(int to_device) {
   if (to_device == cur_device) {
     return cur_device;
   }
-  if (hasPrimaryContext(static_cast<DeviceIndex>(to_device))) {
+  if (hasPrimaryContext(to_device)) {
     C10_CUDA_CHECK(cudaSetDevice(to_device));
   } else {
     targetDeviceIndex = to_device;
