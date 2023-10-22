@@ -446,7 +446,7 @@ class ConstantSource(Source):
 @dataclasses.dataclass(frozen=True)
 class NumpyTensorSource(ChainedSource):
     def name(self) -> str:
-        return f"__as_tensor({self.base.name()})"
+        return f"___from_numpy({self.base.name()})"
 
     def guard_source(self):
         return self.base.guard_source()

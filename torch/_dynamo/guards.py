@@ -120,7 +120,13 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
-        ("__as_tensor", torch.as_tensor),
+        (
+            "___from_numpy",
+            # If not numpy array, piggy back on e.g. tensor guards to check type
+            lambda a: torch.as_tensor(a)
+            if isinstance(a, (np.generic, np.ndarray))
+            else a,
+        ),
     ]
 )
 
