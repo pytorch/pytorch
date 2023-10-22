@@ -86,6 +86,18 @@ def test_bsr_scatter_mm6(x, y, **meta):
     return _test_worker(test_func)
 
 
+def test_bsr_scatter_mm(x, y, **meta):
+    from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
+
+    def test_func(x=x, y=y):
+        indices_data = bsr_scatter_mm_indices_data(
+            x, y, indices_format="bsr_strided_mm_compressed", **meta
+        )
+        return bsr_scatter_mm(x, y, indices_data=indices_data)
+
+    return _test_worker(test_func)
+
+
 if __name__ == "__main__":
     import argparse
     import atexit
