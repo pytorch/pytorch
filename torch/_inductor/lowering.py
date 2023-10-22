@@ -4986,9 +4986,9 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 
 
 @register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(*, kernel_idx, grid, kwargs):
+def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
     kwargs = {
-        key: (clone(x) if isinstance(x, TensorBox) else x) for key, x in kwargs.items()
+        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
     }
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
