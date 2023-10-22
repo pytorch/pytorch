@@ -67,6 +67,7 @@ class DistMathOpsTest(DTensorTestBase):
                 dist_y = torch.nn.functional.softmax(
                     dist_x, dim=softmax_dim, dtype=torch.float32
                 )
+                shard_dim = shard_dim + dist_y.ndim if shard_dim < 0 else shard_dim
                 self.assertTrue(dist_y.placements[0].is_shard(dim=shard_dim))
                 dist_y = dist_y.redistribute(device_mesh, [Replicate()])
                 self.assertEqual(dist_y.to_local(), local_y)
@@ -102,6 +103,7 @@ class DistMathOpsTest(DTensorTestBase):
                     dist_softmax = dist_x.softmax(dim=softmax_dim)
             else:
                 dist_softmax = dist_x.softmax(dim=softmax_dim)
+                shard_dim = shard_dim + dist_x.ndim if shard_dim < 0 else shard_dim
                 self.assertTrue(dist_softmax.placements[0].is_shard(dim=shard_dim))
                 dist_y = dist_softmax.sum()
                 dist_y = dist_y.redistribute(device_mesh, [Replicate()])
