@@ -631,16 +631,6 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif isinstance(value, types.GetSetDescriptorType):
-            return GetSetDescriptorVariable(
-                value, guards=self.make_guards(GuardBuilder.ID_MATCH)
-            )
-        elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
                 value,
@@ -788,7 +778,9 @@ class VariableBuilder:
             )
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif issubclass(type(value), type):
             return UserDefinedClassVariable(
@@ -1084,9 +1076,7 @@ class VariableBuilder:
             options["torch_function_fn"] = VariableBuilder(
                 self.tx,
                 AttrSource(AttrSource(self.source, "__torch_function__"), "__func__"),
-            )(value.__torch_function__.__func__).add_guards(
-                self.make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
+            )(value.__torch_function__.__func__)
             options["guards"] = self.make_guards(GuardBuilder.TYPE_MATCH)
         else:
             options["guards"] = set()
