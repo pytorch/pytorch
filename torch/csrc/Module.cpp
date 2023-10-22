@@ -385,11 +385,11 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   //// Part 3: Get raw pointer and sizes
   // PyObject should be PyDictOrValues but we don't have access to it
   void* a =
-      (void*)((char*)a_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
+      (void*)((char*)a_ - start_pyobj_offset * sizeof(PyObject*) - sizeof(PyGC_Head));
   void* b =
-      (void*)((char*)b_ - start_pyobj_offset * sizeof(PyObject*) - 2 * sizeof(PyGC_Head));
+      (void*)((char*)b_ - start_pyobj_offset * sizeof(PyObject*) - sizeof(PyGC_Head));
   auto actual_size = Py_TYPE(a_)->tp_basicsize +
-      start_pyobj_offset * sizeof(PyObject*) + 2 * sizeof(PyGC_Head);
+      start_pyobj_offset * sizeof(PyObject*) + sizeof(PyGC_Head);
 
   //// Part 4: Swap the full content of the PyObjects
   std::vector<char> tmp(actual_size);
