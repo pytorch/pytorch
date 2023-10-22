@@ -24,6 +24,7 @@ from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
+    has_torch_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     istype,
@@ -204,11 +205,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    def __init__(self, value, value_type=None, **kwargs):
+    def __init__(self, value, value_type=None, torch_function_fn=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        self.torch_function_fn = torch_function_fn
 
     def __str__(self):
         inner = self.value_type.__name__
@@ -223,6 +225,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def python_type(self):
         return self.value_type
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        assert has_torch_function(
+            self
+        ), "calling torch function on object without __torch_function__"
+        from .torch_function import _get_subclass_type_var, call_torch_function
+
+        return call_torch_function(
+            tx,
+            _get_subclass_type_var(tx, self),
+            self.torch_function_fn,
+            fn,
+            types,
+            args,
+            kwargs,
+        )
 
     @staticmethod
     @functools.lru_cache(None)

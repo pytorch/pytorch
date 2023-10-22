@@ -63,6 +63,7 @@ from ..utils import (
     get_static_address_type,
     global_key_name,
     is_namedtuple,
+    is_torch_function_object,
     is_typing,
     is_utils_checkpoint,
     istype,
@@ -136,7 +137,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .torch_function import TensorWithTFOverrideVariable
+from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
     UserDefinedClassVariable,
@@ -789,8 +790,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
+            torch_function_fn = None
+            if is_torch_function_object(value):
+                torch_function_fn = build_torch_function_fn(self.tx, value, self.source)
+
             result = UserDefinedObjectVariable(
                 value,
+                torch_function_fn=torch_function_fn,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
@@ -1073,10 +1079,9 @@ class VariableBuilder:
         )
         options = {}
         if type(value) in config.traceable_tensor_subclasses:
-            options["torch_function_fn"] = VariableBuilder(
-                self.tx,
-                AttrSource(AttrSource(self.source, "__torch_function__"), "__func__"),
-            )(value.__torch_function__.__func__)
+            options["torch_function_fn"] = build_torch_function_fn(
+                self.tx, value, self.source
+            )
             options["guards"] = self.make_guards(GuardBuilder.TYPE_MATCH)
         else:
             options["guards"] = set()
