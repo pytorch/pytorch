@@ -1227,7 +1227,7 @@ if(BUILD_FUNCTORCH)
 endif()
 
 # Parse custom debug info
-if (DEFINED USE_CUSTOM_DEBINFO)
+if(DEFINED USE_CUSTOM_DEBINFO)
     string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
     message(STATUS "Source files with custom debug infos: ${SOURCE_FILES}")
 
