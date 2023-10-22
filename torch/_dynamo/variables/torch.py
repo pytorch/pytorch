@@ -327,8 +327,19 @@ class TorchVariable(VariableTracker):
         ):
             return self._call_ntuple(tx, args, kwargs, options)
         elif self.value is torch.no_grad:
-            return GradModeVariable.create(tx, False, **options)
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, False, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
+            else:
+                return GradModeVariable.create(tx, False, **options)
         elif self.value is torch.enable_grad:
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, True, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True, **options)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
             return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
