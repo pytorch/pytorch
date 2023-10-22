@@ -27,6 +27,7 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
@@ -575,14 +576,20 @@ class BuiltinVariable(VariableTracker):
 
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if self.fn in (int, float) and isinstance(args[0], SymNodeVariable):
+        if self.fn in (int, float) and isinstance(
+            args[0], (SymNodeVariable, variables.TensorVariable)
+        ):
+            if isinstance(args[0], variables.TensorVariable):
+                item = args[0].call_method(tx, "item", [], {})
+            else:
+                item = args[0]
             fn_ = sym_int if self.fn is int else sym_float
             out = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_,
-                    (args[0].as_proxy(),),
+                    (item.as_proxy(),),
                     {},
                 ),
                 **options,
@@ -1425,6 +1432,12 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
+            if op is operator.is_ and isinstance(right, TensorVariable):
+                return ConstantVariable.create(
+                    id(extract_fake_example_value(left.as_proxy().node))
+                    == id(extract_fake_example_value(right.as_proxy().node))
+                )
+
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
             if (
@@ -1466,7 +1479,6 @@ class BuiltinVariable(VariableTracker):
             right, UserDefinedObjectVariable
         ):
             return ConstantVariable.create(op(left.value, right.value))
-
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
