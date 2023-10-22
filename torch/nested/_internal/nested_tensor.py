@@ -39,7 +39,6 @@ class NestedTensor(torch.Tensor):
     _stride: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(
@@ -87,10 +86,8 @@ class NestedTensor(torch.Tensor):
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
-
-        from torch._prims_common import make_contiguous_strides_for
-
-        self._strides = make_contiguous_strides_for(self._size)
+        stride = values.stride()
+        self._strides = (ragged_size * stride[0], *stride)
         self._ragged_idx = 1
 
         if values.requires_grad:
@@ -192,6 +189,20 @@ class NestedTensor(torch.Tensor):
             return fn(*args, **kwargs)
 
         raise NotImplementedError(func)
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        from .ops import jagged_torch_function
+
+        try:
+            return jagged_torch_function(func, *args, **kwargs)
+        except NotImplementedError:
+            pass
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
 
 
 # Not actually a view!

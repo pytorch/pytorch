@@ -4,7 +4,7 @@ import operator
 import traceback
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Set, Tuple
 
 import sympy
 
@@ -53,6 +53,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
         self.counter = 0
 
     def _assert_range_constraint(self, proxy, lower, upper, assert_msg):
@@ -94,11 +95,13 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         # We need the callbacks because, in order to call the function to create a proxy for shape[0], we
         # need the proxy for shape, which further requires the proxy for ret[1], etc.
         def add_assertions(val):
-            call_backs = []
-            messages = []
+            call_backs: List[Callable] = []
+            messages: List[str] = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 symbol = val.node._expr
                 if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
+                    if symbol in self._asserts_generated_unbacked_symbols:
+                        return call_backs, messages
                     # We only care about unbacked symints for these inline
                     # constraints, which are prefixed with 'i'
                     constraint = self.range_constraints[symbol]
@@ -108,6 +111,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                         partial(self._assert_range_constraint, lower=min_val, upper=max_val)
                     )
                     messages.append(assert_msg)
+                    self._asserts_generated_unbacked_symbols.add(symbol)
             elif isinstance(val, torch.Tensor):
                 for i, sym in enumerate(val.shape):
                     cbs, msgs = add_assertions(sym)

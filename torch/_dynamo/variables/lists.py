@@ -28,7 +28,9 @@ from .functions import UserFunctionVariable, UserMethodVariable
 def _listlike_contains_helper(items, search, tx, options):
     if search.is_python_constant():
         result = any(
-            x.as_python_constant() == search.as_python_constant() for x in items
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
         )
         return variables.ConstantVariable.create(result, **options)
 
@@ -803,8 +805,12 @@ class SetVariable(VariableTracker):
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            tensor_node = vt.as_proxy().node
-            return SetVariable.SetElement(vt, tensor_node)
+            fake_tensor = vt.as_proxy().node.meta.get("example_value")
+            if fake_tensor is None:
+                unimplemented(
+                    "Cannot check Tensor object identity without its fake value"
+                )
+            return SetVariable.SetElement(vt, fake_tensor)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
 
