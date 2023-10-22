@@ -3239,6 +3239,16 @@ class ConcatKernel(NopKernel):
         return kernel
 
     @classmethod
+    def can_realize_into_without_copy(cls, src):
+        if isinstance(src, TensorBox):
+            # unwrap a TensorBox
+            return cls.can_realize_into_without_copy(src.data)
+
+        return isinstance(src.data.layout, FlexibleLayout) and not isinstance(
+            src.data, ExternKernelAlloc
+        )
+
+    @classmethod
     def realize_into(cls, src, dst):
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
@@ -3255,9 +3265,7 @@ class ConcatKernel(NopKernel):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
-            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
-                src.data, ExternKernelAlloc
-            ):
+            if cls.can_realize_into_without_copy(src):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
         # introduce a copy
@@ -3811,6 +3819,33 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class AccumulateGrad(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    kernel = "inductor_ops.accumulate_grad_"
+
+    def codegen(self, wrapper):
+        (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
+        wrapper.writeline(f"{self.kernel}({variable}, {new_grad})")
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, variable, new_grad):
+        super().__init__(
+            None,
+            MutationLayout(variable),
+            self.unwrap_storage([variable, new_grad]),
         )
         self.name = V.graph.register_buffer(self)
 
