@@ -3741,9 +3741,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             kernel.__name__,
+            self.grid,
             self.codegen_kwargs(),
         )
-        wrapper.define_user_defined_triton_kernel(kernel)
+        wrapper.define_user_defined_triton_kernel(kernel, self.kwargs)
 
     def should_allocate(self):
         return False
@@ -3770,7 +3771,6 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 constant_args.append(v)
                 kwargs[k] = v
-        kwargs["grid"] = grid
         assert device is not None
 
         super().__init__(
@@ -3782,6 +3782,7 @@ class UserDefinedTritonKernel(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
+        self.grid = grid
 
 
 class InplaceBernoulliFallback(ExternKernel):

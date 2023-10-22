@@ -394,6 +394,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")
 
+        # Early return the original DTensor if the placements are the same.
+        if self._spec.placements == placements:
+            return self
+
         for placement in placements:
             if placement.is_partial():
                 raise RuntimeError(

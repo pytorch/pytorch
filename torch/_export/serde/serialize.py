@@ -317,11 +317,18 @@ class GraphModuleSerializer:
 
     def handle_placeholder(self, node: torch.fx.Node):
         assert node.op == "placeholder"
-        self.graph_state.inputs.append(Argument.create(as_tensor=TensorArgument(name=node.name)))
-
-        self.graph_state.tensor_values[node.name] = TensorValue(
-            meta=serialize_tensor_meta(node.meta["val"])
-        )
+        if isinstance(node.meta['val'], torch.Tensor):
+            graph_input = Argument.create(as_tensor=TensorArgument(name=node.name))
+            self.graph_state.tensor_values[node.name] = TensorValue(
+                meta=serialize_tensor_meta(node.meta["val"])
+            )
+        elif isinstance(node.meta['val'], torch.SymInt):
+            raise AssertionError("SymInt graph input is not implemented yet.")
+        elif isinstance(node.meta['val'], (int, bool, str, float, type(None))):
+            graph_input = self.serialize_input(node.meta['val'])
+        else:
+            raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
+        self.graph_state.inputs.append(graph_input)
 
     def handle_output(self, node: torch.fx.Node):
         assert node.op == "output"
@@ -421,9 +428,17 @@ class GraphModuleSerializer:
             ret["stack_trace"] = stack_trace
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
-            # Serialize to "fx_node_name:(orig_ref,type_str)"
+            def export_nn_module_stack(val):
+                assert isinstance(val, tuple) and len(val) == 2
+                path, ty = val
+
+                assert isinstance(path, str)
+                normalized_ty = ty.__module__ + "." + ty.__qualname__
+                return path + "," + normalized_ty
+
+            # Serialize to "key,orig_path,type_str"
             nn_module_list = [
-                f"{k}:({v[0]},{self.serialize_operator(v[1])})"
+                f"{k},{export_nn_module_stack(v)}"
                 for k, v in nn_module_stack.items()
             ]
             ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
@@ -850,7 +865,7 @@ class GraphModuleSerializer:
             try:
                 getattr(self, f"handle_{node.op}")(node)
             except Exception as e:
-                raise SerializeError(f"Failed serializing node {node} in graph:\n{graph_module.graph}") from e
+                raise SerializeError(f"Failed serializing node {node} in graph: {node.format_node()}") from e
 
         serialized_constants = {
             k: serialize_torch_artifact(v)
@@ -1409,29 +1424,13 @@ class GraphModuleDeserializer:
             return target
 
         if nn_module_stack_str := metadata.get("nn_module_stack"):
-            # Originally serialized to "fx_node_name:(orig_ref,type_str)"
-            nn_module_stack_list = nn_module_stack_str.split(ST_DELIMITER)
-            nn_module_stack = {}
-            for kv in nn_module_stack_list:
-                key_idx = kv.find(":")
-                key = kv[:key_idx]
-                assert kv[key_idx + 1] == "("
-                assert kv[-1] == ")"
-
-                paren = 0
-                comma_idx = None
-                for i, c in enumerate(kv[key_idx + 2:-1]):
-                    if c == "," and paren == 0:
-                        assert comma_idx is None
-                        comma_idx = i + key_idx + 2
-                    elif c == "(":
-                        paren += 1
-                    elif c == ")":
-                        paren -= 1
-
-                assert comma_idx is not None
-                module = deserialize_meta_func(kv[comma_idx + 1:-1])
-                nn_module_stack[key] = (kv[key_idx + 2:comma_idx], module)
+            # Originally serialized to "key,orig_path,type_str"
+            def import_nn_module_stack(key, path, ty):
+                return key, (path, ty)
+            nn_module_stack = dict(
+                import_nn_module_stack(*item.split(","))
+                for item in nn_module_stack_str.split(ST_DELIMITER)
+            )
             ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_str := metadata.get("source_fn_stack"):
