@@ -22,6 +22,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
+from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -32,7 +33,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import (
     is_allowed,
@@ -40,6 +40,8 @@ from ..allowed_functions import (
     is_numpy,
     is_user_defined_allowed,
 )
+
+from ..device_interface import device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
@@ -78,7 +80,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import CUDAStreamVariable, NullContextVariable
+from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -600,14 +602,21 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, torch.cuda.streams.Stream):
-            unimplemented("CUDAStreamVariable does not currently work soundly.")
-            # return CUDAStreamVariable(
-            #     None,
-            #     value,
-            #     source=self.source,
-            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
-            # )
+        elif isinstance(value, _StreamBase):
+            return StreamVariable(
+                None,
+                value,
+                value.device.type,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif isinstance(value, _EventBase):
+            return EventVariable(
+                None,
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         elif (
             isinstance(value, torch._C._TensorMeta)
             and value in config.traceable_tensor_subclasses
@@ -1528,9 +1537,34 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
-    elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
+    elif (
+        inspect.isclass(proxy.node.target)
+        and issubclass(proxy.node.target, _StreamBase)
+    ) or proxy.node.target in [
+        interface_elem.current_stream for interface_elem in device_interfaces.values()
+    ]:
         proxy.node.meta["example_value"] = example_value
-        return CUDAStreamVariable(proxy, example_value, **options)
+        return StreamVariable(
+            proxy, example_value, example_value.device.type, **options
+        )
+    elif (
+        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
+    ) or proxy.node.target in [
+        interface_elem.Event for interface_elem in device_interfaces.values()
+    ]:
+        proxy.node.meta["example_value"] = example_value
+        return EventVariable(proxy, example_value, **options)
+    elif proxy.node.target == "query" and proxy.node.op == "call_method":
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable(example_value, **options)
+    elif (
+        example_value is not None
+        and isinstance(example_value, _EventBase)
+        and proxy.node.target == "record_event"
+        and proxy.node.op == "call_method"
+    ):
+        proxy.node.meta["example_value"] = example_value
+        return EventVariable(proxy, example_value, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
         torch.sym_int,
         getattr,
