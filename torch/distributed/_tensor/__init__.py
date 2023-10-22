@@ -68,7 +68,7 @@ def _dtensor_init_helper(
         spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         # TODO: we need to unify the initialization of tracker at multiple places
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-            random._rng_tracker = random.OffsetBasedRNGTracker()
+            random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh.device_type)
 
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):
