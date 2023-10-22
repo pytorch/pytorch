@@ -6,6 +6,7 @@ from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
+from ..device_interface import get_interface_for_device
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..source import AttrSource, GlobalStateSource
@@ -430,69 +431,139 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
-class CUDAStreamContextVariable(ContextWrappingVariable):
+class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
+        current_stream_method = get_interface_for_device(
+            target_value.device
+        ).current_stream
         current_stream = wrap_fx_proxy_cls(
-            CUDAStreamVariable,
+            StreamVariable,
             tx,
             tx.output.create_proxy(
                 "call_function",
-                torch.cuda.current_stream,
+                current_stream_method,
                 (None,),
                 {},
             ),
         )
-        return CUDAStreamContextVariable(
+        return StreamContextVariable(
             target_values=[target_value],
             initial_values=[current_stream],
+            device=target_value.device,
             **kwargs,
         )
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, device, initial_values=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.device = device
+        self.set_stream = get_interface_for_device(self.device).set_stream
+        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx):
-        # CUDA stream generated inside of traced function
+        # stream generated inside of traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
-                torch.cuda.set_stream,
+                self.set_stream,
                 (self.target_values[0].as_proxy(),),
                 {},
             )
-        # CUDA stream passed from outside of traced function
+        # stream passed from outside of traced function
         else:
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                torch._C._cuda_setStream,
+                self.set_stream_id,
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        torch.cuda.set_stream(self.target_values[0].value)
+        self.set_stream(self.target_values[0].value)
 
     def exit(self, tx, *args):
         tx.output.create_proxy(
             "call_function",
-            torch.cuda.set_stream,
+            self.set_stream,
             (self.initial_values[0].as_proxy(),),
             {},
         )
-        torch.cuda.set_stream(self.initial_values[0].value)
+        self.set_stream(self.initial_values[0].value)
 
     def module_name(self):
-        return "torch.cuda"
+        return "torch." + str(self.device)
 
     def fn_name(self):
         return "stream"
 
 
-class CUDAStreamVariable(VariableTracker):
+class StreamVariable(VariableTracker):
+    def __init__(self, proxy, value, device, **kwargs):
+        if proxy is not None and "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        assert (
+            value.device.type == device
+        ), "stream value is not equal to the passed device"
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+        self.device = device
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert hasattr(self.value, name), f"no stream method found named {name}"
+        assert name in [
+            "wait_stream",
+            "synchronize",
+            "query",
+            "record_event",
+            "wait_event",
+        ], f" unsupported stream method {name}"
+
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        if name in ("wait_stream", "synchronize", "wait_event"):
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        elif name == "query":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=variables.ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
+        elif name == "record_event":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=EventVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
+        else:
+            unimplemented(self.device + " stream method " + name + " unsupported")
+
+    def as_proxy(self):
+        return self.proxy
+
+
+class EventVariable(VariableTracker):
     def __init__(self, proxy, value, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
@@ -507,7 +578,26 @@ class CUDAStreamVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("cuda stream")
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        if name in ("wait", "record", "synchronize"):
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        elif name == "query":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=variables.ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
+        else:
+            unimplemented(f"event method {name} unsupported")
 
     def as_proxy(self):
         return self.proxy
