@@ -23,6 +23,7 @@ import textwrap
 import subprocess
 import weakref
 import sys
+import copyreg
 from torch import inf, nan
 from itertools import product, combinations, permutations
 from functools import partial
@@ -9661,6 +9662,31 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
             self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
 
+    def _get_tensor_prop(self, t):
+        preserved = (
+            id(t),
+            sys.getrefcount(t),
+        )
+        moved = (
+            copyreg._slotnames(t.__class__),
+            id(t.__dict__),
+            tuple(t.__dict__.keys()),
+        )
+        return preserved, moved
+
+    def _checked_swap(self, t1, t2):
+        t1_pres, t1_moved = self._get_tensor_prop(t1)
+        t2_pres, t2_moved = self._get_tensor_prop(t2)
+
+        torch.utils.swap_tensors(t1, t2)
+
+        new_t1_pres, new_t1_moved = self._get_tensor_prop(t1)
+        new_t2_pres, new_t2_moved = self._get_tensor_prop(t2)
+        self.assertEqual(t1_pres, new_t1_pres)
+        self.assertEqual(t2_pres, new_t2_pres)
+        self.assertEqual(t1_moved, new_t2_moved)
+        self.assertEqual(t2_moved, new_t1_moved)
+
     def test_swap(self):
         ts = [
             torch.rand(2),
@@ -9677,13 +9703,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             holder.append(t1)
             t1_ref = weakref.ref(t1)
 
-            t1_prop = (id(t1), sys.getrefcount(t1))
-            t2_prop = (id(t2), sys.getrefcount(t2))
+            self._checked_swap(t1, t2)
 
-            torch.utils.swap_tensors(t1, t2)
-
-            self.assertEqual(t1_prop, (id(t1), sys.getrefcount(t1)))
-            self.assertEqual(t2_prop, (id(t2), sys.getrefcount(t2)))
             self.assertIs(holder[0], t1)
             self.assertEqual(t1.foo, "bar")
             self.assertIs(t1_ref(), t1)
@@ -9712,18 +9733,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
         t7 = MyTwoTensor4(torch.rand(4), torch.rand(4))
 
-        torch.utils.swap_tensors(t1, t2)
+        self._checked_swap(t1, t2)
         with self.assertRaisesRegex(RuntimeError, "are you using slots?"):
             torch.utils.swap_tensors(t1, t3)
         with self.assertRaisesRegex(RuntimeError, "are you using slots?"):
             torch.utils.swap_tensors(t2, t3)
-        torch.utils.swap_tensors(t3, t4)
-        torch.utils.swap_tensors(t3, t5)
+        self._checked_swap(t3, t4)
+        self._checked_swap(t3, t5)
         with self.assertRaisesRegex(RuntimeError, "same number of them"):
             torch.utils.swap_tensors(t3, t6)
         t6.c = "foo"
         t7.d = "bar"
-        torch.utils.swap_tensors(t6, t7)
+        self._checked_swap(t6, t7)
         self.assertEqual(t7.c, "foo")
         self.assertEqual(t6.d, "bar")
 
