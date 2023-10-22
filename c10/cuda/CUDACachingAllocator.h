@@ -26,6 +26,8 @@ C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 #define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__);
 
+namespace cuda {
+
 // TODO: Turn this into an honest to goodness class. I briefly attempted to do
 // this, but it was a bit irritating to figure out how to also correctly
 // apply pimpl pattern so I didn't have to leak any internal implementation
@@ -39,15 +41,15 @@ C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 // not counted as a word boundary, so you would otherwise have to list each
 // of these functions.
 
-namespace cuda::CUDACachingAllocator {
+namespace CUDACachingAllocator {
 
 extern const size_t kLargeBuffer;
 
 struct Stat {
-  uint64_t current = 0;
-  uint64_t peak = 0;
-  uint64_t allocated = 0;
-  uint64_t freed = 0;
+  int64_t current = 0;
+  int64_t peak = 0;
+  int64_t allocated = 0;
+  int64_t freed = 0;
 };
 
 enum struct StatType : uint64_t {
@@ -57,7 +59,7 @@ enum struct StatType : uint64_t {
   NUM_TYPES = 3 // remember to update this whenever a new stat type is added
 };
 
-using StatArray = std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)>;
+typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
 
 // Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
@@ -96,10 +98,10 @@ struct DeviceStats {
   Stat oversize_segments;
 
   // SIZE: maximum block size that is allowed to be split.
-  size_t max_split_size = 0;
+  int64_t max_split_size = 0;
 };
 
-using CreateContextFn = std::shared_ptr<GatheredContext> (*)();
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
@@ -121,7 +123,7 @@ struct SegmentInfo {
   int64_t requested_size = 0; // unrounded, actually requested size
   int64_t allocated_size = 0;
   int64_t active_size = 0;
-  cudaStream_t stream = nullptr;
+  cudaStream_t stream = 0;
   bool is_large = false;
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
@@ -165,7 +167,7 @@ struct TraceEntry {
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
-  size_t size_;
+  int64_t size_;
 };
 
 struct SnapshotInfo {
@@ -193,9 +195,9 @@ std::string format_size(uint64_t size);
 
 using OutOfMemoryObserver = std::function<void(
     int64_t device,
-    size_t allocated,
-    size_t device_total,
-    size_t device_free)>;
+    int64_t allocated,
+    int64_t device_total,
+    int64_t device_free)>;
 
 class CUDAAllocator : public Allocator {
  public:
@@ -221,9 +223,9 @@ class CUDAAllocator : public Allocator {
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
-      int /*device*/,
-      MempoolId_t /*mempool_id*/,
-      const std::unordered_set<void*>& /*expected_live_allocations*/) {
+      int device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
     TORCH_CHECK(
         false,
         name(),
@@ -348,7 +350,7 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
 inline CheckpointDelta setCheckpointPoolState(
     int device,
     std::shared_ptr<AllocatorState> pps) {
-  return get()->setCheckpointPoolState(device, std::move(pps));
+  return get()->setCheckpointPoolState(device, pps);
 }
 
 // CUDAGraph interactions
@@ -385,7 +387,7 @@ inline bool checkPoolLiveAllocations(
 }
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
-  return get()->attachOutOfMemoryObserver(std::move(observer));
+  return get()->attachOutOfMemoryObserver(observer);
 }
 
 inline void releasePool(int device, MempoolId_t mempool_id) {
@@ -393,7 +395,7 @@ inline void releasePool(int device, MempoolId_t mempool_id) {
 }
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
-  return get()->getIpcDevPtr(std::move(handle));
+  return get()->getIpcDevPtr(handle);
 }
 
 inline std::string name() {
@@ -416,5 +418,6 @@ inline void enablePeerAccess(int dev, int dev_to_access) {
   return get()->enablePeerAccess(dev, dev_to_access);
 }
 
-} // namespace cuda::CUDACachingAllocator
+} // namespace CUDACachingAllocator
+} // namespace cuda
 } // namespace c10
