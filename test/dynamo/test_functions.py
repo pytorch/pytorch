@@ -2083,6 +2083,49 @@ def forward(self, x_1, output_1):
         self.assertEqual(fn(y, z), fn_opt(y, z))
         self.assertEqual(fn(y, y), fn_opt(y, y))
 
+    def test_in_set_would_fail_broadcast(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            param.add_(1)
+            tensor_list = set([param2])
+            return param in tensor_list
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_in_set_inplace(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            y = param.add_(1)  # Tensor method
+            z = torch.Tensor.add_(y, 1)  # torch function
+            tensor_list = set([param2])
+            return y in tensor_list and z in tensor_list
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.fx
+from torch._subclasses.fake_tensor import is_fake
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -25,29 +26,47 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 
 
-def _listlike_contains_helper(items, search, tx, options):
+def _get_fake_tensor(vt):
+    fake_tensor = vt.as_proxy().node.meta.get("example_value")
+    if not is_fake(fake_tensor):
+        unimplemented("Cannot check Tensor object identity without its fake value")
+    return fake_tensor
+
+
+def _listlike_contains_helper(items, search, tx, options, check_tensor_identity=False):
     if search.is_python_constant():
-        result = any(
+        found = any(
             x.is_python_constant()
             and x.as_python_constant() == search.as_python_constant()
             for x in items
         )
-        return variables.ConstantVariable.create(result, **options)
+        return variables.ConstantVariable.create(found, **options)
 
     from .builtin import BuiltinVariable
 
-    result = None
+    must_check_tensor_id = False
+    if check_tensor_identity and isinstance(search, variables.TensorVariable):
+        must_check_tensor_id = True
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
+
+    found = None
     for x in items:
-        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-        if result is None:
-            result = check
+        if must_check_tensor_id:
+            if isinstance(x, variables.TensorVariable):
+                if search is _get_fake_tensor(x):  # Object equivalence
+                    return ConstantVariable.create(True)
         else:
-            result = BuiltinVariable(operator.or_).call_function(
-                tx, [check, result], {}
-            )
-    if result is None:
-        result = ConstantVariable.create(None)
-    return result
+            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            if found is None:
+                found = check
+            else:
+                found = BuiltinVariable(operator.or_).call_function(
+                    tx, [check, found], {}
+                )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 class BaseListVariable(VariableTracker):
@@ -889,7 +908,9 @@ class SetVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return _listlike_contains_helper(self.items, args[0], tx, options)
+            return _listlike_contains_helper(
+                self.items, args[0], tx, options, check_tensor_identity=True
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
