@@ -1,5 +1,6 @@
 import math
 import torch
+from functools import lru_cache
 from torch.utils._triton import has_triton
 
 
@@ -563,30 +564,49 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
                 num_stages=num_stages, num_warps=num_warps, SPLIT_N=SPLIT_N, **extra)
 
 
-def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compressed', **meta_input):
-    """Computes indices data for :func:`scatter_mm` used in BSR and
-    strided tensor matrix multiplication.
-    """
-    assert bsr.dense_dim() == 0
-    assert bsr.ndim == 2  # no batch dims
-    crow_indices = bsr.crow_indices()
-    col_indices = bsr.col_indices()
-    blocksize = bsr.values().shape[-2:]
-    M, K = bsr.shape
-    Ms, Ks = blocksize
-    K_, N = other.shape
-    assert K_ == K
+class TensorAsKey:
+    """A light-weight wrapper of a tensor that enables storing tensors as
+    keys with efficient data-pointer/shape/strides based comparision
+    as an approximation to data equality based keys.
 
-    meta = scatter_mm_meta(M, K, N, Ms, Ks, **meta_input)
-    if 'allow_tf32' not in meta_input:
-        meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
+    Motivation: the hash value of a torch tensor is tensor-pointer
+    based that completely ignores data equality and makes the usage of
+    tensors as keys rather pointless. For instance, the result of
+    ``len({a.crow_indices(), a.crow_indices()})`` is `2`, although,
+    the results of `crow_indices` method hold the same data storage.
+    On the other hand, for efficient caching of tensors we want to
+    avoid calling torch.equal at the expense of having a possibly
+    larger cache as it may contain tensors that are element-wise equal
+    but that use different data storages.
+    """
+    def __init__(self, obj):
+        self.obj = obj
+        self.key = (obj.data_ptr(), obj.shape, obj.stride())
+        self._hash = hash(self.key)
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, TensorAsKey):
+            return False
+        if self.obj is other.obj:
+            return True
+        return self.key == other.key
+
+
+@lru_cache(maxsize=128)
+def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, SPLIT_N, crow_indices_as_key, col_indices_as_key):
+    crow_indices, col_indices = crow_indices_as_key.obj, col_indices_as_key.obj
+    device = crow_indices.device
+    indices_dtype = torch.int32
 
     if indices_format == 'bsr_strided_mm_compressed':
-        meta.update(is_compressed=True)
-        SPLIT_N = meta['SPLIT_N']
         Ns = N // SPLIT_N
         q_offsets_lst = []
-        b = torch.arange(SPLIT_N, dtype=torch.int32, device=bsr.device) * Ns
+        b = torch.arange(SPLIT_N, dtype=indices_dtype, device=device) * Ns
         for m in range(M // Ms):
             r0 = crow_indices[m].item()
             r1 = crow_indices[m + 1].item()
@@ -603,20 +623,19 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
         nnz_per_row = crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N)
         nnz_per_row, indices = nnz_per_row.sort(descending=True, stable=True)
         r_offsets = r_offsets[indices]
-        return (indices_format, c_indices, r_offsets, q_offsets, meta)
+        return (indices_format, c_indices, r_offsets, q_offsets)
+
     elif indices_format == 'bsr_strided_mm':
-        meta.update(is_compressed=False)
-        SPLIT_N = meta['SPLIT_N']
         Ns = N // SPLIT_N
         p_offsets_lst = []
         q_offsets_lst = []
-        b = torch.arange(SPLIT_N, dtype=torch.int32, device=bsr.device) * Ns
+        b = torch.arange(SPLIT_N, dtype=indices_dtype, device=device) * Ns
         for m in range(M // Ms):
             r0 = crow_indices[m].item()
             r1 = crow_indices[m + 1].item()
             if r1 == r0:
                 continue
-            p_offsets_lst.append(torch.arange(r0, r1, dtype=torch.int32, device=bsr.device).repeat(SPLIT_N))
+            p_offsets_lst.append(torch.arange(r0, r1, dtype=indices_dtype, device=device).repeat(SPLIT_N))
             q_offsets_lst.append((col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N) + b.repeat_interleave(r1 - r0))
         q_offsets = torch.cat(q_offsets_lst)
         crow_indices_diff = crow_indices.diff()
@@ -626,7 +645,7 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
         c_indices = torch.cat((crow_indices[:1],
                                torch.cumsum(crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N), 0)))
         p_offsets = torch.cat(p_offsets_lst)
-        return (indices_format, c_indices, r_offsets, p_offsets, q_offsets, meta)
+        return (indices_format, c_indices, r_offsets, p_offsets, q_offsets)
 
     elif indices_format == 'scatter_mm':
         Ns = Ms
@@ -644,10 +663,43 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
                     pq_offsets.append([p, q])
 
         return (indices_format,
-                torch.tensor(c_indices, dtype=torch.int32, device=crow_indices.device),
-                torch.tensor(pq_offsets, dtype=torch.int32, device=crow_indices.device))
+                torch.tensor(c_indices, dtype=indices_dtype, device=device),
+                torch.tensor(pq_offsets, dtype=indices_dtype, device=device))
 
-    raise NotImplementedError(indices_format)
+    else:
+        raise ValueError(f'Invalid {indices_format=}. Expected bsr_strided_mm_compressed|bsr_strided_mm|scatter_mm')
+
+
+def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compressed', **meta_input):
+    """Computes indices data for :func:`scatter_mm` used in BSR and
+    strided tensor matrix multiplication.
+    """
+    assert bsr.dense_dim() == 0
+    assert bsr.ndim == 2  # no batch dims
+    crow_indices = bsr.crow_indices()
+    col_indices = bsr.col_indices()
+    blocksize = bsr.values().shape[-2:]
+    M, K = bsr.shape
+    Ms, Ks = blocksize
+    K_, N = other.shape
+    assert K_ == K
+
+    meta = scatter_mm_meta(M, K, N, Ms, Ks, **meta_input)
+    if 'allow_tf32' not in meta_input:
+        meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
+    SPLIT_N = meta['SPLIT_N']
+    indices_data = _bsr_scatter_mm_indices_data(
+        indices_format, M, K, N, Ms, Ks, SPLIT_N,
+        TensorAsKey(bsr.crow_indices()), TensorAsKey(bsr.col_indices()))
+
+    if indices_format == 'bsr_strided_mm_compressed':
+        meta.update(is_compressed=True)
+        return indices_data + (meta,)
+    elif indices_format == 'bsr_strided_mm':
+        meta.update(is_compressed=False)
+        return indices_data + (meta,)
+    else:
+        return indices_data
 
 
 def bsr_scatter_mm(bsr, other, indices_data=None):
