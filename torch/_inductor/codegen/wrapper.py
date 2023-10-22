@@ -6,7 +6,7 @@ import inspect
 import os
 import re
 from itertools import count
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -354,6 +354,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
+                inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
@@ -776,7 +777,7 @@ class WrapperCodeGen(CodeGen):
         from ..ir import Buffer
         from .common import SizeArg, TensorArg
 
-        signature = []
+        signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
             # Not a real argument
