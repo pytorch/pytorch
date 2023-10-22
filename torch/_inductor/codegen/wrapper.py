@@ -31,6 +31,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
+from .triton_utils import config_of, signature_to_meta
 
 
 pexpr = PythonPrinter().doprint
@@ -473,8 +474,11 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_user_defined_triton_kernel(self, kernel_name, args):
-        self.writeline(f"{kernel_name}.run({', '.join(args)})")
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, args):
+        stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
+        self.writeline(
+            f"{kernel_name}.run({', '.join(args)}, grid=grid({grid}), stream={stream_name})"
+        )
 
     def generate_scatter_fallback(
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
@@ -747,8 +751,7 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
-    def define_user_defined_triton_kernel(self, kernel):
-        code = inspect.getsource(kernel.fn)
+    def define_user_defined_triton_kernel(self, kernel, kwargs):
         name = kernel.__name__
 
         compile_wrapper = IndentedBuffer()
@@ -758,9 +761,59 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
+            from torch._inductor.utils import instance_descriptor
+            from torch._inductor.triton_heuristics import template
+            """,
+            strip=True,
+        )
+        compile_wrapper.newline()
+
+        # TODO(oulgen): num_stages and num_warps are default values of
+        # triton.Config. Can we do better? Or ask the user to provide?
+        num_stages = 2
+        num_warps = 4
+
+        from ..ir import Buffer
+        from .common import SizeArg, TensorArg
+
+        signature = []
+        constants = {}
+        for key, arg in kwargs.items():
+            # Not a real argument
+            if key == "grid":
+                continue
+            if (
+                key in kernel.__annotations__
+                and "constexpr" in kernel.__annotations__[key]
+            ):
+                constants[key] = arg
+                continue
+            if isinstance(arg, Buffer):
+                signature.append(
+                    TensorArg(key, arg.codegen_reference(), arg.get_dtype())
+                )
+            else:
+                signature.append(SizeArg(key, arg))
+        index_dtype = "tl.int32"
+        triton_meta = {
+            "signature": signature_to_meta(signature, size_dtype=index_dtype),
+            "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
+            "constants": constants,
+            "configs": [config_of(signature)],
+            "kernel_name": name,
+        }
+        compile_wrapper.splice(
+            f"""
+            @template(
+                num_stages={num_stages},
+                num_warps={num_warps},
+                meta={triton_meta!r}
+            )
+            @triton.jit
             """
         )
-        compile_wrapper.splice(code, strip=True)
+        compile_wrapper.splice(kernel.src, strip=True)
         compile_wrapper.writeline("''')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
