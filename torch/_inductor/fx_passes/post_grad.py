@@ -10,7 +10,10 @@ from sympy import Expr
 import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
+
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -627,44 +630,70 @@ def reinplace_scatters(graph):
     for node in reversed(graph.nodes):
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
-            copy_args_to_copy_nodes[(node.args[0], node.args[1])] = node
+            dst = node.args[0]
+            src = node.args[1]
+            # If the target is a getitem and it indexes a possible clone,
+            # then skip over it
+            if (
+                src.target == operator.getitem
+                and src.args[0].target == triton_kernel_wrapper_functional
+                and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
+            ):
+                src = src.args[0]
+            copy_args_to_copy_nodes[(dst, src)] = node
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
+
+    def can_replace(node, mutated_arg):
+        if get_node_storage(mutated_arg) is None:
+            return False
+        shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+        if mutated_arg.op == "placeholder":
+            if not (
+                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
+            ):
+                return False
+
+            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
+                return False
+
+            # Check for any uses other than current node and copy_ epilogue
+            if len(mutated_arg.users) > 2:
+                return False
+
+            graph.erase_node(copy_node)
+            return True
+        else:
+            # NB: This condition could be relaxed if none of the aliases
+            # are used after this mutation op. But that's trickier.
+            if len(shared_view_nodes) > 1:  # Arg aliases another node
+                return False
+            if len(mutated_arg.users) > 1:  # Arg used somewhere else
+                return False
+            return True
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     }
+    inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            mutated_arg = node.args[inplaceable_op.mutated_arg]
-            if get_node_storage(mutated_arg) is None:
-                continue
-            shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-            if mutated_arg.op == "placeholder":
-                if not (
-                    copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-                ):
-                    continue
-
-                if (
-                    len(shared_view_nodes) > 2
-                ):  # Arg aliases another node other than copy_
-                    continue
-
-                # Check for any uses other than current node and copy_ epilogue
-                if len(mutated_arg.users) > 2:
-                    continue
-
-                graph.erase_node(copy_node)
+            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
                 node.target = inplaceable_op.inplace_op
-            else:
-                # NB: This condition could be relaxed if none of the aliases
-                # are used after this mutation op. But that's trickier.
-                if len(shared_view_nodes) > 1:  # Arg aliases another node
-                    continue
-                if len(mutated_arg.users) > 1:  # Arg used somewhere else
-                    continue
-                node.target = inplaceable_op.inplace_op
+        elif node.target in inplaceable_triton_ops:
+            # inplaceable_triton_ops take an additional argument called
+            # tensors_to_clone which contain a list of tensors to clone
+            # This pass iterates over them and sees which ones are safe
+            # to eliminate (i.e. no longer need the clones)
+            tensors_to_clone = []
+            for arg in node.kwargs["tensors_to_clone"]:
+                assert arg in node.kwargs["kwargs"]
+                if not can_replace(node, node.kwargs["kwargs"][arg]):
+                    tensors_to_clone.append(arg)
+            kwargs = dict(node.kwargs)
+            kwargs["tensors_to_clone"] = tensors_to_clone
+            node.kwargs = immutable_dict(kwargs)
 
 
 @register_lowering_pattern(
