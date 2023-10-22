@@ -975,6 +975,47 @@ class GraphModule(torch.nn.Module):
         actual = normalize_gm(graph.print_readable(False))
         check_graph(actual, expected)
 
+    def test_context_wrapping_grad_mode_decorator(self):
+        ctx_wrappers = [torch.enable_grad, torch.no_grad]
+        for i in range(2):
+            torch._dynamo.reset()
+
+            ctx_wrapper = ctx_wrappers[i]
+            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+
+            def fn(x):
+                def inner_func(x):
+                    return x.sin()
+
+                with ctx_wrapper_inverse():
+                    return ctx_wrapper(inner_func)(x)
+
+            x = torch.zeros(10, requires_grad=True)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+    def test_context_wrapping_grad_mode_nested_function_decorator(self):
+        ctx_wrappers = [torch.enable_grad, torch.no_grad]
+        for i in range(2):
+            torch._dynamo.reset()
+
+            ctx_wrapper = ctx_wrappers[i]
+            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+
+            def fn(x):
+                @ctx_wrapper
+                def inner_func(x):
+                    return x.sin()
+
+                with ctx_wrapper_inverse():
+                    return inner_func(x)
+
+            x = torch.zeros(10, requires_grad=True)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
