@@ -467,6 +467,7 @@ def distribute_tensor(
         # call PyTorch/XLA SPMD for `xla` backend type device mesh.
         # This returns XLAShardedTensor
         from torch.distributed._tensor._xla import xla_distribute_tensor
+
         return xla_distribute_tensor(
             tensor, device_mesh, placements
         )  # type:ignore[return-value]
