@@ -564,6 +564,88 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
                 num_stages=num_stages, num_warps=num_warps, SPLIT_N=SPLIT_N, **extra)
 
 
+def bsr_dense_mm_meta(M, K, N, Ms, Ks,
+                      GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, **extra):
+    if {num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
+        # The following parameters are optimized for the performance
+        # equilibrium points of bsr-dense and dense-dense matrix
+        # multiplications when using GPU cards NVIDIA A100. For points
+        # far from the performance equilibrium points as well as for
+        # other GPU cards, the optimal parameters are likely different
+        # from what specified below.
+        device_name = torch.cuda.get_device_name()
+        is_A100 = 'A100' in device_name
+        if (M, K, N) == (1024,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                if is_A100:
+                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    GROUP_SIZE_ROW=1;num_stages=2;num_warps=8  # noqa: E225,E231,E702
+        elif (M, K, N) == (2048,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                if is_A100:
+                    GROUP_SIZE_ROW=3;num_stages=3;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=2;num_warps=8  # noqa: E225,E231,E702
+        elif (M, K, N) == (4096,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    GROUP_SIZE_ROW=3;num_stages=4;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                if is_A100:
+                    GROUP_SIZE_ROW=2;num_stages=3;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        elif (M, K, N) == (8192,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        elif (M, K, N) == (16384,) * 3:
+            if (Ms, Ks) == (16, 16):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (32, 32):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=4;num_warps=1  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (64, 64):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
+            elif (Ms, Ks) == (128, 128):
+                if is_A100:
+                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+    GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
+    num_stages = num_stages or 1
+    num_warps = num_warps or 4
+    return dict(GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
+
+
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
     keys with efficient data-pointer/shape/strides based comparision
@@ -1001,7 +1083,7 @@ if has_triton():
 
 
     def _run_dense_rowspace_kernel(
-        blocksize, values, crow_indices, col_indices, dense, output, max_grid
+        blocksize, values, crow_indices, col_indices, dense, output, max_grid, meta
     ):
         n_batches = dense.size(0)
         n_block_rows = crow_indices.size(-1) - 1
@@ -1032,10 +1114,7 @@ if has_triton():
                 *ptr_stride_extractor(*sliced_tensors),
                 acc_dtype=acc_dtype,
                 allow_tf32=allow_tf32,
-                GROUP_SIZE_ROW=4,
-                num_stages=1,
-                num_warps=4
-            )
+                **meta)
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
@@ -1174,15 +1253,16 @@ if has_triton():
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        meta: Optional[dict] = None
     ):
         f_name = "bsr_dense_mm"
+        m, kl = bsr.shape[-2:]
         if not skip_checks:
             check_bsr_layout(f_name, bsr)
             check_device(f_name, bsr, dense.device)
             check_dtype(f_name, bsr, dense.dtype)
             check_mm_compatible_shapes(f_name, bsr, dense)
 
-            m = bsr.size(-2)
             n = dense.size(-1)
             row_block, col_block = bsr.values().shape[-2:]
             check(
@@ -1192,7 +1272,6 @@ if has_triton():
             )
             check_blocksize(f_name, (row_block, col_block))
         else:
-            m, kl = bsr.shape[-2:]
             kr, n = dense.shape[-2:]
 
         original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
@@ -1224,6 +1303,11 @@ if has_triton():
         if max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
             return bsr_scatter_mm(bsr, dense, out=out)
 
+        if meta is None:
+            meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1])
+        else:
+            meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1], **meta)
+
         # NOTE: out is contiguous, so prepare_inputs will create a view.
         # out gets modified in-place, so we store a backup copy.
         out_backup = out
@@ -1244,7 +1328,7 @@ if has_triton():
         out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
 
         # Launch kernel
-        _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
+        _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid, meta)
 
         return out_backup
 
