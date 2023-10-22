@@ -9,7 +9,6 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor._xla import xla_distribute_tensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -467,6 +466,8 @@ def distribute_tensor(
     if device_type == "xla":
         # call PyTorch/XLA SPMD for `xla` backend type device mesh.
         # This returns XLAShardedTensor
+        from torch.distributed._tensor._xla import xla_distribute_tensor
+
         return xla_distribute_tensor(
             tensor, device_mesh, placements
         )  # type:ignore[return-value]
