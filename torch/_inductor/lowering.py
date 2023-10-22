@@ -5,13 +5,17 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -259,7 +263,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...]] = list(args)
+        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -4973,6 +4977,20 @@ def accumulate_grad_(variable, new_grad):
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
     return variable
+
+
+@register_lowering(triton_kernel_wrapper_mutation)
+def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+
+@register_lowering(triton_kernel_wrapper_functional)
+def triton_kernel_wrap(*, kernel_idx, grid, kwargs):
+    kwargs = {
+        key: (clone(x) if isinstance(x, TensorBox) else x) for key, x in kwargs.items()
+    }
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
 
 try:
