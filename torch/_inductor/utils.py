@@ -687,6 +687,9 @@ class IndentedBuffer:
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
 
+    def newline(self):
+        self.writeline("\n")
+
     def writeline(self, line):
         if isinstance(line, LineContext):
             self._lines.append(line)
