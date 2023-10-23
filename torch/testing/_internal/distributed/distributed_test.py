@@ -4768,9 +4768,12 @@ class DistributedTest:
                 (LargeNet(), torch.randn(1, 1000).cuda()),
             ]
             if HAS_TORCHVISION:
+                print("[TESTING]: TORCHVISION INSTALLED")
                 models_to_test.append(
                     (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
                 )
+            else:
+                print("[TESTING]: TORCHVISION NOT INSTALLED")
             for (model, inp) in models_to_test:
                 # Enable determinism in cudnn operators
                 with torch.backends.cudnn.flags(
@@ -5007,7 +5010,10 @@ class DistributedTest:
                 nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda()
             ]
             if HAS_TORCHVISION:
+                print("[TESTING]: TORCHVISION INSTALLED")
                 models_to_test.append(torchvision.models.resnet50().cuda())
+            else:
+                print("[TESTING]: TORCHVISION NOT INSTALLED")
 
             for j, model in enumerate(models_to_test):
                 model_optim_in_bwd = copy.deepcopy(model)
@@ -7483,6 +7489,7 @@ class DistributedTest:
 
             # Add resnet model if we have torchvision installed.
             if HAS_TORCHVISION:
+                print("[TESTING]: TORCHVISION INSTALLED")
                 resnet_model = torchvision.models.resnet50()
                 models_to_test.append(
                     DDPUnevenTestInput(
@@ -7492,6 +7499,8 @@ class DistributedTest:
                         sync_interval=1,
                     )
                 )
+            else:
+                print("[TESTING]: TORCHVISION NOT INSTALLED")
 
             # Test with no_sync every 2, 3, 4, ... iterations.
             models_with_sync = []
