@@ -138,6 +138,12 @@ def simulateFp8Precision(input, variant):
 
 
 class TestFloat8Dtype(TestCase):
+    def setUp(self):
+        name = self._testMethodName
+
+        if "fnuz" in name and "cpu" not in name:
+            raise unittest.SkipTest("fnuz ops are only supported on CPU")
+
     """
     Sanity test for zeros comparison
     """
@@ -149,7 +155,7 @@ class TestFloat8Dtype(TestCase):
         self.assertEqual(x, x8.float())
 
     """
-        Numerical test of float8 conversion
+    Numerical test of float8 conversion
     """
 
     @parametrize("dtype", FLOAT8_DTYPES)
@@ -161,7 +167,7 @@ class TestFloat8Dtype(TestCase):
         self.assertEqual(x8_simulated, x8.float())
 
     """
-        Test special numbers
+    Test special numbers
     """
 
     @parametrize("dtype", FLOAT8_DTYPES)
@@ -196,7 +202,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
     multiplication - doesn't seem worth it.
     """
 
-    @parametrize("dtype", FLOAT8_DTYPES)
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
     def test_mul(self, dtype):
         shape = (10, 10)
         a = torch.randn(shape)
