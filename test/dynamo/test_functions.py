@@ -1591,6 +1591,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 "n_elements": n_elements,
                 "BLOCK_SIZE": 16,
             },
+            tensors_to_clone=["in_ptr0", "in_ptr1", "out_ptr"],
         )
         self.assertEqual(out_dict["out_ptr"], torch_add)
         # Make sure it is NOT modified
@@ -1621,6 +1622,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                     "n_elements": output.numel(),
                     "BLOCK_SIZE": 16,
                 },
+                tensors_to_clone=["in_ptr0", "out_ptr"],
             )
             return out["out_ptr"]
 
@@ -1644,7 +1646,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
     getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
@@ -1721,7 +1723,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_views(self, backend):
         def call_triton_take_view(x: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1755,7 +1757,7 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_grad_option(self, grad_fn, backend):
         def call_triton(x: torch.Tensor):
             with grad_fn():
@@ -1771,7 +1773,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_inner_triton_function(self, backend):
         def f(x: torch.Tensor):
             @triton.jit
@@ -1804,7 +1806,36 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
+    def test_triton_kernel_no_clones(self, grad):
+        from torch._inductor.utils import run_and_get_code
+
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x, requires_grad=grad)
+            n_elements = output.numel()
+
+            grid = (x.numel(),)
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
+            return output
+
+        t1 = torch.rand(5, device="cuda", requires_grad=grad)
+        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+
+        torch_add = t1 + t2
+        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        self.assertEqual(torch_add, test)
+        self.assertTrue("aten.copy" not in code)
+        self.assertTrue("aten.clone" not in code)
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, backend):
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
@@ -1930,6 +1961,200 @@ def forward(self, x_1, output_1):
             ref = opt_fn(x)
             res = fn(x)
             self.assertEqual(ref, res)
+
+    def test_cast_tensor_single_elem(self):
+        with torch._dynamo.config.patch({"capture_scalar_outputs": True}):
+            for t, val in [
+                (float, 1.0),
+                (float, 1),
+                (float, True),
+                (int, 1),
+                (int, False),
+                # (int, 1.0), # fails due to a >= 0 comparison in sym_int
+            ]:  # , bool, complex]: no casting for sym_bool, no sym_complex
+
+                def fn(x):
+                    x = x + 1
+                    return t(x)
+
+                opt_fn = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=False
+                )
+                x = torch.tensor([val])
+                res = fn(x)
+                ref = opt_fn(x)
+                self.assertEqual(ref, res)
+
+                # Cannot handle non single-elem
+                with self.assertRaises(ValueError):
+                    fn(torch.tensor([val] * 2))
+                with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
+                    opt_fn(torch.tensor([val] * 2))
+
+    def test_set_construction(self):
+        def fn(x):
+            y = x.add_(1)
+            s = set({x})
+            s.add(y)
+            return len(s)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_is_tensor_tensor(self):
+        def fn(x, y):
+            if x is y:
+                return x * 2
+            else:
+                return x + y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return x is y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_mutated_tensor_tensor_across_graph_break(self):
+        def fn(x):
+            y = x.add_(1)
+            cond = x is y
+            x.add_(1)
+            # The real tensor values are recovered when graph breaking.
+            # Hence we recover the invariant.
+            torch._dynamo.graph_break()
+            x.add_(1)
+            return x is y, cond
+
+        fn_opt = torch.compile(backend="eager", dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_mutated_tensor_tensor(self):
+        def fn(x):
+            z = x.clone()
+            y = z.add_(1)
+            return y is z
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
+        def fn(z):
+            x = z.clone()
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            _ = y is z
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_vmapped_mutated_tensor_tensor(self):
+        def fn(x):
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
+        def fn(y, z):
+            a = y.clone()
+            b = z.clone()
+
+            def g(a, b):
+                return a.acos_(), b.acos_()
+
+            c, d = torch.vmap(g)(a, b)
+            return a is c is b is d
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        y = torch.ones(4, 2)
+        z = torch.ones(4, 10)
+
+        self.assertEqual(fn(y, z), fn_opt(y, z))
+        self.assertEqual(fn(y, y), fn_opt(y, y))
+
+    def test_in_set_would_fail_broadcast(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            param.add_(1)
+            tensor_list = set([param2])
+            return param in tensor_list
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_in_set_inplace(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            y = param.add_(1)  # Tensor method
+            z = torch.Tensor.add_(y, 1)  # torch function
+            tensor_list = set([param2])
+            return y in tensor_list and z in tensor_list
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
