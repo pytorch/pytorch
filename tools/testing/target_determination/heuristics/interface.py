@@ -238,7 +238,7 @@ class AggregatedHeuristics:
         )
 
         for heuristic, heuristic_results in self._heuristic_results.items():
-            if heuristic.test_mode:
+            if heuristic.trial_mode:
                 continue
 
             aggregated_priorities.integrate_priorities(heuristic_results)
@@ -274,10 +274,10 @@ class AggregatedHeuristics:
         for heuristic, heuristic_results in self._heuristic_results.items():
             metrics = heuristic_results.get_priority_info_for_test(test)
             metrics["heuristic_name"] = heuristic.name
-            metrics["test_mode"] = heuristic.test_mode
+            metrics["trial_mode"] = heuristic.trial_mode
             heuristics.append(metrics)
 
-            if not heuristic.test_mode and heuristic_results._get_test_relevance_group(test) in [
+            if not heuristic.trial_mode and heuristic_results._get_test_relevance_group(test) in [
                 Relevance.HIGH,
                 Relevance.PROBABLE,
             ]:
@@ -313,13 +313,13 @@ class HeuristicInterface:
 
     description: str
 
-    # When test mode is set to True, this heuristic's predictions will not be used
+    # When trial mode is set to True, this heuristic's predictions will not be used
     # to reorder tests. It's results will however be emitted in the metrics.
-    test_mode: bool
+    trial_mode: bool
 
     @abstractmethod
     def __init__(self, **kwargs: Dict[str, Any]) -> None:
-        self.test_mode = kwargs.get("test_mode", False)
+        self.trial_mode = kwargs.get("trial_mode", False)
         pass
 
     @abstractmethod
