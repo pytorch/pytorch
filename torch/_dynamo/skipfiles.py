@@ -204,6 +204,7 @@ MOD_INLINELIST = {
     "torch.ao.nn",
     "torch.distributions",
     "torch.fx._pytree",
+    "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.random",
     "torch.sparse",
