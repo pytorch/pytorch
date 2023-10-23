@@ -735,13 +735,20 @@ class Reduction(Loops):
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
-            if input_node is not None and isinstance(input_node, TensorBox):
-                ranges, reduction_ranges = extract_input_node_reduction_ranges(
+            if (
+                len(ranges) == 0
+                and input_node is not None
+                and isinstance(input_node, TensorBox)
+            ):
+                # Only handles the case where keep_dim = False.
+                # Otherwise, we need to propagate reduction dim info to the stage where
+                # the intermediate loader of the first Reduction is generated.
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
-                if reduction_ranges is not None:
+                if new_ranges is not None and new_reduction_ranges is not None:
                     extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(ranges + reduction_ranges)
+                        sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         # If the input_node or its dependent nodes are also Reduction nodes,
