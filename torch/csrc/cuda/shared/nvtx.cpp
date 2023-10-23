@@ -7,7 +7,9 @@
 namespace torch::cuda::shared {
 
 void registerString(const char* string) {
+#ifndef USE_ROCM
   nvtxDomainRegisterString(nullptr, string);
+#endif
 }
 
 void initNvtxBindings(PyObject* module) {

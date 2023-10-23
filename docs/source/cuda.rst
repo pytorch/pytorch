@@ -133,6 +133,7 @@ NVIDIA Tools Extension (NVTX)
     nvtx.mark
     nvtx.range_push
     nvtx.range_pop
+    nvtx.register_string
 
 Jiterator (beta)
 -----------------------------
