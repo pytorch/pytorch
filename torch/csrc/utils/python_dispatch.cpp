@@ -786,7 +786,7 @@ void initDispatchBindings(PyObject* module) {
     auto device = c10::Device(device_type);
     TORCH_CHECK(
         !device.has_index(),
-        "Expected device_type string to not a device index; got ",
+        "Expected device_type string to not have a device index; got ",
         device_type);
     return c10::toString(
         c10::computeDispatchKey(c10::nullopt, c10::nullopt, device));
