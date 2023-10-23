@@ -30,7 +30,7 @@ from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lists import ListVariable, TupleVariable
-from .nn_module import NNModuleVariable
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
 
 log = logging.getLogger(__name__)
@@ -328,7 +328,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def make(value, source=None, **kwargs):
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "map":
+        elif value.__name__ in ("map", "map_impl"):
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
@@ -425,14 +425,24 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # branches
         assert isinstance(
             args[1],
-            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                NNModuleVariable,
+                UnspecializedNNModuleVariable,
+            ),
         ), str(
             type(args[1])
         )  # true_fn
 
         assert isinstance(
             args[2],
-            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                NNModuleVariable,
+                UnspecializedNNModuleVariable,
+            ),
         ), str(
             type(args[2])
         )  # false_fn

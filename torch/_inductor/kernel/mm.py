@@ -142,6 +142,20 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         log.debug("Added %d cutlass gemm configs.", len(ops))
 
+    from torch._inductor.ir import FixedLayout, FlexibleLayout
+
+    if (
+        len(choices) == 1
+        and use_aten_gemm_kernels()
+        and isinstance(layout, FixedLayout)
+    ):
+        # If we are not autotuning, we can swap to a FlexibleLayout
+        # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+        layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
+        choices = [aten_mm.bind((mat1, mat2), layout)]
+
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
 

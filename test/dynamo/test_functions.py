@@ -1537,6 +1537,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     @requires_triton()
     def test_triton_kernel_higher_order_func(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        add_kernel_id = kernel_side_table.add_kernel(add_kernel)
+
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
 
@@ -1547,7 +1551,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         n_elements = output.numel()
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         triton_kernel_wrapper_mutation(
-            kernel=add_kernel,
+            kernel_idx=add_kernel_id,
             grid=grid,
             kwargs={
                 "in_ptr0": t1,
@@ -1564,7 +1568,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         # Test higher order function without mutation
         output = torch.zeros_like(t1)
         out_dict = triton_kernel_wrapper_functional(
-            kernel=add_kernel,
+            kernel_idx=add_kernel_id,
             grid=grid,
             kwargs={
                 "in_ptr0": t1,
@@ -1584,15 +1588,18 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_triton_kernel_functionalize(self):
         import functorch
         from functorch import make_fx
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
 
+        kernel_side_table.reset_table()
+
         def f(x, output):
             out = triton_kernel_wrapper_functional(
-                kernel=mul2_kernel,
+                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
                 grid=(x.numel(),),
                 kwargs={
                     "in_ptr0": x,
@@ -1623,7 +1630,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = functools_triton_kernel_wrapper_functional(grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
     getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']

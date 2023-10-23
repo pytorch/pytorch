@@ -256,6 +256,14 @@ def convert_shape_to_symint(
     ]
 
 
+def is_view(op: torch._ops.OpOverload):
+    """
+    Does this op overload have aliasing
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    return any(a.alias_info is not None for a in op._schema.arguments)
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
@@ -332,6 +340,22 @@ def pad_listlike(x, size):
         return type(x)([x[0]]) * size
     else:
         return x
+
+
+# Used to ensure that iterating over a set is deterministic
+def tuple_sorted(x):
+    if len(x) == 0:
+        return []
+
+    def sort_func(elem):
+        if isinstance(elem, str):
+            return elem
+        else:
+            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
+            # but we are not able to do isinstance assert because of circular dependency
+            return elem.get_name()
+
+    return sorted(x, key=sort_func)
 
 
 def cache_on_self(fn):
@@ -771,6 +795,10 @@ def use_triton_template(layout, *, enable_int32=False):
 def use_cutlass_template(layout):
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
+    # Do not use cutlass template on ROCm
+    if torch.version.hip:
+        return False
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
@@ -1163,6 +1191,31 @@ def reduction_num_outputs(reduction_type):
 
 def is_linux() -> bool:
     return platform.system() == "Linux"
+
+
+def has_free_symbols(itr):
+    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if has_free_symbols(t.data.get_size()) or (
+                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+            ):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
 
 
 # Placeholder strings used in triton codegen.

@@ -23,7 +23,7 @@ static inline DTYPE ## 3 cross(DTYPE ## 3 x, DTYPE ## 3 y) {    \
 }
 
 // Metal only supports half and float for native cross implementation.
-// For all the the other data types, implement cross manually.
+// For all the other data types, implement cross manually.
 REGISTER_CROSS_FUNC(int);
 REGISTER_CROSS_FUNC(long);
 REGISTER_CROSS_FUNC(short);

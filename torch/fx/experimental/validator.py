@@ -647,6 +647,7 @@ def bisect(shape_env):
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
             tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
             new_with_shape_env(shape_env, fake.storage_offset()),
+            fake.is_nested,
         )
 
     # Checks whether the given shape_env fails when produce_guards is called.

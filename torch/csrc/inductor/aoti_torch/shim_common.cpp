@@ -24,6 +24,7 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/mm.h>
+#include <ATen/ops/nonzero.h>
 
 #endif
 
@@ -114,12 +115,41 @@ AOTITorchError aoti_torch_get_sizes(
   });
 }
 
+AOTITorchError aoti_torch_get_size(
+    AtenTensorHandle tensor,
+    int64_t d,
+    int64_t* ret_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_size = t->size(d);
+  });
+}
+
 AOTITorchError aoti_torch_get_strides(
     AtenTensorHandle tensor,
     int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_strides = const_cast<int64_t*>(t->strides().data());
+  });
+}
+
+AOTITorchError aoti_torch_get_stride(
+    AtenTensorHandle tensor,
+    int64_t d,
+    int64_t* ret_stride) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_stride = t->stride(d);
+  });
+}
+
+AOTITorchError aoti_torch_get_storage_offset(
+    AtenTensorHandle tensor,
+    int64_t* ret_storage_offset) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_storage_offset = t->storage_offset();
   });
 }
 
@@ -153,12 +183,18 @@ AOTITorchError aoti_torch_empty_strided(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
-    c10::Device device = c10_device(device_type, device_index);
-    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
-        static_cast<c10::ScalarType>(dtype));
-    at::Tensor* new_tensor =
-        new at::Tensor(at::empty_strided(sizes, strides, options));
-    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+    if (c10::DeviceType(device_type) == c10::DeviceType::CPU) {
+      *ret_new_tensor = tensor_pointer_to_tensor_handle(
+          new at::Tensor(at::detail::empty_strided_cpu(
+              sizes, strides, static_cast<c10::ScalarType>(dtype))));
+    } else {
+      c10::Device device = c10_device(device_type, device_index);
+      c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+          static_cast<c10::ScalarType>(dtype));
+      at::Tensor* new_tensor =
+          new at::Tensor(at::empty_strided(sizes, strides, options));
+      *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+    }
   });
 }
 
@@ -261,6 +297,16 @@ AOTITorchError aoti_torch_tensor_copy_(
   });
 }
 
+AOTITorchError aoti_torch_assign_tensors(
+    AtenTensorHandle src,
+    AtenTensorHandle dst) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
+    *dst_tensor = *src_tensor;
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
@@ -302,6 +348,30 @@ AOTITorchError aoti_torch_mm_out(
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
     at::mm_out(*out_tensor, *self_tensor, *mat2_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_nonzero(
+    AtenTensorHandle self,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = at::nonzero(*self_tensor);
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
+AOTITorchError aoti_torch_repeat_interleave_Tensor(
+    AtenTensorHandle repeats,
+    int64_t output_size,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
+    at::Tensor out_tensor =
+        at::_ops::repeat_interleave_Tensor::call(*repeats_tensor, output_size);
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
   });
 }
 

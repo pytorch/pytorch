@@ -106,7 +106,9 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
     import_strs: Set[str] = set()
     for name, obj in globals.items():
         import_strs.add(_format_import_statement(name, obj, importer))
-    return "\n".join(import_strs)
+    # Sort the imports so we have a stable import block that allows us to
+    # hash the graph module and get a consistent key for use in a cache.
+    return "\n".join(sorted(import_strs))
 
 
 @compatibility(is_backward_compatible=True)
@@ -725,7 +727,7 @@ class {module_name}(torch.nn.Module):
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
 
-        cls.__call__ = call_wrapped
+        cls.__call__ = call_wrapped  # type: ignore[method-assign]
 
         return python_code
 

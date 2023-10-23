@@ -863,7 +863,7 @@ except RuntimeError as e:
             @staticmethod
             def backward(ctx, grad):
                 self.assertEqual(torch.cuda.current_stream(), ctx.stream)
-                # delays the operation in the the background stream
+                # delays the operation in the background stream
                 torch.cuda._sleep(1000 * 5000)
                 return grad * ctx.val, None
 

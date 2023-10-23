@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
@@ -152,6 +152,12 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
             return _listlike_contains_helper(self.items, args[0], tx, options)
+        elif name == "index":
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -379,6 +385,12 @@ class ListVariable(CommonListMethodsVariable):
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not list:
+            return super().call_hasattr(tx, name)
+        options = VariableTracker.propagate(self)
+        return variables.ConstantVariable.create(hasattr([], name), **options)
 
 
 class DequeVariable(CommonListMethodsVariable):
@@ -639,7 +651,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                unimplemented(f"NamedTupleVariable.{name}")
+                super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)].add_options(self)
 

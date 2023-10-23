@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch._C._distributed_c10d import (
+    AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
     AllToAllOptions,
@@ -965,6 +966,8 @@ def _get_default_store():
 
 def _update_default_pg(pg):
     _world.default_pg = pg
+    rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
+    torch._C._distributed_c10d._set_global_rank(rank)
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     if group is None:
@@ -2891,6 +2894,9 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else torch.view_as_real(input_tensor)
     )
 
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+
     group = group or _get_default_group()
 
     if group in _world.pg_coalesce_state.keys():
@@ -2902,7 +2908,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor)
+    work = group._allgather_base(output_tensor, input_tensor, opts)
 
     if async_op:
         return work
@@ -3367,6 +3373,7 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
 
     group = group or _get_default_group()
 
@@ -3935,7 +3942,7 @@ def _new_group_with_tag(
         for rank in ranks:
             if rank < 0 or rank >= global_world_size:
                 raise ValueError(
-                    "The new group's rank should be within the "
+                    "The new group's rank should be within "
                     "the world_size set by init_process_group"
                 )
         if global_rank in ranks:

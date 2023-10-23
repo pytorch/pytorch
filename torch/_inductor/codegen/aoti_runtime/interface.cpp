@@ -172,7 +172,7 @@ AOTIRuntimeError AOTInductorModelDelete(
   })
 }
 
-AOTIRuntimeError AOTInductorModelUpdateConstants(
+AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
   auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);

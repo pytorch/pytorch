@@ -16,11 +16,18 @@ class TwoTensor(torch.Tensor):
         # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
         shape = a.shape
         kwargs = {}
+        kwargs["strides"] = a.stride()
+        kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
         kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
-        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+        assert a.shape == b.shape
+        assert a.stride() == b.stride()
+        assert a.storage_offset() == b.storage_offset()
+        return out
 
     def __init__(self, a, b):
         self.a = a
@@ -63,3 +70,11 @@ class TwoTensor(torch.Tensor):
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
+
+
+class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **kwargs)
+        if torch._subclasses.fake_tensor._is_tensor_constructor(func):
+            out = TwoTensor(out, out.clone())
+        return out
