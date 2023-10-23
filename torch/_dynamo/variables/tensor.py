@@ -980,11 +980,9 @@ class TensorSubclassVariable(VariableTracker):
             torch_fn = VariableBuilder(
                 tx, AttrSource(self.source, "__torch_function__")
             )(self.value.__torch_function__)
-            return TensorWithTFOverrideVariable.create(
-                tx,
-                args[0],
-                torch_fn,
-                self.value,
+
+            return TensorWithTFOverrideVariable.from_tensor_var(
+                tx, args[0], self.value, torch_fn
             )
 
         return super().call_function(tx, args, kwargs)

@@ -1,10 +1,16 @@
+from typing import Dict, List
+
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
+from ..source import GlobalSource
 from ..utils import is_tensor_base_attr_getter
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
+from .tensor import TensorVariable
+from .user_defined import UserDefinedClassVariable
+
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
 # At a high level, a torch function tensor subclass is represented as a TensorWithTFOverrideVariable, which dispatches
@@ -62,7 +68,7 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
-        lambda x: x.subclass_type,
+        lambda x: x.class_type,
     )
 
     for arg in overloaded_args:
@@ -82,59 +88,43 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     )
 
 
-class TensorWithTFOverrideVariable(VariableTracker):
+class TensorWithTFOverrideVariable(TensorVariable):
     """
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
-    @staticmethod
-    def create(
-        tx,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        var = TensorWithTFOverrideVariable(
-            tensor_variable,
-            torch_function_fn,
-            subclass_type,
-            **kwargs,
-        )
+    def __init__(self, *args, **kwargs):
+        self.torch_function_fn = kwargs.pop("torch_function_fn")
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def from_tensor_var(cls, tx, tensor_var, class_type, torch_function_fn):
+        import torch
+
+        kwargs = dict(tensor_var.__dict__)
+        assert (
+            kwargs.pop("class_type") is torch.Tensor
+        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
+
         # stash the subclass type to rewrap an output tensor if needed
+        # this is needed because the actual type needs to be available
+        # each time the compiled artifact is run and outputs a wrapped tensor.
         if var.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global(var.global_mangled_class_name(), subclass_type)
+            tx.output.install_global(var.global_mangled_class_name(), class_type)
 
         return var
 
-    def __init__(
-        self,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.tensor_variable = tensor_variable
-        self.torch_function_fn = torch_function_fn
-        self.subclass_type = subclass_type
-
-    def as_proxy(self):
-        return self.tensor_variable.as_proxy()
-
     def python_type(self):
-        return self.subclass_type
+        return self.class_type
 
     def subclass_type_var(self):
-        from ..source import GlobalSource
-        from .user_defined import UserDefinedClassVariable
-
         return UserDefinedClassVariable(
-            self.subclass_type, source=GlobalSource(self.global_mangled_class_name())
+            self.class_type, source=GlobalSource(self.global_mangled_class_name())
         )
 
     def global_mangled_class_name(self):
-        return f"__subclass_{self.subclass_type.__name__}_{id(self.subclass_type)}"
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}"
 
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
