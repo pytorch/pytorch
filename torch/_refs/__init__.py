@@ -1076,6 +1076,7 @@ def add(
     output = prims.add(a, b)
     return handle_noncontiguous_outputs([a, b], output)
 
+
 # TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
