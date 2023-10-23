@@ -902,7 +902,7 @@ void scaled_gemm(
   #if CUDA_VERSION >= 11080
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
-  const int8_t fastAccuMode = (use_fast_accum) ? 1 : 0;
+  const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));

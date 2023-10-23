@@ -118,7 +118,7 @@ void scaled_gemm(
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
-    const void *result_scale_ptr,
+    const void* result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
     void* amax_ptr,
