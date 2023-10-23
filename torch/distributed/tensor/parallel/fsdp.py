@@ -242,7 +242,9 @@ def _chunk_dtensor(
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
     tensor = tensor.clone().detach()
 
-    # if a tensor has not yet sharded by TP
+    # When a layer is not involved in TP, then the tensor will not be a DTensor.
+    # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
+    # e.g. When you do PairwiseParallel on a 3 layer model, TP will have no effect on the third layer.
     if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
 
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
@@ -265,7 +267,7 @@ def _chunk_dtensor(
 
         tensor = tensor.to_local()
 
-        # For DTensors, it is sharded across tp dimension first and then shardeed across FSDP dimension.
+        # For DTensors, it is sharded across tp dimension first and then sharded across FSDP dimension.
         # TP is the inner dimension and FSDP is the outer dimension.
         # Therefore, shard placements for tensor is (Shard(0), tp_placement).
         replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
