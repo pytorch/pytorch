@@ -182,15 +182,13 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             x.sigmoid()
 
+        msg = (
+            "Accessing overidden method/attribute sigmoid on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
         with torch._dynamo.config.patch(
             "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            (
-                "Accessing overidden method/attribute sigmoid on a tensor",
-                " subclass with a __torch_function__ override is not supported",
-            ),
-        ):
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -209,15 +207,13 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim()
 
+        msg = (
+            "Accessing overidden method/attribute ndim on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
         with torch._dynamo.config.patch(
             "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            (
-                "Accessing overidden method/attribute ndim on a tensor",
-                " subclass with a __torch_function__ override is not supported",
-            ),
-        ):
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
