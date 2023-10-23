@@ -3033,6 +3033,17 @@ class TestNestedTensorSubclass(TestCase):
             self.assertEqual(orig_device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
 
+    def test_unbind(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            out = nt.unbind()
+            self.assertEqual(len(out), len(tensor_list))
+            for i, t in enumerate(out):
+                self.assertEqual(t, tensor_list[i])
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

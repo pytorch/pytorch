@@ -31,6 +31,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
     free_symbols,
+    is_symbolic,
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1234,6 +1235,27 @@ class FakeTensor(torch.Tensor):
         assert common_device is not None, f"Could not find common device for {func}"
 
         return common_device, has_scalar_only_inputs
+
+    # We must handle tolist in a special way for FakeTensors here in the case
+    # where tolist is called from torch dispatch for tensor subclasses.
+    # Ordinarily, if a program calls .tolist compiling still works because there is
+    # special handling in dynamo, but for tensor subclasses if .tolist is called
+    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
+    # This would result in an error since wrapper subclasses don't have storage.
+    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
+    # of the tensor to create the output Python list, and (2) creating unbacked
+    # symints for each element of the list.
+    def tolist(self):
+        assert self.dim() == 1 and is_symbolic(self.shape[0])
+        shape_env = self.shape[0].node.shape_env
+        out = []
+        # Specialize on the length of the list
+        for _ in range(self.shape[0]):
+            s = shape_env.create_unbacked_symint()
+            # max value?
+            torch._constrain_as_size(s, min=2)
+            out.append(s)
+        return out
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
