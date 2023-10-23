@@ -187,4 +187,19 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
+#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
+
+  CACHE_TORCH_DTYPE(bfloat16);
+  CACHE_TORCH_DTYPE(float16);
+  CACHE_TORCH_DTYPE(float32);
+  CACHE_TORCH_DTYPE(float64);
+  CACHE_TORCH_DTYPE(uint8);
+  CACHE_TORCH_DTYPE(int8);
+  CACHE_TORCH_DTYPE(int16);
+  CACHE_TORCH_DTYPE(int32);
+  CACHE_TORCH_DTYPE(int64);
+  CACHE_TORCH_DTYPE(bool);
+
+  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
+  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"
