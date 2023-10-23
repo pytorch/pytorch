@@ -6,6 +6,10 @@
 
 namespace torch::cuda::shared {
 
+void registerString(const char* string) {
+  ::nvtxDomainRegisterStringA(nullptr, string);
+}
+
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -15,6 +19,7 @@ void initNvtxBindings(PyObject* module) {
   nvtx.def("rangeStartA", nvtxRangeStartA);
   nvtx.def("rangeEnd", nvtxRangeEnd);
   nvtx.def("markA", nvtxMarkA);
+  nvtx.def("registerString", registerString);
 }
 
 } // namespace torch::cuda::shared

@@ -13,7 +13,10 @@ except ImportError:
 
         rangePushA = _fail
         rangePop = _fail
+        rangeStartA = _fail
+        rangeEnd = _fail
         markA = _fail
+        register_string = _fail
 
     _nvtx = _NVTXStub()  # type: ignore[assignment]
 
@@ -74,6 +77,10 @@ def mark(msg):
         msg (str): ASCII message to associate with the event.
     """
     return _nvtx.markA(msg)
+
+
+def register_string(s: bytes):
+    _nvtx.registerString(s)
 
 
 @contextmanager

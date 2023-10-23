@@ -797,6 +797,8 @@ except RuntimeError as e:
         torch.cuda.nvtx.range_push("foo")
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
+        torch.cuda.nvtx.register_string(b"blah")
+
         range_handle = torch.cuda.nvtx.range_start("range_start")
         torch.cuda.nvtx.range_end(range_handle)
 
