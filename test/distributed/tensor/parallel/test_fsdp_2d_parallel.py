@@ -599,6 +599,8 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         no_wrap_osd_states = no_wrap_osd["state"]
         optim_2d_osd_states = optim_2d_osd["state"]
 
+        self.assertEqual(len(no_wrap_osd_states), len(optim_2d_osd_states))
+        self.assertEqual(no_wrap_osd_states.keys(), optim_2d_osd_states.keys())
         for fqn, states in no_wrap_osd_states.items():
             dist_states = optim_2d_osd_states.get(fqn)
 
