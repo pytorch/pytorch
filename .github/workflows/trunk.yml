@@ -120,7 +120,7 @@ jobs:
       python-version: 3.9.12
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1 },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
         ]}
 
   macos-12-py3-arm64-test:
