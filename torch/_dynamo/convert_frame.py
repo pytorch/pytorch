@@ -620,12 +620,12 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
-            fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            fail_reason = str(e)
             raise
         except Exception as e:
-            fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            fail_reason = str(e)
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
