@@ -101,7 +101,8 @@ class PyCodegen:
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
-            graph_outputs_key = self.add_graph_output(value)
+            tensor_variable = value.tensor_variable
+            graph_outputs_key = self.add_graph_output(tensor_variable)
             output.append(
                 self.create_load_global(
                     value.global_mangled_class_name(), True, add=True

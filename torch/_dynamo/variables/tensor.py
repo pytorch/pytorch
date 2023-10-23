@@ -589,37 +589,8 @@ class TensorVariable(VariableTracker):
             )
             return ConstantVariable.create(None, **options)
         elif name in ("resize_", "resize_as_"):
-            if "memory_format" in kwargs:
-                memory_format = kwargs["memory_format"].as_python_constant()
-            else:
-                memory_format = torch.contiguous_format
-
-            if name == "resize_":
-                self.size = args[0].as_python_constant()
-                self.is_contiguous = (memory_format,)
-            else:
-                assert isinstance(args[0], TensorVariable)
-                if self.size and args[0].size:
-                    if (
-                        self.size == args[0].size
-                        or memory_format is torch.preserve_format
-                    ):
-                        self.is_contiguous = args[0].is_contiguous
-                    else:
-                        self.size = args[0].size
-                        self.stride = args[0].stride
-                        self.ndim = args[0].ndim
-                        self.is_contiguous = (memory_format,)
-
-            return wrap_fx_proxy(
-                tx,
-                tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    *proxy_args_kwargs([self] + list(args), kwargs),
-                ),
-                **options,
-            )
+            # Handling resizing in its full generality is difficult.
+            unimplemented(f"Tensor.{name}")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
@@ -1009,9 +980,11 @@ class TensorSubclassVariable(VariableTracker):
             torch_fn = VariableBuilder(
                 tx, AttrSource(self.source, "__torch_function__")
             )(self.value.__torch_function__)
-
-            return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, torch_fn
+            return TensorWithTFOverrideVariable.create(
+                tx,
+                args[0],
+                torch_fn,
+                self.value,
             )
 
         return super().call_function(tx, args, kwargs)
