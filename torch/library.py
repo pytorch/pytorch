@@ -293,7 +293,7 @@ def _(lib: Library, name, dispatch_key=""):
 
 
 
-def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
+def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     r"""Register an abstract implementation for this operator.
 
     An "abstract implementation" specifies the behavior of this operator on
@@ -362,7 +362,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
     source = torch._library.utils.get_source(_stacklevel + 1)
 
     def inner(func):
-        entry = torch._library.simple_registry.singleton.find(name)
+        entry = torch._library.simple_registry.singleton.find(qualname)
         handle = entry.abstract_impl.register(func, source)
         if lib is not None:
             lib._registration_handles.append(handle)
