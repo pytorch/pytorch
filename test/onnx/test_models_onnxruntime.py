@@ -448,7 +448,11 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(
             mha,
             (dummy_input,),
-            additional_test_inputs=[(dummy_input,), (test_inputs_small,), (test_inputs_big,)],
+            additional_test_inputs=[
+                (dummy_input,),
+                (test_inputs_small,),
+                (test_inputs_big,),
+            ],
             input_names=["input_images"],
             output_names=["outputs"],
             dynamic_axes={
