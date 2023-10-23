@@ -203,10 +203,13 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    @parametrize("amax_keep_dim", (True, False))
     @parametrize(
         "shape", ((1, 1, 15), (1, 10, 15), (1, 10, 512), (1, 10, 4096), (4, 2048, 4096))
     )
-    def test_layernorm_fp8_quant(self, float8_dtype: torch.dtype, shape: Tuple[int]):
+    def test_layernorm_fp8_quant(
+        self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: Tuple[int]
+    ):
         batch_size, sequence_length, hidden_size = shape
 
         def ln_fp8(x: Tensor, scale: Tensor, amax_buffer: Tensor):
@@ -217,7 +220,9 @@ class TestFP8Types(TestCase):
                 bias=None,
                 eps=1e-05,
             )
-            amax_buffer.fill_(torch.amax(torch.abs(x)))
+            amax_buffer.fill_(
+                torch.amax(torch.abs(x), keepdim=amax_keep_dim).reshape(-1)[0]
+            )
             x_scaled = x * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
