@@ -519,6 +519,8 @@ Examples:
 
   TORCH_LOGS_FORMAT="%(levelname)s: %(message)s" or any provided format
   string will set the output format
+  Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
+  "filename" and "name".
 """  # flake8: noqa: B950
     msg = f"""
 TORCH_LOGS Info
