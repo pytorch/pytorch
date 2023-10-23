@@ -404,6 +404,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(conv_transpose3d, input, lower_precision_fp)
   KERNEL_CPU(prelu, lower_precision_fp)
   KERNEL_CPU(scaled_dot_product_attention, lower_precision_fp)
+  KERNEL_CPU(_native_multi_head_attention, lower_precision_fp)
 
   // fp32 cast policy
   KERNEL_CPU(avg_pool3d, fp32)
