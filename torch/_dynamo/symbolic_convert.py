@@ -450,7 +450,21 @@ def break_graph_if_unsupported(*, push):
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
+
             self.restore_graphstate(state)
+
+            # This code is not *just* and optimization! Code below, specifically,
+            # the tensor-stack-only-fastpath in compile_subgraph make assumptions
+            # about the state of the graph. It assumes that all the tensors in the stack are
+            # valid to write to output. This is generally sound, UNLESS (1) there is nothing else
+            # in the graph and (2) you failed to create placeholders (the caue of the graph break)
+            # This is a rare edge state, and so we apply the same logic here as we do
+            # when we hit a RETURN_VALUE for a frame we deem useless.
+            #
+            # Relevant test:
+            # PYTORCH_TEST_WITH_DYNAMO=1 python test/test_indexing.py -k test_boolean_shape_mismatch_cpu
+            if self._useless_graph():
+                raise exc.SkipFrame("Restore after graph break produces an empty graph")
 
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
@@ -2211,12 +2225,15 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
-    def RETURN_VALUE(self, inst):
-        if (
+    def _useless_graph(self):
+        return (
             self.output.count_calls() == 0
             and not self.symbolic_locals_contain_module_class()
             and not self.export
-        ):
+        )
+
+    def RETURN_VALUE(self, inst):
+        if self._useless_graph():
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
