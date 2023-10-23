@@ -12,6 +12,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -1288,6 +1289,8 @@ class Scheduler:
         unbacked_symbol_to_origin_node = {}
 
         for node in self.nodes:
+            log.debug("scheduling %s", node.node)
+
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
@@ -1337,7 +1340,18 @@ class Scheduler:
 
         # make sure outputs aren't dead-code-eliminated
         for node_name in V.graph.get_output_names():
+            log.debug("scheduling output %s", node_name)
             add_user(node_name, OutputNode(StarDep(node_name)))
+
+        # make sure unbacked symints aren't dead-code-eliminated
+        for node in V.graph.graph_outputs:
+            if isinstance(node, ir.ShapeAsConstantBuffer):
+                for s in free_unbacked_symbols(node.shape):
+                    node_name = unbacked_symbol_to_origin_node[s].node.name
+                    log.debug(
+                        "scheduling output %s for unbacked symint %s", node_name, s
+                    )
+                    add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
