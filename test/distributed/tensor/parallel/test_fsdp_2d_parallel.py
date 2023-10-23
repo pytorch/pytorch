@@ -615,10 +615,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 self.assertTrue(isinstance(dist_state, torch.Tensor))
                 self.assertTrue(torch.allclose(state, dist_state))
 
-        # Update the parameters 2d optim states will be different from ref_optim_state_dict.
-        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
-        optim_2d.step()
-
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 if __name__ == "__main__":
