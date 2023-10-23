@@ -56,7 +56,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'from_file',
 ]
 
 ################################################################################
@@ -1923,6 +1923,7 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
+from .utils._tensor_creation import from_file
 
 from . import _logging
 _logging._init_logs()

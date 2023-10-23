@@ -9,6 +9,7 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+import tempfile
 from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
@@ -3500,6 +3501,16 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+
+    @onlyCPU
+    def test_from_file(self, device):
+        dtype = torch.float64
+        t = torch.randn(2, 5, dtype=dtype, device=device)
+        with tempfile.NamedTemporaryFile() as f:
+            t.numpy().tofile(f)
+            t_mapped = torch.from_file(f.name, shared=False, size=t.numel(), dtype=dtype)
+            self.assertTrue(t_mapped.untyped_storage().filename == f.name)
+
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):

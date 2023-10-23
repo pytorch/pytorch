@@ -25,6 +25,7 @@ class _StorageBase:
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
+    filename: _Optional[str] = None
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
@@ -80,7 +81,14 @@ class _StorageBase:
     @property
     def is_hpu(self): ...  # noqa: E704
     @classmethod
-    def from_file(cls, filename, shared, nbytes) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
+    def _from_file(cls, filename, shared, nbytes) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
+
+    @classmethod
+    def from_file(cls, filename, shared=False, nbytes=0) -> T:  # type: ignore[type-var]
+        storage : T = cls._from_file(filename, shared, nbytes)
+        storage.filename = filename   # type: ignore[union-attr]
+        return storage
+
     @classmethod
     def _expired(cls, *args, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     def _byteswap(self, *args, **kwargs): ...  # noqa: E704
@@ -1073,6 +1081,7 @@ class TypedStorage:
             filename,
             shared,
             size * torch._utils._element_size(cls.dtype))
+        untyped_storage.filename = filename
         storage = cls(wrap_storage=untyped_storage)
         return storage
 
