@@ -1429,13 +1429,12 @@ def _unflatten_orig_param_states(
         value = gathered_state[state_name]
         param_idx = fsdp_param_info.param_indices[fqn]
 
-
         if isinstance(value, DTensor):
             placement = value.placements[0]
             # If gathered state is a DTensor and its TP placement is not Replicate(), we need to
             # gather the tensor on its TP dimension before chunking them into DTensor again.
             if placement != Replicate():
-                placement_dim = placement.dim
+                placement_dim = placement.dim  # type: ignore[attr-defined]
                 value_local = value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
                 reshape_size[placement_dim] *= 2
