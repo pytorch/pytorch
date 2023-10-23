@@ -941,6 +941,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 is_qat=True,
             )
 
+    @skipIfNoX86
     def test_qat_conv2d_unary_with_quantizer_api(self):
         """
         Test QAT pattern of conv2d_bn with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
