@@ -8,6 +8,9 @@
 #   REL_WITH_DEB_INFO
 #     build with optimizations and -g (debug symbols)
 #
+#   USE_CUSTOM_DEBINFO="path/to/file1.cpp;path/to/file2.cpp"
+#     build with debug info only for specified files
+#
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
