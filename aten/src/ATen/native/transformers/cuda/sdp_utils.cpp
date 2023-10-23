@@ -230,6 +230,23 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   return true;
 }
 
+
+bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
+  // FlashAttention 2 updated the default mask meaning for causal in this PR:
+  // 9e5e8bc91e it is now aligned to lower_right which would be a BC break
+  // for non-square masks. We will not support non-square masks for causal w/ FAV2
+  if (params.is_causal && params.query.sym_size(-2) != params.key.sym_size(-2)) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k. ",
+          "Got seqlen_q: ", params.query.sym_size(-2), " seqlen_k: ",
+          params.key.sym_size(-2), ". If you would like to use causal attention with non-square masks, please see CausalAttnMask.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN(!debug, "Torch was not compiled with flash attention.");
@@ -249,6 +266,7 @@ bool use_flash_attention(sdp_params const& params, bool debug) {
       check_last_dim_stride_equals_1,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90,
+      check_flash_causal_non_square_seqlens,
       check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {

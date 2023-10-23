@@ -1552,6 +1552,21 @@ class TestSDPAFailureModes(NNTestCase):
                     out = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
+    def test_flash_attention_fail_with_non_square_causal_attention(self, device):
+        dtype = torch.bfloat16
+        q_shape = (1, 1, 8, 16)
+        kv_shape = (1, 1, 12, 16)
+        make_q = partial(rand_sdpa_tensor, shape=q_shape, type=type, device=device, dtype=dtype)
+        make_kv = partial(rand_sdpa_tensor, shape=kv_shape, type=type, device=device, dtype=dtype)
+        q, k, v = make_q(), make_kv(), make_kv()
+        warning_str = "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k."
+        with sdp_kernel(**backend_map[SDPBackend.FLASH_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, warning_str):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, is_causal=True))
+
 def _get_block_size(device, head_dim, is_causal):
     # This should match the block sizes in the CUDA kernel
     # Mask is only interesting when we are setting dropout
@@ -1880,47 +1895,6 @@ class TestSDPACudaOnly(NNTestCase):
         with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
-
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("type", ["dense", "nested"])
-    @parametrize("is_contiguous", [True, False])
-    @parametrize("head_dims_match", [True, False])
-    def test_scaled_dot_product_attention_fused_kernels(self, device, type: str, is_contiguous: bool, head_dims_match: bool):
-        make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=torch.float16)
-
-        batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
-        shape = (batch, seq_len, num_heads, head_dim)
-        if head_dims_match:
-            shape_v = shape
-        else:
-            head_dim_v = 96
-            shape_v = (batch, seq_len, num_heads, head_dim_v)
-
-        query = make_tensor(shape)
-        key = make_tensor(shape)
-        value = make_tensor(shape_v)
-
-        # Lets switch seq_len and num_heads
-        # B x S X H X D -> B x H x S x D
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
-
-        if is_contiguous:
-            query = query.contiguous()
-            key = key.contiguous()
-            value = value.contiguous()
-
-        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                query.contiguous(), key.contiguous(), value.contiguous(),
-                attn_mask=None, dropout_p=0.0, is_causal=False)
-
-        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
@@ -2467,6 +2441,9 @@ class TestSDPACudaOnly(NNTestCase):
 
         if isSM86or89Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86 and sm89 for headdim > 192 currently disabled")
+        if is_causal and seq_len_q != seq_len_k:
+            self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
+
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
@@ -2598,6 +2575,9 @@ class TestSDPACudaOnly(NNTestCase):
                     dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
                 dropout_mask = softmax_mask >= 0
                 return dropout_mask
+
+        if fused_kernel == SDPBackend.FLASH_ATTENTION and is_causal and seq_len_q != seq_len_k:
+            self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
 
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
