@@ -335,7 +335,7 @@ def validate_failures_dict_structure(
                     continue
                 base_test_name = actual_test_name[len(test) + 2 :]
                 # remove potential pytest parametrization suffix
-                base_test_name = re.sub("\[.*\]", "", base_test_name)
+                base_test_name = re.sub(r"\[.*\]", "", base_test_name)
                 if testcase.__name__ != test_class:
                     continue
                 if hasattr(testcase, base_test_name):
