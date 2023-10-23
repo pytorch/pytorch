@@ -1591,6 +1591,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 "n_elements": n_elements,
                 "BLOCK_SIZE": 16,
             },
+            tensors_to_clone=["in_ptr0", "in_ptr1", "out_ptr"],
         )
         self.assertEqual(out_dict["out_ptr"], torch_add)
         # Make sure it is NOT modified
@@ -1621,6 +1622,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                     "n_elements": output.numel(),
                     "BLOCK_SIZE": 16,
                 },
+                tensors_to_clone=["in_ptr0", "out_ptr"],
             )
             return out["out_ptr"]
 
@@ -1644,7 +1646,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16});  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
     getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
@@ -1721,7 +1723,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_views(self, backend):
         def call_triton_take_view(x: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1755,7 +1757,7 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_grad_option(self, grad_fn, backend):
         def call_triton(x: torch.Tensor):
             with grad_fn():
@@ -1771,7 +1773,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_inner_triton_function(self, backend):
         def f(x: torch.Tensor):
             @triton.jit
@@ -1804,7 +1806,36 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
+    def test_triton_kernel_no_clones(self, grad):
+        from torch._inductor.utils import run_and_get_code
+
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x, requires_grad=grad)
+            n_elements = output.numel()
+
+            grid = (x.numel(),)
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
+            return output
+
+        t1 = torch.rand(5, device="cuda", requires_grad=grad)
+        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+
+        torch_add = t1 + t2
+        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        self.assertEqual(torch_add, test)
+        self.assertTrue("aten.copy" not in code)
+        self.assertTrue("aten.clone" not in code)
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, backend):
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False

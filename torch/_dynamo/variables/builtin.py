@@ -38,6 +38,7 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import EventVariable, StreamVariable
 from .dicts import ConstDictVariable
 from .lists import (
     BaseListVariable,
@@ -1007,6 +1008,13 @@ class BuiltinVariable(VariableTracker):
             val = arg_type is isinstance_type
         return variables.ConstantVariable.create(val)
 
+    def call_issubclass(self, tx, left_ty, right_ty):
+        """Checks if first arg is subclass of right arg"""
+        left_ty = left_ty.as_python_constant()
+        right_ty = right_ty.as_python_constant()
+
+        return variables.ConstantVariable(issubclass(left_ty, right_ty))
+
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
@@ -1484,6 +1492,13 @@ class BuiltinVariable(VariableTracker):
             right, UserDefinedObjectVariable
         ):
             return ConstantVariable.create(op(left.value, right.value))
+
+        if (
+            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
+            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
+        ) and op is operator.eq:
+            return ConstantVariable(op(left.value, right.value))
+
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
