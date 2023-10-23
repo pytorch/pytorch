@@ -753,7 +753,7 @@ class AlgorithmSelectorCache(PersistentCache):
             self.log_results(name, input_nodes, timings, autotune_elapse)
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug("selected choice: %s", str(selected_choice))
-        print("selected choice: %s", str(selected_choice))
+
         return selected_choice
 
     @classmethod
