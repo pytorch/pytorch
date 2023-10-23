@@ -181,7 +181,8 @@ def define(qualname, schema, *, lib=None):
 
     This entrypoint defines the custom operator (the first step)
     you must then perform the second step by calling various
-    ``impl_*`` APIs, like :func:`torch.library.impl_device`.
+    ``impl_*`` APIs, like :func:`torch.library.impl` or
+    :func:`torch.library.impl_abstract`.
 
     Args:
         qualname (str): The qualified name for the operator. Should be
