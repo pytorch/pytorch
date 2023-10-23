@@ -1064,7 +1064,7 @@ def get_include_and_linking_paths(
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
-) -> Tuple[Any, str, str, str, str]:
+) -> Tuple[List[str], str, str, str, str]:
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
