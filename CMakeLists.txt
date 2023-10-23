@@ -1225,3 +1225,23 @@ caffe2_print_configuration_summary()
 if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)
 endif()
+
+# Parse custom debug info
+if(DEFINED USE_CUSTOM_DEBINFO)
+    string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
+    message(STATUS "Source files with custom debug infos: ${SOURCE_FILES}")
+
+    string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
+
+    # Set the COMPILE_FLAGS property for each source file
+    foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
+        # We have to specify the scope here. We do this by specifying the
+        # targets we care about and caffe2/ for all test targets defined there
+        set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
+        set_source_files_properties(${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS} PROPERTIES COMPILE_FLAGS "-g")
+    endforeach()
+
+    # Link everything with debug info when any file is in debug mode
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -g")
+endif()
