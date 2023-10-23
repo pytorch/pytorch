@@ -1,9 +1,6 @@
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (
-    _get_arg_as_input_act_obs_or_fq,
-    _get_output_act_obs_or_fq,
-    _get_dtype_and_is_dynamic,
     _insert_obs_or_fq,
     _save_state,
     _is_activation_post_process_node,
@@ -21,7 +18,6 @@ from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from typing import Dict, Tuple, Union, Any, Optional
 from torch.ao.quantization.quantizer import (
-    QuantizationAnnotation,
     EdgeOrNode,
     SharedQuantizationSpec,
     QuantizationSpecBase,

@@ -367,7 +367,10 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         m(*example_inputs)
         act_post_processes_pairs = []
         for n in m.graph.nodes:
-            if n.target in [torch.ops.aten.view.default, torch.ops.aten.hardtanh.default]:
+            if n.target in [
+                torch.ops.aten.view.default,
+                torch.ops.aten.hardtanh.default,
+            ]:
                 input_act = getattr(m, n.args[0].target)
                 output_act = getattr(m, list(n.users)[0].target)
                 self.assertEqual(id(input_act), id(output_act))
