@@ -20,7 +20,8 @@ except ImportError:
 
     _nvtx = _NVTXStub()  # type: ignore[assignment]
 
-__all__ = ["range_push", "range_pop", "range_start", "range_end", "mark", "range"]
+__all__ = ["range_push", "range_pop", "range_start", "range_end", "mark", "range",
+           "register_string"]
 
 
 def range_push(msg):
@@ -79,8 +80,15 @@ def mark(msg):
     return _nvtx.markA(msg)
 
 
-def register_string(s: bytes):
-    _nvtx.registerString(s)
+def register_string(s: str):
+    """
+    Register a string with NVTX. This makes NVTX more efficient when handling ranges
+    with the string as name.
+
+    Args:
+        s (str): ASCII string to register.
+    """
+    _nvtx.registerString(s.encode('ascii'))
 
 
 @contextmanager
