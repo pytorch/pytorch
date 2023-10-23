@@ -4,8 +4,10 @@ import datetime
 import json
 import os
 import pathlib
-from typing import Any, Callable, cast, Dict, List, Optional
+from typing import Any, Callable, cast, Dict, List, Optional, Union
 from urllib.request import urlopen
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 def get_disabled_issues() -> List[str]:
@@ -17,13 +19,17 @@ def get_disabled_issues() -> List[str]:
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
+ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
+TEST_TIMES_FILE = "test-times.json"
+TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
+TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
 
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
 
 def fetch_and_cache(
-    dirpath: str,
+    dirpath: Union[str, pathlib.Path],
     name: str,
     url: str,
     process_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
@@ -31,6 +37,8 @@ def fetch_and_cache(
     """
     This fetch and cache utils allows sharing between different process.
     """
+    pathlib.Path(dirpath).mkdir(exist_ok=True)
+
     path = os.path.join(dirpath, name)
     print(f"Downloading {url} to {path}")
 
@@ -72,13 +80,12 @@ def get_slow_tests(
         return {}
 
 
-def get_test_times(dirpath: str, filename: str) -> Dict[str, Dict[str, float]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/test-times.json"
-    try:
-        return fetch_and_cache(dirpath, filename, url, lambda x: x)
-    except Exception:
-        print("Couldn't download test times...")
-        return {}
+def get_test_times() -> Dict[str, Dict[str, float]]:
+    return get_from_test_infra_generated_stats(
+        "test-times.json",
+        TEST_TIMES_FILE,
+        "Couldn't download test times...",
+    )
 
 
 def get_disabled_tests(
@@ -104,19 +111,30 @@ def get_disabled_tests(
         return {}
 
 
-def get_test_file_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_rating.json"
-    try:
-        return fetch_and_cache(dirpath, filename, url, lambda x: x)
-    except Exception:
-        print("Couldn't download test file ratings file, not reordering...")
-        return {}
+def get_test_file_ratings() -> Dict[str, Any]:
+    return get_from_test_infra_generated_stats(
+        "file_test_rating.json",
+        TEST_FILE_RATINGS_FILE,
+        "Couldn't download test file ratings file, not reordering...",
+    )
 
 
-def get_test_class_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_class_rating.json"
+def get_test_class_ratings() -> Dict[str, Any]:
+    return get_from_test_infra_generated_stats(
+        "file_test_class_rating.json",
+        TEST_CLASS_RATINGS_FILE,
+        "Couldn't download test class ratings file, not reordering...",
+    )
+
+
+def get_from_test_infra_generated_stats(
+    from_file: str, to_file: str, failure_explanation: str
+) -> Dict[str, Any]:
+    url = f"https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/{from_file}"
     try:
-        return fetch_and_cache(dirpath, filename, url, lambda x: x)
+        return fetch_and_cache(
+            REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER, to_file, url, lambda x: x
+        )
     except Exception:
-        print("Couldn't download test class ratings file, not reordering...")
+        print(failure_explanation)
         return {}
