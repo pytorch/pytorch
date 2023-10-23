@@ -77,7 +77,9 @@ void set_params_fprop(
     void* softmax_lse_d,
     float p_dropout,
     float softmax_scale,
-    bool is_causal) {
+    bool is_causal,
+    bool is_deterministic = true,
+    bool is_using_qloop = true) {
   auto acc_type  = at::kFloat;
   auto data_type = q.dtype();
 
@@ -181,6 +183,8 @@ void set_params_fprop(
   // Set this to probability of keeping an element to simplify things.
   params.p_dropout = p_dropout;
   params.is_causal = is_causal;
+  params.is_deterministic = is_deterministic;
+  params.is_using_qloop = is_using_qloop;
 }
 
 void set_params_dgrad(
@@ -206,7 +210,10 @@ void set_params_dgrad(
     void* softmax_lse_d,
     float p_dropout,
     float softmax_scale,
-    bool is_causal) {
+    bool is_causal,
+    bool is_deterministic,
+    bool is_performance_mode,
+    bool is_using_qloop) {
   hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
   auto acc_type      = at::kFloat;
   auto data_type     = q.dtype();
@@ -330,6 +337,9 @@ void set_params_dgrad(
   // Set this to probability of keeping an element to simplify things.
   params.p_dropout = p_dropout;
   params.is_causal = is_causal;
+  params.is_deterministic = is_deterministic;
+  params.is_performance_mode = is_performance_mode;
+  params.is_using_qloop = is_using_qloop;
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
@@ -345,11 +355,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
     const float softmax_scale,
     const bool zero_tensors,
     const bool is_causal,
-    const bool return_softmax, // o in rocm ,this will return the random number matrix when doing dropout
+    const bool return_softmax, // in rocm ,this will return the random number matrix when doing dropout
     const int num_splits       // num_splits is not used in rocm
-) {
+  ) {
   const bool is_deterministic = true;
-  const bool is_using_qloop   = true;
+
+
   auto dprops                 = at::cuda::getCurrentDeviceProperties();
   auto stream                 = at::cuda::getCurrentHIPStream().stream();
   bool is_dropout             = p_dropout > 0.0;
@@ -438,7 +449,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
       softmax_lse.data_ptr(),
       p_dropout,
       softmax_scale,
-      is_causal);
+      is_causal,
+      is_deterministic);
 
   // number of times random will be generated per thread, to offset philox counter in thc random
   // state
@@ -503,14 +515,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
     const bool zero_tensors,
     const bool is_causal,
     const int num_splits,
-    at::Tensor philox_seed,  // Not used or supported on ROCm
-    at::Tensor philox_offset // Not used or supported on ROCm
-) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-
+    at::Tensor philox_seed,          // Not used or supported on ROCm
+    at::Tensor philox_offset     ) { // Not used or supported on ROCm
   const bool is_deterministic    = true;
   const bool is_using_qloop      = true;
   const bool is_performance_mode = true;
+
+
+  auto dprops = at::cuda::getCurrentDeviceProperties();
 
   bool is_dropout = p_dropout > 0.0;
   auto stream     = at::cuda::getCurrentHIPStream().stream();
@@ -618,7 +630,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
       softmax_lse.data_ptr(),
       p_dropout,
       softmax_scale,
-      is_causal);
+      is_causal,
+      is_deterministic,
+      is_performance_mode,
+      is_using_qloop);
 
   if (is_dropout) {
     // See Note [Acquire lock when using random generators]
