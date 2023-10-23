@@ -3724,12 +3724,6 @@ class TestSparseCompressedTritonKernels(TestCase):
 
             self.assertEqual(result, expected)
 
-            other = tensor(2 * k, 2 * n)
-
-            expected = torch.cat([
-                torch.cat([blocks[1], blocks[0]], dim=1),
-                torch.cat([torch.zeros_like(blocks[0]), blocks[1]], dim=1)], dim=0) @ other
-
             indices_data = (
                 'bsr_strided_mm',
                 torch.tensor([0, 2, 4, 5, 6], dtype=torch.int32, device=device),
@@ -3740,8 +3734,13 @@ class TestSparseCompressedTritonKernels(TestCase):
                 dict(SPLIT_N=2, is_compressed=False, TILE_M=m, TILE_N=n, GROUP_SIZE=1)
             )
 
-            result = scatter_mm(blocks, other, indices_data=indices_data)
-            self.assertEqual(result, expected)
+            for bsize in [(), (2,), (3, 4)]:
+                other = tensor(*bsize, 2 * k, 2 * n)
+                expected = torch.cat([
+                    torch.cat([blocks[1], blocks[0]], dim=1),
+                    torch.cat([torch.zeros_like(blocks[0]), blocks[1]], dim=1)], dim=0) @ other
+                result = scatter_mm(blocks, other, indices_data=indices_data)
+                self.assertEqual(result, expected)
 
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
     @onlyCUDA
@@ -3761,11 +3760,11 @@ class TestSparseCompressedTritonKernels(TestCase):
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
 
         # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
-        batches = [()]
+        batches = [(), (2,), (2, 2)]
         sizes = [blocksize[0], 2 * blocksize[0], 4 * blocksize[0]]
         sizes_K = [blocksize[1], 2 * blocksize[1]]
 
-        for bd, bs, M, K, N, has_zero_row_block in itertools.product(batches, batches, sizes, sizes_K, sizes, (False, True)):
+        for bd, bs, M, K, N, has_zero_row_block in itertools.product(batches, batches[:1], sizes, sizes_K, sizes, (False, True)):
             bsr_dense = tensor(bs + (M, K))
             if has_zero_row_block:
                 if M > blocksize[0]:
@@ -3792,6 +3791,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                         # ensure that there was at least one succesful test:
                         assert SPLIT_N < SPLIT_N_list[0]
                         break
+
                     self.assertEqual(result, expected)
 
 
