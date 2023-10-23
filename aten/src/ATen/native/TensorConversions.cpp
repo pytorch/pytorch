@@ -37,6 +37,7 @@
 #include <ATen/ops/to_dense_native.h>
 #include <ATen/ops/to_mkldnn_backward_native.h>
 #include <ATen/ops/to_native.h>
+#include <ATen/ops/to_permuted_native.h>
 #include <ATen/ops/to_sparse_bsc_native.h>
 #include <ATen/ops/to_sparse_bsr_native.h>
 #include <ATen/ops/to_sparse_csc_native.h>
@@ -345,6 +346,18 @@ Tensor _to_copy(
                                  options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
+}
+
+Tensor to_permuted(
+  const Tensor& self,
+  IntArrayRef physical_layout,
+  c10::optional<ScalarType> dtype,
+  c10::optional<Device> device,
+  bool non_blocking
+) {
+  auto out = at::empty_permuted_symint(
+      self.sym_sizes(), physical_layout, dtype, self.layout(), device, /*pin_memory=*/false);
+  return out.copy_(self, non_blocking);
 }
 
 template <typename T>

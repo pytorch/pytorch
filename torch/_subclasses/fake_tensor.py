@@ -1522,7 +1522,12 @@ class FakeTensorMode(TorchDispatchMode):
                 or (
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely
-                    torch_decomp_decompositions(func)
+                    (
+                        torch_decomp_decompositions(func)
+                        # Without this, device conversions fail with
+                        # AssertionError: tensor's device must be `meta`, got cuda instead
+                        or func == aten.to_permuted.default
+                    )
                     and all(not e.is_sparse for e in flat_arg_fake_tensors)
                 )
             ):

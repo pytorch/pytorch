@@ -319,6 +319,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "put",
     "put_",
     "_to_copy",
+    "to_permuted",
     "replication_pad1d_backward",
     "replication_pad2d_backward",
     "replication_pad3d_backward",

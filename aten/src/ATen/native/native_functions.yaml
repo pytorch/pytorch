@@ -7466,6 +7466,11 @@
   device_check: NoCheck
   device_guard: False
 
+- func: to_permuted(Tensor self, int[] physical_layout, *, ScalarType? dtype=None, Device? device=None, bool non_blocking=False) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: to_permuted
+
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
 
 # TODO: Two weeks after this lands, combine these two overloads,

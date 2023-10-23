@@ -204,6 +204,7 @@ __all__ = [
     "copy_to",  # TODO: add OpInfo (or implement .to)
     "item",
     "to",
+    "to_permuted",
     #
     # Reduction ops
     #
@@ -1942,6 +1943,28 @@ def clone(
 ) -> TensorLikeType:
     result = prims.clone(a, memory_format=memory_format)
     return result
+
+
+@register_decomposition(aten.to_permuted)
+def to_permuted(
+    self: TensorLikeType,
+    physical_layout: StrideType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    non_blocking: bool = False,
+) -> TensorLikeType:
+    perm = self.permute(physical_layout)
+    if device is not None:
+        device = utils.canonicalize_device(device)
+    out_perm = perm.to(  # type: ignore[call-overload]
+        dtype=dtype,
+        device=device,
+        non_blocking=non_blocking,
+        memory_format=torch.contiguous_format,
+        copy=True,
+    )
+    return out_perm.permute(utils.invert_perm(physical_layout))
 
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
