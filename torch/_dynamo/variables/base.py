@@ -227,6 +227,13 @@ class VariableTracker(metaclass=HasPostInit):
     def python_type(self):
         raise NotImplementedError(f"{self} has no type")
 
+    def var_type(self):
+        """
+        Similar to python_type but
+        returns a VariableTracker containing the type.
+        """
+        raise NotImplementedError(f"{self} has no variable tracker-ed type")
+
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
