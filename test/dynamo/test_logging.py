@@ -598,6 +598,7 @@ exclusions = {
     "schedule",
     "fusion",
     "aot_graphs",
+    "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
     "graph_breaks",
