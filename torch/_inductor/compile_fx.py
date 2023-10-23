@@ -303,7 +303,7 @@ def compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    if dynamo_utils.count_calls(gm.graph) == 0:
+    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
 
     if config.save_args:
