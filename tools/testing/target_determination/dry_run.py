@@ -85,7 +85,7 @@ def calculate_recall(
     ground_truth_failures_set = set(ground_truth_failures)
 
     # Calculate True Positives (TP), False Positives (FP), and False Negatives (FN)
-    TP = len(ground_truth_failures_set.intersection(selected_tests))
+    TP = len(ground_truth_failures_set.intersection(selected_tests_set))
     FN = len(ground_truth_failures_set) - TP
 
     # Calculate recall and precision
