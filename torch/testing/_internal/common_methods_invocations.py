@@ -19476,6 +19476,10 @@ python_ref_db = [
         # Fails on int32
         # https://github.com/pytorch/pytorch/issues/85258
     ),
+    PythonRefInfo(
+        "_refs.full_like",
+        torch_opinfo_name="full_like",
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.frac",
         torch_opinfo_name="frac",
@@ -19622,6 +19626,18 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
         torch_opinfo_name="positive",
+    ),
+    PythonRefInfo(
+        "_refs.rand_like",
+        torch_opinfo_name="rand_like",
+    ),
+    PythonRefInfo(
+        "_refs.randn_like",
+        torch_opinfo_name="randn_like",
+    ),
+    PythonRefInfo(
+        "_refs.randint_like",
+        torch_opinfo_name="randn_like",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.real",

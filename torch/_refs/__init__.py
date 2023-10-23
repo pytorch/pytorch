@@ -5336,8 +5336,41 @@ def full(
     return torch.fill(e, fill_value)  # type: ignore[arg-type]
 
 
-def full_like(
+def _like_constructor(
+    construct_fn: Callable,
     a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> Tensor:
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+    result = construct_fn(
+        a.shape,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
+
+    if memory_format == torch.preserve_format:
+        logical_to_physical_perm = (
+            utils.compute_elementwise_output_logical_to_physical_perm(a)
+        )
+        result = result.to_permuted(logical_to_physical_perm)
+    return result
+
+
+@register_decomposition(aten.full_like)
+def full_like(
+    input: TensorLikeType,
     fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -5347,8 +5380,9 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    e = torch.empty_like(
-        a,
+    return _like_constructor(
+        lambda shape, *a, **kw: torch.full(shape, fill_value, *a, **kw),
+        input,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -5356,7 +5390,6 @@ def full_like(
         requires_grad=requires_grad,
         memory_format=memory_format,
     )
-    return fill(e, fill_value)
 
 
 @register_decomposition(aten.zeros_like)
@@ -5431,6 +5464,85 @@ def randn(
         dtype=dtype,
         device=device,
         requires_grad=requires_grad,
+    )
+
+
+@register_decomposition(aten.randn_like)
+def randn_like(
+    input: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return _like_constructor(
+        torch.randn,
+        input,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
+
+
+@register_decomposition(aten.rand_like)
+def rand_like(
+    input: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return _like_constructor(
+        torch.rand,
+        input,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
+
+
+@register_decomposition(aten.randint_like)
+def randint_like(
+    input: TensorLikeType,
+    *args,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+    **kwargs,
+) -> TensorLikeType:
+    low_high = args
+    if "low" in kwargs:
+        low_high = (kwargs.pop("low"), *low_high)
+    if "high" in kwargs:
+        low_high = (*low_high, kwargs.pop("high"))
+
+    torch._check(len(low_high) <= 2, lambda: f"Unexpected arguments {low_high}")
+    torch._check(not kwargs, lambda: f"Unexpected keyword arguments {kwargs}")
+
+    return _like_constructor(
+        lambda shape, *a, **kw: torch.randint(shape, *low_high, *a, **kw),
+        input,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
     )
 
 

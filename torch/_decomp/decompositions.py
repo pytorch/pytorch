@@ -4232,6 +4232,26 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
         return aten.squeeze.dims(self, [dim])
 
 
+@register_decomposition(aten.copy)
+def copy(self: Tensor, src: Tensor, non_blocking: bool = False):
+    if (
+        not non_blocking
+        and self.storage_offset == 0
+        and utils.is_non_overlapping_and_dense(self)
+    ):
+        physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(
+            self
+        )
+        src = src.expand(self.shape)
+        return aten.to_permuted(
+            src,
+            physical_layout,
+            dtype=self.dtype,
+            device=self.device,
+        )
+    return NotImplemented
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
