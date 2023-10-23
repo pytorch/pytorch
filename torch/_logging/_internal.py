@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
+LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 
 
 @dataclass
@@ -515,6 +516,11 @@ Examples:
 
   TORCH_LOGS="+some.random.module,schedule" will set the log level of
   some.random.module to logging.DEBUG and enable the schedule artifact
+
+  TORCH_LOGS_FORMAT="%(levelname)s: %(message)s" or any provided format
+  string will set the output format
+  Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
+  "filename" and "name".
 """  # flake8: noqa: B950
     msg = f"""
 TORCH_LOGS Info
@@ -663,7 +669,15 @@ class TorchLogsFormatter(logging.Formatter):
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 
-DEFAULT_FORMATTER = TorchLogsFormatter()
+def _default_formatter():
+    fmt = os.environ.get(LOG_FORMAT_ENV_VAR, None)
+    if fmt is None:
+        return TorchLogsFormatter()
+    else:
+        return logging.Formatter(fmt)
+
+
+DEFAULT_FORMATTER = _default_formatter()
 
 
 def _setup_handlers(create_handler_fn, log):
