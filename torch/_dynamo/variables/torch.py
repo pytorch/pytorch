@@ -532,26 +532,7 @@ class TorchVariable(VariableTracker):
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
         elif can_dispatch_torch_function(tx, args, kwargs):
-            unwrapped = dispatch_torch_function(tx, self, args, kwargs)
-            # The wrapping here follows the logic in
-            # `torch.Tensor.__torch_function__`.
-            # TODO: This shouldn't be here as well, this should be traced in the base torch function
-            # impl
-            if self.value in torch.overrides.get_default_nowrap_functions():
-                return unwrapped
-
-            # TODO: It's not correct to always rewrap args[0]; with multiple subclasses the dispatch
-            # may be on the second or later argument. Fix this to respect what dispatch_torch_function says
-            # the dispatch should be.
-            # TODO: We also should not be rewrapping unconditionally, it's possible that
-            # the return value *MAY NOT* be a torch function override tensor.
-            # The solution here is to trace the base torch function impl
-            return TensorWithTFOverrideVariable.create(
-                tx,
-                unwrapped,
-                args[0].torch_function_fn,
-                args[0].subclass_type,
-            )
+            return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:

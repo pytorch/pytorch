@@ -12,13 +12,13 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
-from torch._dynamo.trace_rules import get_torch_obj_rule_map, load_object
 from torch._dynamo.external_utils import is_compiling
 from torch._dynamo.skipfiles import (
     FUNC_INLINELIST,
     LEGACY_MOD_INLINELIST,
     MOD_INLINELIST,
 )
+from torch._dynamo.trace_rules import get_torch_obj_rule_map, load_object
 from torch._dynamo.utils import is_safe_constant, istype
 from torch.fx._symbolic_trace import is_fx_tracing
 
@@ -79,7 +79,6 @@ ignored_torch_name_rule_set = {
     "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
     "torch.overrides.TorchFunctionMode",
     "torch.package.package_exporter.PackageExporter",
-    "torch.profiler.profiler.profile",
     "torch.serialization._opener",
     "torch.sparse.check_sparse_tensor_invariants",
     "torch.utils._contextlib._DecoratorContextManager",
@@ -310,14 +309,15 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_name_rule_map_correctness(self):
         generated_torch_name_rule_set = generate_allow_list()
-        ignored_torch_obj_rule_set = {load_object(x) for x in ignored_torch_name_rule_set}
+        ignored_torch_obj_rule_set = {
+            load_object(x) for x in ignored_torch_name_rule_set
+        }
         self.assertTrue(
-            ignored_torch_obj_rule_set.issubset(
-                set(generated_torch_name_rule_set)
-            )
+            ignored_torch_obj_rule_set.issubset(set(generated_torch_name_rule_set))
         )
         self.assertTrue(
-            generated_torch_name_rule_set == set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
+            generated_torch_name_rule_set
+            == set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
         )
 
     def test_func_inlinelist_torch_function(self):
