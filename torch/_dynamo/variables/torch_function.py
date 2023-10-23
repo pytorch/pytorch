@@ -1,3 +1,4 @@
+import inspect
 from typing import Dict, List
 
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
@@ -43,6 +44,24 @@ banned_attrs = [
 
 def is_torch_function_user_object(obj):
     return hasattr(obj, "__torch_function__")
+
+
+def _is_attr_overidden(tx, var, name):
+    import torch
+
+    try:
+        attr_val = inspect.getattr_static(var.python_type(), name)
+        return attr_val != getattr(torch.Tensor, name)
+    except AttributeError:
+        pass
+
+    try:
+        var.dynamic_getattr(tx, name)
+        return True
+    except NotImplementedError:
+        pass
+
+    return False
 
 
 def call_torch_function(
@@ -148,6 +167,14 @@ class TensorWithTFOverrideVariable(TensorVariable):
         if name in banned_attrs:
             unimplemented(
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
+            )
+
+        if _is_attr_overidden(tx, self, name):
+            unimplemented(
+                (
+                    f"Accessing overidden method/attribute {name} on a tensor",
+                    " subclass with a __torch_function__ override is not supported",
+                )
             )
 
         if tx.output.torch_function_enabled:
