@@ -2156,6 +2156,24 @@ def forward(self, x_1, output_1):
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+        ]:
+
+            def fn(x):
+                return op(-10, x)
+
+            opt_fn = torch.compile(fullgraph=True)(fn)
+
+            x = torch.randn(10)
+            self.assertEqual(opt_fn(x), fn(x))
+
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 

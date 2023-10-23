@@ -134,6 +134,12 @@ class BuiltinVariable(VariableTracker):
             operator.truediv,
             operator.mod,
             operator.add,
+            operator.lt,
+            operator.gt,
+            operator.ge,
+            operator.le,
+            operator.ne,
+            operator.eq,
             operator.sub,
             operator.getitem,
             operator.lshift,
@@ -1441,7 +1447,7 @@ class BuiltinVariable(VariableTracker):
                 op(left._underlying_items, right._underlying_items)
             )
 
-        if isinstance(left, TensorVariable):
+        if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
             if op is operator.is_ and isinstance(right, TensorVariable):
@@ -1453,7 +1459,8 @@ class BuiltinVariable(VariableTracker):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
             if (
-                isinstance(right, TensorVariable)
+                isinstance(left, TensorVariable)
+                and isinstance(right, TensorVariable)
                 and (left.size and right.size) is not None
                 and left.size != right.size
             ):
@@ -1462,11 +1469,9 @@ class BuiltinVariable(VariableTracker):
                 except RuntimeError:
                     # not broadcastable, can't be compared
                     _unimplemented()
-            proxy = tx.output.create_proxy(
-                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-            )
+            tensor_cls = left if isinstance(left, TensorVariable) else right
             return wrap_fx_proxy_cls(
-                type(left),  # handle Ndarrays and Tensors
+                type(tensor_cls),  # handle Ndarrays and Tensors
                 tx,
                 proxy,
             )
