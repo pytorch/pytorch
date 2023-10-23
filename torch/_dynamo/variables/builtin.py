@@ -134,6 +134,12 @@ class BuiltinVariable(VariableTracker):
             operator.truediv,
             operator.mod,
             operator.add,
+            operator.lt,
+            operator.gt,
+            operator.ge,
+            operator.le,
+            operator.ne,
+            operator.eq,
             operator.sub,
             operator.getitem,
             operator.lshift,
@@ -1002,6 +1008,13 @@ class BuiltinVariable(VariableTracker):
             val = arg_type is isinstance_type
         return variables.ConstantVariable.create(val)
 
+    def call_issubclass(self, tx, left_ty, right_ty):
+        """Checks if first arg is subclass of right arg"""
+        left_ty = left_ty.as_python_constant()
+        right_ty = right_ty.as_python_constant()
+
+        return variables.ConstantVariable(issubclass(left_ty, right_ty))
+
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
@@ -1118,7 +1131,6 @@ class BuiltinVariable(VariableTracker):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
                         unimplemented(f"unexpected sourceless type bases: {bases}")
-
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
                 pass
@@ -1262,6 +1274,11 @@ class BuiltinVariable(VariableTracker):
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder
+
+        try:
+            return obj.var_type()
+        except NotImplementedError:
+            pass
 
         try:
             py_type = obj.python_type()
@@ -1430,7 +1447,7 @@ class BuiltinVariable(VariableTracker):
                 op(left._underlying_items, right._underlying_items)
             )
 
-        if isinstance(left, TensorVariable):
+        if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
             if op is operator.is_ and isinstance(right, TensorVariable):
@@ -1442,7 +1459,8 @@ class BuiltinVariable(VariableTracker):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
             if (
-                isinstance(right, TensorVariable)
+                isinstance(left, TensorVariable)
+                and isinstance(right, TensorVariable)
                 and (left.size and right.size) is not None
                 and left.size != right.size
             ):
@@ -1451,11 +1469,9 @@ class BuiltinVariable(VariableTracker):
                 except RuntimeError:
                     # not broadcastable, can't be compared
                     _unimplemented()
-            proxy = tx.output.create_proxy(
-                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-            )
+            tensor_cls = left if isinstance(left, TensorVariable) else right
             return wrap_fx_proxy_cls(
-                type(left),  # handle Ndarrays and Tensors
+                type(tensor_cls),  # handle Ndarrays and Tensors
                 tx,
                 proxy,
             )
