@@ -442,11 +442,11 @@ class TorchVariable(VariableTracker):
             # TODO: We also should not be rewrapping unconditionally, it's possible that
             # the return value *MAY NOT* be a torch function override tensor.
             # The solution here is to trace the base torch function impl
-            return TensorWithTFOverrideVariable.create(
+            return TensorWithTFOverrideVariable.from_tensor_var(
                 tx,
                 unwrapped,
+                args[0].class_type,
                 args[0].torch_function_fn,
-                args[0].subclass_type,
             )
         elif self.value in [
             torch.amp.autocast_mode.autocast,
