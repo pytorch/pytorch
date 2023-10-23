@@ -212,7 +212,7 @@ class AggregatedHeuristics:
     """
 
     _heuristic_results: Dict[
-        str, TestPrioritizations
+        "HeuristicInterface", TestPrioritizations
     ]  # Key is the Heuristic's name. Dicts will preserve the order of insertion, which is important for sharding
 
     unranked_tests: Tuple[str, ...]
@@ -229,7 +229,9 @@ class AggregatedHeuristics:
 
         self._heuristic_results[heuristic] = heuristic_results
 
-    def get_aggregated_priorities(self) -> TestPrioritizations:
+    def get_aggregated_priorities(
+        self, include_trial: bool = False
+    ) -> TestPrioritizations:
         """
         Returns the aggregated priorities across all heuristics.
         """
@@ -238,7 +240,7 @@ class AggregatedHeuristics:
         )
 
         for heuristic, heuristic_results in self._heuristic_results.items():
-            if heuristic.trial_mode:
+            if heuristic.trial_mode and not include_trial:
                 continue
 
             aggregated_priorities.integrate_priorities(heuristic_results)
@@ -277,7 +279,9 @@ class AggregatedHeuristics:
             metrics["trial_mode"] = heuristic.trial_mode
             heuristics.append(metrics)
 
-            if not heuristic.trial_mode and heuristic_results._get_test_relevance_group(test) in [
+            if not heuristic.trial_mode and heuristic_results._get_test_relevance_group(
+                test
+            ) in [
                 Relevance.HIGH,
                 Relevance.PROBABLE,
             ]:
@@ -300,6 +304,10 @@ class AggregatedHeuristics:
             "aggregated"
         ] = self.get_aggregated_priorities().get_priority_info_for_test(test)
 
+        stats["aggregated_trial"] = self.get_aggregated_priorities(
+            include_trial=True
+        ).get_priority_info_for_test(test)
+
         if highest_ranking_heuristic:
             stats["highest_ranking_heuristic"] = highest_ranking_heuristic
 
@@ -319,7 +327,7 @@ class HeuristicInterface:
 
     @abstractmethod
     def __init__(self, **kwargs: Dict[str, Any]) -> None:
-        self.trial_mode = kwargs.get("trial_mode", False)
+        self.trial_mode = kwargs.get("trial_mode", False)  # type: ignore[assignment]
         pass
 
     @abstractmethod
