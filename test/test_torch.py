@@ -9665,7 +9665,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def _get_tensor_prop(self, t):
         preserved = (
             id(t),
-            sys.getrefcount(t),
+            # Refcount values get modified by Dynamo resume frames
+            0 if torch._utils.is_compiling() else sys.getrefcount(t),
         )
         moved = (
             copyreg._slotnames(t.__class__),
