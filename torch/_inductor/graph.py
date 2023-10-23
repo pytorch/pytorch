@@ -592,7 +592,7 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -732,7 +732,9 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(n):
+        with ir.IRNode.current_origins(origins), self.set_current_node(
+            n
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem

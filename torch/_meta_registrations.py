@@ -352,9 +352,10 @@ def meta_copy_(self, src, non_blocking=False):
             "more than one element of the written-to tensor refers to a single memory location"
         )
 
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        aten.expand_copy.default(intermediate, self.size())
+    if isinstance(src, Tensor):
+        intermediate = src.to(self, non_blocking)
+        if self.size() != intermediate.size():
+            aten.expand_copy.default(intermediate, self.size())
     return self
 
 
