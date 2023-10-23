@@ -518,7 +518,7 @@ Examples:
   some.random.module to logging.DEBUG and enable the schedule artifact
 
   TORCH_LOGS_FORMAT="%(levelname)s: %(message)s" or any provided format
-  string will let you set the output format
+  string will set the output format
 """  # flake8: noqa: B950
     msg = f"""
 TORCH_LOGS Info
