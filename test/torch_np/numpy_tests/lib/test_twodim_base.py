@@ -318,6 +318,7 @@ class TestHistogram2d(TestCase):
         assert_array_equal(H, answer)
         assert_array_equal(xe, array([0.0, 0.25, 0.5, 0.75, 1]))
 
+    @skip(reason="NP_VER: fails on CI with older NumPy")
     @parametrize("x_len, y_len", [(10, 11), (20, 19)])
     def test_bad_length(self, x_len, y_len):
         x, y = np.ones(x_len), np.ones(y_len)
