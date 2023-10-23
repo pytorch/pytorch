@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
 )
 
 from torch.testing._internal.common_dtype import all_types_and_complex
+import torch._dynamo.test_case
 
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -116,11 +117,68 @@ def rand_dense_2by4_all_patterns(r, c, dtype, device):
     return dense_inv, dense_val
 
 
-class TestSparseSemiStructured(torch._dynamo.test_case.TestCase):
+class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
+    def test_mlp_contiguous_relu_compile(self):
+        """
+        Test nn.Linear + .contiguous() + nn.ReLU with SparseSemiStructuredTensor + torch.compile
+        We expect:
+            (1) The sparse tensor subclass should turn nn.Linear into `aten._structured_sparse_linear` + `aten.contiguous()`
+            (2) Inductor should fuse the .contiguous() call into the relu
+        """
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(128, 128)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x.contiguous()
+                return torch.nn.functional.relu(x)
+
+        def _test_mlp_contiguous_relu_compile(backend, dense_input_shape):
+            SparseSemiStructuredTensor._FORCE_CUTLASS = False
+            input = torch.rand((128, 128), device="cuda").half()
+
+            model = Model().eval().cuda().half()
+            mod_linear = model.linear
+            m, n = mod_linear.weight.shape
+            mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
+            # set masked weight
+            mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
+
+            dense_result = model(input)
+            mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
+
+            model = torch.compile(model)
+            sparse_result = model(input)
+
+            assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+
+            for backend in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+                for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
+                    _test_mlp_contiguous_relu_compile(backend, dense_input_shape)
+
+class TestSparseSemiStructured(TestCase):
+
+    def setUp(self):
+        if not _IS_SM8X:
+            self.skipTest('Only runs on SM80')
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
 
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
@@ -341,74 +399,6 @@ class TestSparseSemiStructured(torch._dynamo.test_case.TestCase):
         sparse_result = model(input)
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
-    @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
-    def test_mlp_contiguous_relu_compile(self, dense_input_shape, backend, device):
-        """
-        Test nn.Linear + .contiguous() + nn.ReLU with SparseSemiStructuredTensor + torch.compile
-        We expect:
-            (1) The sparse tensor subclass should turn nn.Linear into `aten._structured_sparse_linear` + `aten.contiguous()`
-            (2) Inductor should fuse the .contiguous() call into the relu
-        """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
-        input_tensor = torch.rand(dense_input_shape, device=device).half()
-        model = (
-            nn.Sequential(
-                nn.Linear(128, 256),
-                # nn.ReLU(0.5),
-                # nn.Linear(256, 128),
-            )
-            .half()
-            .to(device)
-        )
-
-        for i in range(1):
-            m, n = model[i].weight.shape
-            mask = rand_sparse_semi_structured_mask(
-                m, n, device=device, dtype=torch.bool
-            )
-            # set masked weight
-            model[i].weight = nn.Parameter(model[i].weight * mask)
-
-        dense_result = model(input_tensor)
-
-        for i in range(1):
-            model[i].weight = nn.Parameter(to_sparse_semi_structured(model[i].weight))
-
-        compiled_model = torch.compile(model)
-        sparse_result = compiled_model(input_tensor)
-
-        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
-
-        # SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
-
-        # class Model(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.linear = nn.Linear(128, 128)
-
-        #     def forward(self, x):
-        #         x = self.linear(x)
-        #         x = x.contiguous()
-        #         return torch.nn.functional.relu(x)
-
-        # input = torch.rand(dense_input_shape, device=device).half()
-        # model = Model().eval().cuda().half()
-        # mod_linear = model.linear
-        # m, n = mod_linear.weight.shape
-        # mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
-        # # set masked weight
-        # mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
-
-        # dense_result = model(input)
-        # mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
-
-        # model = torch.compile(model)
-        # sparse_result = model(input)
-
-        # assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_values(self, backend):
