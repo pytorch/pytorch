@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
 import unittest
 
@@ -69,23 +68,15 @@ class EagerRecordGraphAndInputs:
 GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
 
 
-@contextlib.contextmanager
-def preserve_subclass_config():
-    old_subclass_set = set(torch._dynamo.config.traceable_tensor_subclasses)
-    try:
-        torch._dynamo.config.traceable_tensor_subclasses.clear()
-        torch._dynamo.config.traceable_tensor_subclasses.update(GLOBAL_TEST_SUBCLASSES)
-        yield
-    finally:
-        torch._dynamo.config.traceable_tensor_subclasses.clear()
-        torch._dynamo.config.traceable_tensor_subclasses.update(old_subclass_set)
-
-
 class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._exit_stack.enter_context(preserve_subclass_config())
+        cls._exit_stack.enter_context(
+            torch._dynamo.config.patch(
+                "traceable_tensor_subclasses", GLOBAL_TEST_SUBCLASSES
+            )
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -146,16 +137,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        torch._dynamo.config.traceable_tensor_subclasses.add(LocalSubclass)
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return LocalSubclass(torch.add(x, 1.0))
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return LocalSubclass(torch.add(x, 1.0))
 
-        input = torch.ones(2, 2)
+            input = torch.ones(2, 2)
 
-        res = fn(input)
-        self.assertIsInstance(res, LocalSubclass)
+            res = fn(input)
+            self.assertIsInstance(res, LocalSubclass)
 
     def test_torch_function_call_on_method(self):
         x = torch.ones(2, 2)
@@ -175,6 +166,60 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, res_exp2)
+
+    def test_user_overidden_method_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def sigmoid(self):
+                return None
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            x.sigmoid()
+
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            (
+                "Accessing overidden method/attribute sigmoid on a tensor",
+                " subclass with a __torch_function__ override is not supported",
+            ),
+        ):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+    def test_user_overidden_attr_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def ndim(self):
+                return 10
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.ndim()
+
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            (
+                "Accessing overidden method/attribute ndim on a tensor",
+                " subclass with a __torch_function__ override is not supported",
+            ),
+        ):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
 
     def test_torch_function_call_on_attr(self):
         x = torch.ones(2, 2)
