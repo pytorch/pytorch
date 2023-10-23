@@ -559,10 +559,8 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    # @parametrize("is_even_sharded_model", [True, False])
-    # @parametrize("use_orig_params", [True, False])
-    @parametrize("is_even_sharded_model", [True])
-    @parametrize("use_orig_params", [True])
+    @parametrize("is_even_sharded_model", [True, False])
+    @parametrize("use_orig_params", [True, False])
     def test_2d_optim_state_dict(self, is_even_sharded_model, use_orig_params):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
