@@ -67,12 +67,15 @@ def call_torch_function(
 
 
 def build_torch_function_fn(tx, value, source):
-    from .builder import VariableBuilder
+    from .builder import SourcelessBuilder, VariableBuilder
 
-    return VariableBuilder(
-        tx,
-        AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
-    )(value.__torch_function__.__func__)
+    if not source:
+        return VariableBuilder(
+            tx,
+            AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
+        )(value.__torch_function__.__func__)
+    else:
+        return SourcelessBuilder()(tx, value.__torch_function__.__func__)
 
 
 def can_dispatch_torch_function(tx, args, kwargs):

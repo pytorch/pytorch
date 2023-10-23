@@ -2999,22 +2999,6 @@ def create_runtime_wrapper(
                     continue
                 original_inpt = args[inpt_idx]
                 updated_inpt = updated_inputs[i]
-                # TODO: add better resize_() support for autograd case.
-                # Check for the case when an input has been resized.
-                # Note: One important thing to check for is user code that calls inpt.storage().resize_().
-                # We can't trace operations on storage into the graph, so we should get dynamo to graph break.
-                # TODO: handle resize_() on inputs to a larger size.
-                # This is actually non-trivial to detect, so we should probably just handle it
-                # (or make dynamo detect).
-                # We can't just check of original_inpt.storage_size != updated_inpt.storage_size,
-                # Because the original_inpt might be a view of some larger tensor,
-                # and updated_inpt is always densely packed.
-                if not trace_joint and original_inpt.untyped_storage().size() != updated_inpt.untyped_storage().size():
-                    # It actually isn't enough just to see if the storage sizes are different between old and new inputs.
-                    # If the original input was a slice into some larger storage, the same will not be true for the updated input.
-                    # So before doing the resize_(), we **also** check that functionalization detected a metadata mutation.
-                    if meta.mutates_metadata:
-                        original_inpt.resize_(updated_inpt.size())
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
