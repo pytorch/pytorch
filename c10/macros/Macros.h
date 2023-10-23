@@ -141,6 +141,12 @@
 #define __has_attribute(x) 0
 #endif
 
+#if __has_attribute(weak)
+#define C10_WEAK __attribute__((weak))
+#else
+#define C10_WEAK
+#endif
+
 // Direct port of LLVM_ATTRIBUTE_USED.
 #if __has_attribute(used)
 #define C10_USED __attribute__((__used__))

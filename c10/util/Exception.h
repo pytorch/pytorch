@@ -117,13 +117,13 @@ class C10_API Warning {
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
-  Warning(
+  C10_WEAK Warning(
       warning_variant_t type,
       const SourceLocation& source_location,
       std::string msg,
       bool verbatim);
 
-  Warning(
+  C10_WEAK Warning(
       warning_variant_t type,
       SourceLocation source_location,
       const char* msg,
