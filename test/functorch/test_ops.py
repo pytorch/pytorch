@@ -1771,7 +1771,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
 
-       # https://github.com/pytorch/pytorch/issues/96560
+        # https://github.com/pytorch/pytorch/issues/96560
         decorate('xlogy', decorator=skipIfRocm),
 
         # numerical inconsistencies, look like bugs
