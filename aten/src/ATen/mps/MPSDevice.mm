@@ -7,8 +7,7 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 static std::unique_ptr<MPSDevice> mps_device;
 static c10::once_flag mpsdev_init;
@@ -148,5 +147,4 @@ bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
 }
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps
