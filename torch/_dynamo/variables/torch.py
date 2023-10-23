@@ -224,13 +224,24 @@ class TorchCtxManagerClassVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import CUDAStreamVariable, GradModeVariable, InferenceModeVariable
+        from . import GradModeVariable, InferenceModeVariable, StreamVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value is torch.no_grad:
-            return GradModeVariable.create(tx, False, **options)
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, False, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
+            else:
+                return GradModeVariable.create(tx, False, **options)
         elif self.value is torch.enable_grad:
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, True, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True, **options)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
             return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
@@ -238,13 +249,13 @@ class TorchCtxManagerClassVariable(VariableTracker):
             return InferenceModeVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
-        elif self.value is torch.cuda.streams.Stream:
+        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
             return wrap_fx_proxy_cls(
-                CUDAStreamVariable,
+                StreamVariable,
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    torch.cuda.streams.Stream,
+                    self.value,
                     (),
                     {},
                 ),
@@ -345,10 +356,10 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
-            CUDAStreamContextVariable,
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -490,12 +501,14 @@ class TorchVariable(VariableTracker):
             return ConstantVariable.create(
                 any(has_torch_function(a) for a in args), **options
             )
-        elif self.value is torch.cuda.stream:
-            log.warning(
-                "torch.cuda.stream() not fully supported, streams may be ignored"
-            )
+        elif any(
+            self.value is method
+            for method in [
+                interface_elem.stream for interface_elem in device_interfaces.values()
+            ]
+        ):
             assert len(args) == 1
-            return CUDAStreamContextVariable.create(tx, args[0], **options)
+            return StreamContextVariable.create(tx, args[0], **options)
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
