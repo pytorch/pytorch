@@ -5,13 +5,17 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -44,7 +48,14 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    is_dynamic,
+    is_pointwise_use,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -252,7 +263,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...]] = list(args)
+        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -943,6 +954,76 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
+def pointwise_cat(inputs, dim=0):
+    # (inclusive, exclusive)
+    inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
+    prev_end = 0
+    for inp in inputs:
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
+        prev_end = inputs_ranges[-1][-1]
+
+    inputs_loaders = [inp.make_loader() for inp in inputs]
+
+    def inner_fn(idx):
+        idx_dim = ops.index_expr(idx[dim], torch.int64)
+
+        masks = []
+        masked_loads = []
+        for i in range(len(inputs)):
+            start = (
+                ops.constant(0, torch.int64)
+                if i == 0
+                else ops.index_expr(inputs_ranges[i][0], torch.int64)
+            )
+            end = ops.index_expr(inputs_ranges[i][1], torch.int64)
+
+            start_cond = ops.ge(idx_dim, start)
+            end_cond = ops.lt(idx_dim, end)
+            if i == 0:
+                mask = end_cond
+            elif i == len(inputs) - 1:
+                mask = start_cond
+            else:
+                mask = ops.and_(start_cond, end_cond)
+
+            masks.append(mask)
+            idx_load = list(idx)
+
+            # if we're concatting [4], [2]
+            # when we index the second tensor for 5 we want to index 5 - 4
+            idx_load[dim] -= inputs_ranges[i][0]
+
+            masked_loads.append(
+                ops.masked(
+                    mask,
+                    lambda: inputs_loaders[i](idx_load),
+                    0.0,  # this value should be unused
+                ),
+            )
+
+        def get_masked_val(i):
+            if i != len(inputs) - 1:
+                return ops.where(
+                    masks[i],
+                    masked_loads[i],
+                    get_masked_val(i + 1),
+                )
+            else:
+                return masked_loads[-1]
+
+        return get_masked_val(0)
+
+    new_size = list(inputs[0].get_size())
+    new_size[dim] = inputs_ranges[-1][-1]
+
+    return Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=inputs[0].get_dtype(),
+        inner_fn=inner_fn,
+        ranges=new_size,
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if all(input.get_dtype() is torch.uint8 for input in inputs):
@@ -962,6 +1043,36 @@ def cat(inputs, dim=0):
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
+
+    def should_lower_cat_input(x) -> bool:
+        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # them in case we want to fuse
+        if ir.is_storage_and_layout(x):
+            storage, _ = ir.as_storage_and_layout(x, freeze=False)
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+
+        if isinstance(x, TensorBox):
+            if isinstance(x.data, ir.BaseView):
+                return should_lower_cat_input(x.data.unwrap_view())
+            else:
+                return should_lower_cat_input(x.data)
+
+        if isinstance(x, ir.StorageBox):
+            return should_lower_cat_input(x.data)
+
+        if isinstance(x, ir.Pointwise):
+            return True
+
+        return False
+
+    if len(inputs) <= config.max_pointwise_cat_inputs:
+        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+            return pointwise_cat(inputs, dim)
+
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
@@ -4210,7 +4321,6 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
             assert len(index) == len(size)
-            assert all(index[i] == 0 for i in reduced_idx)
             index = [index[i] for i in kept_idx]
         assert len(index) == len(kept_idx)
         new_index = [None] * (len(index) + len(reduction_index))
@@ -4858,6 +4968,29 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+@register_lowering(torch.ops.inductor.accumulate_grad_)
+def accumulate_grad_(variable, new_grad):
+    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
+    variable.realize()
+    new_grad.realize()
+    ir.AccumulateGrad(variable, new_grad)
+    return variable
+
+
+@register_lowering(triton_kernel_wrapper_mutation)
+def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+
+@register_lowering(triton_kernel_wrapper_functional)
+def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+    kwargs = {
+        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
+    }
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
 
 try:

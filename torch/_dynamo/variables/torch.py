@@ -1,10 +1,13 @@
 import collections
+import inspect
 import logging
 
 import math
 import re
 import types
 from typing import Dict, List
+
+from torch._streambase import _StreamBase
 
 try:
     import numpy as np
@@ -20,6 +23,7 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
+from ..device_interface import device_interfaces
 from ..exc import unimplemented
 from ..utils import (
     check_constant_args,
@@ -41,7 +45,11 @@ from .ctx_manager import (
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
-from .tensor import TensorWithTFOverrideVariable
+from .torch_function import (
+    can_dispatch_torch_function,
+    dispatch_torch_function,
+    TensorWithTFOverrideVariable,
+)
 
 log = logging.getLogger(__name__)
 
@@ -219,12 +227,12 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
-            CUDAStreamContextVariable,
-            CUDAStreamVariable,
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             InferenceModeVariable,
+            StreamContextVariable,
+            StreamVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -319,8 +327,19 @@ class TorchVariable(VariableTracker):
         ):
             return self._call_ntuple(tx, args, kwargs, options)
         elif self.value is torch.no_grad:
-            return GradModeVariable.create(tx, False, **options)
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, False, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
+            else:
+                return GradModeVariable.create(tx, False, **options)
         elif self.value is torch.enable_grad:
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, True, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True, **options)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
             return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
@@ -355,12 +374,26 @@ class TorchVariable(VariableTracker):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
-        elif self.value is torch.cuda.stream:
-            log.warning(
-                "torch.cuda.stream() not fully supported, streams may be ignored"
-            )
+        elif any(
+            self.value is method
+            for method in [
+                interface_elem.stream for interface_elem in device_interfaces.values()
+            ]
+        ):
             assert len(args) == 1
-            return CUDAStreamContextVariable.create(tx, args[0], **options)
+            return StreamContextVariable.create(tx, args[0], **options)
+        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+            return wrap_fx_proxy_cls(
+                StreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    (),
+                    {},
+                ),
+                **options,
+            )
         elif self.value in (
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,
@@ -368,18 +401,6 @@ class TorchVariable(VariableTracker):
             assert not kwargs
             return ConstantVariable.create(
                 any(has_torch_function(a) for a in args), **options
-            )
-        elif self.value is torch.cuda.streams.Stream:
-            return wrap_fx_proxy_cls(
-                CUDAStreamVariable,
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    torch.cuda.streams.Stream,
-                    (),
-                    {},
-                ),
-                **options,
             )
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
@@ -406,36 +427,26 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
-        elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
-            # This code block implements inlining the __torch_function__
-            # override of a tensor.
-
-            tensor_with_tf_override = args[0]
-
-            # TODO(future PR): make this implement the full __torch_function__ API
-            # instead of assuming the relevant override is in the first argument.
-            args[0] = args[0].tensor_variable
-
-            unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-                tx,
-                self,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
-                options,
-                args,
-                kwargs,
-            )
-
+        elif can_dispatch_torch_function(tx, args, kwargs):
+            unwrapped = dispatch_torch_function(tx, self, args, kwargs)
             # The wrapping here follows the logic in
             # `torch.Tensor.__torch_function__`.
+            # TODO: This shouldn't be here as well, this should be traced in the base torch function
+            # impl
             if self.value in torch.overrides.get_default_nowrap_functions():
                 return unwrapped
-            return TensorWithTFOverrideVariable(
+
+            # TODO: It's not correct to always rewrap args[0]; with multiple subclasses the dispatch
+            # may be on the second or later argument. Fix this to respect what dispatch_torch_function says
+            # the dispatch should be.
+            # TODO: We also should not be rewrapping unconditionally, it's possible that
+            # the return value *MAY NOT* be a torch function override tensor.
+            # The solution here is to trace the base torch function impl
+            return TensorWithTFOverrideVariable.create(
+                tx,
                 unwrapped,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
+                args[0].torch_function_fn,
+                args[0].subclass_type,
             )
         elif self.value in [
             torch.amp.autocast_mode.autocast,
