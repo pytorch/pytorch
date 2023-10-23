@@ -1850,6 +1850,8 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif isinstance(value, torch.dtype):
+            return ConstantVariable.create(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
