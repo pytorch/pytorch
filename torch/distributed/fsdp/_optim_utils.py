@@ -24,7 +24,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -1427,9 +1427,26 @@ def _unflatten_orig_param_states(
     fsdp_state = fsdp_param_info.state
     for fqn, gathered_state in output_states.items():
         value = gathered_state[state_name]
-
         param_idx = fsdp_param_info.param_indices[fqn]
-        value = value.reshape(flat_param._shapes[param_idx])
+
+        if isinstance(value, DTensor):
+            placement = value.placements[0]
+            # If gathered state is a DTensor and its TP placement is not Replicate(), we need to
+            # gather the tensor on its TP dimension before chunking them into DTensor again.
+            if placement != Replicate():
+                placement_dim = placement.dim  # type: ignore[attr-defined]
+                value_local = value.redistribute(placements=(Replicate(),))
+                reshape_size = list(flat_param._shapes[param_idx])
+                reshape_size[placement_dim] *= 2
+                reshape_size = torch.Size(reshape_size)
+                value = value.reshape(reshape_size)
+            # If gathered state is a replicate DTensor, we directly reshape it.
+            else:
+                value = value.reshape(flat_param._shapes[param_idx])
+        # If gathered state is a tensor, we directly reshape it into unflatten state.
+        else:
+            value = value.reshape(flat_param._shapes[param_idx])
+
         if shard_state:
             osd_config = fsdp_state._optim_state_dict_config
             if getattr(osd_config, "_use_dtensor", False):
