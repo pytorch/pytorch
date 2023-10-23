@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -9666,7 +9666,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         preserved = (
             id(t),
             # Refcount values get modified by Dynamo resume frames
-            0 if torch._utils.is_compiling() else sys.getrefcount(t),
+            0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
         )
         moved = (
             copyreg._slotnames(t.__class__),
@@ -9711,7 +9711,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertIs(t1_ref(), t1)
             self.assertIsNot(t1_ref(), t2)
             del t1, holder
-            self.assertIs(t1_ref(), None)
+            # Dynamo keeps it alive
+            if not TEST_WITH_TORCHDYNAMO:
+                self.assertIs(t1_ref(), None)
 
     def test_swap_fail_slots(self):
         class MyTwoTensor(TwoTensor):
