@@ -161,9 +161,15 @@ class FunctionalTensor(torch.Tensor):
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
         x_functional = torch._to_functional_tensor(x)
-        torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
-        out = FunctionalTensor(x_functional)
-        torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
+        # Technically the FunctionalTensormode here is unnecessary,
+        # but it avoids spurious NotImplemented logs during `ProxyTorchDispatchMode` tracing.
+        # _mirror_autograd_meta_to queries tensor sizes,
+        # and otherwise the sym_size() call will go to the proxy mode before hitting
+        # FunctionalTensor.__torch_dispatch__
+        with FunctionalTensorMode():
+            torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
+            out = FunctionalTensor(x_functional)
+            torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
     def from_functional(self):

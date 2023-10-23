@@ -5,7 +5,7 @@ import textwrap
 import pandas as pd
 
 
-def check_hf_bert_perf_csv(filename):
+def check_perf_csv(filename, threshold):
     """
     Basic performance checking.
     """
@@ -16,10 +16,7 @@ def check_hf_bert_perf_csv(filename):
     for _, row in df.iterrows():
         model_name = row["name"]
         speedup = row["speedup"]
-        # Reduce from 1.165 to 1.160, see https://github.com/pytorch/pytorch/issues/96530
-        # Reduce from 1.160 to 1.140 after a transformer version upgrade, see https://github.com/pytorch/benchmark/pull/1406
-        # The speedup is not backed to 1.16 after the extra graph break issue is fixed in transformer upstream
-        if speedup < 1.150:
+        if speedup < threshold:
             failed.append(model_name)
 
         print(f"{model_name:34} {speedup}")
@@ -39,5 +36,8 @@ def check_hf_bert_perf_csv(filename):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", "-f", type=str, help="csv file name")
+    parser.add_argument(
+        "--threshold", "-t", type=float, help="threshold speedup value to check against"
+    )
     args = parser.parse_args()
-    check_hf_bert_perf_csv(args.file)
+    check_perf_csv(args.file, args.threshold)

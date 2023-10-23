@@ -2,7 +2,6 @@
 
 import copy
 import math
-import unittest
 
 import torch
 
@@ -349,7 +348,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             list(torch._dynamo.utils.counters["graph_break"].values()), [1]
         )
 
-    @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
             @staticmethod

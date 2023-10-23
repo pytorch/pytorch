@@ -30,6 +30,8 @@ from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
 
+aten = torch.ops.aten
+
 
 # NOTE [Autograd interaction between torch.Tensor]
 #
@@ -235,6 +237,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         assert (
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        assert isinstance(inner_tensors, dict) and len(inner_tensors) == 1
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
         return DTensor(
@@ -253,6 +256,16 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # This is mostly for inference mode when we want to
+        # decompose CompositeImplicitAutograd ops.
+        # For the long run, we need to think of a better way to handle it.
+        # TODO: We can benchmark this decompose further to see if we can
+        # completely remove the check and apply it for all DTensor Ops.
+        if func == aten.linear.default:
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         return op_dispatch.operator_dispatch(
             func,
             args,
@@ -301,10 +314,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
         device_mesh = device_mesh or mesh_resources.get_current_mesh()
+        device_type = device_mesh.device_type
 
         # convert the local tensor to desired device base on device mesh's device_type
-        if not local_tensor.is_meta:
-            local_tensor = local_tensor.to(device_mesh.device_type)
+        if device_type != local_tensor.device.type and not local_tensor.is_meta:
+            local_tensor = local_tensor.to(device_type)
 
         # set default placements to replicated if not specified
         if placements is None:
@@ -440,13 +454,14 @@ def distribute_tensor(
 
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_type = device_mesh.device_type
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-        random._rng_tracker = OffsetBasedRNGTracker(device_mesh.device_type)
+        random._rng_tracker = OffsetBasedRNGTracker(device_type)
 
     if not tensor.is_leaf:
         raise RuntimeError(
@@ -454,8 +469,9 @@ def distribute_tensor(
         )
 
     # convert tensor to the corresponding device type if it's not in that device type
-    if not tensor.is_meta:
-        tensor = tensor.to(device_mesh.device_type)
+    if device_type != tensor.device.type and not tensor.is_meta:
+        tensor = tensor.to(device_type)
+
     # set default placements to replicated if not specified
     if placements is None:
         placements = [Replicate() for _ in range(device_mesh.ndim)]

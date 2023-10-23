@@ -352,10 +352,9 @@ def _reshard(
             free_event.record()
             state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
-    # Since we prefetch entire handles keys at a time, conservatively mark
-    # the entire key as no longer prefetched once we free at least one
-    if free_unsharded_flat_param:
-        handle._prefetched = False
+    # Flat parameter freed or not, we always have to "unshard" the parameter
+    # upon next access to get its shape correct.
+    handle._prefetched = False
 
 
 def _unshard_grads(
@@ -599,6 +598,7 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
+                handle._prefetched = False
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
@@ -1451,7 +1451,9 @@ def _register_post_backward_reshard_only_hook(
     inp_tensors: Optional[List[torch.Tensor]] = None
     if not handle:
         return
-    if handle.flat_param.requires_grad:
+    flat_param = handle.flat_param
+    already_registered = hasattr(flat_param, "_post_backward_hook_state")
+    if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
         args_list, _ = tree_flatten(args)
@@ -1465,7 +1467,7 @@ def _register_post_backward_reshard_only_hook(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check

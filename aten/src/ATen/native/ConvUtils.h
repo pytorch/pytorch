@@ -416,4 +416,31 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
   return can_use_thnn_channels_last_2d;
 }
 
+static inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+
+  // check layout only for xpu tensor.
+  if (!input.is_xpu() || !weight.is_xpu()) {
+    return false;
+  }
+
+  // disable NHWC for float64 input.
+  if (input.scalar_type() == at::kDouble ||
+      weight.scalar_type() == at::kDouble) {
+    return false;
+  }
+
+  auto input_memory_format = input.suggest_memory_format();
+  auto weight_memory_format = weight.suggest_memory_format();
+
+  bool can_use_xpu_channels_last_2d =
+      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+      (weight_memory_format == at::MemoryFormat::ChannelsLast);
+
+  bool can_use_xpu_channels_last_3d =
+      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
+
+  return can_use_xpu_channels_last_2d || can_use_xpu_channels_last_3d;
+}
+
 } // namespace at::native

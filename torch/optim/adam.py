@@ -2,7 +2,7 @@ from typing import List, Optional, Union, Tuple
 
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, params_t, _use_grad_for_differentiable, _get_value,
+from .optimizer import (Optimizer, ParamsT, _use_grad_for_differentiable, _get_value,
                         _stack_if_compiling, _dispatch_sqrt, _default_to_fused_or_foreach,
                         _capturable_doc, _differentiable_doc, _foreach_doc, _fused_doc,
                         _maximize_doc)
@@ -13,7 +13,7 @@ __all__ = ['Adam', 'adam']
 
 class Adam(Optimizer):
     def __init__(self,
-                 params: params_t,
+                 params: ParamsT,
                  lr: Union[float, Tensor] = 1e-3,
                  betas: Tuple[float, float] = (0.9, 0.999),
                  eps: float = 1e-8,

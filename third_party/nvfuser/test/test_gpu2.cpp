@@ -2926,7 +2926,6 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
   fusion.addOutput(tv_N);
 
   auto options = at::TensorOptions().dtype(aten_dtype).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   std::vector<TensorView*> outputs_of_red;
   at::Tensor aten_input =
@@ -7704,7 +7703,6 @@ TEST_F(NVFuserTest, FusionIssue970_CUDA) {
   tv1->split(1, 4);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({nelm, nelm}, options);
 

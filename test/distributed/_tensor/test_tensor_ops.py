@@ -380,6 +380,18 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randint(5, (12, 8, 12)),
             )
 
+    @with_comms
+    def test_where_type_promotion(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+
+        specs = [[Shard(0)], [Replicate()]]
+        for spec in specs:
+            global_tensor = torch.randn(12, 8)
+            mat = distribute_tensor(global_tensor, mesh, spec)
+            res = torch.where(mat > 0, 1, 0)
+            ref = torch.where(global_tensor > 0, 1, 0)
+            self.assertEqual(res.redistribute(placements=[Replicate()]).to_local(), ref)
+
 
 if __name__ == "__main__":
     run_tests()

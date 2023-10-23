@@ -156,7 +156,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def __init__(
         self,
-        input_nodes: List[IRNode],
+        input_nodes: List[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
@@ -478,7 +478,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
-        output_node: IRNode = None,
+        output_node: Optional[Buffer] = None,
     ) -> str:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library as cutlass_lib  # type: ignore[import]
