@@ -177,11 +177,12 @@ def define(qualname, schema, *, lib=None):
     In PyTorch, defining an op (short for "operator") is a two step-process:
     - we need to define the op (by providing an operator name and schema)
     - we need to implement behavior for how the operator interacts with
-      various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
+    various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
 
     This entrypoint defines the custom operator (the first step)
     you must then perform the second step by calling various
-    ``impl_*`` APIs.
+    ``impl_*`` APIs, like :func:`torch.library.impl` or
+    :func:`torch.library.impl_abstract`.
 
     Args:
         qualname (str): The qualified name for the operator. Should be
@@ -253,7 +254,7 @@ def impl(qualname, types, func=None, *, lib=None):
         lib (Optional[Library]): If provided, the lifetime of this registration
             will be tied to the lifetime of the Library object.
 
-    Examples::
+    Examples:
         >>> import torch
         >>> import numpy as np
         >>>
@@ -343,7 +344,7 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
 
-    Examples::
+    Examples:
         >>> import torch
         >>> import numpy as np
         >>> from torch import Tensor
@@ -411,6 +412,7 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
 def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of an abstract impl.
+    Calling ``get_ctx()`` is only valid inside of an abstract impl
+    (see :func:`torch.library.impl_abstract` for more usage details.
     """
     return torch._library.abstract_impl.global_ctx_getter()
