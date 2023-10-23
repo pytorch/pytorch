@@ -138,7 +138,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .torch_function import TensorWithTFOverrideVariable
+from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
     UserDefinedClassVariable,
@@ -1083,10 +1083,9 @@ class VariableBuilder:
         )
         options = {}
         if type(value) in config.traceable_tensor_subclasses:
-            options["torch_function_fn"] = VariableBuilder(
-                self.tx,
-                AttrSource(AttrSource(self.source, "__torch_function__"), "__func__"),
-            )(value.__torch_function__.__func__)
+            options["torch_function_fn"] = build_torch_function_fn(
+                self.tx, value, self.source
+            )
             options["guards"] = self.make_guards(GuardBuilder.TYPE_MATCH)
         else:
             options["guards"] = set()
@@ -1841,6 +1840,10 @@ class SourcelessBuilder:
                 {k: self(tx, v) for k, v in value.items()},
                 dict,
                 mutable_local=MutableLocal(),
+            )
+        elif isinstance(value, set):
+            return SetVariable(
+                [self(tx, x) for x in value], mutable_local=MutableLocal()
             )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))

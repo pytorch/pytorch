@@ -348,6 +348,7 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
+        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -477,6 +478,29 @@ class TensorVariable(VariableTracker):
                     *proxy_args_kwargs([self, tensor_type_const], kwargs),
                 ),
                 **options,
+            )
+        elif (
+            name == "as_subclass"
+            and len(args) == 1
+            and isinstance(args[0], UserDefinedClassVariable)
+        ):
+            from .builder import VariableBuilder
+            from .torch_function import TensorWithTFOverrideVariable
+
+            # [Note: __torch_function__] coerce this tensor variable into a TensorWithTFOverrideVariable
+            # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
+            # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
+            # It is up to the user whether this is correct behavior or not.
+            py_cls = args[0].as_python_constant()
+            torch_fn = VariableBuilder(
+                tx,
+                AttrSource(
+                    AttrSource(args[0].source, "__torch_function__"), "__func__"
+                ),
+            )(py_cls.__torch_function__.__func__)
+
+            return TensorWithTFOverrideVariable.from_tensor_var(
+                tx, self, py_cls, torch_fn
             )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1

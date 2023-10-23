@@ -121,6 +121,7 @@ def _disallowed_function_ids():
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
         torch.resize_as_,
+        torch._tensor._convert,
     ]
 
     # extract all dtypes from torch

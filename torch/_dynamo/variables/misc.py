@@ -113,65 +113,7 @@ class SuperVariable(VariableTracker):
         )
         inner_fn, source = self._resolved_getattr_and_source(self, name)
 
-        # This variable is True when it corresponds to user code such as
-        #
-        #   super().__torch_function__(...)
-        #
-        # and the super().__torch_function__ attribute resolves
-        # to torch.Tensor.__torch_function__.
-        is_original_tensor_torch_function = (
-            name == "__torch_function__"
-            # for now, only support one level of inheritance
-            and len(self.objvar.value.__mro__) > 1
-            and self.objvar.value.__mro__[1] == torch.Tensor
-        )
-        if is_original_tensor_torch_function:
-            # Instead of tracing inside torch.Tensor.__torch_function__,
-            # record the `call_function` or `call_method` call into the graph.
-            from . import ConstantVariable, ConstDictVariable, TorchVariable
-            from .builder import wrap_fx_proxy
-
-            original_torch_or_getattr_variable = args[0]
-            new_args = args[2].items
-            # TODO (mlazos): this is a hack to handle kwargs properly for a test
-            # we assume that kwargs is either a dict or None.
-            # Rather than inserting the base torch function impl into the graph
-            # we should trace it properly. We should be able to remove all of this
-            # code starting from "is_original_tensor_torch_function" above.
-            if not isinstance(args[3], ConstantVariable):
-                new_kwargs = args[3].items
-                options = VariableTracker.propagate(self, new_args, new_kwargs)
-            else:
-                new_kwargs = ConstDictVariable(dict(), dict).items
-                options = VariableTracker.propagate(self, new_args, [args[3]])
-            # Disable __torch_function__ here to prevent the clone of the
-            # example tensor from going into the override.
-            with torch._C.DisableTorchFunctionSubclass():
-                if isinstance(args[0], TorchVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_function",
-                            original_torch_or_getattr_variable.value,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                elif isinstance(args[0], GetAttrVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_method",
-                            original_torch_or_getattr_variable.name,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                else:
-                    unimplemented(
-                        f"GetAttrVariable.call_function original __torch_function__ {args}"
-                    )
-        elif inner_fn is object.__init__:
+        if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar

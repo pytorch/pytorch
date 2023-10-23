@@ -212,6 +212,7 @@ MOD_INLINELIST = {
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
+    "torch._tensor",
 }
 
 
