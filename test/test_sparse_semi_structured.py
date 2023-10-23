@@ -127,7 +127,6 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         super().tearDown()
 
-
     @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
     def test_mlp_contiguous_relu_compile(self):
         """
@@ -148,8 +147,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
                 return torch.nn.functional.relu(x)
 
         def _test_mlp_contiguous_relu_compile(backend, dense_input_shape):
-            SparseSemiStructuredTensor._FORCE_CUTLASS = False
-            input = torch.rand((128, 128), device="cuda").half()
+            SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
+            input = torch.rand(dense_input_shape, device="cuda").half()
 
             model = Model().eval().cuda().half()
             mod_linear = model.linear
@@ -175,11 +174,6 @@ class TestSparseSemiStructured(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
-        super().setUp()
-
-    def tearDown(self):
-        super().tearDown()
-
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
