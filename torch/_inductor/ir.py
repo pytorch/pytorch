@@ -747,7 +747,7 @@ class Reduction(Loops):
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
-                if new_reduction_ranges is not None:
+                if new_ranges is not None and new_reduction_ranges is not None:
                     extracted_numel_hint = V.graph.sizevars.symbolic_hint(
                         sympy_product(new_ranges + new_reduction_ranges)
                     )
