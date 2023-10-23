@@ -4238,9 +4238,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
         serializer = GraphModuleSerializer(None, None)
-        named_arguments = serializer.serialize_inputs(
-            self.op_overload, args, kwargs, include_default_values=False
-        )
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
         def handle_single_output(return_type, output):
