@@ -683,7 +683,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         for name, child in model.named_children():
             if isinstance(child, torch.fx.GraphModule):
                 torch.ao.quantization.move_exported_model_to_eval(child)
-                converted_child = convert_pt2e(child)
+                converted_child = convert_pt2e(child, fold_quantize=True)
                 setattr(model, name, converted_child)
             else:
                 self._convert_qat_linears(child)
@@ -724,10 +724,6 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 9,
-            # 3 x linear: 1 for weight
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_channel.default
-            ): 3,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_channel.default
             ): 3,
