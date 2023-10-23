@@ -23,6 +23,8 @@ def from_file(
     ``size`` is the number of elements in the Tensor. If ``shared`` is ``False``, then the file must contain
     at least :math:`size * sizeof(dtype)` bytes. If ``shared`` is `True` the file will be created if needed.
 
+    See :meth:`share_memory_` for a discussion on how the ``shared`` argument differs from sharing memory.
+
     .. note::
         Only CPU tensors can be mapped to files.
 
@@ -32,7 +34,8 @@ def from_file(
 
     Args:
         filename (str) - file name to map
-        shared (bool) - whether to share memory
+        shared (bool) - whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
+                        underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
         size (int) - number of elements in the tensor
 
     Keyword args:
