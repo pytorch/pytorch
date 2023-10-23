@@ -607,14 +607,13 @@ class GraphModule(torch.nn.Module):
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def _get_jagged_tensor(self, nested_size, offsets):
-        # Makes a jagged tensor with 3 constituent tensors with size
+        # Makes a jagged tensor with N constituent tensors with size
         # as specified ((S0, S1, S2), D)
-        S0, S1, S2 = nested_size[0]
         D = nested_size[1]
-        a = torch.randn(S0, D, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(S1, D, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(S2, D, requires_grad=True, dtype=torch.float64)
-        return jagged_from_list([a, b, c], offsets)
+        out = []
+        for s in nested_size[0]:
+            out.append(torch.randn(s, D, requires_grad=True, dtype=torch.float64))
+        return jagged_from_list(out, offsets)
 
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
         compile_count = [0]
@@ -631,7 +630,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((3, 4, 5), 4), None)
+        nt2, _ = self._get_jagged_tensor(((3, 4, 5, 6), 4), None)
         self._check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
 
     def test_binary_does_not_recompile(self):
@@ -700,6 +699,31 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
+
+    def test_unbind(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 5), 2), None)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4, 5), 3), None)
+
+        def fn(x):
+            return x.unbind()
+
+        compiled_f = torch.compile(fn, fullgraph=True, backend="eager", dynamic=True)
+        out = compiled_f(nt)
+
+        out_ref = fn(nt)
+
+        # correctness
+        self.assertEqual(len(out), len(out_ref))
+        for x, x_ref in zip(out, out_ref):
+            self.assertTrue(torch.allclose(x, x_ref))
+
+        # We specialize on the length of offsets, e.g. (1) we recompile if the
+        # length of the offsets is different. (2) we don't recompile if the
+        # length of the offsets is the same, even if the size of the constituent
+        # tensors are different.
+        self._check_recompiles(fn, (nt,), (nt2,), False)
+        self._check_recompiles(fn, (nt,), (nt3,), True)
 
 
 if __name__ == "__main__":
