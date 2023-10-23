@@ -4,6 +4,8 @@ import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
 
+import numpy
+
 import pytest
 from pytest import raises as assert_raises
 
@@ -254,6 +256,7 @@ class TestVstack(TestCase):
         with pytest.raises(TypeError, match="arrays to stack must be"):
             vstack(np.arange(3) for _ in range(2))
 
+    @skipif(numpy.__version__ < "1.24", reason="casting kwarg is new in NumPy 1.24")
     def test_casting_and_dtype(self):
         a = np.array([1, 2, 3])
         b = np.array([2.5, 3.5, 4.5])
@@ -261,6 +264,7 @@ class TestVstack(TestCase):
         expected_res = np.array([[1, 2, 3], [2, 3, 4]])
         assert_array_equal(res, expected_res)
 
+    @skipif(numpy.__version__ < "1.24", reason="casting kwarg is new in NumPy 1.24")
     def test_casting_and_dtype_type_error(self):
         a = np.array([1, 2, 3])
         b = np.array([2.5, 3.5, 4.5])

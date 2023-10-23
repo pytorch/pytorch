@@ -5,12 +5,12 @@
 """
 import functools
 import warnings
-import numpy
-
 
 # from numpy.core.getlimits import _discovered_machar, _float_ma
 
 from unittest import skipIf
+
+import numpy
 
 from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
@@ -90,7 +90,7 @@ class TestFinfo(TestCase):
         with assert_raises((TypeError, ValueError)):
             finfo("i4")
 
-    @xpassIfTorchDynamo  # (reason="These attributes are not implemented yet.")
+    @skip  # (reason="Some of these attributes are not implemented vs NP versions")
     def test_basic_missing(self):
         dt = np.float32
         for attr in [
