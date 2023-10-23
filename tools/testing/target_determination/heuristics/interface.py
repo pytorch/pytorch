@@ -316,7 +316,7 @@ class AggregatedHeuristics:
 
 class HeuristicInterface:
     """
-    Interface for all heuristics.
+    Interface for all heuristics
     """
 
     description: str
