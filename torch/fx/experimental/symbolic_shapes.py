@@ -3696,6 +3696,10 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
+            if isinstance(self.var_to_val.get(k, None), SingletonInt):
+                # Skip var_to_range logic for SingletonInt which is only used
+                # for jagged layout NestedTensors today
+                continue
             vr = self.var_to_range[k]
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
@@ -4221,6 +4225,11 @@ class ShapeEnv:
 
         for symbol in expr.free_symbols:
             assert isinstance(symbol, sympy.Symbol)
+
+            if isinstance(self.var_to_val.get(symbol, None), SingletonInt):
+                # Skip var_to_range logic for SingletonInt which is only used
+                # for jagged layout NestedTensors today
+                continue
 
             r = try_solve(expr, symbol)
 

@@ -14,7 +14,7 @@ namespace at::native {
 
 namespace {
 
-template <typename scalar_t, typename opmath_t>
+template <typename scalar_t, typename accscalar_t>
 void cpu_adaptive_avg_pool(
     Tensor& output_,
     const Tensor& input_,
@@ -50,10 +50,10 @@ void cpu_adaptive_avg_pool(
           int64_t kw = iw1 - iw0;
 
           // compute local average
-          opmath_t sum = 0;
+          accscalar_t sum = 0;
           for (const auto ih : c10::irange(ih0, ih1)) {
             for (const auto iw : c10::irange(iw0, iw1)) {
-              sum += opmath_t(input_ptr[ih * input_width + iw]);
+              sum += accscalar_t(input_ptr[ih * input_width + iw]);
             }
           }
           output_ptr[oh * output_width + ow] = scalar_t(sum / kh / kw);

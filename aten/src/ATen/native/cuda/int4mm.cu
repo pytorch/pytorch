@@ -22,7 +22,9 @@ constexpr __host__ __device__ auto divDown(U a, V b) -> decltype(a + b) {
 template <typename U, typename V>
 constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
   static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
-  return (a + b - 1) / b;
+  // Overflow safe variant of (a + b - 1) / b
+  const uint64_t blocks = a / b + (a % b != 0);
+  return blocks;
 }
 
 template <typename U, typename V>
@@ -119,7 +121,7 @@ inline __host__ __device__ bool isPointerAligned(const void* p, int align) {
 template <int Align>
 inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   static_assert(isPowerOf2(Align), "");
-  uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
+  const uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
@@ -266,8 +268,8 @@ struct ALayout_RM {
       int32_t kTileStart,
       int32_t laneId,
       bf16x2x4_u32 out[KTilesToLoad]) {
-    auto mLane = mTile * kMTileSize + (laneId / 4);
-    auto kLane = kTileStart * kKTileSize + (laneId % 4) * 2;
+    const auto mLane = mTile * kMTileSize + (laneId / 4);
+    const auto kLane = kTileStart * kKTileSize + (laneId % 4) * 2;
 
     // access
     // [mTile * kMTileSize + (laneId / 4)]
@@ -315,8 +317,8 @@ struct ALayout_RM {
       // sum.z / sum.w are written at
       // [8 + (laneId / 4)], [(laneId % 4) * 2, (laneId % 4) * 2 + 1]
       // i.e., same columns, different row.
-      int outRow = mTile * kMTileSize + (laneId / 4);
-      int outCol = nTile * kNTileSize + (laneId % 4) * 2;
+      const int outRow = mTile * kMTileSize + (laneId / 4);
+      const int outCol = nTile * kNTileSize + (laneId % 4) * 2;
 
       // Pointer where sum.x / sum.y is written
       auto cPtr = reinterpret_cast<__nv_bfloat16*>(C) + outRow * n + outCol;
@@ -491,13 +493,13 @@ template <
 __global__
 __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     // Data for the A matrix, loaded as per ALayout
-    const void* __restrict__ A,
+    const void* const __restrict__ A,
 
     // Data for the B matrix, loaded as per BLayout
-    const void* __restrict__ B,
+    const void* const __restrict__ B,
 
     // Optional quantization data for dequantizing B, loaded as per BLayout
-    const void* __restrict__ B_quantizationInfo,
+    const void* const __restrict__ B_quantizationInfo,
 
     // Output data for the C matrix, stored as per CLayout
     void* __restrict__ C,
@@ -791,6 +793,7 @@ void launch_tinygemm_kernel(
       mTiles,
       nTiles,
       kTiles);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   cudaFuncAttributes funcAttr;
   C10_CUDA_CHECK(cudaFuncGetAttributes(
@@ -810,7 +813,6 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   // innermost k-tiles that we can use is 2.
   static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles), "");
 
-  constexpr int32_t kMTileSize = 16;
   constexpr int32_t kNTileSize = 8;
   constexpr int32_t kKTileSize = 16;
 
@@ -1052,7 +1054,6 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   // which is the maximum vectorized load/store size
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
-  constexpr int32_t kMTileSize = 16;
   constexpr int32_t kNTileSize = 8;
   constexpr int32_t kKTileSize = 16;
 

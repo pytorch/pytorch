@@ -14,7 +14,7 @@ namespace at::native {
 
 namespace {
 
-template <typename scalar_t, typename opmath_t>
+template <typename scalar_t, typename accscalar_t>
 void cpu_adaptive_max_pool(
     const Tensor& output_,
     const Tensor& indices_,
@@ -53,7 +53,7 @@ void cpu_adaptive_max_pool(
 
           // compute local max
           int64_t maxindex = ih0 * input_width + iw0;
-          opmath_t maxval = -std::numeric_limits<opmath_t>::infinity();
+          accscalar_t maxval = -std::numeric_limits<accscalar_t>::infinity();
           for (int64_t ih = ih0; ih < ih1; ih ++) {
             for (int64_t iw = iw0; iw < iw1; iw ++) {
               int64_t index = ih * input_width + iw;
