@@ -619,62 +619,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 self.assertTrue(isinstance(dist_state, torch.Tensor))
                 self.assertTrue(torch.allclose(state, dist_state))
 
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @parametrize("is_even_sharded_model", [True, False])
-    def test_2d_optim_state_dict(self, is_even_sharded_model):
-        simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
-
-        # Create a model without wrapper
-        torch.manual_seed(0)
-        no_wrap_model = simple_model().cuda(self.rank)
-        no_wrap_state_dict = no_wrap_model.state_dict()
-        no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
-        no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
-        no_wrap_optim.step()
-        _, no_wrap_osd = get_state_dict(no_wrap_model, optimizers=no_wrap_optim, optim_only=True)
-
-        # Create a model and sharded it with 2D FSDP + TP
-        torch.manual_seed(0)
-        mesh_2d = init_device_mesh(
-            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
-        )
-        model_2d = parallelize_module(
-            simple_model().cuda(), mesh_2d["tp"], PairwiseParallel()
-        )
-        model_2d = FSDP(
-            model_2d,
-            device_mesh=mesh_2d["dp"],
-            use_orig_params=True,
-        )
-        FSDP.set_state_dict_type(
-            model_2d,
-            StateDictType.SHARDED_STATE_DICT,
-        )
-        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
-        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
-        optim_2d.step()
-        _, optim_2d_osd = get_state_dict(model_2d, optimizers=optim_2d)
-        ref_optim_2d_osd = deepcopy(optim_2d_osd)
-
-        no_wrap_osd_states = no_wrap_osd["state"]
-        optim_2d_osd_states = optim_2d_osd["state"]
-
-        for fqn, states in no_wrap_osd_states.items():
-            dist_states = optim_2d_osd_states.get(fqn)
-
-            for state_name, state in states.items():
-                dist_state = dist_states.get(state_name)
-                # If a state  is DTensor, we all gather it in both DP and TP dimension to
-                # compare with no_wrap state.
-                if isinstance(dist_state, DT):
-                    dist_state = dist_state.cuda().redistribute(
-                        placements=(Replicate(), Replicate())
-                    ).to_local()
-                self.assertTrue(isinstance(dist_state, torch.Tensor))
-                self.assertTrue(torch.allclose(state, dist_state))
-
         # Update the parameters 2d optim states will be different from ref_optim_state_dict.
         model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
         optim_2d.step()
@@ -700,6 +644,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                     self.assertTrue(torch.allclose(new_state.to_local(), state.to_local()))
                 else:
                     self.assertEqual(new_state, state)
+
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 if __name__ == "__main__":
