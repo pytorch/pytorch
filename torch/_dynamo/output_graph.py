@@ -100,6 +100,8 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 
+from .variables.torch_function import TensorWithTFOverrideVariable
+
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -849,11 +851,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             self.add_output_instructions(random_calls_instructions)
 
-
         if (
             stack_values
             and all(
-                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                not isinstance(
+                    v,
+                    (
+                        UnspecializedPythonVariable,
+                        NumpyNdarrayVariable,
+                        TensorWithTFOverrideVariable,
+                    ),
+                )
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
@@ -871,7 +879,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # Relevant test:
             # PYTORCH_TEST_WITH_DYNAMO=1 python test/test_indexing.py -k test_boolean_shape_mismatch_cpu
             if tx._useless_graph():
-                raise exc.SkipFrame("Restore after graph break produces an empty graph")
+                raise SkipFrame("Restore after graph break produces an empty graph")
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
