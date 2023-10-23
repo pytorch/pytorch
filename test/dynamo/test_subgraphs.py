@@ -77,7 +77,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             else:
                 return 2
 
-        self._common(fn, 3, 5)
+        self._common(fn, 2, 5)
 
     def test_control_flow5(self):
         def fn(a, b):
