@@ -15,7 +15,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
-from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+from torch.distributed.checkpoint.state_dict import get_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
@@ -351,8 +351,9 @@ class TestNew2dParallelTraining(DTensorTestBase):
             mesh_2d = init_device_mesh(
                 self.device_type, (2, self.world_size // 2), mesh_dim_names=("tp", "dp")
             )
-            model_2d = parallelize_module(SimpleModel().cuda(), mesh_2d["tp"], PairwiseParallel())
-
+            model_2d = parallelize_module(
+                SimpleModel().cuda(), mesh_2d["tp"], PairwiseParallel()
+            )
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -556,7 +557,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             self.assertEqual(v1.device_mesh, v2.device_mesh)
             self.assertEqual(v1.placements, v2.placements)
 
-
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("is_even_sharded_model", [True, False])
@@ -571,7 +571,9 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
         no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
         no_wrap_optim.step()
-        _, no_wrap_osd = get_state_dict(no_wrap_model, optimizers=no_wrap_optim, optim_only=True)
+        _, no_wrap_osd = get_state_dict(
+            no_wrap_model, optimizers=no_wrap_optim, optim_only=True
+        )
 
         # Create a model and sharded it with 2D FSDP + TP
         torch.manual_seed(0)
@@ -609,9 +611,11 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 # If a state  is DTensor, we all gather it in both DP and TP dimension to
                 # compare with no_wrap state.
                 if isinstance(dist_state, DT):
-                    dist_state = dist_state.cuda().redistribute(
-                        placements=(Replicate(), Replicate())
-                    ).to_local()
+                    dist_state = (
+                        dist_state.cuda()
+                        .redistribute(placements=(Replicate(), Replicate()))
+                        .to_local()
+                    )
                 self.assertTrue(isinstance(dist_state, torch.Tensor))
                 self.assertTrue(torch.allclose(state, dist_state))
 
