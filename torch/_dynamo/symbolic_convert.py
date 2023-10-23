@@ -2265,7 +2265,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
             unimplemented(f"inlining disallowed: {func_value}")
 
-        result = skipfiles.check_verbose(func, extra_check=True)
+        result = skipfiles.check_verbose(func, allow_torch=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
