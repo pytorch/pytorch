@@ -450,6 +450,7 @@ def break_graph_if_unsupported(*, push):
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
+
             self.restore_graphstate(state)
 
             self.output.compile_subgraph(self, reason=reason)
@@ -2211,12 +2212,15 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
-    def RETURN_VALUE(self, inst):
-        if (
+    def _useless_graph(self):
+        return (
             self.output.count_calls() == 0
             and not self.symbolic_locals_contain_module_class()
             and not self.export
-        ):
+        )
+
+    def RETURN_VALUE(self, inst):
+        if self._useless_graph():
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
