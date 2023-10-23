@@ -315,7 +315,7 @@ class GraphModule(torch.nn.Module):
             sin_1 = l_d_y_1_2_.sin();  l_d_y_1_2_ = None
             sub = add - sin_1;  add = sin_1 = None
             return (sub,)
-""",
+""",  # NOQA: B950
         )
 
     def test_wrap_pytree_args_with_symint_constant(self):
@@ -3201,16 +3201,14 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(torch.sum, in_dims)(x)
 
         x = torch.randn(3, 3, 3, 3)
-        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
+        cnt = CompileCounter()
+        opt = torch.compile(wrapper_fn, backend=cnt, fullgraph=False, dynamic=True)
         expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
         # Third invocation of `opt` makes `in_dims` as SymInt.
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"torch.func.vmap: in_dims is not an int or tuple variable.": 2},
-        )
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 9)
 
     def test_vmap_multiple_invocation_out_dims(self):
         counters.clear()
@@ -3219,16 +3217,15 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(lambda x: torch.sum(x, 0), out_dims=out_dims)(x)
 
         x = torch.randn(3, 3, 3, 3)
-        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
+        cnt = CompileCounter()
+        opt = torch.compile(wrapper_fn, backend=cnt, fullgraph=False, dynamic=True)
         expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
         # Third invocation of `opt` makes `in_dims` as SymInt.
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"torch.func.vmap: out_dims is not an int or tuple variable.": 2},
-        )
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 9)
+
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
