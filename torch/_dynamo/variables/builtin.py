@@ -1079,7 +1079,7 @@ class BuiltinVariable(VariableTracker):
     def call_getattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, default=None
     ):
-        from ..allow_skip_list import is_torch_ctx_manager_class
+        from .. import trace_rules
         from . import (
             ConstantVariable,
             GetAttrVariable,
@@ -1176,7 +1176,10 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif is_torch_ctx_manager_class(member):
+            elif (
+                trace_rules.check(member)
+                == trace_rules.TraceRule.SUPPORTED_CTX_MANAGER_CLASS
+            ):
                 return TorchCtxManagerClassVariable(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)

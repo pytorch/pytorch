@@ -33,8 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-from .. import config, mutation_guard, replay_record, skipfiles
-from ..allow_skip_list import is_torch_ctx_manager_class
+from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
 from ..allowed_functions import (
     is_allowed,
     is_builtin_callable,
@@ -730,7 +729,11 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif issubclass(type(value), type) and is_torch_ctx_manager_class(value):
+        elif (
+            issubclass(type(value), type)
+            and trace_rules.check(value)
+            == trace_rules.TraceRule.SUPPORTED_CTX_MANAGER_CLASS
+        ):
             return TorchCtxManagerClassVariable(
                 value,
                 source=self.source,

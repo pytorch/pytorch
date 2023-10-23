@@ -200,20 +200,21 @@ def is_torch_ctx_manager_class(obj):
     return obj in torch_ctx_manager_classes
 
 
+def torch_reconstruct(codegen, value):
+    name = torch_get_name(value, f"allowed_fn_{id(value)}")
+    unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+    return codegen.setup_globally_cached(unique_var_name, value, False)
+
+
 class TorchCtxManagerClassVariable(VariableTracker):
+    """Points to a context manager class in torch.* that dynamo has implementations"""
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
 
-    def unique_var_name(self):
-        name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
-        return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
-
-    def as_proxy(self):
-        return self.value
+        return torch_reconstruct(codegen, self.value)
 
     def python_type(self):
         return type(self.value)
@@ -326,12 +327,8 @@ class TorchVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result).add_options(self)
 
-    def unique_var_name(self):
-        name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
-        return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
+        return torch_reconstruct(codegen, self.value)
 
     def as_proxy(self):
         return self.value

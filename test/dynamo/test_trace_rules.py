@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
-from torch._dynamo.allow_skip_list import get_torch_ctx_manager_classes
+from torch._dynamo.trace_rules import get_torch_obj_rule_map, load_object
 from torch._dynamo.external_utils import is_compiling
 from torch._dynamo.skipfiles import (
     FUNC_INLINELIST,
@@ -28,8 +28,67 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_torch_ctx_manager_classes = {
-    torch.device,  # constant folding function
+ignored_torch_name_rule_set = {
+    "torch.ExcludeDispatchKeyGuard",
+    "torch._C.DisableTorchFunction",
+    "torch._C._AutoDispatchBelowAutograd",
+    "torch._C._DisableAutocast",
+    "torch._C._DisableFuncTorch",
+    "torch._C._DisablePythonDispatcher",
+    "torch._C._DisableTorchDispatch",
+    "torch._C._EnablePreDispatch",
+    "torch._C._EnablePythonDispatcher",
+    "torch._C._EnableTorchFunction",
+    "torch._C._ExcludeDispatchKeyGuard",
+    "torch._C._ForceDispatchKeyGuard",
+    "torch._C._IncludeDispatchKeyGuard",
+    "torch._C._InferenceMode",
+    "torch._C._RestorePythonTLSSnapshot",
+    "torch._C._SetExcludeDispatchKeyGuard",
+    "torch._C._profiler._RecordFunctionFast",
+    "torch._decomp.decompositions_for_rng.PhiloxStateTracker",
+    "torch._subclasses.fake_tensor.FakeTensorMode",
+    "torch._subclasses.functional_tensor.FunctionalTensorMode",
+    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
+    "torch.autograd.anomaly_mode.detect_anomaly",
+    "torch.autograd.anomaly_mode.set_detect_anomaly",
+    "torch.autograd.forward_ad._set_fwd_grad_enabled",
+    "torch.autograd.forward_ad.dual_level",
+    "torch.autograd.grad_mode._force_original_view_tracking",
+    "torch.autograd.grad_mode._unsafe_preserve_version_counter",
+    "torch.autograd.grad_mode.set_multithreading_enabled",
+    "torch.autograd.graph.saved_tensors_hooks",
+    "torch.autograd.profiler.emit_itt",
+    "torch.autograd.profiler.emit_nvtx",
+    "torch.autograd.profiler_legacy.profile",
+    "torch.backends.mkl.verbose",
+    "torch.backends.mkldnn.verbose",
+    "torch.cpu.StreamContext",
+    "torch.cuda.StreamContext",
+    "torch.cuda._DeviceGuard",
+    "torch.cuda.device",
+    "torch.cuda.graphs.graph",
+    "torch.device",  # constant folding
+    "torch.distributed.autograd.context",
+    "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
+    "torch.hub._Faketqdm",
+    "torch.jit._ir_utils._InsertPoint",
+    "torch.jit._script.RecursiveScriptClass",
+    "torch.jit.strict_fusion",
+    "torch.onnx._internal.diagnostics.infra.context.DiagnosticContext",
+    "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
+    "torch.overrides.TorchFunctionMode",
+    "torch.package.package_exporter.PackageExporter",
+    "torch.profiler.profiler.profile",
+    "torch.serialization._opener",
+    "torch.sparse.check_sparse_tensor_invariants",
+    "torch.utils._contextlib._DecoratorContextManager",
+    "torch.utils._device.DeviceContext",
+    "torch.utils._python_dispatch.TorchDispatchMode",
+    "torch.utils.data.datapipes._decorator.guaranteed_datapipes_determinism",
+    "torch.utils.data.datapipes._decorator.runtime_validation_disabled",
+    "torch.utils.data.datapipes.dataframe.dataframes.CaptureLikeMock",
+    "torch.utils.hooks.RemovableHandle",
 }
 
 
@@ -105,7 +164,7 @@ def generate_allow_list():
     """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
-    torch_ctx_manager_classes = set()
+    torch_objects = set()
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -193,7 +252,7 @@ def generate_allow_list():
                         and "__enter__" in obj.__dict__
                         and "__exit__" in obj.__dict__
                     ):
-                        torch_ctx_manager_classes.add(obj)
+                        torch_objects.add(obj)
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                     if (
@@ -201,7 +260,7 @@ def generate_allow_list():
                         and "__enter__" in obj.__dict__
                         and "__exit__" in obj.__dict__
                     ):
-                        torch_ctx_manager_classes.add(obj)
+                        torch_objects.add(obj)
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
@@ -234,10 +293,10 @@ def generate_allow_list():
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return torch_object_ids, torch_ctx_manager_classes
+    return torch_objects
 
 
-class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
+class TraceRuleTests(torch._dynamo.test_case.TestCase):
     # We are using python function and module string names for these inlinelist,
     # this unit test is to make sure the functions/modules can be correctly imported
     # or loaded in case there is typo in the strings.
@@ -249,16 +308,16 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
             m = importlib.import_module(module_name)
             self.assertTrue(isinstance(getattr(m, fn_name), types.FunctionType))
 
-    def test_torch_ctx_manager_classes_correctness(self):
-        generated_torch_ctx_manager_classes = generate_allow_list()[1]
+    def test_torch_name_rule_map_correctness(self):
+        generated_torch_name_rule_set = generate_allow_list()
+        ignored_torch_obj_rule_set = {load_object(x) for x in ignored_torch_name_rule_set}
         self.assertTrue(
-            ignored_torch_ctx_manager_classes.issubset(
-                generated_torch_ctx_manager_classes
+            ignored_torch_obj_rule_set.issubset(
+                set(generated_torch_name_rule_set)
             )
         )
         self.assertTrue(
-            generated_torch_ctx_manager_classes - get_torch_ctx_manager_classes()
-            == ignored_torch_ctx_manager_classes
+            generated_torch_name_rule_set == set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
         )
 
     def test_func_inlinelist_torch_function(self):

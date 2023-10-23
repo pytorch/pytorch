@@ -326,7 +326,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from ..allow_skip_list import is_torch_ctx_manager_class
+        from .. import trace_rules
         from .builder import VariableBuilder
 
         if (
@@ -348,7 +348,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj = self.value.__self__
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
-                and is_torch_ctx_manager_class(obj.__class__)
+                and trace_rules.check(obj.__class__)
+                == trace_rules.TraceRule.SUPPORTED_CTX_MANAGER_CLASS
                 and not (args or kwargs)
             ):
                 return variables.TorchCtxManagerClassVariable(
