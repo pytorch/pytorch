@@ -135,8 +135,8 @@ def do_bench(*args, **kwargs):
             # NB: Lazily load triton, as importing triton is slow
             # see https://github.com/openai/triton/issues/1599
             from triton.testing import do_bench as triton_do_bench
-        except ImportError:
-            raise NotImplementedError("requires Triton")
+        except ImportError as exc:
+            raise NotImplementedError("requires Triton") from exc
 
         # triton PR https://github.com/openai/triton/pull/1513 change the
         # quantile fields name from 'percentiles' to 'quantiles'
@@ -262,6 +262,21 @@ def is_view(op: torch._ops.OpOverload):
     """
     assert isinstance(op, torch._ops.OpOverload)
     return any(a.alias_info is not None for a in op._schema.arguments)
+
+
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    if use.target is operator.getitem or is_view(use.target):
+        return all(is_pointwise_use(u) for u in use.users)
+
+    return torch.Tag.pointwise in use.target.tags
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -671,6 +686,9 @@ class IndentedBuffer:
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
+
+    def newline(self):
+        self.writeline("\n")
 
     def writeline(self, line):
         if isinstance(line, LineContext):
