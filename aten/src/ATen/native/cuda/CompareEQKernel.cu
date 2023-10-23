@@ -28,22 +28,12 @@ struct CompareEqFunctor{
  };
 }
 
-C10_NOINLINE void compare_eq_ne_kernel(TensorIteratorBase& iter, EqOpType op) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(
-      kComplexHalf,
-      kHalf,
-      kBFloat16,
-      kBool,
-      kFloat8_e4m3fn,
-      kFloat8_e4m3fnuz,
-      kFloat8_e5m2,
-      kFloat8_e5m2fnuz,
-      iter.common_dtype(),
-      "compare_eq_ne_cuda",
-      [&]() {
-        opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
-            iter, CompareEqFunctor<scalar_t>(op));
-      });
+C10_NOINLINE void compare_eq_ne_kernel(TensorIteratorBase &iter, EqOpType op) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(kComplexHalf, kHalf, kBFloat16, kBool, kFloat8_e4m3fn, kFloat8_e5m2,
+                                         iter.common_dtype(), "compare_eq_ne_cuda", [&]() {
+    opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
+        iter, CompareEqFunctor<scalar_t>(op));
+  });
 }
 
 void eq_kernel_cuda(TensorIteratorBase& iter) {
