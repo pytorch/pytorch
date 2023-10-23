@@ -27,7 +27,7 @@ __all__ = [
     "range_end",
     "mark",
     "range",
-    "register_string"
+    "register_string",
 ]
 
 
@@ -95,7 +95,7 @@ def register_string(s: str):
     Args:
         s (str): ASCII string to register.
     """
-    _nvtx.registerString(s.encode("ascii"))
+    _nvtx.registerString(s)
 
 
 @contextmanager
