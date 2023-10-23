@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
-from unittest import SkipTest
+from unittest import skipIf, SkipTest
+
+import numpy
 
 import pytest
 from pytest import raises as assert_raises
@@ -192,6 +194,7 @@ class TestSum(TestCase):
         assert_allclose(res_float, 4.0, atol=1e-15)
         assert res_float.dtype == "float64"
 
+    @skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @xpassIfTorchDynamo  # (reason="sum: does not warn on overflow")
     def test_sum_dtypes_warnings(self):
         for dt in (int, np.float16, np.float32, np.float64):

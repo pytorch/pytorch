@@ -202,6 +202,7 @@ class TestHstack(TestCase):
         # with assert_warns(FutureWarning):
         hstack(x for x in np.ones((3, 2)))
 
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     def test_casting_and_dtype(self):
         a = np.array([1, 2, 3])
         b = np.array([2.5, 3.5, 4.5])
@@ -468,6 +469,7 @@ class TestConcatenate(TestCase):
 
 @instantiate_parametrized_tests
 class TestStackMisc(TestCase):
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     def test_stack(self):
         # non-iterable input
         assert_raises(TypeError, stack, 1)
@@ -549,6 +551,7 @@ class TestStackMisc(TestCase):
         with assert_raises(TypeError):
             stack((a, b), dtype=np.int64, axis=1, casting="safe")
 
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @parametrize("axis", [0])
     @parametrize("out_dtype", ["c8", "f4", "f8", "i8"])  # torch does not have ">f8",
     @parametrize("casting", ["no", "equiv", "safe", "same_kind", "unsafe"])

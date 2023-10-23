@@ -9,6 +9,8 @@ import warnings
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
+import numpy
+
 # from numpy._utils import _pep440
 import pytest
 from pytest import raises as assert_raises
@@ -467,6 +469,7 @@ class TestConversion(TestCase):
             a = np.array(l, dtype=T)
             assert_equal([int(_m) for _m in a], li)
 
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @xpassIfTorchDynamo  # (reason="pytorch does not emit this warning.")
     def test_iinfo_long_values_1(self):
         for code in "bBh":
@@ -845,6 +848,7 @@ class TestScalarOpsMisc(TestCase):
         with pytest.warns(RuntimeWarning, match="overflow encountered"):
             operation(min, neg_1)
 
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @xpassIfTorchDynamo  # (reason="pytorch does not warn on overflow")
     @parametrize("dtype", "B")
     def test_scalar_unsigned_integer_overflow(self, dtype):

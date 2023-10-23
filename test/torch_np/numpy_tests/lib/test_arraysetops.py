@@ -3,6 +3,9 @@
 """Test functions for 1D array set operations.
 
 """
+from unittest import skipIf
+
+import numpy
 
 from pytest import raises as assert_raises
 
@@ -31,6 +34,7 @@ else:
     from torch._numpy.testing import assert_array_equal, assert_equal
 
 
+@skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
 @xpassIfTorchDynamo  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestSetOps(TestCase):

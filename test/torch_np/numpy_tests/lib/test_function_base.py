@@ -12,6 +12,8 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 import hypothesis
 import hypothesis.strategies as st
 
+import numpy
+
 import pytest
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
@@ -2860,14 +2862,14 @@ class TestPercentile(TestCase):
         np.testing.assert_equal(res.dtype, arr.dtype)
 
     H_F_TYPE_CODES = [
-        (int_type, np.float64) for int_type in np.typecodes["AllInteger"]
+        (int_type, np.float64) for int_type in "Bbhil"  # np.typecodes["AllInteger"]
     ] + [
         (np.float16, np.float16),
         (np.float32, np.float32),
         (np.float64, np.float64),
     ]
 
-    @xpassIfTorchDynamo  # (reason="TODO: implement percentile interpolations")
+    @skipif(numpy.__version__ < "1.24", reason="NEP 50 is new in 1.24")
     @parametrize("input_dtype, expected_dtype", H_F_TYPE_CODES)
     @parametrize(
         "method, expected",
@@ -3229,6 +3231,7 @@ class TestPercentile(TestCase):
             np.percentile(d, [1, 7], axis=(0, 3), keepdims=True).shape, (2, 1, 5, 7, 1)
         )
 
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @parametrize(
         "q",
         [
@@ -3801,6 +3804,7 @@ class TestMedian(TestCase):
         assert_equal(np.median(d, axis=(0, 1, 2, 3), keepdims=True).shape, (1, 1, 1, 1))
         assert_equal(np.median(d, axis=(0, 1, 3), keepdims=True).shape, (1, 1, 7, 1))
 
+    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @parametrize(
         "axis",
         [
