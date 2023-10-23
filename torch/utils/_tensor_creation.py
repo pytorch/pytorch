@@ -23,7 +23,7 @@ def from_file(
     ``size`` is the number of elements in the Tensor. If ``shared`` is ``False``, then the file must contain
     at least :math:`size * sizeof(dtype)` bytes. If ``shared`` is `True` the file will be created if needed.
 
-    See :meth:`share_memory_` for a discussion on how the ``shared`` argument differs from sharing memory.
+    See :meth:`torch.UntypedStorage.share_memory_` for a discussion on how the ``shared`` argument differs from sharing memory.
 
     .. note::
         Only CPU tensors can be mapped to files.
