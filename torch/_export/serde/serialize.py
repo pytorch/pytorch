@@ -459,7 +459,7 @@ class GraphModuleSerializer:
         return serialized_args
 
     def serialize_inputs(
-        self, target: torch._ops.OpOverload, args, kwargs=None, include_default_values=True
+        self, target: torch._ops.OpOverload, args, kwargs=None
     ) -> List[NamedArgument]:
         assert isinstance(target, torch._ops.OpOverload)
         kwargs = kwargs or {}
@@ -480,13 +480,10 @@ class GraphModuleSerializer:
                     )
                 )
             else:
-                if include_default_values:
-                    serialized_args.append(
-                        NamedArgument(
-                            name=schema_arg.name,
-                            arg=self.serialize_input(schema_arg.default_value),
-                        )
-                    )
+                # We intentionally don't serialize the missing arguments
+                # with default values
+                pass
+
 
         return serialized_args
 
