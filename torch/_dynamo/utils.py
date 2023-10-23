@@ -548,6 +548,7 @@ class CompilationMetrics:
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
+    fail_details: Optional[str]
 
 
 @dataclasses.dataclass

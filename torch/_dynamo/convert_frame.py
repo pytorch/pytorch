@@ -474,6 +474,7 @@ def _compile(
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_reason: Optional[str] = None
+    fail_details: Optional[str] = None
 
     def transform(instructions, code_options):
         nonlocal output
@@ -620,12 +621,14 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
-            exception_handler(e, code, frame, export=export)
             fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            fail_details = str(e)  # fail details after exc msg augment
             raise
         except Exception as e:
-            exception_handler(e, code, frame, export=export)
             fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            fail_details = str(e)  # fail details after exc msg augment
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
@@ -669,6 +672,7 @@ def _compile(
                 entire_frame_compile_time,
                 backend_compile_time,
                 fail_reason,
+                fail_details,
             )
             log_compilation_event(metrics)
 
