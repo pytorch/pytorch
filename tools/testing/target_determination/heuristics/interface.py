@@ -316,7 +316,7 @@ class AggregatedHeuristics:
 
 class HeuristicInterface:
     """
-    Interface for all heuristics
+    Interface for all heuristics.
     """
 
     description: str
@@ -328,7 +328,6 @@ class HeuristicInterface:
     @abstractmethod
     def __init__(self, **kwargs: Dict[str, Any]) -> None:
         self.trial_mode = kwargs.get("trial_mode", False)  # type: ignore[assignment]
-        pass
 
     @abstractmethod
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
