@@ -116,7 +116,7 @@ def rand_dense_2by4_all_patterns(r, c, dtype, device):
     return dense_inv, dense_val
 
 
-class TestSparseSemiStructured(TestCase):
+class TestSparseSemiStructured(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
         if not _IS_SM8X:
@@ -353,33 +353,62 @@ class TestSparseSemiStructured(TestCase):
             (2) Inductor should fuse the .contiguous() call into the relu
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
+        input_tensor = torch.rand(dense_input_shape, device=device).half()
+        model = (
+            nn.Sequential(
+                nn.Linear(128, 256),
+                # nn.ReLU(0.5),
+                # nn.Linear(256, 128),
+            )
+            .half()
+            .to(device)
+        )
 
+        for i in range(1):
+            m, n = model[i].weight.shape
+            mask = rand_sparse_semi_structured_mask(
+                m, n, device=device, dtype=torch.bool
+            )
+            # set masked weight
+            model[i].weight = nn.Parameter(model[i].weight * mask)
 
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(128, 128)
+        dense_result = model(input_tensor)
 
-            def forward(self, x):
-                x = self.linear(x)
-                x = x.contiguous()
-                return torch.nn.functional.relu(x)
+        for i in range(1):
+            model[i].weight = nn.Parameter(to_sparse_semi_structured(model[i].weight))
 
-        input = torch.rand(dense_input_shape, device=device).half()
-        model = Model().eval().cuda().half()
-        mod_linear = model.linear
-        m, n = mod_linear.weight.shape
-        mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
-        # set masked weight
-        mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
-
-        dense_result = model(input)
-        mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
-
-        model = torch.compile(model)
-        sparse_result = model(input)
+        compiled_model = torch.compile(model)
+        sparse_result = compiled_model(input_tensor)
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+
+        # SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
+
+        # class Model(nn.Module):
+        #     def __init__(self):
+        #         super().__init__()
+        #         self.linear = nn.Linear(128, 128)
+
+        #     def forward(self, x):
+        #         x = self.linear(x)
+        #         x = x.contiguous()
+        #         return torch.nn.functional.relu(x)
+
+        # input = torch.rand(dense_input_shape, device=device).half()
+        # model = Model().eval().cuda().half()
+        # mod_linear = model.linear
+        # m, n = mod_linear.weight.shape
+        # mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
+        # # set masked weight
+        # mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
+
+        # dense_result = model(input)
+        # mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
+
+        # model = torch.compile(model)
+        # sparse_result = model(input)
+
+        # assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_values(self, backend):

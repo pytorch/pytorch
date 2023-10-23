@@ -20,6 +20,7 @@ coverage.xml
 **/.pytorch-slow-tests.json
 **/.pytorch-test-times.json
 **/.pytorch-test-file-ratings.json
+**/.pytorch-test-class-ratings.json
 */*.pyc
 */*.so*
 */**/__pycache__
