@@ -45,11 +45,7 @@ from .ctx_manager import (
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
-from .torch_function import (
-    can_dispatch_torch_function,
-    dispatch_torch_function,
-    TensorWithTFOverrideVariable,
-)
+from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
 
@@ -249,6 +245,16 @@ class TorchVariable(VariableTracker):
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
+        if self.value is torch.overrides.get_default_nowrap_functions:
+            # [Note: __torch_function__] we return empty here because we restrict
+            # the set of functions that we trace __torch_function__ on to
+            # functions outside of the actual set. Implementing this properly will require implementing
+            # some variable types to track and compare tensor getset descriptors
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder()(
+                tx, torch.overrides.get_default_nowrap_functions()
+            ).add_options(options)
         elif self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable.create(
@@ -428,26 +434,7 @@ class TorchVariable(VariableTracker):
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
         elif can_dispatch_torch_function(tx, args, kwargs):
-            unwrapped = dispatch_torch_function(tx, self, args, kwargs)
-            # The wrapping here follows the logic in
-            # `torch.Tensor.__torch_function__`.
-            # TODO: This shouldn't be here as well, this should be traced in the base torch function
-            # impl
-            if self.value in torch.overrides.get_default_nowrap_functions():
-                return unwrapped
-
-            # TODO: It's not correct to always rewrap args[0]; with multiple subclasses the dispatch
-            # may be on the second or later argument. Fix this to respect what dispatch_torch_function says
-            # the dispatch should be.
-            # TODO: We also should not be rewrapping unconditionally, it's possible that
-            # the return value *MAY NOT* be a torch function override tensor.
-            # The solution here is to trace the base torch function impl
-            return TensorWithTFOverrideVariable.from_tensor_var(
-                tx,
-                unwrapped,
-                args[0].class_type,
-                args[0].torch_function_fn,
-            )
+            return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,

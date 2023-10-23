@@ -1002,6 +1002,13 @@ class BuiltinVariable(VariableTracker):
             val = arg_type is isinstance_type
         return variables.ConstantVariable.create(val)
 
+    def call_issubclass(self, tx, left_ty, right_ty):
+        """Checks if first arg is subclass of right arg"""
+        left_ty = left_ty.as_python_constant()
+        right_ty = right_ty.as_python_constant()
+
+        return variables.ConstantVariable(issubclass(left_ty, right_ty))
+
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
