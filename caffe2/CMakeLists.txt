@@ -936,8 +936,7 @@ if(USE_ROCM)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
   if(USE_NCCL)
-    # fmt::fmt-header-only is needed by the NCCL code in torch/csrc/distributed/c10d
-    target_link_libraries(torch_hip PRIVATE __caffe2_nccl fmt::fmt-header-only)
+    target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
@@ -972,8 +971,7 @@ elseif(USE_CUDA)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
   endif()
   if(USE_NCCL)
-    # fmt::fmt-header-only is needed by the NCCL code in torch/csrc/distributed/c10d
-    target_link_libraries(torch_cuda PRIVATE __caffe2_nccl fmt::fmt-header-only)
+    target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
   if(USE_UCC)
@@ -1133,7 +1131,6 @@ set(ATen_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
