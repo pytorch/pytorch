@@ -307,6 +307,7 @@ class WrapperCodeGen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
+        self.unbacked_symbol_decls = set()
 
         self.write_header()
         self.write_prefix()
@@ -1047,6 +1048,15 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
+
+    def codegen_unbacked_symbol_decl(self, symbol):
+        name = str(symbol)
+        if name in self.unbacked_symbol_decls:
+            return name
+        else:
+            # When in CppWrapperCodeGen, we should only generate the declaration once
+            self.unbacked_symbol_decls.add(name)
+            return self.declare + name
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
