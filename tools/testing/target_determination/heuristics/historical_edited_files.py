@@ -11,7 +11,11 @@ from tools.testing.target_determination.heuristics.utils import (
     get_correlated_tests,
 )
 
-
+# This heuristic assumes that changed files in previous commits are good sources
+# of information for what files are related to each other. If fileA and
+# testFileA were edited in the same commit on main, that probably means that
+# future commits that change fileA should probably run testFileA. Based on this,
+# a correlation dict is built based on what files were edited in commits on main.
 class HistorialEditedFiles(HeuristicInterface):
     def __init__(self, **kwargs: Dict[str, Any]):
         super().__init__(**kwargs)

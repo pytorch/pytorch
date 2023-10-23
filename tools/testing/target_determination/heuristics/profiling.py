@@ -11,7 +11,9 @@ from tools.testing.target_determination.heuristics.utils import (
     get_correlated_tests,
 )
 
-
+# Profilers were used to gather simple python code coverage information for each
+# test to see files were involved in each tests and used to build a correlation
+# dict (where all ratings are 1).
 class Profiling(HeuristicInterface):
     def __init__(self, **kwargs: Dict[str, Any]):
         super().__init__(**kwargs)
