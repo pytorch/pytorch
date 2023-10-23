@@ -675,7 +675,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
                 )
                 quantizer.set_global(quantization_config)
                 traced_child_prepared = prepare_qat_pt2e(traced_child, quantizer)
-                model._modules[name] = traced_child_prepared
+                setattr(model, name, traced_child_prepared)
             else:
                 self._prepare_qat_linears(child)
 
