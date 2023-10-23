@@ -575,7 +575,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         no_wrap_optim.step()
         _, no_wrap_osd = get_state_dict(no_wrap_model, optimizers=no_wrap_optim, optim_only=True)
 
-
         # Create a model and sharded it with 2D FSDP + TP
         torch.manual_seed(0)
         mesh_2d = init_device_mesh(
@@ -607,10 +606,12 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
             for state_name, state in states.items():
                 dist_state = dist_states.get(state_name)
+                # If a state  is DTensor, we all gather it in both DP and TP dimension to
+                # compare with no_wrap state.
                 if isinstance(dist_state, DT):
-                    dist_state = dist_state.cuda().redistribute(placements=(Replicate(), Replicate())).to_local()
-                    if self.rank == 0:
-                        print(f"rank={self.rank}, {fqn=}.{state_name=}, {state=}, {dist_state=}")
+                    dist_state = dist_state.cuda().redistribute(
+                        placements=(Replicate(), Replicate())
+                    ).to_local()
                 self.assertTrue(isinstance(dist_state, torch.Tensor))
                 self.assertTrue(torch.allclose(state, dist_state))
 
