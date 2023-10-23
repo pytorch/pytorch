@@ -447,16 +447,18 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
         test_inputs_big = torch.randn(1, 15, 4, requires_grad=True)
         self.run_test(
             mha,
-            (dummy_input,),
+            (dummy_input, dummy_input, dummy_input),
             additional_test_inputs=[
-                (dummy_input,),
-                (test_inputs_small,),
-                (test_inputs_big,),
+                (dummy_input, dummy_input, dummy_input),
+                (test_inputs_small, test_inputs_small, test_inputs_small),
+                (test_inputs_big, test_inputs_big, test_inputs_big),
             ],
-            input_names=["input_images"],
-            output_names=["outputs"],
+            input_names=["query", "key", "value"],
+            output_names=["output"],
             dynamic_axes={
-                "input_images": {0: "batch_size", 1: "sequence"},
+                "query": {0: "batch_size", 1: "sequence"},
+                "key": {0: "batch_size", 1: "sequence"},
+                "value": {0: "batch_size", 1: "sequence"},
                 "output": {0: "batch_size", 1: "sequence"},
             },
             rtol=1e-3,
