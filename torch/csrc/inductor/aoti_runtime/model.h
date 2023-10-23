@@ -247,8 +247,20 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
-  void update_constants_map(std::shared_ptr<ConstantMap>&& constants_map) {
-    constants_ = std::move(constants_map);
+  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
+    constants_map_ = std::move(constants_map);
+    if (!constants_map_) {
+      return;
+    }
+    constants_.resize(constants_info_.size());
+    int idx = 0;
+    for (const auto& info : constants_info_) {
+      const auto it = constants_map_->find(info.name);
+      if (it != constants_map_->end()) {
+        constants_[idx] = it->second;
+      }
+      idx++;
+    }
   }
 
   /// Returns true if the model is complete.
@@ -302,7 +314,8 @@ class AOTInductorModelBase {
   std::vector<ParamInfo> outputs_info_;
   std::vector<ConstInfo> constants_info_;
 
-  std::shared_ptr<ConstantMap> constants_;
+  std::shared_ptr<ConstantMap> constants_map_;
+  std::vector<AtenTensorHandle> constants_;
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
