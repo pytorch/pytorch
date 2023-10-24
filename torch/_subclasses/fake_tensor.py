@@ -1532,9 +1532,7 @@ class FakeTensorMode(TorchDispatchMode):
                 )
             ):
                 with self:
-                    r = decomposition_table[func](*args, **kwargs)
-                    if r is not NotImplemented:
-                        return r
+                    return decomposition_table[func](*args, **kwargs)
 
             with self:
                 # Decomposes CompositeImplicitAutograd ops

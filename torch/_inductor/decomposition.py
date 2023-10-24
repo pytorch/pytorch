@@ -496,3 +496,23 @@ def masked_scatter(self, mask, source):
         source_idx = mask.reshape(-1).cumsum(0) - 1
         return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
     return NotImplemented
+
+
+@register_decomposition(aten.copy)
+def copy(self: Tensor, src: Tensor, non_blocking: bool = False):
+    if (
+        not non_blocking
+        and self.storage_offset == 0
+        and utils.is_non_overlapping_and_dense(self)
+    ):
+        physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(
+            self
+        )
+        src = src.expand(self.shape)
+        return aten.to_permuted(
+            src,
+            physical_layout,
+            dtype=self.dtype,
+            device=self.device,
+        )
+    return NotImplemented
