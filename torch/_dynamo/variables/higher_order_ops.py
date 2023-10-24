@@ -399,7 +399,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args.append(v)
 
         if kwargs:
-            unimplemented(f"torch.cond: Got unexpected kwargs: {list[kwargs.keys()]}")
+            unimplemented(f"torch.cond: Got unexpected kwargs: {list(kwargs.keys())}")
 
         if len(args) != 4:
             unimplemented(
