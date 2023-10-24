@@ -1675,7 +1675,7 @@ def compile(model: Optional[Callable] = None, *,
 
     Args:
        model (Callable): Module/function to optimize
-       fullgraph (bool): Whether it is ok to break model into several subgraphs
+       fullgraph (bool): Whether to raise an error on graph breaks. Default is False, i.e. graph breaks are allowed.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will
