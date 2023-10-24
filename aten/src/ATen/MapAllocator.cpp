@@ -201,7 +201,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
           }
         } else {
           CloseHandle(hfile);
-          TORCH_CHECK(false, "file <", filename_, "> size <", hfilesz, "> is smaller than the required mapping size <", size, ">; error code: <", GetLastError(), ">");
+          TORCH_CHECK(false, "file <", filename_, "> size <", hfilesz.QuadPart, "> is smaller than the required mapping size <", size, ">; error code: <", GetLastError(), ">");
         }
       }
     } else {
