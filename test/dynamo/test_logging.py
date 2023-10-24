@@ -92,6 +92,14 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
+    @requires_cuda()
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
         def fn(x, y):
@@ -102,7 +110,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -388,13 +396,34 @@ LoweringException: AssertionError:
             msg = record.getMessage()
             if "return x * 2" in msg:
                 found_x2 = True
-                self.assertIn("inline depth: 2", msg)
+                self.assertIn("inline depth: 3", msg)
             if "return x * 3" in msg:
                 found_x3 = True
-                self.assertIn("inline depth: 2", msg)
+                self.assertIn("inline depth: 3", msg)
 
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_funcname(self, records):
+        def fn1():
+            def fn2():
+                if True:
+                    return [torch.ones(3, 3) for _ in range(5)]
+                return None
+
+            return fn2()
+
+        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt()
+
+        found_funcname = False
+        for record in records:
+            msg = record.getMessage()
+            if "<listcomp>" in msg and "fn1.fn2" in msg:
+                found_funcname = True
+
+        self.assertTrue(found_funcname)
 
     @make_logging_test(graph_sizes=True)
     def test_graph_sizes_dynamic(self, records):
@@ -567,7 +596,10 @@ exclusions = {
     "bytecode",
     "output_code",
     "schedule",
+    "fusion",
     "aot_graphs",
+    "post_grad_graphs",
+    "compiled_autograd",
     "recompiles",
     "graph_breaks",
     "ddp_graphs",
@@ -578,6 +610,8 @@ exclusions = {
     "custom_format_test_artifact",
     "onnx",
     "onnx_diagnostics",
+    "guards",
+    "verbose_guards",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -71,5 +71,10 @@ class TORCH_API Timer {
   }
 };
 
-TORCH_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
+TORCH_DECLARE_TYPED_REGISTRY(
+    TimerRegistry,
+    c10::DeviceType,
+    Timer,
+    std::unique_ptr,
+    c10::Device);
 } // namespace c10d

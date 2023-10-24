@@ -10,6 +10,7 @@ extern "C" {
 // PyTorch-only compat functions
 
 #define IS_PYTHON_3_11_PLUS PY_VERSION_HEX >= 0x030B00C1
+#define IS_PYTHON_3_12_PLUS PY_VERSION_HEX >= 0x030C0000
 
 PYCAPI_COMPAT_STATIC_INLINE(int)
 PyCode_GetNCellvars(PyCodeObject* code) {

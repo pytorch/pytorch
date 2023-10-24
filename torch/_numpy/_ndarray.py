@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import math
 import operator
+from typing import Sequence
 
 import torch
 
@@ -145,7 +146,7 @@ ri_dunder = {
     "mul": "multiply",
     "truediv": "divide",
     "floordiv": "floor_divide",
-    "pow": "float_power",
+    "pow": "power",
     "mod": "remainder",
     "and": "bitwise_and",
     "or": "bitwise_or",
@@ -343,6 +344,9 @@ class ndarray:
     def tolist(self):
         return self.tensor.tolist()
 
+    def __iter__(self):
+        return (ndarray(x) for x in self.tensor.__iter__())
+
     def __str__(self):
         return (
             str(self.tensor)
@@ -366,10 +370,10 @@ class ndarray:
     def __index__(self):
         try:
             return operator.index(self.tensor.item())
-        except Exception:
+        except Exception as exc:
             raise TypeError(
                 "only integer scalar arrays can be converted to a scalar index"
-            )
+            ) from exc
 
     def __bool__(self):
         return bool(self.tensor)
@@ -422,15 +426,36 @@ class ndarray:
             return self.__getitem__(args)
 
     def __getitem__(self, index):
+        tensor = self.tensor
+
+        def neg_step(i, s):
+            if not (isinstance(s, slice) and s.step is not None and s.step < 0):
+                return s
+
+            nonlocal tensor
+            tensor = torch.flip(tensor, (i,))
+
+            # Account for the fact that a slice includes the start but not the end
+            assert isinstance(s.start, int) or s.start is None
+            assert isinstance(s.stop, int) or s.stop is None
+            start = s.stop + 1 if s.stop else None
+            stop = s.start + 1 if s.start else None
+
+            return slice(start, stop, -s.step)
+
+        if isinstance(index, Sequence):
+            index = type(index)(neg_step(i, s) for i, s in enumerate(index))
+        else:
+            index = neg_step(0, index)
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
-        return ndarray(self.tensor.__getitem__(index))
+        return ndarray(tensor.__getitem__(index))
 
     def __setitem__(self, index, value):
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
 
-        if type(value) not in _dtypes_impl.SCALAR_TYPES:
+        if not _dtypes_impl.is_scalar(value):
             value = normalize_array_like(value)
             value = _util.cast_if_needed(value, self.tensor.dtype)
 
@@ -447,7 +472,7 @@ class ndarray:
 
 
 def _tolist(obj):
-    """Recusrively convert tensors into lists."""
+    """Recursively convert tensors into lists."""
     a1 = []
     for elem in obj:
         if isinstance(elem, (list, tuple)):
@@ -488,7 +513,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     if isinstance(obj, ndarray):
         obj = obj.tensor
 
-    # is a specific dtype requrested?
+    # is a specific dtype requested?
     torch_dtype = None
     if dtype is not None:
         torch_dtype = _dtypes.dtype(dtype).torch_dtype

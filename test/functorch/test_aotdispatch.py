@@ -18,12 +18,14 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     skipIfRocm,
 )
+from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
 import warnings
 import itertools
+from contextlib import nullcontext
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
@@ -40,7 +42,7 @@ from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
     nop, default_partition, default_decompositions,
-    memory_efficient_fusion, get_aot_compilation_context
+    memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
 from torch._decomp import decomposition_table
 
@@ -262,6 +264,9 @@ class TestAOTAutograd(AOTTestCase):
         test_mutation: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
+        # Only active when inp_ is Callable.
+        # TODO: probably consolidate all tests to make inp a Callable.
+        make_inputs_subclasses: bool = False,
     ):
         for keep_input_mutations in [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
@@ -271,8 +276,9 @@ class TestAOTAutograd(AOTTestCase):
                 # The callable should return a tuple of f_inputs, f_graph_inputs
                 # (The idea is that we might want to compile a function with the graph inputs,
                 # but test autograd backprop all the way through the actual inputs)
-                inp_copy, graph_inps_copy = inp_callable()
-                inp, graph_inps = inp_callable()
+                with TwoTensorMode() if make_inputs_subclasses else nullcontext():
+                    inp_copy, graph_inps_copy = inp_callable()
+                    inp, graph_inps = inp_callable()
             else:
                 inp_copy = []
                 inp = []
@@ -308,7 +314,7 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(f, nn.Module):
                 compiled_f = aot_module(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -317,7 +323,7 @@ class TestAOTAutograd(AOTTestCase):
             else:
                 compiled_f = aot_function(
                     f,
-                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
                     bw_compiler=nop,
                     decompositions=decompositions,
                     keep_inference_input_mutations=keep_input_mutations,
@@ -612,23 +618,6 @@ def forward(self, primals_1, primals_2, primals_3):
         inp = [torch.ones(3, 3, requires_grad=True)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
         inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
-    def test_input_mutation_resize_smaller(self):
-        def f(a, b):
-            a.resize_(2, 2)
-            return a + b
-        # tenors that require gradients cannot be resized, so only test requires_grad=False case
-        inp = [
-            torch.ones(3, 3),
-            torch.ones(2, 2, requires_grad=True),
-        ]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
-        inp = [
-            torch.ones(3, 3),
-            torch.ones(2, 2),
-        ]
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_batchnorm(self):
@@ -928,7 +917,8 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    return [view, mul, detach]""")
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    return [view, mul, detach_1]""")
 
     def test_output_aliases_intermediate_inplace_view(self):
         def f(a):
@@ -949,16 +939,17 @@ def forward(self, primals_1):
             # Thanks to the detach_() AOT Autograd doesn't need to do anything.
             # `out` will show up as having OutputType.non_alias,
             # and ._is_view() == False
-            return out
+            return out, a + 1
         inp = [torch.ones(2, 4, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
         inp = [torch.ones(2, 4, requires_grad=True)]
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     t = torch.ops.aten.t.default(mul);  mul = None
-    return [t]""")
+    add = torch.ops.aten.add.Tensor(primals_1, 1);  primals_1 = None
+    return [t, add]""")
 
 
     def test_output_aliases_intermediate_inplace_view_and_view(self):
@@ -1009,6 +1000,9 @@ def forward(self, primals_1):
             return [(x,), (x,)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(AssertionError, "which is currently unsupported in the subclass use case"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
@@ -1110,11 +1104,136 @@ def forward(self, primals_1, primals_2):
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        with self.assertRaisesRegex(RuntimeError, "Encountered aliased inputs that are mutated in the graph, but"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(RuntimeError, "Encountered aliased inputs that are mutated in the graph, but"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
+
+    # https://github.com/pytorch/pytorch/issues/106456
+    def test_input_mutation_noncontiguous(self):
+        def f(a):
+            a.mul_(2)
+            return a + 1
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            # create a non-contiguous view to pass as an input to the compiler
+            inp = x[:, 0]
+            return [base], [inp]
+
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
+
+    # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    def test_input_mutation_false_aliasing(self):
+        def f(a, b):
+            a.mul_(3)
+            b.mul_(2)
+            return a + b
+
+        # No overlap, contiguous
+        def inp_callable1(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            # create two non-contiguous views that share storage, but are actually non-overlapping
+            a = x[0:2]
+            b = x[2:4]
+            return [base], [a, b]
+
+        fw_graph = self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        # Input mutations on subclasses with training graphs fail backward guards today.
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+            self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
+
+        # Important characteristic: the graph takes in 2 inputs!
+        # That shows that we didn't try to run our complicated synthetic base logic,
+        # because we successfully detected false aliasing across the two inputs.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(mul, mul_1)
+    return (mul, mul_1, add)""")
+
+        # No overlap, non-contiguous: first tensor ends before second tensor start
+        def inp_callable2(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (8, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (8, 1), storage_offset=28)
+            return [base], [a, b]
+
+        # No overlap, non-contiguous: tensors are perfectly interleaved
+        def inp_callable3(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            a = x[:, 0:2]
+            b = x[:, 2:4]
+            return [base], [a, b]
+
+        # No overlap, non-contiguous
+        def inp_callable4(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=22)
+            return [base], [a, b]
+
+        # No overlap, non-contiguous
+        def inp_callable5(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=23)
+            return [base], [a, b]
+
+        # overlap! non-contiguous
+        def inp_callable_overlap1(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=24)
+            return [base], [a, b]
+
+        # overlap! non-contiguous
+        def inp_callable_overlap2(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=25)
+            return [base], [a, b]
+
+        fw_graph2 = self.verify_aot_autograd(f, partial(inp_callable2, req_grad=False), test_mutation=True)
+        fw_graph3 = self.verify_aot_autograd(f, partial(inp_callable3, req_grad=False), test_mutation=True)
+        fw_graph4 = self.verify_aot_autograd(f, partial(inp_callable4, req_grad=False), test_mutation=True)
+        fw_graph5 = self.verify_aot_autograd(f, partial(inp_callable5, req_grad=False), test_mutation=True)
+
+        fw_graph_overlap1 = self.verify_aot_autograd(f, partial(inp_callable_overlap2, req_grad=False), test_mutation=True)
+        fw_graph_overlap2 = self.verify_aot_autograd(f, partial(inp_callable_overlap1, req_grad=False), test_mutation=True)
+
+        # All non-overlap graphs should be the same since we detected false aliasing
+        self.assertEqual(str(fw_graph.code), str(fw_graph2.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph3.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph4.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph5.code))
+
+        # All overlap graphs should be the same since we detected real aliasing
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap2.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap1.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap2.code))
+
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_mem_leak_from_save_for_bw(self):
@@ -1146,7 +1265,7 @@ def forward(self, primals_1, primals_2):
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
-        # The first output should view off the the first input, the 2nd output should view off the 2nd input
+        # The first output should view off the first input, the 2nd output should view off the 2nd input
         def f(a, b):
             return a.view(a.shape), b.view(b.shape)
 
@@ -1160,6 +1279,8 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
@@ -1167,11 +1288,11 @@ def forward(self, primals_1, primals_2):
             return a + b
 
         def inp_callable(req_grad):
-            base = torch.ones(2, 2, requires_grad=req_grad)
+            base = torch.ones(4, 2, requires_grad=req_grad)
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
@@ -1187,8 +1308,8 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_3);  as_strided_2 = as_strided_3 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_other_input2(self):
@@ -1213,8 +1334,8 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_3);  as_strided_2 = as_strided_3 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_and_output_alias(self):
@@ -1237,8 +1358,8 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_6, [4]);  as_strided_6 = None
     return [as_strided_scatter, view_1]""")  # noqa: B950
 
     def test_input_aliased_with_mutation_output_alias(self):
@@ -1267,8 +1388,8 @@ def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_6, [-1]);  as_strided_6 = None
     return [as_strided_scatter, add, view_1]""")  # noqa: B950
 
     def test_input_metadata_mutation_aliases(self):
@@ -1308,6 +1429,10 @@ def forward(self, primals_1, primals_2):
             return [base, c_arg], [x.view(-1), x.view(-1), c_arg]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
@@ -1339,6 +1464,10 @@ def forward(self, primals_1, primals_2):
             return [base1, base2], [x1.view(-1), x2.view(-1), x1.view(-1), x2.view(-1)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # 3 graph inputs: (b_d_base, a, c)
         # 2 returns: (b_updated, a+c+d)
@@ -1351,11 +1480,11 @@ def forward(self, primals_1, primals_2, primals_3):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    t_1 = torch.ops.aten.t.default(as_strided_3);  as_strided_3 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = None
-    as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
+    as_strided_11 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
     return [as_strided_scatter, add_2, view_1, t_1]""")  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -1419,8 +1548,8 @@ def forward(self, primals_1, primals_2):
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     t = torch.ops.aten.t.default(view);  view = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = as_strided_2 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_3, as_strided_2);  as_strided_3 = as_strided_2 = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
@@ -1739,45 +1868,6 @@ def forward(self, tangents_1):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
-    def test_resize_input(self):
-        def f(x, y):
-            y.resize_(4)
-            y.zero_()
-            self.assertEqual(x.shape, (4,))
-            return y
-
-        # NB: don't use verify_aot_autograd as the inputs get
-        # mutated and I don't trust verify to do it right
-
-        compiled_f = aot_function(f, nop)
-        ref_x = torch.randn(0)
-        ref_out = f(ref_x, ref_x)
-
-        test_x = torch.randn(0)
-        test_out = compiled_f(test_x, test_x)
-
-        self.assertEqual(ref_out, test_out)
-
-    def test_resize_input_smaller(self):
-        def f(x, y):
-            y.resize_(4)
-            y.zero_()
-            self.assertEqual(x.shape, (4,))
-            return y
-
-        # NB: don't use verify_aot_autograd as the inputs get
-        # mutated and I don't trust verify to do it right
-
-        compiled_f = aot_function(f, nop)
-        ref_x = torch.randn(5)
-        ref_out = f(ref_x, ref_x)
-
-        test_x = torch.randn(5)
-        test_out = compiled_f(test_x, test_x)
-
-        self.assertEqual(ref_out, test_out)
-
-
     def test_custom_autograd(self):
         class CustomFn(torch.autograd.Function):
             @staticmethod
@@ -2055,12 +2145,18 @@ class <lambda>(torch.nn.Module):
         getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
         detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
         detach_2: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
+        detach_3: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
+        detach_4: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_3);  detach_3 = None
+        detach_5: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_6: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_5);  detach_5 = None
         ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, relu, 0);  expand = relu = None
+        detach_7: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_8: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
         getitem_6: f32[3] = native_batch_norm_backward[1]
@@ -2069,7 +2165,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0]
         getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
         getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
 
@@ -2099,7 +2195,8 @@ class <lambda>(torch.nn.Module):
         relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: f32[] = torch.ops.aten.sum.default(relu)
         detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        return (getitem_3, getitem_4, add, sum_1, detach)
+        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach);  detach = None
+        return (getitem_3, getitem_4, add, sum_1, detach_1)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
@@ -2584,6 +2681,22 @@ class TestPartitioning(AOTTestCase):
 
         assert torch.allclose(ref, res)
 
+    # https://github.com/pytorch/pytorch/issues/110666
+    def test_generate_gives_inference_graph(self):
+        # We expect this to give an inference graph
+        def generate(x):
+            with torch.no_grad():
+                return torch.mul(x, x)
+
+        inference_graph_cell = [None]
+        inference_compiler = make_boxed_compiler(partial(extract_graph, graph_cell=inference_graph_cell))
+        aot_fn = aot_function(generate, nop, inference_compiler=inference_compiler)
+        # Even though x requires grad, we should still get an inference graph
+        x = torch.randn(4, requires_grad=True)
+        res = aot_fn(x)
+        self.assertTrue(inference_graph_cell[0] is not None)
+
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self):
@@ -2598,6 +2711,378 @@ class TestPartitioning(AOTTestCase):
             res = aot_mod(x)
         res.sum().backward()
 
+
+class TestAOTDispatch(AOTTestCase):
+
+    # Tests to add cases for (non-exhaustive list, mostly for my notes):
+    # - subclass / mode introduced in the middle of the compiled fn
+    # - various input mutation / intermediate base tests
+    # - input mutation that changes a tensor into a subclass
+    # - metadata mutation? (TBD)
+    # - guard tests (fw guards *and* bw guards)
+    # - subclass test involving _indices_of_inps_to_detach
+    def test_aot_dispatch_simple(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 6)
+            bb = torch.div(b, 2)
+            return aa + bb
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = TwoTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+
+        # Output is a TwoTensor (check both inner tensors)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref.grad.a, a_test.grad.a)
+        self.assertEqual(a_ref.grad.b, a_test.grad.b)
+        self.assertEqual(b_ref.grad.a, b_test.grad.a)
+        self.assertEqual(b_ref.grad.b, b_test.grad.b)
+
+        # Important pieces of the graph:
+        # - mul() and div() show up twice, because we called them on a TwoTensor
+        # - add() shows up once, because we called it on a plain Tensor
+        # - The user forward() fn returns 1 output (the result of add),
+        #   while the graph itself returns two outputs (add, add_1)
+        # - add, add_1 correspond to the two inner dense tensors that will be wrapped
+        # - into a single TwoTensor output.
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 6);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 6);  primals_2 = None
+    div = torch.ops.aten.div.Tensor(primals_3, 2);  primals_3 = None
+    add = torch.ops.aten.add.Tensor(mul, div);  mul = None
+    add_1 = torch.ops.aten.add.Tensor(mul_1, div);  mul_1 = div = None
+    return [add, add_1]""")
+
+        # Important pieces of the graph:
+        # - 4 total dense outputs.
+        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   will get a gradient that is a TwoTensor subclass,
+        #   so (mul_2, mul_3) will be wrapped into a.grad
+        #   and (div_1, div_2) will be wrapped into b.grad
+        # - 4 total dense outputs,
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, tangents_1, tangents_2):
+    div_1 = torch.ops.aten.div.Tensor(tangents_1, 2)
+    div_2 = torch.ops.aten.div.Tensor(tangents_2, 2)
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, 6);  tangents_1 = None
+    mul_3 = torch.ops.aten.mul.Tensor(tangents_2, 6);  tangents_2 = None
+    return [mul_2, mul_3, div_1, div_2]""")
+
+    def test_aot_dispatch_inference(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 6)
+            bb = torch.div(b, 2)
+            return aa + bb
+
+        a1_ref = torch.ones(3, 3)
+        a2_ref = torch.ones(3, 3)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3)
+
+        a1_test = a1_ref.clone()
+        a2_test = a2_ref.clone()
+        a_test = TwoTensor(a1_test, a2_test)
+        b_test = b_ref.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+
+        # Output is a TwoTensor (check both inner tensors)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+    def test_aot_dispatch_incorrect_backward(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 2)
+            bb = torch.add(b, 3)
+            out_subclass = torch.div(aa, bb)
+            out_reg = torch.add(b, b)
+            # When creating the joint, we assume that the second grad_out
+            # is not a subclass.
+            # In the below test case though, we end up being wrong.
+            # This would require re-tracing and recompiling the backward.
+            return out_subclass, out_reg
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = TwoTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        # First out is a TwoTensor, second is an ordinary tensor
+        self.assertEqual(out_ref[0].a, out_test[0].a)
+        self.assertEqual(out_ref[0].b, out_test[0].b)
+        self.assertEqual(out_ref[1], out_test[1])
+
+        # We compiled our graph assuming type(grad_out[1]) == torch.Tensor,
+        # but we were wrong: in the below tests, it is a subclass.
+        # This will eventually require a repartition + recompile
+        with self.assertRaisesRegex(
+            AssertionError,
+            "incorrectly attempted to compile the backward with incorrect subclass metadata"
+        ):
+            (out_test[0] + out_test[1]).sum().backward()
+
+    def test_aot_dispatch_output_alias(self):
+        # a is a tensor, b is a TwoTensor
+        def f(a, b):
+            return b.view(b.shape), a * b
+
+        b1_ref = torch.ones(3, 3, requires_grad=True)
+        b2_ref = torch.ones(3, 3, requires_grad=True)
+        b_ref = TwoTensor(b1_ref, b2_ref)
+        a_ref = torch.ones(3, 3, requires_grad=True)
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test = TwoTensor(b1_test, b2_test)
+        a_test = a_ref.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref1, out_ref2 = f(a_ref, b_ref)
+        out_test1, out_test2 = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref1, out_test1)
+        self.assertEqual(out_ref2.a, out_test2.a)
+        self.assertEqual(out_ref2.b, out_test2.b)
+
+        (out_ref1 + out_ref2).sum().backward()
+        (out_test1 + out_test2).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref.grad.a, a_test.grad.a)
+        self.assertEqual(a_ref.grad.b, a_test.grad.b)
+        self.assertEqual(b_ref.grad.a, b_test.grad.a)
+        self.assertEqual(b_ref.grad.b, b_test.grad.b)
+
+    def test_aot_dispatch_input_mutation(self):
+        def f(a, b):
+            a.mul_(2)
+            b.mul_(3)
+            return a + b
+
+        b1_ref = torch.ones(3, 3, requires_grad=True)
+        b2_ref = torch.ones(3, 3, requires_grad=True)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.ones(3, 3, requires_grad=True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile teh backward.
+        (b_ref * out_ref).sum().backward()
+        (b_test * out_test).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+        self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
+        self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
+
+    def test_aot_dispatch_input_metadata_mutation(self):
+        def f(a, b):
+            a.t_()
+            b.t_()
+            return a + b
+
+        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.arange(9, dtype=torch.float32).reshape(3, 3).detach().requires_grad_(True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
+        (b_ref * out_ref).sum().backward()
+        (b_test * out_test).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+        self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
+        self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
+
+    def test_aot_dispatch_input_data_and_metadata_mutation(self):
+        def f(a, b):
+            a.t_()
+            b.t_()
+            a.mul_(2)
+            b.mul_(3)
+            return a + b
+
+        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.arange(9, dtype=torch.float32).reshape(3, 3).detach().requires_grad_(True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
+        (b_ref * out_ref).sum().backward()
+        (b_test * out_test).sum().backward()
+        # Both grad_inputs are TwoTensor
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+        self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
+        self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
+
+    def test_aot_dispatch_input_mutation_and_output_alias(self):
+        def f(a, b):
+            a.mul_(2)
+            b.mul_(3)
+            return b.view(b.shape), a + b
+
+        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        a_ref_base = torch.arange(9, dtype=torch.float32).reshape(3, 3).detach().requires_grad_(True)
+        b_ref = b_ref_base + 1
+        a_ref = a_ref_base + 1
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test_base = TwoTensor(b1_test, b2_test)
+        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        b_test = b_test_base + 1
+        a_test = a_test_base + 1
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref1, out_ref2 = f(a_ref, b_ref)
+        out_test1, out_test2 = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref1.a, out_test1.a)
+        self.assertEqual(out_ref1.b, out_test1.b)
+        self.assertEqual(out_ref2.a, out_test2.a)
+        self.assertEqual(out_ref2.b, out_test2.b)
+
+        # confirm input mutations worked
+        self.assertEqual(a_test, a_ref)
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        (out_ref1 * out_ref2).sum().backward()
+        (out_test1 * out_test2).sum().backward()
+        # Both grad_inputs are TwoTensors
+        self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
+        self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
@@ -2664,6 +3149,27 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
+    # https://github.com/pytorch/pytorch/issues/105327
+    def test_lift_fresh_copy_in_graph(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                _tensor_constant0 = torch.tensor([1])
+                lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0)
+                y = x.mul(lift_fresh_copy)
+                return (y,)
+
+        mod = MyMod()
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = torch.ones(4, requires_grad=True)
+        inputs = [x]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        out_ref = mod(x)
+        out_test = compiled_f(x)
+        self.assertEqual(out_ref[0].detach(), out_test[0].detach())
 
     def test_inference_python_dispatcher(self):
         # Extracted from unet
@@ -2756,7 +3262,6 @@ aot_autograd_failures = {
     xfail('narrow'),
     xfail('istft'),
     xfail('linalg.eig'),
-    xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
@@ -2764,8 +3269,6 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
-    # Worked with real but not with fake
-    xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
@@ -2774,7 +3277,6 @@ aot_autograd_failures = {
     xfail('cov'),
     xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
     xfail('sparse.sampled_addmm'),
-    xfail('normal', 'number_mean'),  # TypeError: randn_like(): argument 'input' (position 1) must be Tensor, not float
     xfail('sparse.mm', 'reduce'),
     skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
     skip('nn.functional.margin_ranking_loss'),  # seems flaky
@@ -2785,6 +3287,7 @@ aot_autograd_failures = {
     decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
     decorate('linalg.pinv', 'singular', decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)})),
+    decorate('nn.functional.interpolate', 'bicubic', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     # conv2d sometimes nondeterministic in this config?
     decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
@@ -2792,7 +3295,6 @@ aot_autograd_failures = {
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -2806,9 +3308,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
-    xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
-    xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2822,15 +3321,12 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
-    xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
@@ -2973,8 +3469,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'

@@ -283,15 +283,12 @@ def _multi_tensor_rprop(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
     for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes), _) in grouped_tensors.values():
         # Handle complex params
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_prevs = _view_complex_as_real(grouped_prevs)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_step_sizes = _view_complex_as_real(grouped_step_sizes)
+        for i in range(len(grouped_params)):
+            if torch.is_complex(grouped_params[i]):
+                grouped_params[i] = torch.view_as_real(grouped_params[i])
+                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                grouped_prevs[i] = torch.view_as_real(grouped_prevs[i])
+                grouped_step_sizes[i] = torch.view_as_real(grouped_step_sizes[i])
 
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
         if maximize:
@@ -300,11 +297,9 @@ def _multi_tensor_rprop(
         # At the end of the step, grouped_prevs will contain the current grads, so we reuse
         # grouped_prevs memory instead of creating a new buffer, but, for clarity, we reassign
         # to keep referring to the buffer as grouped_grads.
-        for i in range(len(grouped_prevs)):
-            if maximize:
-                grouped_prevs[i].copy_(grouped_grads[i] * -1)
-            else:
-                grouped_prevs[i].copy_(grouped_grads[i])
+        torch._foreach_copy_(grouped_prevs, grouped_grads)
+        if maximize:
+            torch._foreach_neg_(grouped_prevs)
         grouped_grads = grouped_prevs
 
         torch._foreach_sign_(signs)
@@ -315,7 +310,8 @@ def _multi_tensor_rprop(
 
         # update stepsizes with step size updates
         torch._foreach_mul_(grouped_step_sizes, signs)
-        torch._foreach_clamp_(grouped_step_sizes, step_size_min, step_size_max)
+        for step_size in grouped_step_sizes:
+            step_size.clamp_(step_size_min, step_size_max)
 
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx

@@ -35,6 +35,7 @@ class NAdam(Optimizer):
             group.setdefault('foreach', None)
             group.setdefault('capturable', False)
             group.setdefault('differentiable', False)
+            group.setdefault('decoupled_weight_decay', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -46,8 +47,10 @@ class NAdam(Optimizer):
                 s['mu_product'] = torch.tensor(s['mu_product'])
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
+        has_complex = False
         for p in group['params']:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError('NAdam does not support sparse gradients')
@@ -76,6 +79,7 @@ class NAdam(Optimizer):
                 exp_avg_sqs.append(state['exp_avg_sq'])
                 mu_products.append(state['mu_product'])
                 state_steps.append(state['step'])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -101,7 +105,7 @@ class NAdam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps)
 
             nadam(params_with_grad,
                   grads,
@@ -118,7 +122,8 @@ class NAdam(Optimizer):
                   decoupled_weight_decay=group['decoupled_weight_decay'],
                   foreach=group['foreach'],
                   capturable=group['capturable'],
-                  differentiable=group['differentiable'])
+                  differentiable=group['differentiable'],
+                  has_complex=has_complex)
 
         return loss
 
@@ -136,10 +141,12 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm}\textbf{if} \: \lambda \neq 0 \text{ and not } \textit{decoupled\_weight\_decay} \\
-            &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}        \\
+            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1}                                       \\
+            &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
+            &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
+            &\hspace{15mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}                    \\
+            &\hspace{10mm}\textbf{else}                                                          \\
+            &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
             &\hspace{5mm} \mu_t \leftarrow \beta_1 \big(1 - \frac{1}{2}  0.96^{t \psi} \big)     \\
             &\hspace{5mm} \mu_{t+1} \leftarrow \beta_1 \big(1 - \frac{1}{2} 0.96^{(t+1)\psi}\big)\\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
@@ -147,7 +154,7 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             &\hspace{5mm}\widehat{m_t} \leftarrow \mu_{t+1} m_t/(1-\prod_{i=1}^{t+1}\mu_i)\\[-1.ex]
             & \hspace{11mm} + (1-\mu_t) g_t /(1-\prod_{i=1}^{t} \mu_{i})                         \\
             &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
-            &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{5mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
@@ -192,6 +199,7 @@ def nadam(params: List[Tensor],
           foreach: Optional[bool] = None,
           capturable: bool = False,
           differentiable: bool = False,
+          has_complex: bool = False,
           *,
           beta1: float,
           beta2: float,
@@ -236,7 +244,8 @@ def nadam(params: List[Tensor],
          decoupled_weight_decay=decoupled_weight_decay,
          eps=eps,
          capturable=capturable,
-         differentiable=differentiable)
+         differentiable=differentiable,
+         has_complex=has_complex)
 
 
 def _single_tensor_nadam(params: List[Tensor],
@@ -254,7 +263,8 @@ def _single_tensor_nadam(params: List[Tensor],
                          eps: float,
                          decoupled_weight_decay: bool,
                          capturable: bool,
-                         differentiable: bool):
+                         differentiable: bool,
+                         has_complex: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -263,10 +273,17 @@ def _single_tensor_nadam(params: List[Tensor],
         mu_product = mu_products[i]
         step_t = state_steps[i]
 
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert param.is_cuda and mu_product.is_cuda and step_t.is_cuda, \
-                "If capturable=True, params, mu_products, and state_steps must be CUDA tensors."
+            assert (
+                (param.is_cuda and mu_product.is_cuda and step_t.is_cuda) or (param.is_xla and mu_product.is_xla and step_t.is_xla)
+            ), "If capturable=True, params, mu_products, and state_steps must be CUDA or XLA tensors."
 
         # update step
         step_t += 1
@@ -278,11 +295,12 @@ def _single_tensor_nadam(params: List[Tensor],
 
         bias_correction2 = 1 - beta2 ** step
 
-        if weight_decay != 0 and not decoupled_weight_decay:
-            grad = grad.add(param, alpha=weight_decay)
-        else:
-            # Perform stepweight decay
-            param.mul_(1 - lr * weight_decay)
+        if weight_decay != 0:
+            if decoupled_weight_decay:
+                # Perform stepweight decay
+                param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         # calculate the momentum cache \mu^{t} and \mu^{t+1}
         mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
@@ -328,7 +346,8 @@ def _multi_tensor_nadam(params: List[Tensor],
                         eps: float,
                         decoupled_weight_decay: bool,
                         capturable: bool,
-                        differentiable: bool):
+                        differentiable: bool,
+                        has_complex: bool):
 
     if len(params) == 0:
         return
@@ -346,14 +365,30 @@ def _multi_tensor_nadam(params: List[Tensor],
     for ((grouped_params, grouped_grads, grouped_exp_avgs,
          grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps), _) in grouped_tensors.values():
 
-        # update steps
-        torch._foreach_add_(grouped_state_steps, 1)
+        # handle complex
+        if has_complex:
+            for i in range(len(grouped_params)):
+                if torch.is_complex(grouped_params[i]):
+                    grouped_params[i] = torch.view_as_real(grouped_params[i])
+                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
+                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
 
-        if weight_decay != 0 and not decoupled_weight_decay:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
         else:
-            # Perform stepweight decay
-            torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
+            torch._foreach_add_(grouped_state_steps, 1)
+
+        if weight_decay != 0:
+            if decoupled_weight_decay:
+                # Perform stepweight decay
+                torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)

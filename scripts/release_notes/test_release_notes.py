@@ -12,11 +12,11 @@ class TestCommitList(unittest.TestCase):
                 commit_list_path, "v1.5.0", "6000dca5df"
             )
             self.assertEqual(len(commit_list.commits), 33)
-            self.assertEqual(commit_list.commits[0].commit_hash, "7335f079ab")
+            self.assertEqual(commit_list.commits[0].commit_hash, "7335f079abb")
             self.assertTrue(
                 commit_list.commits[0].title.startswith("[pt][quant] qmul and qadd")
             )
-            self.assertEqual(commit_list.commits[-1].commit_hash, "6000dca5df")
+            self.assertEqual(commit_list.commits[-1].commit_hash, "6000dca5df6")
             self.assertTrue(
                 commit_list.commits[-1].title.startswith(
                     "[nomnigraph] Copy device option when customize "

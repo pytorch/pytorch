@@ -4,8 +4,10 @@ import datetime
 import json
 import os
 import pathlib
-from typing import Any, Callable, cast, Dict, List, Optional
+from typing import Any, Callable, cast, Dict, List, Optional, Union
 from urllib.request import urlopen
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 def get_disabled_issues() -> List[str]:
@@ -15,18 +17,19 @@ def get_disabled_issues() -> List[str]:
     return issue_numbers
 
 
-IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
-
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
-TEST_FILE_RATINGS_FILE = ".pytorch-test-file-ratings.json"
+ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
+TEST_TIMES_FILE = "test-times.json"
+TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
+TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
 
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
 
 def fetch_and_cache(
-    dirpath: str,
+    dirpath: Union[str, pathlib.Path],
     name: str,
     url: str,
     process_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
@@ -34,6 +37,8 @@ def fetch_and_cache(
     """
     This fetch and cache utils allows sharing between different process.
     """
+    pathlib.Path(dirpath).mkdir(exist_ok=True)
+
     path = os.path.join(dirpath, name)
     print(f"Downloading {url} to {path}")
 
@@ -75,27 +80,12 @@ def get_slow_tests(
         return {}
 
 
-def get_test_times(dirpath: str, filename: str) -> Dict[str, Dict[str, float]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/test-times.json"
-    build_environment = os.environ.get("BUILD_ENVIRONMENT")
-    if build_environment is None:
-        test_times = fetch_and_cache(dirpath, filename, url, lambda x: x)
-        raise RuntimeError(
-            f"BUILD_ENVIRONMENT is not defined, available keys are {test_times.keys()}"
-        )
-
-    def process_response(the_response: Dict[str, Any]) -> Any:
-        if build_environment not in the_response:
-            raise RuntimeError(
-                f"{build_environment} not found, available envs are: {the_response.keys()}"
-            )
-        return the_response[build_environment]
-
-    try:
-        return fetch_and_cache(dirpath, filename, url, process_response)
-    except Exception:
-        print("Couldn't download test times...")
-        return {}
+def get_test_times() -> Dict[str, Dict[str, float]]:
+    return get_from_test_infra_generated_stats(
+        "test-times.json",
+        TEST_TIMES_FILE,
+        "Couldn't download test times...",
+    )
 
 
 def get_disabled_tests(
@@ -103,9 +93,10 @@ def get_disabled_tests(
 ) -> Optional[Dict[str, Any]]:
     def process_disabled_test(the_response: Dict[str, Any]) -> Dict[str, Any]:
         # remove re-enabled tests and condense even further by getting rid of pr_num
+        disabled_issues = get_disabled_issues()
         disabled_test_from_issues = dict()
         for test_name, (pr_num, link, platforms) in the_response.items():
-            if pr_num not in IGNORE_DISABLED_ISSUES:
+            if pr_num not in disabled_issues:
                 disabled_test_from_issues[test_name] = (
                     link,
                     platforms,
@@ -120,12 +111,30 @@ def get_disabled_tests(
         return {}
 
 
-def get_test_file_ratings(
-    dirpath: str, filename: str = TEST_FILE_RATINGS_FILE
-) -> Optional[Dict[str, Any]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_rating.json"
+def get_test_file_ratings() -> Dict[str, Any]:
+    return get_from_test_infra_generated_stats(
+        "file_test_rating.json",
+        TEST_FILE_RATINGS_FILE,
+        "Couldn't download test file ratings file, not reordering...",
+    )
+
+
+def get_test_class_ratings() -> Dict[str, Any]:
+    return get_from_test_infra_generated_stats(
+        "file_test_class_rating.json",
+        TEST_CLASS_RATINGS_FILE,
+        "Couldn't download test class ratings file, not reordering...",
+    )
+
+
+def get_from_test_infra_generated_stats(
+    from_file: str, to_file: str, failure_explanation: str
+) -> Dict[str, Any]:
+    url = f"https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/{from_file}"
     try:
-        return fetch_and_cache(dirpath, filename, url, lambda x: x)
+        return fetch_and_cache(
+            REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER, to_file, url, lambda x: x
+        )
     except Exception:
-        print("Couldn't download test file ratings file, not reordering...")
+        print(failure_explanation)
         return {}

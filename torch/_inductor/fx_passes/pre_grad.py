@@ -1,13 +1,21 @@
+import copy
 import logging
 from typing import List, Optional
 
 import torch
+import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
-
+from torch.fx.experimental.optimization import (
+    matches_module_pattern,
+    replace_node_module,
+)
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.nn import functional as F
+from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
 
+from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
     PatternMatcherPass,
@@ -22,24 +30,26 @@ normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
+    efficient_conv_bn_eval_pass,
 ]
 
 
 @init_once_fakemode
 def lazy_init():
-    from . import split_cat  # noqa: F401
+    from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
-        from .fb import split_cat as split_cat_fb  # noqa: F401
+        from .fb import split_cat as split_cat_fb  # type: ignore[import]  # noqa: F401
 
 
-def pre_grad_passes(gm, example_inputs):
+def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     """
     Apply passes on the input FX graph using Torch IR.
 
@@ -63,10 +73,18 @@ def pre_grad_passes(gm, example_inputs):
     gm.graph.lint()
     gm.recompile()
 
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(
+            "Print graph after recompile in pre grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
+        )
+
     return gm
 
 
-def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
     is_cpu = is_cpu_device(example_inputs)
 
     fake_mode = detect_fake_mode(example_inputs)
@@ -79,6 +97,115 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = linear_permute_fusion(gm)
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
+
+    # make sure the autograd is disabled.
+    if torch.is_grad_enabled() or not is_cpu:
+        return gm
+    if config.freezing:
+        gm = remove_identity(gm)
+        gm = fuse_conv_bn(gm)
+    return gm
+
+
+def fetch_attr(target: str, mod):
+    target_atoms = target.split(".")
+    attr_itr = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
+
+def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """
+    Removes all identity layers from the module.
+    """
+
+    class IdentityRemover(torch.fx.Transformer):
+        def call_module(self, target, args, kwargs):
+            if isinstance(self.submodules[target], nn.Identity):
+                assert len(args) == 1
+                return args[0]
+            else:
+                return super().call_module(target, args, kwargs)
+
+    return IdentityRemover(gm).transform()
+
+
+def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:
+    """
+    Fuses Convolution/BN layers for inference purposes.
+    """
+    modules_patterns = [
+        (torch.nn.Conv1d, torch.nn.BatchNorm1d),
+        (torch.nn.Conv2d, torch.nn.BatchNorm2d),
+        (torch.nn.Conv3d, torch.nn.BatchNorm3d),
+    ]
+    module_function_patterns = [
+        (torch.nn.Conv1d, F.batch_norm),
+        (torch.nn.Conv2d, F.batch_norm),
+        (torch.nn.Conv3d, F.batch_norm),
+    ]
+    modules = dict(gm.named_modules())
+    for pattern in modules_patterns:
+        for node in gm.graph.nodes:
+            if matches_module_pattern(pattern, node, modules):
+                if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
+                    continue
+                conv = modules[node.args[0].target]
+                bn = modules[node.target]
+                eval_mode = all(not n.training for n in [conv, bn])
+                if not eval_mode:
+                    continue
+                if not bn.track_running_stats:
+                    continue
+                fused_conv = fuse_conv_bn_eval(conv, bn)
+                replace_node_module(node.args[0], modules, fused_conv)
+                node.replace_all_uses_with(node.args[0])
+                gm.graph.erase_node(node)
+    gm.graph.lint()
+    for pattern in module_function_patterns:
+        for node in gm.graph.nodes:
+            if matches_module_function_pattern(pattern, node, modules):
+                # TODO: support kwargs.
+                if len(node.args) != 8:
+                    continue
+                conv = modules[node.args[0].target]
+                bn_training = node.args[5]
+                bn_eps = node.args[7]
+                if conv.training or bn_training:
+                    continue
+                if type(bn_eps) is not float:
+                    continue
+                bn_args_is_constant = all(
+                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
+                )
+                if not bn_args_is_constant:
+                    continue
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                bn_weight = fetch_attr(node.args[3].target, gm)
+                bn_bias = fetch_attr(node.args[4].target, gm)
+                if bn_running_mean is None or bn_running_var is None:
+                    continue
+                fused_conv = copy.deepcopy(conv)
+                fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
+                    fused_conv.weight,
+                    fused_conv.bias,
+                    bn_running_mean,
+                    bn_running_var,
+                    bn_eps,
+                    bn_weight,
+                    bn_bias,
+                )
+                replace_node_module(node.args[0], modules, fused_conv)
+                node.replace_all_uses_with(node.args[0])
+                gm.graph.erase_node(node)
+    gm.graph.lint()
+    gm.recompile()
 
     return gm
 
@@ -127,7 +254,7 @@ class NormalizedMatmulNode:
             return self.node.kwargs["other"]
 
 
-def check_permute(node: torch.fx.Node):
+def check_permute(node: torch.fx.Node) -> bool:
     ranks = len(node.meta["tensor_meta"].shape)
     if len(node.args) > 3:
         permutation = [node.args[i] % ranks for i in range(1, ranks + 1)]
@@ -334,7 +461,9 @@ def transpose_linear(
     return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
 
 
-def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: bool):
+def transpose_matmul(
+    A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: bool
+) -> torch.Tensor:
     if Atrans:
         A = A.transpose(-1, -2)
     if Btrans:

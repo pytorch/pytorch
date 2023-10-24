@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/IndexKernel.h>
-#include <c10/cuda/CUDADeviceAssertion.h>
 
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
@@ -348,11 +347,10 @@ namespace {
 __global__ void masked_scatter_size_check(
   const int64_t* const mask_exclusive_sum,
   const bool* const mask,
-  const int64_t srcSize,
-  TORCH_DSA_KERNEL_ARGS) {
+  const int64_t srcSize) {
   // Convert exclusive sum to inclusive sum
   const auto totalElements = *mask_exclusive_sum + *mask;
-  CUDA_KERNEL_ASSERT2(totalElements <= srcSize);
+  CUDA_KERNEL_ASSERT(totalElements <= srcSize);
 }
 
 } // anonymous namespace
@@ -373,15 +371,9 @@ void launch_masked_scatter_kernel(
 
   // Asynchronously check that the number of `1` elements present in the mask
   // must be <= the number of elements available in `src`.
-  TORCH_DSA_KERNEL_LAUNCH(
-      masked_scatter_size_check,
-      1,
-      1,
-      0,
-      at::cuda::getCurrentCUDAStream(),
-      &maskPrefixSum_data[mask_numel - 1],
-      &mask_data[mask_numel - 1],
-      srcSize);
+  masked_scatter_size_check<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+      &maskPrefixSum_data[mask_numel - 1], &mask_data[mask_numel - 1], srcSize);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too

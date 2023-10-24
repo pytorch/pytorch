@@ -27,6 +27,11 @@ C10_DEFINE_bool(
     false,
     "Use thread pool to schedule backend execution");
 
+C10_DEFINE_bool(
+    torch_lazy_enable_device_data_cache,
+    true,
+    "Enable or disable device data cache (turns cache on or off), does not change cache state");
+
 C10_DEFINE_int(
     torch_lazy_compilation_cache_size,
     1024,

@@ -1,8 +1,10 @@
 import copyreg
+import functools
 import sys
 import traceback
 import warnings
 from collections import defaultdict
+from contextlib import nullcontext
 from typing import Any, DefaultDict, List, Optional
 
 import torch
@@ -149,7 +151,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 #     serialize the *state_dict* of a model, not the model itself
 #     (since this is more stable to code changes affecting the model
 #     serialization), and the state dict saves "data" only, thus
-#     stripping the the backward hooks.  In some cases, hooks are
+#     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
 #     but DDP already manages readding the hooks!
 #
@@ -228,7 +230,7 @@ def _validate_loaded_sparse_tensors():
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size()
+                    t._indices(), t._values(), t.size(), t.is_coalesced()
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -275,9 +277,9 @@ def _rebuild_sparse_tensor(layout, data):
             is_coalesced = None
         else:
             indices, values, size, is_coalesced = data
-        result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
-        if is_coalesced is not None:
-            result._coalesced_(is_coalesced)
+        result = torch.sparse_coo_tensor(
+            indices, values, size, check_invariants=False, is_coalesced=is_coalesced
+        )
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -839,3 +841,51 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
+
+
+def _functionalize_sync(t):
+    # This code lives in python instead of C++ since conditioning on a certain python subclass
+    # is much more of a pain in C++.
+    from torch._subclasses.functional_tensor import (
+        FunctionalTensor,
+        maybe_disable_functional_mode,
+    )
+
+    ctx = (
+        maybe_disable_functional_mode
+        if isinstance(t, FunctionalTensor)
+        else nullcontext
+    )
+    if isinstance(t, FunctionalTensor):
+        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
+        # when we sync our inner tensor.
+        # Why?
+        # (1) If there are input mutations in the graph, then they will be re-applied during
+        #     AOTAutograd when we call _sync() from inside of our functionalization kernels.
+        # (2) _sync() causes us to regenerate our updated the tensor from the updated base,
+        #     which dispatches to a bunch of view ops
+        # (3) The input to these view ops is our inner FunctionalTensorWrapper
+        #     (since the sync was called from C++), not the python FunctionalTensor
+        # (4) if a python FunctionalTensorMode is active, it will complain when it intercepts
+        #     the view op, since it will see an input that is a C++ FunctionalTensorWrapper
+        #     (aka a normal torch.Tensor) instead of a python `FunctionalTensor).
+        maybe_functional_mode = torch._C._unset_dispatch_mode(
+            torch._C._TorchDispatchModeKey.FUNCTIONAL
+        )
+        try:
+            torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
+        finally:
+            if maybe_functional_mode is not None:
+                torch._C._set_dispatch_mode(maybe_functional_mode)
+    else:
+        torch._functionalize_sync(t)  # type: ignore[attr-defined]
+
+
+@functools.lru_cache(2)
+def _get_device_module(device_type: str):
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
+        )
+    return device_module

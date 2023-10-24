@@ -40,7 +40,7 @@ class LRScheduler:
             for i, group in enumerate(optimizer.param_groups):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
-                                   "in param_groups[{}] when resuming an optimizer".format(i))
+                                   f"in param_groups[{i}] when resuming an optimizer")
         self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
         self.last_epoch = last_epoch
 
@@ -489,12 +489,10 @@ class ConstantLR(LRScheduler):
         if self.last_epoch == 0:
             return [group['lr'] * self.factor for group in self.optimizer.param_groups]
 
-        if (self.last_epoch > self.total_iters or
-                (self.last_epoch != self.total_iters)):
+        if self.last_epoch != self.total_iters:
             return [group['lr'] for group in self.optimizer.param_groups]
 
-        if (self.last_epoch == self.total_iters):
-            return [group['lr'] * (1.0 / self.factor) for group in self.optimizer.param_groups]
+        return [group['lr'] * (1.0 / self.factor) for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
         return [base_lr * (self.factor + (self.last_epoch >= self.total_iters) * (1 - self.factor))
@@ -645,8 +643,8 @@ class SequentialLR(LRScheduler):
         if (len(milestones) != len(schedulers) - 1):
             raise ValueError(
                 "Sequential Schedulers expects number of schedulers provided to be one more "
-                "than the number of milestone points, but got number of schedulers {} and the "
-                "number of milestones to be equal to {}".format(len(schedulers), len(milestones))
+                f"than the number of milestone points, but got number of schedulers {len(schedulers)} and the "
+                f"number of milestones to be equal to {len(milestones)}"
             )
         self._schedulers = schedulers
         self._milestones = milestones
@@ -716,7 +714,7 @@ class PolynomialLR(LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
-        power (int): The power of the polynomial. Default: 1.0.
+        power (float): The power of the polynomial. Default: 1.0.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
@@ -862,7 +860,7 @@ class ChainedScheduler(LRScheduler):
             if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
                 raise ValueError(
                     "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
-                    "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
+                    f"got schedulers at index {0} and {scheduler_idx} to be different"
                 )
         self._schedulers = list(schedulers)
         self.optimizer = schedulers[0].optimizer
@@ -905,7 +903,7 @@ class ChainedScheduler(LRScheduler):
             self._schedulers[idx].load_state_dict(s)
 
 
-class ReduceLROnPlateau:
+class ReduceLROnPlateau(LRScheduler):
     """Reduce learning rate when a metric has stopped improving.
     Models often benefit from reducing the learning rate by a factor
     of 2-10 once learning stagnates. This scheduler reads a metrics

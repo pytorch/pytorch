@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import copy
 from collections.abc import Sequence
 from functools import partial
 import warnings
@@ -19,6 +20,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
+    integral_types_and,
 )
 
 from torch.testing._internal.common_utils import (
@@ -71,6 +73,7 @@ from torch._subclasses.fake_utils import outputs_alias_inputs
 
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
 from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
@@ -648,7 +651,6 @@ class TestCommon(TestCase):
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
     @ops(_ops_and_refs, dtypes=OpDTypes.none)
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_out_warning(self, device, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
@@ -659,6 +661,13 @@ class TestCommon(TestCase):
             if torch.float32 in supported_dtypes
             else list(supported_dtypes)[0]
         )
+
+        # Ops from python_ref_db point to python decomps that are potentially
+        # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
+        # ops before testing to avoid clashing with OpInfo.supports_out
+        if not op.supports_out:
+            op = copy.copy(op)
+            op.op = _maybe_remove_out_wrapper(op.op)
 
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
@@ -777,10 +786,17 @@ class TestCommon(TestCase):
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
     @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
+
+        # Ops from python_ref_db point to python decomps that are potentially
+        # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
+        # ops before testing to avoid clashing with OpInfo.supports_out
+        if not op.supports_out:
+            op = copy.copy(op)
+            op.op = _maybe_remove_out_wrapper(op.op)
+
         for sample in samples:
             # calls it normally to get the expected result
             expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -997,7 +1013,6 @@ class TestCommon(TestCase):
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
     @_variant_ops(op_db)
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_variant_consistency_eager(self, device, dtype, op):
         # Acquires variants (method variant, inplace variant, operator variant, inplace_operator variant, aliases)
 
@@ -1098,10 +1113,8 @@ class TestCommon(TestCase):
                             RuntimeError,
                             msg=(
                                 "inplace variant either incorrectly allowed "
-                                "resizing or you have marked the sample {}"
-                                " incorrectly with `broadcasts_self=True".format(
-                                    sample.summary()
-                                )
+                                f"resizing or you have marked the sample {sample.summary()}"
+                                " incorrectly with `broadcasts_self=True"
                             ),
                         ):
                             variant_forward = variant(
@@ -1181,7 +1194,6 @@ class TestCommon(TestCase):
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
     @ops(op_db, allowed_dtypes=(torch.complex32,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
@@ -1212,7 +1224,6 @@ class TestCommon(TestCase):
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
-    @skipIfTorchInductor("Inductor does not support view with dtype yet")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -1436,6 +1447,18 @@ class TestCommon(TestCase):
 
         self.fail(msg)
 
+    # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops((op for op in op_db if op.promotes_int_to_float), allowed_dtypes=integral_types_and(torch.bool))
+    def test_promotes_int_to_float(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype):
+            output = op(sample.input, *sample.args, **sample.kwargs)
+            if not output.dtype.is_floating_point:
+                self.fail(
+                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
+                )
+
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
@@ -1607,7 +1630,6 @@ class TestMathBits(TestCase):
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -1630,7 +1652,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.double,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1650,7 +1671,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1754,6 +1774,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.equal',
         '_refs.full',
         '_refs.full_like',
+        '_refs.is_complex',
         '_refs.to',
         '_refs.mvlgamma',
         '_refs.ones',
@@ -1781,6 +1802,7 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
+        '_refs.floor_divide',
         '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
@@ -1836,6 +1858,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
+        '_refs.nn.functional.dropout',
         '_refs.nn.functional.l1_loss',
         '_refs.nn.functional.smooth_l1_loss',
         '_refs.nn.functional.log_softmax',
@@ -1852,6 +1875,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.square',
         '_refs.stft',
         '_refs.T',
+        '_refs.take_along_dim',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
@@ -1880,6 +1904,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
+        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
     }
 
     @parametrize("op", ref_ops_names)
@@ -1892,7 +1917,7 @@ class TestRefsOpsInfo(TestCase):
         else:
             # Intentionally don't use assertIn to avoid printing the
             # (very large) container
-            self.assertTrue(op in self.ref_db_names, msg="{op} not in ref_db_names")
+            self.assertTrue(op in self.ref_db_names, msg=f"{op} not in ref_db_names")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
@@ -1936,7 +1961,6 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::_to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
@@ -1991,7 +2015,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("_segment_reduce", "lengths"),
     xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
     xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip('nn.functional.ctc_loss'),
@@ -2182,4 +2205,5 @@ instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
+    TestCase._default_dtype_check_enabled = True
     run_tests()

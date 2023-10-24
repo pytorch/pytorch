@@ -24,11 +24,11 @@ class Container {
   size_type size_;
 };
 
-TEST(ssize_test, size_t) {
+TEST(ssizeTest, size_t) {
   ASSERT_THAT(ssize(Container(std::size_t{3})), testing::Eq(std::ptrdiff_t{3}));
 }
 
-TEST(ssize_test, size_t_overflow) {
+TEST(ssizeTest, size_t_overflow) {
 #if defined(NDEBUG)
   GTEST_SKIP() << "Only valid if assert is enabled." << std::endl;
 #endif
@@ -39,13 +39,13 @@ TEST(ssize_test, size_t_overflow) {
   EXPECT_THROW(ssize(Container(ptrdiff_t_max + 1)), c10::Error);
 }
 
-TEST(ssize_test, small_container_promotes_to_ptrdiff_t) {
+TEST(ssizeTest, small_container_promotes_to_ptrdiff_t) {
   auto signed_size = ssize(Container(std::uint16_t{3}));
   static_assert(std::is_same_v<decltype(signed_size), std::ptrdiff_t>);
   ASSERT_THAT(signed_size, testing::Eq(3));
 }
 
-TEST(ssize_test, promotes_to_64_bit_on_32_bit_platform) {
+TEST(ssizeTest, promotes_to_64_bit_on_32_bit_platform) {
   if (sizeof(std::intptr_t) != 4) {
     GTEST_SKIP() << "Only valid in 64-bits." << std::endl;
   }

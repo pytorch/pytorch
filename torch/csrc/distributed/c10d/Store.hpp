@@ -28,7 +28,10 @@ class TORCH_API Store : public torch::CustomClassHolder {
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}
 
-  ~Store() override;
+  Store(const Store&) = default;
+  Store(Store&&) noexcept = default;
+
+  ~Store() override = default;
 
   void set(const std::string& key, const std::string& value);
 
@@ -70,25 +73,23 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
-
   // watchKey() is deprecated and no longer supported.
   virtual void watchKey(
       const std::string& /* unused */,
       WatchKeyCallback /* unused */) {
-    TORCH_CHECK(
-        false,
-        "watchKey is deprecated, no implementation support it.");
+    TORCH_CHECK(false, "watchKey is deprecated, no implementation support it.");
   }
 
   virtual void append(
       const std::string& key,
       const std::vector<uint8_t>& value);
 
-  virtual std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys);
+  virtual std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys);
 
   virtual void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values);
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values);
 
   // Returns true if this store support append, multiGet and multiSet
   virtual bool hasExtendedApi() const;

@@ -13,7 +13,7 @@ Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
 from dataclasses import dataclass
-from typing import Dict, TypeVar
+from typing import Dict
 
 from torchgen.model import BaseTy, ScalarType
 
@@ -31,7 +31,6 @@ from .types_base import (
     shortT,
 )
 
-_T = TypeVar("_T")
 
 TENSOR_LIST_LIKE_CTYPES = [
     "at::TensorList",
@@ -62,6 +61,7 @@ dimnameListT = BaseCppType("at", "DimnameList")
 dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
+deviceIndexT = BaseCppType("at", "DeviceIndex")
 scalarT = BaseCppType("at", "Scalar")
 optionalScalarRefT = BaseCppType("at", "OptionalScalarRef")
 memoryFormatT = BaseCppType("at", "MemoryFormat")
@@ -111,6 +111,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
+    BaseTy.DeviceIndex: deviceIndexT,
     BaseTy.Scalar: scalarT,
     BaseTy.MemoryFormat: memoryFormatT,
     BaseTy.QScheme: qschemeT,

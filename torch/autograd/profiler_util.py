@@ -246,20 +246,14 @@ class EventList(list):
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
-                        '{{"name": "{}", '
+                        f'{{"name": "{evt.trace_name}", '
                         '"ph": "s", '
-                        '"ts": {}, '
-                        '"tid": {}, '
+                        f'"ts": {evt.time_range.start}, '
+                        f'"tid": {evt.thread}, '
                         '"pid": "CPU functions", '
-                        '"id": {}, '
-                        '"cat": "cpu_to_{}", '
-                        '"args": {{}}}}, '.format(
-                            evt.trace_name,
-                            evt.time_range.start,
-                            evt.thread,
-                            next_id,
-                            device_name,
-                        )
+                        f'"id": {next_id}, '
+                        f'"cat": "cpu_to_{device_name}", '
+                        '"args": {{}}}}, '
                     )
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
@@ -814,7 +808,6 @@ def _filter_name(name):
     filtered_out_names = [
         MEMORY_EVENT_NAME,  # used only for the top-level memory events
         OUT_OF_MEMORY_EVENT_NAME,
-        "profiler::_record_function_enter",
         "profiler::_record_function_enter_new",
         "profiler::_record_function_exit",
         "aten::is_leaf",

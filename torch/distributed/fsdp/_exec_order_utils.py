@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
-from torch.distributed.fsdp.flat_param import FlatParamHandle
+from torch.distributed.fsdp._flat_param import FlatParamHandle
 
 
 class _ExecOrderWarnStatus(Enum):
@@ -47,10 +47,7 @@ class _ExecOrderData:
         self._forward_prefetch_limit = forward_prefetch_limit
 
         # Data structures for execution order validation
-        self._checking_order: bool = debug_level in [
-            dist.DebugLevel.INFO,
-            dist.DebugLevel.DETAIL,
-        ]
+        self._checking_order: bool = debug_level == dist.DebugLevel.DETAIL
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
         self.all_handles: List[FlatParamHandle] = []
@@ -166,7 +163,7 @@ class _ExecOrderData:
         self._check_order(handle, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
-        if not self.is_first_iter or handle._pre_forward_order_index:
+        if not self.is_first_iter or handle._pre_forward_order_index is not None:
             return
         index = len(self.handles_pre_forward_order)
         handle._pre_forward_order_index = index
@@ -175,20 +172,20 @@ class _ExecOrderData:
     def _check_order(self, handle: FlatParamHandle, is_training: bool) -> None:
         """
         Checks the forward execution order as long as ``is_training`` is
-        ``True`` since checking in eval mode is not supported.
+        ``True`` since checking in eval mode is not supported. This only checks
+        if the distributed debug level is DETAIL.
 
         - On the first iteration, this uses all-gathers to check that all ranks
         are all-gathering the same handles and hence ``FlatParameter`` s,
         raising an error if not.
-        - On subsequent iterations, if the distributed debug level is at least
-        INFO, then this checks that each rank is locally consistent with its
-        own forward order from the first iteration, issuing a warning if not.
-        This issues a warning on the first deviating iteration and stops
-        warning thereafter.
+        - On subsequent iterations, this checks that each rank is locally
+        consistent with its own forward order from the first iteration, issuing
+        a warning if not. This issues a warning on the first deviating
+        iteration and stops warning thereafter.
         """
         # Do not check order in eval mode since the post-backward callback does
         # not run so it cannot be used to mark the end of an iteration
-        if not is_training:
+        if not is_training or not self._checking_order:
             return
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
@@ -217,18 +214,22 @@ class _ExecOrderData:
             # TODO (awgu): Since every module has at most one handle in the
             # current implementation, this should never raise the error.
             assert self.world_size is not None  # mypy
-            for (r1, n1), (r2, n2) in itertools.combinations(
-                (
-                    (rank, world_num_valid_indices[rank])
-                    for rank in range(self.world_size)
-                ),
-                2,
-            ):
-                if n1 != n2:
-                    raise RuntimeError(
-                        f"{msg_prefix} rank {r1} is all-gathering {n1} parameters "
-                        f"while rank {r2} is all-gathering {n2} parameters"
-                    )
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
+                # tensor comparison control flow.
+                # https://github.com/pytorch/pytorch/issues/107055
+                for (r1, n1), (r2, n2) in itertools.combinations(
+                    (
+                        (rank, world_num_valid_indices[rank])
+                        for rank in range(self.world_size)
+                    ),
+                    2,
+                ):
+                    if n1 != n2:
+                        raise RuntimeError(
+                            f"{msg_prefix} rank {r1} is all-gathering {n1} parameters "
+                            f"while rank {r2} is all-gathering {n2} parameters"
+                        )
             world_indices = torch.zeros(  # type: ignore[call-overload]
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
@@ -239,27 +240,33 @@ class _ExecOrderData:
             # Copy entire tensor from D2H once to avoid per element D2H copies
             world_indices = world_indices.cpu()
             # Check that all ranks plan to all-gather the same index parameters
-            for (r1, i1), (r2, i2) in itertools.combinations(
-                (
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                # TODO(voz): Don't graph break on this - dynamo hates the i1 != i2
+                # tensor comparison control flow.
+                # https://github.com/pytorch/pytorch/issues/107055
+                for (r1, i1), (r2, i2) in itertools.combinations(
                     (
-                        rank,
-                        world_indices[
-                            rank * num_valid_indices : (rank + 1) * num_valid_indices
-                        ],
-                    )
-                    for rank in range(self.world_size)
-                ),
-                2,
-            ):
-                if i1 != i2:
-                    r1_param_names = self._get_names_from_handle_indices(i1)
-                    r2_param_names = self._get_names_from_handle_indices(i2)
-                    raise RuntimeError(
-                        f"{msg_prefix} rank {r1} is all-gathering parameters "
-                        f"for {r1_param_names} while rank {r2} is all-gathering "
-                        f"parameters for {r2_param_names}"
-                    )
-        elif self._checking_order:
+                        (
+                            rank,
+                            world_indices[
+                                rank
+                                * num_valid_indices : (rank + 1)
+                                * num_valid_indices
+                            ],
+                        )
+                        for rank in range(self.world_size)
+                    ),
+                    2,
+                ):
+                    if i1 != i2:
+                        r1_param_names = self._get_names_from_handle_indices(i1)
+                        r2_param_names = self._get_names_from_handle_indices(i2)
+                        raise RuntimeError(
+                            f"{msg_prefix} rank {r1} is all-gathering parameters "
+                            f"for {r1_param_names} while rank {r2} is all-gathering "
+                            f"parameters for {r2_param_names}"
+                        )
+        else:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console
             if self.warn_status == _ExecOrderWarnStatus.WARNED:

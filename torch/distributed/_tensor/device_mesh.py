@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, Tuple, TYPE_CHECKING, Union
+import math
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -9,18 +10,12 @@ from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
     _get_default_group,
     _get_group_tag,
-    all_to_all,
-    broadcast,
-    get_global_rank,
     get_rank,
     get_world_size,
-    GroupMember,
     init_process_group,
     is_initialized,
     new_group,
     ProcessGroup,
-    scatter,
-    Work,
 )
 
 
@@ -39,11 +34,66 @@ if TYPE_CHECKING:
 class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
+        self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
 
     def get_current_mesh(self) -> "DeviceMesh":
         if len(self.mesh_stack) == 0:
             raise RuntimeError("No device mesh is currently active!")
         return self.mesh_stack[-1]
+
+    def create_child_mesh(
+        self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
+    ) -> "DeviceMesh":
+        # swap the current dim to the last dim then reshape to flatten out other
+        # dims, so we can just extract the list of ranks which contains cur_rank.
+        cur_rank = device_mesh.get_rank()
+        pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+            -1, device_mesh.mesh.size(mesh_dim)
+        )
+
+        for mesh_1d in pg_ranks_by_dim:
+            sub_mesh = DeviceMesh(
+                device_mesh.device_type,
+                mesh_1d,
+                mesh_dim_names=(mesh_dim_name,),
+                _init_process_groups=False,
+            )
+            if cur_rank in mesh_1d:
+                res_sub_mesh = sub_mesh
+
+        res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
+        # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+        self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+        return res_sub_mesh
+
+    def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
+        return self.child_to_parent_mapping.get(device_mesh, None)
+
+    def get_parent_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
+        """
+        Return the index of the mesh dim in the parent mesh.
+        The device_mesh passed in needs to be sliced out from a parent mesh.
+        """
+        parent_mesh = self.get_parent_mesh(device_mesh)
+        child_mesh_dim_names = device_mesh.mesh_dim_names
+        if parent_mesh and child_mesh_dim_names:
+            assert (
+                len(child_mesh_dim_names) == 1
+            ), "The child mesh can only be a 1D mesh."
+            child_mesh_dim_name = child_mesh_dim_names[0]
+            if parent_mesh.mesh_dim_names:
+                return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
+        return None
+
+    @staticmethod
+    def num_devices_per_host(device_type: str) -> int:
+        return _get_device_handle(device_type).device_count()
+
+    @staticmethod
+    def num_hosts(device_type: str) -> int:
+        # ProcessGroup can't tell us this info so we have to infer it, assume
+        # homogeneous hardware for now
+        return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
 
 
 mesh_resources: _MeshEnv = _MeshEnv()
@@ -53,10 +103,10 @@ def _get_device_handle(device_type: str = "cuda"):
     """
     Get the module corresponding to the device_type which is cuda or cuda-like device.
     For example, when the device_type is cuda, the module `torch.cuda` is returned.
-    Return None when device_type is cpu or there is no corresponding module,
-    otherwise return the corresponding module.
+    Return None when there is no corresponding module for device_type, otherwise
+    return the corresponding module.
     """
-    return getattr(torch, device_type, None) if device_type != "cpu" else None
+    return getattr(torch, device_type, None)
 
 
 class DeviceMesh:
@@ -102,12 +152,14 @@ class DeviceMesh:
 
     device_type: str
     mesh: torch.Tensor
+    mesh_dim_names: Optional[Tuple[str, ...]]
 
     def __init__(
         self,
         device_type: str,
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
+        mesh_dim_names: Optional[Tuple[str, ...]] = None,
         _init_process_groups: bool = True,
         _validate_mesh: bool = True,
     ) -> None:
@@ -117,12 +169,21 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        # always try to create default (world) pg, even if it is not initialized
-        # already. The world pg is used for device mesh identity (rank) on each
-        # process (we need to know if the current global rank is in the mesh or not)
-        self._get_or_create_default_group()
-        if _init_process_groups:
-            self._init_process_groups(_validate_mesh)
+        self.mesh_dim_names = mesh_dim_names
+
+        # private field to pre-generate DeviceMesh's hash
+        self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
+
+        # Skip process group initialization if xla device.
+        # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
+        if device_type != "xla":
+            # always try to create default (world) pg, even if it is not initialized
+            # already. The world pg is used for device mesh identity (rank) on each
+            # process (we need to know if the current global rank is in the mesh or not).
+            self._get_or_create_default_group()
+            if _init_process_groups:
+                self._init_process_groups(_validate_mesh)
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -141,7 +202,10 @@ class DeviceMesh:
             # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
             # NOTE: This device selection would only work for homogeneous hardware.
             num_devices_per_host = device_handle.device_count()
-            if world_size % num_devices_per_host != 0:
+            if (
+                world_size > num_devices_per_host
+                and world_size % num_devices_per_host != 0
+            ):
                 raise RuntimeError(
                     f"DeviceMesh only support homogeneous hardware, but found "
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
@@ -165,7 +229,7 @@ class DeviceMesh:
             )
 
         # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type)
+        self_mesh = self.mesh.to(self.device_type).contiguous()
         mesh_tensor = funcol.all_gather_tensor(
             self_mesh, gather_dim=0, group=_get_default_group()
         )
@@ -235,14 +299,65 @@ class DeviceMesh:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash((self.mesh, id(self)))
+        return self._hash
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
-        if id(self) == id(other):
+        if id(self.mesh) == id(other.mesh):
             return True
-        return self.mesh.equal(other.mesh)
+        return (
+            self.mesh.shape == other.mesh.shape
+            and self._flatten_mesh_list == other._flatten_mesh_list
+        )
+
+    def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
+        """
+        Slice the current DeviceMesh based on the mesh_dim_name given to create a child
+        DeviceMesh.
+
+        Args:
+            mesh_dim_name (str): the name of the mesh dimension of the parent DeviceMesh
+            to create a child DeviceMesh for.
+        Returns:
+            A :class:`DeviceMesh` object
+
+        Example (2 host with 4 GPUs each):
+        ```
+        # Below is a DeviceMesh with mesh_shape of (2, 4) and mesh_dim_name of ("dp", "tp")
+        mesh = DeviceMesh(device_type="cuda",
+                          mesh=[
+                            [0, 1, 2, 3],
+                            [4, 5, 6, 7]
+                          ],
+                          mesh_dim_names=["dp", "tp"])
+                          )
+        ```
+        Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
+        Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
+        Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
+        Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
+        Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
+        Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
+        """
+        if self.mesh.ndim <= 1:
+            raise RuntimeError(
+                f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
+            )
+        if self.mesh_dim_names is None:
+            raise KeyError(
+                "No `mesh_dim_names` found.",
+                "To slice the device mesh, please call `init_device_mesh` with `mesh_dim_names`.",
+            )
+        if mesh_dim_name not in self.mesh_dim_names:
+            raise KeyError(
+                f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                f"Available mesh dimensions are: {self.mesh_dim_names}",
+            )
+        mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
+        submesh = mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
+
+        return submesh
 
     def get_dim_groups(
         self, mesh_dim: Optional[int] = None
@@ -276,137 +391,60 @@ class DeviceMesh:
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
 
-    def scatter(
-        self,
-        output: torch.Tensor,
-        scatter_list: List[torch.Tensor],
-        mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
-        """
-        scatter a list of tensors to a device mesh dimension. We by default
-        use the first rank of the mesh dimension as the source of truth, i.e
-        for a 2d mesh [[0, 1], [2, 3]], if we scatter on mesh_dim = 1, we will
-        scatter the tensor list on rank 0 to rank 0/1, and tensor list on rank
-        2 to rank 2/3.
 
-        Args:
-            output (torch.Tensor): the tensor to receive the scattered list.
-            scatter_list (List[torch.Tensor]): the tensor list to be scattered.
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to scatter on, we by default choose the first rank on the
-                mesh dimension as source of truth.
+def init_device_mesh(
+    device_type: str,
+    mesh_shape: Tuple[int, ...],
+    *,
+    mesh_dim_names: Optional[Tuple[str, ...]] = None,
+) -> DeviceMesh:
+    """
+    Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
+    This creates a DeviceMesh with a mesh layout of n-d dimensional array, n being the len(mesh_shape)
+    and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
+    labeled as mesh_dim_names[i].
 
-        Returns:
-            A :class:`Work` object
-        """
-        # TODO: Ideally we should use the meta tensor way
-        # (to register a meta kernel for the collective op)
-        # so that it would avoid the communication. Need to
-        # remove the check below once that is done.
-        if output.is_meta:
-            return None
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-        # src need to be global rank
-        src_for_dim = 0
 
-        if dim_group is not GroupMember.WORLD:
-            src_for_dim = get_global_rank(dim_group, 0)
+    Args:
+        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
+        mesh_shape: Tuple[int]: A tuple describes the dimension of the multi-dimesnion array
+        that describes the layout of devices.
+    Kwargs:
+        mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
+        of the multi-dimensional array that describes the layout of devices. Its length must match the length
+        of `mesh_shape`. Each string in mesh_dim_names must be unique.
 
-        if src_for_dim == get_rank():
-            fut = scatter(
-                output,
-                scatter_list=scatter_list,
-                src=src_for_dim,
-                group=dim_group,
-                async_op=async_op,
-            )
-        else:
-            fut = scatter(
-                output,
-                scatter_list=None,
-                src=src_for_dim,
-                group=dim_group,
-                async_op=async_op,
+    Returns:
+        A :class:`DeviceMesh` object
+
+    .. note: If no process group is found, init_device_mesh will initialize distributed process group/groups
+    behind the scene, which are required for distributed communications.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> from torch.distributed._tensor.device_mesh import init_device_mesh
+        >>>
+        >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
+        >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+    """
+    if mesh_dim_names is not None:
+        if len(set(mesh_dim_names)) != len(mesh_dim_names):
+            raise RuntimeError(
+                "Each mesh_dim_name must be uqique.",
+                f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
             )
 
-        return fut
-
-    def broadcast(
-        self,
-        tensor: torch.Tensor,
-        mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
-        """
-        broadcast the tensor to a device mesh dimension. We by default
-        use the first rank of the mesh dimension as the source of truth, i.e
-        for a 2d mesh [[0, 1], [2, 3]], if we broadcast on mesh_dim = 1, we will
-        broadcast the tensor on rank 0 to rank 0/1, and tensor on rank 2
-        to rank 2/3.
-
-        Args:
-            tensor (torch.Tensor): tensor to broadcast.
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to scatter on, we by default choose the first rank on the
-                mesh dimension as source of truth.
-
-        Returns:
-            A :class:`Work` object
-        """
-        # TODO: Ideally we should use the meta tensor way
-        # (to register a meta kernel for the collective op)
-        # so that it would avoid the communication. Need to
-        # remove the check below once that is done.
-        if tensor.is_meta:
-            return None
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-        # src need to be global rank
-        src_for_dim = 0
-        if dim_group is not GroupMember.WORLD:
-            src_for_dim = get_global_rank(dim_group, 0)
-
-        return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
-
-    # TODO: test uneven split on GLOO and NCCL
-    def all_to_all(
-        self,
-        output_tensor_list: List[torch.Tensor],
-        input_tensor_list: List[torch.Tensor],
-        mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-
-        work = None
-        # no direct dist.all_to_all support on 'gloo' so we manually do scatters
-        if self.device_type == "cpu":
-            logger.warning(
-                "ProcessGroupGloo does not support all_to_all, falling back with scatters!"
+        if len(mesh_shape) != len(mesh_dim_names):
+            raise RuntimeError(
+                "mesh_shape and mesh_dim_names should have same length!",
+                f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
             )
-            # TODO: pull the handle of uneven case in #492
-            dim_group_size = get_world_size(dim_group)
-            for i in range(dim_group_size):
-                # src need to be global rank
-                src_for_dim = i
-                if dim_group is not GroupMember.WORLD:
-                    src_for_dim = get_global_rank(dim_group, i)
 
-                work = scatter(
-                    output_tensor_list[i],
-                    input_tensor_list if self.get_rank() == src_for_dim else [],
-                    group=dim_group,
-                    src=src_for_dim,
-                    async_op=async_op,
-                )
-        else:
-            work = all_to_all(
-                output_tensor_list,
-                input_tensor_list,
-                dim_group,
-                async_op=async_op,
-            )
-        return work
+    mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
+    device_mesh = DeviceMesh(
+        device_type=device_type,
+        mesh=mesh,
+        mesh_dim_names=mesh_dim_names,
+    )
+
+    return device_mesh

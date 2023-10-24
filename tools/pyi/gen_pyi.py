@@ -10,7 +10,7 @@ from torchgen.api.python import (
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
-from torchgen.model import DispatchKey, Variant
+from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -75,12 +75,50 @@ def get_py_torch_functions(
 # the stubs to read on the human eye.
 
 DEVICE_PARAM = "device: Device = None"
-FACTORY_PARAMS = (
-    f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
-)
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
-# this could be more precise w.r.t list contents etc. How to do Ellipsis?
-INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
+# NOTE: specifying indices for Tensor.__getitem__
+# We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
+#
+# key: (
+#     None
+#     | slice
+#     | ellipsis
+#     | SupportsIndex
+#     | _ArrayLikeInt_co
+#     | tuple[None | slice | ellipsis | _ArrayLikeInt_co | SupportsIndex, ...]
+# )
+#
+# where:
+#
+# _ArrayLikeInt_co = _DualArrayLike[
+#     dtype[Union[bool_, integer[Any]]],
+#     Union[bool, int],
+# ]
+#
+# and
+#
+# _DualArrayLike = Union[
+#     _SupportsArray[_DType],
+#     _NestedSequence[_SupportsArray[_DType]],
+#     _T,
+#     _NestedSequence[_T],
+# ]
+#
+# Moreover, _NestedSequence is a Protocol that matches arbitrary nesting of list/tuple.
+# We can substitute and simplify:
+# _SupportsArray -> Tensor
+# _ArrayLikeInt_co -> [bool | int | | Tensor | NestedSequence[bool | int] | NestedSequence[Tensor]]
+# which leaves us with key: T | tuple[T, ...], where T is:
+# T = (
+#     None | bool | int | slice | ellipsis | SupportsIndex
+#     | Tensor | _NestedSequence[Tensor] | _NestedSequence[bool | int]
+# )
+
+# NOTE: ellipsis is equal to type[Ellipsis] in stub files.
+_leaf_types = "Union[None, _bool, _int, slice, ellipsis, Tensor]"  # not SupportsIndex!
+_index = f"Union[SupportsIndex, {_leaf_types}, _NestedSequence[{_leaf_types}]]"
+INDICES = f"indices: Union[{_index}, tuple[{_index}, ...]]"
 
 blocklist = [
     "__init_subclass__",
@@ -462,7 +500,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "pdist",
         "cosine_similarity",
     ]
-    imported_hints = ["from .. import {0} as {0}".format(_) for _ in torch_imports]
+    imported_hints = [f"from .. import {_} as {_}" for _ in torch_imports]
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
@@ -479,9 +517,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    imported_hints += [
-        "from .._C._nn import {0} as {0}".format(_) for _ in c_nn_imports
-    ]
+    imported_hints += [f"from .._C._nn import {_} as {_}" for _ in c_nn_imports]
     # This is from `torch._C._nn` but renamed
     imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
 
@@ -667,6 +703,7 @@ def gen_pyi(
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
+                            "is_coalesced: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -699,6 +736,19 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_replace": [
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_commit_update": [
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -875,15 +925,13 @@ def gen_pyi(
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, out: Optional[Tensor] = None) -> Tensor: ...".format(binop)
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ...".format(
-                binop
-            )
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1038,6 +1086,7 @@ def gen_pyi(
             "is_quantized": ["is_quantized: _bool"],
             "is_meta": ["is_meta: _bool"],
             "is_mps": ["is_mps: _bool"],
+            "is_mtia": ["is_mtia: _bool"],
             "is_ort": ["is_ort: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
@@ -1086,8 +1135,8 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
@@ -1096,9 +1145,9 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                "*, alpha: Optional[Number] = 1{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
@@ -1192,6 +1241,8 @@ def gen_pyi(
             "double",
             "float16",
             "bfloat16",
+            "float8_e4m3fn",
+            "float8_e5m2",
             "half",
             "uint8",
             "int8",
@@ -1203,6 +1254,7 @@ def gen_pyi(
             "long",
             "complex32",
             "complex64",
+            "chalf",
             "cfloat",
             "complex128",
             "cdouble",
@@ -1230,6 +1282,9 @@ def gen_pyi(
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+    torch_dispatch_mode_key_hints = [
+        f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
+    ]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
@@ -1250,6 +1305,7 @@ def gen_pyi(
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
+        "torch_dispatch_mode_key_hints": torch_dispatch_mode_key_hints,
         "all_directive": all_directive,
         "tag_attributes": tag_attributes,
     }

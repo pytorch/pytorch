@@ -400,7 +400,7 @@ TEST(DispatchKeySet, TestBackendComponentToString) {
 }
 
 TEST(DispatchKeySet, TestEndOfRuntimeBackendKeysAccurate) {
-  DispatchKey k;
+  DispatchKey k = DispatchKey::Undefined;
 #define SETTER(fullname, prefix) k = DispatchKey::EndOf##fullname##Backends;
   C10_FORALL_FUNCTIONALITY_KEYS(SETTER)
 #undef SETTER

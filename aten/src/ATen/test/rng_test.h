@@ -62,9 +62,6 @@ constexpr int64_t _max_to() {
 template<typename RNG, c10::ScalarType S, typename T>
 void test_random_from_to(const at::Device& device) {
 
-  constexpr int64_t min_val = _min_val<T>();
-  constexpr int64_t min_from = _min_from<T>();
-
   constexpr int64_t max_val = _max_val<T>();
   constexpr int64_t max_to = _max_to<T>();
 
@@ -81,6 +78,7 @@ void test_random_from_to(const at::Device& device) {
       static_cast<c10::optional<int64_t>>(c10::nullopt)
     };
   } else if constexpr (::std::is_signed<T>::value) {
+    constexpr int64_t min_from = _min_from<T>();
     froms = {
       min_from,
       -42L,
@@ -161,6 +159,8 @@ void test_random_from_to(const at::Device& device) {
   }
   if constexpr (::std::is_same_v<T, int64_t>) {
     ASSERT_TRUE(full_64_bit_range_case_covered);
+  } else {
+    (void)full_64_bit_range_case_covered;
   }
   ASSERT_TRUE(from_to_case_covered);
   ASSERT_TRUE(from_case_covered);

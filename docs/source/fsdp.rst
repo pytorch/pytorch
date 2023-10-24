@@ -18,29 +18,29 @@ FullyShardedDataParallel
 .. autoclass:: torch.distributed.fsdp.CPUOffload
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.StateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.FullStateDictConfig
+.. autoclass:: torch.distributed.fsdp.FullStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.ShardedStateDictConfig
+.. autoclass:: torch.distributed.fsdp.ShardedStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.LocalStateDictConfig
+.. autoclass:: torch.distributed.fsdp.LocalStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.OptimStateDictConfig
+.. autoclass:: torch.distributed.fsdp.OptimStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.FullOptimStateDictConfig
+.. autoclass:: torch.distributed.fsdp.FullOptimStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.ShardedOptimStateDictConfig
+.. autoclass:: torch.distributed.fsdp.ShardedOptimStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.LocalOptimStateDictConfig
+.. autoclass:: torch.distributed.fsdp.LocalOptimStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.api.StateDictSettings
+.. autoclass:: torch.distributed.fsdp.StateDictSettings
   :members:

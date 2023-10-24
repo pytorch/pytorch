@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // a wrapper to mark places where we expect all the at::Tensors to be
 // variables
@@ -15,5 +14,4 @@ struct variable_tensor_list : public std::vector<at::Tensor> {
       : std::vector<at::Tensor>(std::move(tensor)) {}
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
