@@ -299,13 +299,19 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
     # We are using python function and module string names for these inlinelist,
     # this unit test is to make sure the functions/modules can be correctly imported
     # or loaded in case there is typo in the strings.
-    def test_skipfiles_inlinelist_correctness(self):
+    def test_skipfiles_inlinelist(self):
         for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
-            self.assertTrue(isinstance(importlib.import_module(m), types.ModuleType))
+            self.assertTrue(
+                isinstance(importlib.import_module(m), types.ModuleType),
+                f"{m} from skipfiles.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
+            )
         for f in FUNC_INLINELIST:
             module_name, fn_name = f.rsplit(".", 1)
             m = importlib.import_module(module_name)
-            self.assertTrue(isinstance(getattr(m, fn_name), types.FunctionType))
+            self.assertTrue(
+                isinstance(getattr(m, fn_name), types.FunctionType),
+                f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
+            )
 
     def test_torch_name_rule_map(self):
         generated_torch_name_rule_set = generate_allow_list()
