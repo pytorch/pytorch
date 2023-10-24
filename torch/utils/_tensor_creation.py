@@ -21,7 +21,7 @@ def from_file(
     If ``shared`` is False, then changes to the tensor do not affect the file.
 
     ``size`` is the number of elements in the Tensor. If ``shared`` is ``False``, then the file must contain
-    at least :math:`size * sizeof(dtype)` bytes. If ``shared`` is `True` the file will be created if needed.
+    at least ``size * sizeof(dtype)`` bytes. If ``shared`` is `True` the file will be created if needed.
 
     See :meth:`torch.UntypedStorage.share_memory_` for a discussion on how the ``shared`` argument differs from sharing memory.
 
@@ -33,10 +33,10 @@ def from_file(
 
 
     Args:
-        filename (str) - file name to map
-        shared (bool) - whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
-                        underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
-        size (int) - number of elements in the tensor
+        filename (str): file name to map
+        shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
+                       underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
+        size (int): number of elements in the tensor
 
     Keyword args:
         {generator}
