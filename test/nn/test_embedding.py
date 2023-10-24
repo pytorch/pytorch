@@ -944,10 +944,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                                  atol=dtype2prec_DONTUSE[dtypes[2]], rtol=0)
 
         trainable_scale = (True, False)
-        include_last_offset = (True, False)
+        include_last_offset_list = (True, False)
         modes = (('sum', False), ('sum', True), ('max', False), ('mean', False))
         for (mode, has_weight), trainable, include_last_offset in itertools.product(
-            modes, trainable_scale, include_last_offset
+            modes, trainable_scale, include_last_offset_list
         ):
             test_per_sample_weights_new_offsets(
                 mode, trainable, include_last_offset, has_weight

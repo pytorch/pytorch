@@ -154,11 +154,11 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         sharded_tensor_osd = FSDP.optim_state_dict(ref_model, ref_optim)
 
         # Check dtensor and sharded_tensor model state dict values are identical
-        for dtensor_sd, sharded_tensor_sd in zip(
+        for dtensor_sd_item, sharded_tensor_sd_item in zip(
             dtensor_sd.items(), sharded_tensor_sd.items()
         ):
-            k1, v1 = dtensor_sd
-            k2, v2 = sharded_tensor_sd
+            k1, v1 = dtensor_sd_item
+            k2, v2 = sharded_tensor_sd_item
             self.assertEqual(k1, k2)
 
             self.assertEqual(type(v1), DTensor)
@@ -225,15 +225,15 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         new_optim_state_dict = FSDP.optim_state_dict(model, optim)
 
         # Check whether new_optim_state_dict is the same as ref_optim_state_dict.
-        for new_optim_state_dict, ref_optim_state_dict in zip(
+        for new_optim_state_dict_item, ref_optim_state_dict_item in zip(
             new_optim_state_dict["state"].items(),
             ref_optim_state_dict["state"].items(),
         ):
             # check FQN are the same
-            self.assertEqual(new_optim_state_dict[0], ref_optim_state_dict[0])
+            self.assertEqual(new_optim_state_dict_item[0], ref_optim_state_dict_item[0])
             for new_optim_hyper_param, ref_optim_hyper_param in zip(
-                new_optim_state_dict[1].items(),
-                ref_optim_state_dict[1].items(),
+                new_optim_state_dict_item[1].items(),
+                ref_optim_state_dict_item[1].items(),
             ):
                 k1, v1 = new_optim_hyper_param
                 k2, v2 = ref_optim_hyper_param

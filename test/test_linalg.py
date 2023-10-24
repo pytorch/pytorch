@@ -2413,7 +2413,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(v.mT.matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
 
         all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
+        for actual_rank, size, all_batches in [  # noqa: B020
                 (2, (17, 4), all_batches),
                 (4, (17, 4), all_batches),
                 (4, (17, 17), all_batches),
@@ -7415,7 +7415,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
 
         all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
+        for actual_rank, size, all_batches in [  # noqa: B020
                 (2, (17, 4), all_batches),
                 (2, (100, 4), all_batches),
                 (6, (100, 40), all_batches),

@@ -1286,8 +1286,8 @@ class DistributedDataParallel(Module, Joinable):
             )
             yield from ps
 
-        for m in m.modules() if recurse else [m]:
-            yield from model_parameters(m)
+        for mod in m.modules() if recurse else [m]:
+            yield from model_parameters(mod)
 
     def _check_default_group(self):
         pickle_not_supported = False

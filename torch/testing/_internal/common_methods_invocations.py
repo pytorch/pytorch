@@ -4926,7 +4926,7 @@ def sample_inputs_put(op_info, device, dtype, requires_grad, **kwargs):
     tgt_gen = (make_arg(size) for size in tgt_sizes)
     idx = make_idx((0,), high=1)
     src = make_arg((0,))
-    for tgt, acc in product(tgt, (True, False)):
+    for tgt, acc in product(tgt_gen, (True, False)):
         yield SampleInput(input=tgt.clone().requires_grad_(requires_grad),
                           args=(idx.clone(),
                                 src.clone().requires_grad_(requires_grad),
@@ -8190,9 +8190,9 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
-    for qkv_shapes, is_causal, dropout_p in product(
+    for qkv_shape, is_causal, dropout_p in product(
             qkv_shapes, [True, False], [0.0, 0.5]):
-        shape_q, shape_kv = qkv_shapes
+        shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q),
             make(shape_kv),
