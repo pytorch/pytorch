@@ -2230,10 +2230,26 @@ class Layout(IRNode):
 
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
+
+        if not self.stride:
+            return True
+
+        # ignore expanded dims
+        stride = self.stride
+        size = self.size
+        while (
+            stride
+            and V.graph.sizevars.size_hint(stride[0]) == 0
+            and V.graph.sizevars.size_hint(size[0]) == 1
+        ):
+            stride = stride[1:]
+            size = size[1:]
+            order = order[1:]
+
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
             if stride_ordered[i] > stride_ordered[i + 1]:
