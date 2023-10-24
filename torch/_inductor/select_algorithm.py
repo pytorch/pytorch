@@ -119,18 +119,10 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-
-        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
-        return textwrap.dedent(
-            f"""
-            @template(
-                num_stages={self.num_stages},
-                num_warps={self.num_warps},
-                triton_meta={triton_meta!r},
-                inductor_meta={inductor_meta!r},
-            )
-            @triton.jit
-            """
+        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
+        return (
+            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            + "@triton.jit"
         )
 
     def def_kernel(self, *argnames):
