@@ -251,13 +251,19 @@ class ConvertIntSource(ChainedSource):
         # To re-use all the infra we've built for SymInt, when dynamo sees a SymBool inputs,
         # we make dynamo create graphs that take SymInt inputs instead.
         #
-        # To provide the correct SymInt inputs for dynamo extracted graph, we additionally insert a
-        # cast_symbool_to_symint higher order operator call into the byte code.
-        # This is to ensure the conversion from SymBool to SymInt can be properly traced.
-        codegen.load_import_from(
-            "torch._higher_order_ops.cast_symbool_to_symint", "cast_symbool_to_symint"
-        )
-        return self.base.reconstruct(codegen) + create_call_function(1, True)
+        # We need to install a new function to disable dynamo from tracing into torch.sym_ite
+        # while keep original function unchanged.
+        import torch
+
+        fn_name = "___sym_ite_with_dynamo_disabled"
+        codegen.tx.output.install_global(fn_name, torch._dynamo.disable(torch.sym_ite))
+        return [
+            *codegen.load_function_name(fn_name, True),
+            *self.base.reconstruct(codegen),
+            codegen.create_load_const(1),
+            codegen.create_load_const(0),
+            *create_call_function(3, False),
+        ]
 
     def guard_source(self):
         return self.base.guard_source()
@@ -268,11 +274,10 @@ class ConvertIntSource(ChainedSource):
         # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression
         # generated for Dynamo's SymInt.
 
-        # Note: ITE will install a guard on the outer shape_env. This is desirable because dynamo guard checking
-        # is essentially an if-else statement based on input: if the guard check succeed, dynamo uses the
-        # cahced optimized code. if the guard check fails, dynamo re-compiles and install necessary guards in SHAPE_ENV
-        # and propagate the guards to outer shape_env.
-        return f"ITE({self.base.name()}, 1, 0)"
+        # Note: ITE_WITH_HINT doesn't install guard in the outer shape_env of SymBool input because we
+        # have to make sure all the guards pass and the cached code will be executed. Otherwise, we will
+        # accidently specialize the outer shape_env.
+        return f"ITE_WITH_HINT({self.base.name()}, 1, 0)"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -465,7 +470,7 @@ class ConstantSource(Source):
 @dataclasses.dataclass(frozen=True)
 class NumpyTensorSource(ChainedSource):
     def name(self) -> str:
-        return f"__as_tensor({self.base.name()})"
+        return f"___from_numpy({self.base.name()})"
 
     def guard_source(self):
         return self.base.guard_source()

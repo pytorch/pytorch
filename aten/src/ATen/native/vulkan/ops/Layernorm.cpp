@@ -62,20 +62,22 @@ Tensor layer_norm(
   _check_layer_norm_inputs(input_arg, normalized_shape, weight_opt, bias_opt);
 
   TORCH_CHECK(
-      input_arg.dim() == 3 || input_arg.dim() == 4,
-      "Vulkan layernorm expects 3-dim or 4-dim input!");
+      input_arg.dim() >= 2 && input_arg.dim() <= 4,
+      "Vulkan layernorm expects input of 2d, 3d or 4d!");
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   const IntArrayRef v_input_sizes = v_input.sizes();
 
   TORCH_CHECK(
-      input_arg.dim() == 3 || v_input_sizes[Layout::Activation4D::batch] == 1,
+      input_arg.dim() == 2 || input_arg.dim() == 3 ||
+          v_input_sizes[Layout::Activation4D::batch] == 1,
       "Vulkan layernorm expects batch dim == 1 when the input is 4-dimensional!");
 
   TORCH_CHECK(
-      normalized_shape.size() == 3,
-      "Vulkan layernorm expects normalized_shape to have length 3, i.e. [C, H, W]");
+      (normalized_shape.size() == 2 && input_arg.dim() == 2) ||
+          (normalized_shape.size() == 3 && input_arg.dim() >= 3),
+      "Vulkan layernorm expects normalized_shape and input dimensions match for 2d and 3d input; normalized_shape of 3d is expected for 4d input!");
 
   TORCH_CHECK(
       weight_opt->defined() && bias_opt->defined(),
@@ -107,7 +109,9 @@ Tensor layer_norm(
   } block{
       v_input.extents(),
       safe_downcast<int32_t>(volume),
-      safe_downcast<int32_t>((v_input_sizes[input_arg.dim() - 3] - 1) % 4),
+      safe_downcast<int32_t>(
+          input_arg.dim() >= 3 ? (v_input_sizes[input_arg.dim() - 3] - 1) % 4
+                               : 0),
       safe_downcast<float>(eps)};
 
   api::UniformParamsBuffer params(context, block);

@@ -720,6 +720,7 @@ coverage_ignore_functions = [
     "tensordot",
     "unique",
     "unique_consecutive",
+    "unravel_index",
     # torch.fx.annotate
     "annotate",
     # torch.fx.experimental.accelerator_partitioner
@@ -966,6 +967,7 @@ coverage_ignore_functions = [
     "parallel_and",
     "parallel_or",
     "sym_sqrt",
+    "sym_ite",
     "sympy_is_channels_last_contiguous_2d",
     "sympy_is_channels_last_contiguous_3d",
     "sympy_is_channels_last_strides_2d",

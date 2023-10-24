@@ -3244,12 +3244,12 @@ def forward(self, x):
             size_tests,
             exp_graph,
             exp_guard_code,
-            different_shape_env,
+            share_shape_env,
             exp_shape_env_guards,
         ):
             fake_mode = fake_tensor.FakeTensorMode(shape_env=ShapeEnv())
             for i, size in enumerate(size_tests):
-                if different_shape_env:
+                if not share_shape_env:
                     fake_mode = fake_tensor.FakeTensorMode(shape_env=ShapeEnv())
 
                 fake_x = fake_mode.from_tensor(
@@ -3291,36 +3291,21 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["ITE(L['pred'], 1, 0) == 1"]
-        false_guard_code = ["Ne(ITE(L['pred'], 1, 0), 1)"]
+        true_guard_code = ["ITE_WITH_HINT(L['pred'], 1, 0) == 1"]
+        false_guard_code = ["Ne(ITE_WITH_HINT(L['pred'], 1, 0), 1)"]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            different_shape_env=False,
-            # The shape_env are shared. pred are simplified to concreate values for the latter three export,
-            # specifically, they become True, False, False. Only the first export installs a guard in outer shape_env
+            share_shape_env=False,
+            # The shape_env is different in each iteration. Each shape_env gets a single guard installed.
+            # TODO(yidi): simplifiy the guards to Ea(s0, 3), Ne(s0, 4), Ne(s0, 5)
             exp_shape_env_guards=[
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-            ],
-        )
-
-        test_symbool_guards(
-            f,
-            [3, 3, 4, 5],
-            [true_graph, true_graph, false_graph, false_graph],
-            [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            different_shape_env=True,
-            # The shape_env are not shared so each of them gets a new guard based on the predicate.
-            exp_shape_env_guards=[
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Ne(s0, 4)"],
-                ["Ne(s0, 5)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)"],
+                ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
             ],
         )
 

@@ -112,6 +112,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
         ("___dict_version", dict_version),
+        ("___dict_contains", lambda a, b: a in b),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
@@ -119,7 +120,13 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
-        ("__as_tensor", torch.as_tensor),
+        (
+            "___from_numpy",
+            # If not numpy array, piggy back on e.g. tensor guards to check type
+            lambda a: torch.as_tensor(a)
+            if isinstance(a, (np.generic, np.ndarray))
+            else a,
+        ),
     ]
 )
 
@@ -190,20 +197,14 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
-        user_scope: Optional[Dict[str, object]],
+        local_scope: Dict[str, object],
+        global_scope: Dict[str, object],
         check_fn_manager: CheckFunctionManager,
-        *,
-        local: bool,
     ):
-        self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        if user_scope:
-            scope = {"L" if local else "G": user_scope}
-        else:
-            scope = {"L" if local else "G": dict()}
-        self.scope: Dict[str, Dict[str, object]] = scope
+        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -218,11 +219,17 @@ class GuardBuilder(GuardBuilderBase):
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[GuardCodeList] = []
-        # shape_env_code is only used by local_builder and is used for
+        # shape_env_code is only used by builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[GuardCodeList] = []
+
+        # exprs are appended by SHAPE_ENV guard. One usage is to propagate shape guards accumulated
+        # during dynamo tracing in dynamo's shape_env to outer shape_env only after guard check passes.
+        # This can keep the consistency between passing a SymBool inputs to a dynamo compiled function
+        # vs non-compiled version.
+        self.shape_env_propagation_exprs: List[str] = []
 
         # [Note - On Eager Tensor Guards]
         # Most of the time, we generate Python code in a guard to directly
@@ -246,12 +253,6 @@ class GuardBuilder(GuardBuilderBase):
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
-
-        # A function created by SHAPE_ENV guard. It propagates shape guards accumulated
-        # during dynamo tracing in dynamo's shape_env to outer shape_env. This is used
-        # to keep the behvaior between pass a SymBool inputs to a dynamo compiled function
-        # and its non-compiled version.
-        self._maybe_propagate_shape_env_guards = lambda: None
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -296,6 +297,13 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___dict_version({ref}) == {version}"
         self._produce_guard_code(guard, [code])
 
+    def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
+        dict_ref = self.arg_ref(guard)
+
+        maybe_not = "not " if invert else ""
+        code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        return self._produce_guard_code(guard, [code])
+
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',
         # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
@@ -329,7 +337,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
         # cache size logic
-        if self.local and isinstance(guard.originating_source, LocalSource):
+        if isinstance(guard.originating_source, LocalSource):
             # TODO(janimesh) - This is currently restricted to nn.Module objects
             # because many other ID_MATCH'd objects fail - like DeviceMesh.
             # Increase the scope of ID_MATCH'd objects.
@@ -525,7 +533,9 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(const_keys, local=self.local)
+        const_keys_repr = dict_const_keys_repr(
+            const_keys, local=is_from_local_source(guard.originating_source)
+        )
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
             code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
@@ -654,17 +664,9 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-        def _propagate_symbool_guard_to_outer_shape_env():
-            assert all(
-                eval(guard_expr, self.scope, SYMPY_INTERP)
-                for guard_expr in guards
-                if "ITE" in guard_expr
-            )
-
-        self._maybe_propagate_shape_env_guards = (
-            _propagate_symbool_guard_to_outer_shape_env
-        )
-        self._maybe_propagate_shape_env_guards()
+        # Propagate immediately to reflect all the specialization we've done during tracing
+        for code in self.shape_env_propagation_exprs:
+            eval(code, self.scope, SYMPY_INTERP)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
@@ -786,6 +788,11 @@ class GuardBuilder(GuardBuilderBase):
 
         if shape_env:
             self.shape_env_code.append(GuardCodeList(code_list, guard))
+            for code in code_list:
+                if "ITE_WITH_HINT" in code:
+                    self.shape_env_propagation_exprs.append(
+                        "bool(" + code.replace("ITE_WITH_HINT", "SYM_ITE") + ")"
+                    )
         else:
             self.code.append(GuardCodeList(code_list, guard))
 
@@ -959,40 +966,29 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
+        w_builder = None
+
         def source_ref(source):
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
                 # No need to track constants
                 return source.name()
-            builder = guard_source.select(w_local(), w_global())
-            assert builder is not None
-            return builder.arg_ref(source.name())
+            assert w_builder
+            r_builder = w_builder()
+            assert r_builder is not None
+            return r_builder.arg_ref(source.name())
 
-        local_builder = GuardBuilder(
+        builder = GuardBuilder(
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
-            combine_scopes(output_graph.global_scope, output_graph.local_scope),
-            self,
-            local=True,
-        )
-        global_builder = GuardBuilder(
-            self.id_ref,
-            source_ref,
-            self.lookup_weakrefs,
+            output_graph.local_scope,
             output_graph.global_scope,
             self,
-            local=False,
         )
+        # Break retain cycle. See test_release_input_memory
+        w_builder = weakref.ref(builder)
 
-        # We need to transplant a copy here, because some guards
-        # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
-        # the inverse is illegal.
-        if "G" in global_builder.scope:
-            local_builder.scope["G"] = global_builder.scope["G"]
-        # source_ref can cause a cycle, make sure we break it with weakref
-        w_local = weakref.ref(local_builder)
-        w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
@@ -1005,10 +1001,8 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(
-            local_builder, global_builder, guards, guard_fail_fn
-        )
+            guard.create(builder)
+        self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
@@ -1018,14 +1012,11 @@ class CheckFunctionManager:
         # eval_frame.c. In future, we should probably replace check_fn with a
         # queryable data structure such that this information is already present
         # in some form.
-        self.check_fn.id_matched_objs = local_builder.id_matched_objs
+        self.check_fn.id_matched_objs = builder.id_matched_objs
 
-    def compile_check_fn(
-        self, local_builder, global_builder, guards_out, guard_fail_fn
-    ):
-        assert not (set(local_builder.argnames) & set(global_builder.argnames))
+    def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
-        largs = local_builder.argnames
+        largs = builder.argnames
         largs += ["**___kwargs_ignored"]
 
         guards_log.debug("GUARDS:")
@@ -1034,6 +1025,7 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
+            extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
                     if fs.filename not in uninteresting_files():
@@ -1043,7 +1035,7 @@ class CheckFunctionManager:
             elif guard.stack:
                 extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
-                guards_log.debug("%s", f"{code:<60}{extra}")
+            guards_log.debug("%s", f"{code:<60}{extra}")
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
@@ -1066,33 +1058,20 @@ class CheckFunctionManager:
                 code_parts.append(code)
 
         seen = set()
-        for gcl in local_builder.code:
+        for gcl in builder.code:
             for code in gcl.code_list:
                 if code not in seen:
                     add_code_part(code, gcl.guard)
                     seen.add(code)
 
-        seen = set()
-        for gcl in global_builder.code:
-            for code in gcl.code_list:
-                if code not in seen:
-                    add_code_part(code, gcl.guard)
-                    seen.add(code)
-
-        tensor_check_names = (
-            local_builder.tensor_check_names + global_builder.tensor_check_names
-        )
-
+        tensor_check_names = builder.tensor_check_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
-            tensor_check_examples = (
-                local_builder.tensor_check_examples
-                + global_builder.tensor_check_examples
-            )
+            tensor_check_examples = builder.tensor_check_examples
 
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
@@ -1134,9 +1113,8 @@ class CheckFunctionManager:
             )
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = (
-                local_builder.tensor_check_guards + global_builder.tensor_check_guards
-            )
+            tensor_check_guards = builder.tensor_check_guards
+
             for i, name in enumerate(tensor_check_names):
                 # This is a copy of what guards.cpp checks against
                 # Keep this in sync with TensorCheck constructor
@@ -1173,11 +1151,10 @@ class CheckFunctionManager:
 
         # TODO: the "guard" here is actually just the top level SHAPE_ENV
         # which is useless.  Get ShapeEnv to pass in more provenance.
-        for gcl in local_builder.shape_env_code:
+        for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
 
-        assert not global_builder.shape_env_code
         global_state = convert_frame.initial_global_state
         if global_state is None:
             # we should only hit this case in NopTests()
@@ -1196,7 +1173,10 @@ class CheckFunctionManager:
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
+
+        guard_body, pycode = build_guard_function(
+            unique_code_parts, make_guard_fn_args, builder.shape_env_propagation_exprs
+        )
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS\n", guard_body)
@@ -1209,27 +1189,16 @@ class CheckFunctionManager:
             set_guard_fail_hook(guard_fail_hook)
 
         out: Dict[str, Any] = dict()
-        exec(pycode, global_builder.scope, out)
-
-        def _wrap_with_shape_env_guard_propagation(fn):
-            def wrapped_guard_fn(*args, **kwargs):
-                if fn(*args, **kwargs):
-                    local_builder._maybe_propagate_shape_env_guards()
-                    global_builder._maybe_propagate_shape_env_guards()
-                    return True
-                return False
-
-            return wrapped_guard_fn
+        exec(pycode, builder.scope, out)
 
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
-        guard_fn = _wrap_with_shape_env_guard_propagation(guard_fn)
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
-            "G": global_builder.scope["G"],
+            "G": builder.scope["G"],
         }
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
@@ -1261,7 +1230,9 @@ class CheckFunctionManager:
         return None
 
 
-def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
+def build_guard_function(
+    code_parts, closure_args, shape_env_propagation_exprs
+) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     if HAS_UNPARSE_FUNCTIONS:
@@ -1285,6 +1256,15 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
         guard_body.writeline(f"if not ({expr}):")
         with guard_body.indent():
             guard_body.writeline("return False")
+
+    # Additional expressions when guard passes. This is needed
+    # because we want to propagate the shape_env guards to outer shape_env only
+    # when the guard check passes.
+    # The alternatives such as adding a guard_pass_fn hook or a wrapper function cause overhead
+    # every time the guard passes. We want to avoid it by moving the logic to generaged code
+    # since in most cases additional_exprs will be empty.
+    for expr in shape_env_propagation_exprs:
+        guard_body.writeline(expr)
 
     # Wrap the inner body into the actual guard function.
     guard = IndentedBuffer()
