@@ -590,7 +590,6 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
                 value,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -599,7 +598,6 @@ class VariableBuilder:
                 value,
                 value.device.type,
                 source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -607,7 +605,6 @@ class VariableBuilder:
                 None,
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif (
             isinstance(value, torch._C._TensorMeta)
@@ -733,10 +730,10 @@ class VariableBuilder:
         elif is_allowed(value):
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif (
             istype(value, (type, types.FunctionType))
@@ -744,17 +741,17 @@ class VariableBuilder:
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
                 skipfiles.check_verbose(value, allow_torch=True).reason,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserFunctionVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, types.MethodType) and isinstance(
             value.__self__, torch.nn.Module
@@ -776,33 +773,34 @@ class VariableBuilder:
             assert self_obj and isinstance(
                 self_obj, VariableTracker
             ), "Failed to produce a valid self obj"
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
         elif isinstance(value, types.GetSetDescriptorType):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(
-                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+                value
             )
         elif isinstance(value, types.MethodWrapperType):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(
                 value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                source=self.source
             )
         elif issubclass(type(value), type):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             self.install_guards(GuardBuilder.TYPE_MATCH)
