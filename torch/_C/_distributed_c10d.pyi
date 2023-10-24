@@ -11,10 +11,6 @@ _DEFAULT_FIRST_BUCKET_BYTES: int
 _DEFAULT_NO_TIMEOUT: timedelta
 _DEFAULT_PG_TIMEOUT: timedelta
 
-class EventKind(Enum):
-    START = ...
-    END = ...
-
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
     FP16_COMPRESS = ...
@@ -24,8 +20,6 @@ def _register_builtin_comm_hook(
     reducer: Reducer,
     comm_hook_type: BuiltinCommHookType,
 ): ...
-def _dequeue_c10d_event() -> Dict[str, object]: ...
-def _enable_event_collection(pipe_fs: int) -> None: ...
 
 class GradBucket:
     def index(self) -> int: ...
@@ -134,8 +128,9 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
 
-class AllGatherOptions:
+class AllgatherOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class GatherOptions:
     rootRank: int
@@ -148,6 +143,7 @@ class ScatterOptions:
 class ReduceScatterOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
 
 class BarrierOptions:
     device_ids: List[int]

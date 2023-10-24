@@ -148,7 +148,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-12/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-15/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
@@ -182,7 +182,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # have, and it applies to child processes.
 
     # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-12/lib/clang/12.0.1/lib/linux/libclang_rt.asan-x86_64.so
+    export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
     # Increase stack size, because ASAN red zones use more stack
@@ -384,6 +384,11 @@ test_perf_for_dashboard() {
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
@@ -615,7 +620,7 @@ test_libtorch_jit() {
 
   # Run jit and lazy tensor cpp tests together to finish them faster
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests cpp/test_lazy
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy
   else
     # CUDA tests have already been skipped when CUDA is not available
     python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
