@@ -920,6 +920,7 @@ class NIterError(Exception):
     pass
 
 
+@skip(reason="NPY_VER: fails on CI")
 @xpassIfTorchDynamo  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestFromiter(TestCase):
