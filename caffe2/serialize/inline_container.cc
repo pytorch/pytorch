@@ -380,6 +380,9 @@ size_t PyTorchStreamReader::getRecord(
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
   }
+  if (chunk_size <= 0) {
+    chunk_size = n;
+  }
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
