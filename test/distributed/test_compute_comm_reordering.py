@@ -19,6 +19,7 @@ from torch._inductor.comm_analysis import (
     NCCL_HW,
     NCCL_PROTO,
     NVIDIA_GPU_TYPE,
+    llMaxBws,
 )
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
@@ -28,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.utils._triton import has_triton
+from torch.testing._internal.logging_utils import make_logging_test
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):
