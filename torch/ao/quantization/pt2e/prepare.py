@@ -381,7 +381,7 @@ def _maybe_insert_input_and_output_observers_for_node(
         is_qat,
     )
 
-    output_is_a_tensor = isinstance(node.meta["val"], FakeTensor) if "val" in node.meta else False
+    output_is_a_tensor = "val" in node.meta and isinstance(node.meta["val"], FakeTensor)
     if not output_is_a_tensor:
         return
 
