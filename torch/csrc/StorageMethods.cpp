@@ -644,7 +644,7 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
   if (map_allocator == nullptr) {
     TORCH_WARN(
         "Only storages with data pointers created via at::MapAllocator have a filename.");
-    return THPUtils_packInt32(-1);
+    Py_RETURN_NONE;
   }
   std::string filename = map_allocator->filename();
 
