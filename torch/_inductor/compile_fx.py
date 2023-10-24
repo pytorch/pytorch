@@ -1002,7 +1002,7 @@ def compile_fx(
                 if all(v is not None for v in fake_inputs):
                     # Validate devices before switching to fake tensors.
                     for idx, fi, i in zip(count(), fake_inputs, inputs_):
-                        if fi.device != i.device:
+                        if isinstance(i, torch.Tensor) and fi.device != i.device:
                             raise ValueError(
                                 f"Device mismatch between fake input and example input at position #{idx}: "
                                 f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
