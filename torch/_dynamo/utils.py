@@ -1369,17 +1369,16 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    def ensure_fake(e):
-        if isinstance(e, torch.Tensor):
-            assert is_fake(e) and maybe_get_fake_mode(e) is tx.fake_mode
+    def ensure_graph_fake(e):
+        assert is_fake(e) and maybe_get_fake_mode(e) is tx.fake_mode
         return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
 
     args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map(ensure_fake, args)
-    kwargs = tree_map(ensure_fake, kwargs)
+    args = tree_map_only(torch.Tensor, ensure_graph_fake, args)
+    kwargs = tree_map_only(torch.Tensor, ensure_graph_fake, kwargs)
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -1443,7 +1442,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map(torch.Tensor, ensure_fake, ret_val)
+        _ = tree_map_only(torch.Tensor, ensure_graph_fake, ret_val)
     return ret_val
 
 
