@@ -66,6 +66,31 @@ to_other_batch_rule(const Tensor& self, optional<int64_t> self_bdim,
                     bool copy, c10::optional<at::MemoryFormat> memory_format) {
   return std::make_tuple(self.to(other, non_blocking, copy, memory_format), self_bdim);
 }
+
+std::tuple<Tensor, optional<int64_t>> to_permuted_batch_rule(
+  const Tensor &self,
+  optional<int64_t> self_bdim,
+  IntArrayRef physical_layout,
+  optional<c10::ScalarType> dtype,
+  optional<c10::Device> device,
+  bool non_blocking
+) {
+  if (!self_bdim.has_value()) {
+    auto out = self.to_permuted(physical_layout, dtype, device, non_blocking);
+    return std::make_tuple(std::move(out), self_bdim);
+  }
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  VmapDimVector vmap_layout;
+  vmap_layout.reserve(physical_layout.size() + 1);
+  vmap_layout.emplace_back(0);
+  for (auto dim : physical_layout) {
+    vmap_layout.emplace_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
+  }
+
+  auto out = self_.to_permuted(vmap_layout, dtype, device, non_blocking);
+  return std::make_tuple(std::move(out), 0);
+}
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
@@ -84,6 +109,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(to, dtype, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype)));
   VMAP_SUPPORT2(to, dtype_layout, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype_layout)));
   VMAP_SUPPORT2(to, other, to_other_batch_rule);
+  VMAP_SUPPORT(to_permuted, to_permuted_batch_rule);
 
   UNARY_POINTWISE(_to_copy);
   UNARY_POINTWISE(alias);
