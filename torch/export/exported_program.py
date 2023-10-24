@@ -956,22 +956,23 @@ class ExportedProgram:
                             )
                         else:
                             unification_map[p_dim.node.expr] = arg_dim
-                        min_val, max_val = _convert_range_to_int(
-                            self.range_constraints[p_dim.node.expr]
-                        )
-                        # NOTE: we allow dimensions to be 0/1 at runtime
-                        if min_val > 2:
-                            check(
-                                arg_dim >= min_val,
-                                f"expected input {p.name}.shape[{j}] to be >= "
-                                f"{min_val}, but got {arg_dim}",
+                        if p_dim.node.expr in self.range_constraints:
+                            min_val, max_val = _convert_range_to_int(
+                                self.range_constraints[p_dim.node.expr]
                             )
-                        if max_val < math.inf:
-                            check(
-                                arg_dim <= max_val,
-                                f"expected input {p.name}.shape[{j}] to be <= "
-                                f"{max_val}, but got {arg_dim}",
-                            )
+                            # NOTE: we allow dimensions to be 0/1 at runtime
+                            if min_val > 2:
+                                check(
+                                    arg_dim >= min_val,
+                                    f"expected input {p.name}.shape[{j}] to be >= "
+                                    f"{min_val}, but got {arg_dim}",
+                                )
+                            if max_val < math.inf:
+                                check(
+                                    arg_dim <= max_val,
+                                    f"expected input {p.name}.shape[{j}] to be <= "
+                                    f"{max_val}, but got {arg_dim}",
+                                )
                     else:
                         check(
                             arg_dim == p_dim,
