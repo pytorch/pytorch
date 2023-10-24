@@ -1832,11 +1832,21 @@ endif()
 # Create a job pool with a limited number of jobs
 set_property(GLOBAL PROPERTY JOB_POOLS compile_pool=2)
 
-if (USE_FLASH_ATTENTION)
+# TODO if this works we want this to be turned on for CI but for developers to turn off
+# And revert changes to -j on CI/CD to enable more parelleism for all files but these
+if(USE_FLASH_ATTENTION)
+# To address out-of-memory (OOM) errors that occur when building all files in parallel
+# on our Docker machines, we introduce artificial dependencies between the files.
+# This ensures that files are compiled sequentially, thereby reducing memory usage
+# and preventing OOM errors.
+  set(previous_file "")
   foreach(tmp ${FLASH_ATTENTION_CUDA_SOURCES})
     FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
     SET(tmp_path "../${tmp_path}")
-    set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-t 2")
+    if(NOT "${previous_file}" STREQUAL "")
+      add_dependencies(${tmp_path} ${previous_file})
+    endif()
+    set(previous_file ${tmp_path})
   endforeach()
 endif()
 
