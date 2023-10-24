@@ -100,6 +100,8 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 
+from .variables.torch_function import TensorWithTFOverrideVariable
+
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -852,7 +854,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                not isinstance(
+                    v,
+                    (
+                        UnspecializedPythonVariable,
+                        NumpyNdarrayVariable,
+                        TensorWithTFOverrideVariable,
+                    ),
+                )
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
