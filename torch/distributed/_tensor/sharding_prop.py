@@ -17,7 +17,7 @@ from torch.distributed._tensor.op_schema import (
     RuntimeSchemaInfo,
     StrategyType,
 )
-from torch.distributed._tensor.placement_types import TensorMeta
+from torch.distributed._tensor.placement_types import TensorMeta, Replicate
 
 aten = torch.ops.aten
 
@@ -142,6 +142,25 @@ class ShardingPropagator:
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
         if out_tensor_meta is None:
             return OutputSharding(None, [op_schema])
+
+        mesh = op_schema.args_spec[0].mesh
+        if mesh.size() == 1:
+            # mesh have single rank, propagate replication directly
+            if isinstance(out_tensor_meta, TensorMeta):
+                output_spec = DTensorSpec(mesh, (Replicate(),), tensor_meta=out_tensor_meta)
+            if isinstance(out_tensor_meta, (list, tuple)):
+                output_spec = []
+                for meta_out in out_tensor_meta:
+                    if isinstance(meta_out, TensorMeta):
+                        output_spec.append(DTensorSpec(mesh, (Replicate(),), tensor_meta=meta_out))
+                output_spec = tuple(output_spec) if isinstance(out_tensor_meta, tuple) else output_spec
+
+            output_sharding = OutputSharding(
+                output_spec,
+                schema_suggestions=None,
+                needs_redistribute=False,
+            )
+            return output_sharding
 
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):

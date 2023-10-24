@@ -649,6 +649,19 @@ class DTensorMeshTest(DTensorTestBase):
             mesh.mesh, torch.ones(4, 3), torch.tensor([]), sharded_again.to_local()
         )
 
+    @with_comms
+    def test_single_rank_mesh_computation(self):
+        mesh = DeviceMesh(self.device_type, [0])
+        local_tensor = torch.ones(3, 4, 5)
+        dtensor = DTensor.from_local(local_tensor, mesh, [Replicate()])
+        self.assertEqual(dtensor.size(), torch.Size([3, 4, 5]))
+
+        # test dtensor created in single rank submesh
+        # test if non-supported op pass
+        output = torch.ops.aten.native_layer_norm(dtensor, (4, 5), None, None, 1)
+        print(output)
+
+
 
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
