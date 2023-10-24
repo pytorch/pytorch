@@ -820,6 +820,18 @@ class WrapperCodeGen(CodeGen):
             """
         )
         compile_wrapper.splice(kernel.src, strip=True)
+
+        # Also include any possible kernel being called indirectly
+        from triton import JITFunction
+
+        for symbol_name in kernel.fn.__code__.co_names:
+            if symbol_name in kernel.fn.__globals__:
+                symbol = kernel.fn.__globals__[symbol_name]
+                if isinstance(symbol, JITFunction):
+                    compile_wrapper.newline()
+                    compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(symbol.src, strip=True)
+
         compile_wrapper.writeline("''')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
