@@ -178,6 +178,7 @@ init_command = [
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
+    'torch/_dynamo/allowed_functions.py',
     'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/convert_frame.py',
     'torch/_dynamo/symbolic_convert.py',
