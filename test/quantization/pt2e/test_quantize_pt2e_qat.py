@@ -710,7 +710,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
-        model_pt2e = convert_pt2e(model_pt2e)
+        model_pt2e = convert_pt2e(model_pt2e, fold_quantize=True)
         quant_result_pt2e = model_pt2e(*example_inputs)
 
         exported_model = torch.export.export(model_pt2e, example_inputs)
@@ -720,7 +720,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             # 3 x linear: 1 for act, 1 for output
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 9,
+            ): 8,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 9,
@@ -755,6 +755,9 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         state_dict_before = copy.deepcopy(model.state_dict())
         torch.save(model.state_dict(), buffer)
         buffer.seek(0)
+        model = TestQuantizeMixQATAndPTQ.QATPTQTestModule()
+        model.train()
+        self._prepare_qat_linears(model)
         model.load_state_dict(torch.load(buffer))
         for i in range(2):
             after_prepare_result_pt2e = model(*example_inputs)
@@ -769,6 +772,9 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         torch.save(model.state_dict(), buffer)
 
         buffer.seek(0)
+        model = TestQuantizeMixQATAndPTQ.QATPTQTestModule()
+        model.train()
+        self._prepare_qat_linears(model)
         model.load_state_dict(torch.load(buffer))
         self.assertEqual(state_dict_before, model.state_dict())
         self._convert_qat_linears(model)
@@ -785,7 +791,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
-        model_pt2e = convert_pt2e(model_pt2e)
+        model_pt2e = convert_pt2e(model_pt2e, fold_quantize=True)
         quant_result_pt2e = model_pt2e(*example_inputs)
 
         exported_model = torch.export.export(model_pt2e, example_inputs)
@@ -795,7 +801,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             # 3 x linear: 1 for act, 1 for output
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 9,
+            ): 8,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 9,

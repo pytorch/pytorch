@@ -222,6 +222,18 @@ class RedistributeTest(DTensorTestBase):
                 torch.ones(local_shape) * self.world_size,
             )
 
+    @with_comms
+    def test_redistribute_negative_shard_dim(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
+        shard_spec = [Shard(1)]
+        shard_minus_spec = [Shard(-1)]
+
+        shard_tensor = distribute_tensor(local_tensor, device_mesh, shard_spec)
+        self.assertEqual(shard_tensor.placements[0].dim, 1)
+        reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
+        self.assertEqual(shard_tensor.placements[0].dim, 1)
+
 
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
