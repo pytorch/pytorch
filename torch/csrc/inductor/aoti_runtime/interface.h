@@ -101,7 +101,8 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
 // std::unordered_map<std::string, at::Tensor*>*.
 AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
-    AOTInductorConstantMapHandle constant_map_handle);
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool is_cpu);
 
 // Run an AOTInductorModel (see AOTInductorModelCreate for when one should use
 // this function versus AOTInductorModelContainerRun).
