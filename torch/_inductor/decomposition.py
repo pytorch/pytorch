@@ -269,6 +269,19 @@ def angle(x):
         return ret + nan
 
 
+@register_decomposition([aten.add])
+def add(x, y, *, alpha=None):
+    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
+    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex_tensor or not y_is_complex_tensor:
+        return NotImplemented
+    z = y
+    if alpha is not None:
+        z = alpha * y
+    complex_type = torch.promote_types(x.dtype, y.dtype)
+    return (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
