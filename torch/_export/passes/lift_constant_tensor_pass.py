@@ -12,7 +12,7 @@ def lift_constant_tensor_pass(ep):
         return ep
 
     graph_signature = ep.graph_signature
-    buffers = graph_signature.buffers
+    inputs = graph_signature.input_specs
 
     fake_mode = detect_fake_mode(
         tuple(node.meta["val"] for node in ep.graph.nodes if node.op == "placeholder")
@@ -20,7 +20,6 @@ def lift_constant_tensor_pass(ep):
     assert fake_mode is not None
 
     first_user_input = None
-    lifted_buffers = []
     for node in ep.graph.nodes:
         if node.op == "placeholder" and node.name in graph_signature.user_inputs:
             first_user_input = node
@@ -32,7 +31,7 @@ def lift_constant_tensor_pass(ep):
             if not isinstance(constant_tensor, torch.Tensor):
                 continue
 
-            constant_tensor_fqn = f"_lifted_tensor_constant{len(buffers)}"
+            constant_tensor_fqn = f"_lifted_tensor_constant{len(ep.tensor_constants)}"
 
             with ep.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
@@ -47,22 +46,14 @@ def lift_constant_tensor_pass(ep):
                 ep.graph.erase_node(node)
 
                 # Add the constant as a buffer to the graph signature
-                lifted_buffers.append(
+                inputs.append(
                     InputSpec(
-                        kind=InputKind.BUFFER,
+                        kind=InputKind.CONSTANT_TENSOR,
                         arg=TensorArgument(name=const_placeholder_node.name),
                         target=constant_tensor_fqn,
                     )
                 )
-                buffers.append(constant_tensor_fqn)
-                ep.state_dict[constant_tensor_fqn] = constant_tensor
+                ep.tensor_constants[constant_tensor_fqn] = constant_tensor
 
-    new_input_specs = []
-    for s in graph_signature.input_specs:
-        if s.kind == InputKind.USER_INPUT and len(lifted_buffers) > 0:
-            new_input_specs.extend(lifted_buffers)
-            lifted_buffers.clear()
-        new_input_specs.append(s)
-    ep.graph_signature.input_specs = new_input_specs
     ep.graph_module.recompile()
     return ep

@@ -763,7 +763,9 @@ def _export(
         )
     exported_program = lift_constant_tensor_pass(exported_program)
 
-    return exported_program._transform(_ReplaceSymSizeOpPass())
+    exported_program = exported_program._transform(_ReplaceSymSizeOpPass())
+    exported_program.graph.eliminate_dead_code()
+    return exported_program
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
@@ -781,17 +783,20 @@ def save(
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
-    from .serde.serialize import serialize
+    from .serde.serialize import serialize, SerializedArtifact
     from .serde.schema import SCHEMA_VERSION
-    serialized_program, serialized_state_dict = serialize(ep, opset_version)
+    artifact: SerializedArtifact = serialize(ep, opset_version)
 
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
-        # Save serialized_ep and serialized_state_dict to the zip file
-        zipf.writestr('serialized_exported_program.json', serialized_program)
-        zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        # Save every field the SerializedArtifact to a file
+        for field in dataclasses.fields(artifact):
+            field_name = field.name
+            serialized_field = getattr(artifact, field_name)
+            zipf.writestr(f"{field_name}.json", serialized_field)
+
         zipf.writestr('version', str(SCHEMA_VERSION))
 
         # Add extra files if provided
@@ -821,13 +826,18 @@ def load(
                 f"schema version {SCHEMA_VERSION}."
             )
 
+        from .serde.serialize import deserialize, SerializedArtifact
+
         # Load serialized_ep and serialized_state_dict from the zip file
-        serialized_ep = zipf.read('serialized_exported_program.json')
-        serialized_state_dict = zipf.read('serialized_state_dict.json')
+        artifact: SerializedArtifact = SerializedArtifact(
+            **{
+                field.name: zipf.read(f"{field.name}.json")
+                for field in dataclasses.fields(SerializedArtifact)
+            }
+        )
 
         # Deserialize ExportedProgram
-        from .serde.serialize import deserialize
-        ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+        ep = deserialize(artifact)
 
         # Populate extra_files map
         if extra_files is not None:

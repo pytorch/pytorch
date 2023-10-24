@@ -11,6 +11,7 @@ from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint, Dim, export
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -172,6 +173,30 @@ class TestExport(TestCase):
             "trying to get a value out of symbolic int"
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
+
+    def test_moo(self):
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super(CustomModule, self).__init__()
+
+                # Define a parameter
+                self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+
+                # Define two buffers
+                self.register_buffer('my_buffer1', torch.tensor(3.0))
+                self.register_buffer('my_buffer2', torch.tensor(4.0))
+
+            def forward(self, x1, x2):
+                # Use the parameter, buffers, and both inputs in the forward method
+                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
+
+                # Mutate one of the buffers (e.g., increment it by 1)
+                self.my_buffer2.add_(1.0) # In-place addition
+
+                return output
+
+        ep = export(CustomModule(), (torch.ones(1), torch.ones(1)))
+        print(ep)
 
     def test_if_functional(self):
         def foo(x):
@@ -1365,6 +1390,41 @@ class TestExport(TestCase):
                         actual_source_fns.append(source_names)
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
+
+    def test_lifted_constants(self) -> None:
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.input_specs), 2)
+        self.assertEqual(len(ep.tensor_constants), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 1)
+        self.assertEqual(len(ep.tensor_constants), 2)
+
+        inp = (torch.randn(1),)
+        self.assertTrue(torch.allclose(ep(*inp), Foo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep(*inp), transform(*inp)))
 
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
