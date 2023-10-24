@@ -1418,6 +1418,8 @@ def forward(self):
         self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
 
     def test_cond_with_kwargs(self):
+        from torch._higher_order_ops.cond import cond_op
+
         def test(pred, x):
             def true_fn(x):
                 return x
@@ -1425,9 +1427,7 @@ def forward(self):
             def false_fn(x):
                 return -x
 
-            return control_flow.cond(
-                pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x]
-            )
+            return cond_op(pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x])
 
         cnt = CompileCounter()
         opt_test = torch.compile(test, backend=cnt)
@@ -1438,6 +1438,8 @@ def forward(self):
         self.assertEqual(cnt.frame_count, 2)
 
     def test_cond_with_invalid_kwargs(self):
+        from torch._higher_order_ops.cond import cond_op
+
         def test(pred, x):
             def true_fn(x):
                 return x
@@ -1445,7 +1447,7 @@ def forward(self):
             def false_fn(x):
                 return -x
 
-            return control_flow.cond(
+            return cond_op(
                 pred=pred,
                 true_fn=true_fn,
                 false_fn=false_fn,
@@ -1456,7 +1458,7 @@ def forward(self):
         cnt = CompileCounter()
         opt_test = torch.compile(test, backend=cnt)
         inp = torch.ones(3, 3)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             opt_test(True, inp)
 
     def test_map_graph_break(self):
