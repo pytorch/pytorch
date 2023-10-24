@@ -1384,6 +1384,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        elif func is torch.ops.aten.size.default:
+            return tuple(int(s) for s in args[0].size())
+        elif func is torch.ops.aten.stride.default:
+            return tuple(int(s) for s in args[0].stride())
+        elif func is torch.ops.aten.storage_offset.default:
+            return int(args[0].storage_offset())
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
