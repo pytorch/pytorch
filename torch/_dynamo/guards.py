@@ -120,7 +120,13 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
-        ("__as_tensor", torch.as_tensor),
+        (
+            "___from_numpy",
+            # If not numpy array, piggy back on e.g. tensor guards to check type
+            lambda a: torch.as_tensor(a)
+            if isinstance(a, (np.generic, np.ndarray))
+            else a,
+        ),
     ]
 )
 
@@ -980,7 +986,7 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(builder, builder)
+            guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -1004,6 +1010,7 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
+            extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
                     if fs.filename not in uninteresting_files():
@@ -1013,7 +1020,7 @@ class CheckFunctionManager:
             elif guard.stack:
                 extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
-                guards_log.debug("%s", f"{code:<60}{extra}")
+            guards_log.debug("%s", f"{code:<60}{extra}")
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
