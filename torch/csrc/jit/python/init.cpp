@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -1455,6 +1454,7 @@ void initJITBindings(PyObject* module) {
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
           int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
+          Py_DECREF(res);
           if (i > 0) {
             return i;
           }
