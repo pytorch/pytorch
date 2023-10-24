@@ -39,5 +39,5 @@ Args:
     shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
                     underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
     size (int): number of elements in the storage
-    """,
+""",
 )
