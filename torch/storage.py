@@ -25,8 +25,8 @@ class _StorageBase:
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
-    # If storage is created from a file, this attribute will be set to the filename
-    filename: _Optional[str] = None
+    # If storage is created from a file, this attribute will be dynamically set to the filename on the first access
+    _filename: _Optional[Union[str, int]] = None
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
@@ -82,17 +82,11 @@ class _StorageBase:
     @property
     def is_hpu(self): ...  # noqa: E704
     @classmethod
-    def _from_file(cls, filename, shared, nbytes) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
-
-    @classmethod
-    def from_file(cls, filename, shared=False, nbytes=0) -> T:  # type: ignore[type-var]
-        storage : T = cls._from_file(filename, shared, nbytes)
-        storage.filename = filename   # type: ignore[union-attr]
-        return storage
-
+    def from_file(cls, filename, shared, nbytes) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     @classmethod
     def _expired(cls, *args, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     def _byteswap(self, *args, **kwargs): ...  # noqa: E704
+    def _get_filename(self, *args, **kwargs) -> Union[str, int]: ...  # type: ignore[empty-body, misc] # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -338,6 +332,15 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
     def is_hpu(self):
         return self.device.type == 'hpu'
 
+    @property
+    def filename(self) -> _Optional[str]:
+        """Returns the file name associated with this storage if the storage was memory mapped from a file.
+           or ``None`` if the storage was not created by memory mapping a file."""
+        if self._filename is None:
+            self._filename = self._get_filename()
+        return None if self._filename == -1 else self._filename  # type: ignore[return-value]
+
+
     @_share_memory_lock_protected
     def share_memory_(self, *args, **kwargs):
         return super().share_memory_(*args, **kwargs)
@@ -466,6 +469,12 @@ class TypedStorage:
     @property
     def _dtype(self):
         return self.dtype
+
+    @property
+    def filename(self) -> _Optional[str]:
+        """Returns the file name associated with this storage if the storage was memory mapped from a file.
+           or ``None`` if the storage was not created by memory mapping a file."""
+        return self._untyped_storage.filename
 
     def fill_(self, value):
         _warn_typed_storage_removal()
@@ -1056,6 +1065,24 @@ class TypedStorage:
 
     @classmethod
     def from_file(cls, filename, shared, size):
+        """from_file(filename, shared=False, size=0) -> Storage
+
+        Creates a CPU storage backed by a memory-mapped file.
+
+        If ``shared`` is ``True``, then memory is shared between all processes.
+        All changes are written to the file. If ``shared`` is ``False``, then the changes on
+        the storage do not affect the file.
+
+        ``size`` is the number of elements in the storage. If ``shared`` is ``False``,
+        then the file must contain at least :math:`size * sizeof(Type)` bytes
+        (``Type`` is the type of storage). If ``shared`` is ``True`` the file will be created if needed.
+
+        Args:
+            filename (str): file name to map
+            shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
+                            underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
+            size (int): number of elements in the storage
+        """
         _warn_typed_storage_removal()
         if cls == TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
