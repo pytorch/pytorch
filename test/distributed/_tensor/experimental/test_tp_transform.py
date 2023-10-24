@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import torch
-from torch.distributed._tensor.experimental.tensor_parallel import (
+from torch.distributed._tensor.experimental.tp_transform import (
     tensor_parallel_transformation,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (

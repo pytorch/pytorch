@@ -35,6 +35,13 @@ def tensor_parallel_transformation(
     rank: int,
     world_size: int,
 ) -> ExportedProgram:
+    """
+    The entry point function to perform graph transformations on an exported program
+    to transform a single-device graph into a tensor parallel graph.
+
+    .. warning::
+        This API is experimental and subject to change.
+    """
     return exported_program._transform(
         TensorParallelTransformPass(
             rank,
@@ -46,6 +53,12 @@ def tensor_parallel_transformation(
 
 
 class TensorParallelTransformPass(PassBase):
+    """
+    This pass is responsible for transforming a single-device graph into a tensor parallel
+    graph. It will mark the placement strategy of each node in the graph,
+    partition the graph into distributed graph, then shard the parameters/buffers accordingly.
+    """
+
     def __init__(
         self,
         rank: int,
@@ -62,15 +75,15 @@ class TensorParallelTransformPass(PassBase):
     def call(self, graph_module) -> PassResult:
         gm = copy.deepcopy(graph_module)
 
-        placement_strategies = mark_sharding(gm, self.graph_signiture, self.mesh)
-        partitioner(gm)
-        shard_state_dict(
+        placement_strategies = _mark_sharding(gm, self.graph_signiture, self.mesh)
+        _partitioner(gm)
+        _shard_state_dict(
             self.state_dict, placement_strategies, self.graph_signiture, self.mesh
         )
         return PassResult(gm, True)
 
 
-def mark_tensor_parallel_shardings(
+def _mark_tensor_parallel_shardings(
     gm: GraphModule,
     graph_signiture: ExportGraphSignature,
     mesh: DeviceMesh,
@@ -128,7 +141,7 @@ def mark_tensor_parallel_shardings(
     return placement_strategies
 
 
-def mark_sharding(
+def _mark_sharding(
     gm: GraphModule, graph_signiture: ExportGraphSignature, mesh: DeviceMesh
 ) -> Dict[Node, PlacementStrategy]:
     """
@@ -136,7 +149,7 @@ def mark_sharding(
     """
     placement_strategies: Dict[
         Node, PlacementStrategy
-    ] = mark_tensor_parallel_shardings(gm, graph_signiture, mesh)
+    ] = _mark_tensor_parallel_shardings(gm, graph_signiture, mesh)
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -184,6 +197,9 @@ def mark_sharding(
 def _get_output_spec_from_output_sharding(
     output_sharding: OutputSharding,
 ) -> DTensorSpec:
+    """
+    Util function to extract output spec from output sharding.
+    """
     if isinstance(output_sharding.output_spec, DTensorSpec):
         return output_sharding.output_spec
     else:
@@ -201,6 +217,9 @@ def _create_placement_strategy(
     placements: Tuple[Placement, ...],
     input_specs: Optional[Sequence[DTensorSpec]] = None,
 ) -> PlacementStrategy:
+    """
+    Util function to construct a placement strategy for a given node.
+    """
     placement = PlacementStrategy(
         input_specs=input_specs,
         output_spec=DTensorSpec(
@@ -213,6 +232,9 @@ def _create_placement_strategy(
 
 
 def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
+    """
+    Util function to populate tensor meta of output_spec based on node metadata.
+    """
     if isinstance(node.meta["val"], Sequence):
         assert isinstance(output_spec, Sequence)
         for spec, fake_tensor in zip(output_spec, node.meta["val"]):
@@ -231,7 +253,7 @@ def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
         )
 
 
-def partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+def _partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Graph partitioner that partitions the single device graph
     to distributed graph
@@ -373,6 +395,9 @@ def _get_input_node_specs(
 def _get_op_schema(
     node: Node, placement_strategies: Dict[Node, PlacementStrategy]
 ) -> OpSchema:
+    """
+    Util function to construct the operator schema of a node.
+    """
     args_schema_list: List[object] = []
     for arg in node.args:
         if isinstance(arg, Node):
@@ -392,7 +417,7 @@ def _get_op_schema(
     return op_schema
 
 
-def shard_state_dict(
+def _shard_state_dict(
     state_dict: Dict[str, torch.Tensor],
     placement_strategies: Dict[Node, PlacementStrategy],
     graph_signiture: ExportGraphSignature,
