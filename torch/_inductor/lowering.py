@@ -2023,6 +2023,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
+        assert isinstance(arg, TensorBox)
         unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
             arg
         )

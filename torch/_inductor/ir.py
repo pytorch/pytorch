@@ -2246,6 +2246,14 @@ class Layout(IRNode):
             size = size[1:]
             order = order[1:]
 
+        def sorted_indices(arr):
+            sorted_arr = sorted(arr)
+            return [sorted_arr.index(element) for element in arr]
+
+        # since we may have removed expanded dimension, need to re-sort & re-index
+        # or original order may have an element out of bounds
+        order = sorted_indices(order)
+
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
