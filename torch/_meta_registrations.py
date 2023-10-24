@@ -5273,8 +5273,8 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 @register_meta(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
     grad_output: Tensor,
-    output_size: Sequence[Union[int, torch.types.SymInt]],
-    input_size: Sequence[Union[int, torch.types.SymInt]],
+    output_size: Sequence[Union[int, torch.SymInt]],
+    input_size: Sequence[Union[int, torch.SymInt]],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ):

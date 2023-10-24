@@ -31,7 +31,7 @@ from typing import (
 from typing_extensions import ParamSpec
 
 import torch
-from torch import inf, Tensor
+from torch import inf, SymInt, Tensor
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
 from torch.storage import UntypedStorage, TypedStorage
@@ -49,7 +49,6 @@ from torch.types import (
     Device,
     Number,
     Storage,
-    SymInt,
 )
 
 # This module is defined in torch/csrc/Module.cpp
