@@ -3626,6 +3626,7 @@ G['macademia'], accessed at:
         pred_x = torch.tensor(True)
 
         out_graph, _ = torch._dynamo.export(mod)(pred_x, x)
+        breakpoint()
         self.assertExpectedInline(
             out_graph.code.strip(),
             """\
