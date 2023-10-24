@@ -653,9 +653,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r.new_empty(
-            [sample_shape[0], *r.shape]
-        )
+        example_value = r.new_empty([sample_shape[0], *r.shape])
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
