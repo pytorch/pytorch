@@ -279,9 +279,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_pt2_compliant_ops_are_allowed(self):
         lib = torch.library.Library("mylib", "FRAGMENT")
         try:
-            torch.library.define("mylib::bar", "(Tensor x) -> Tensor", lib=lib, tags=(torch.Tag.pt2_compliant,))
+            torch.library.define(
+                "mylib::bar",
+                "(Tensor x) -> Tensor",
+                lib=lib,
+                tags=(torch.Tag.pt2_compliant_tag,),
+            )
             torch.library.impl("mylib::bar", "CompositeImplicitAutograd", torch.sin)
-            assert torch.Tag.pt2_compliant in torch.ops.mylib.bar.default.tags
+            assert torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar.default.tags
 
             def f(x):
                 return torch.ops.mylib.bar(x)
@@ -309,7 +314,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         try:
             torch.library.define("mylib::bar2", "(Tensor x) -> Tensor")
             torch.library.impl("mylib::bar2", "CompositeImplicitAutograd", torch.sin)
-            assert torch.Tag.pt2_compliant not in torch.ops.mylib.bar2.default.tags
+            assert torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar2.default.tags
 
             def f(x):
                 return torch.ops.mylib.bar2(x)
@@ -322,11 +327,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(3)
 
             counts = torch._dynamo.testing.CompileCounter()
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "not PT2 compliant"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "not PT2 compliant"
+            ):
                 optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
                 y = optimized_f(x)
 
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "not PT2 compliant"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "not PT2 compliant"
+            ):
                 optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
                 y = optimized_g(x)
         finally:

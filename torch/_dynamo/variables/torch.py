@@ -151,28 +151,32 @@ except ImportError:
 err_epilogue = (
     "With the current config, we will graph break "
     "(and fall back to eager-mode PyTorch) on all ops "
-    "that have not been tagged as 'pt2_compliant'. "
-    "Please see the following doc for how to mark this op as pt2_compliant "
+    "that have do not have the 'pt2_compliant_tag'. "
+    "Please see the following doc for how to mark this op as PT2 compliant "
     "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
 )
+
 
 def check_allowed_op(value):
     if not config.only_allow_pt2_compliant_ops:
         return
     if isinstance(value, torch._ops.OpOverload):
-        if torch.Tag.pt2_compliant in value.tags:
+        if torch.Tag.pt2_compliant_tag in value.tags:
             return
-        unimplemented(f"Encountered the torch.ops.OpOverload {value} "
-                      f"that is not PT2 compliant. "
-                      + err_epilogue)
+        unimplemented(
+            f"Encountered the torch.ops.OpOverload {value} "
+            f"that is not PT2 compliant. " + err_epilogue
+        )
     if isinstance(value, torch._ops.OpOverloadPacket):
         for overload in value.overloads():
             op = getattr(value, overload)
-            if torch.Tag.pt2_compliant in op.tags:
+            if torch.Tag.pt2_compliant_tag in op.tags:
                 continue
-            unimplemented(f"Encountered the torch.ops.OpOverloadPacket {value} "
-                          f"which has an overload ({overload}) that is not PT2 compliant. "
-                          + err_epilogue)
+            unimplemented(
+                f"Encountered the torch.ops.OpOverloadPacket {value} "
+                f"which has an overload ({overload}) that is not PT2 compliant. "
+                + err_epilogue
+            )
 
 
 class TorchVariable(VariableTracker):

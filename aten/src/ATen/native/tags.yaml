@@ -3,7 +3,7 @@
 - tag: inplace_view
   desc: |
           This tag indicates if an operator *only* modifies the tensor metadata
-- tag: pt2_compliant
+- tag: pt2_compliant_tag
   desc: |
           This tag indicates if the operator is guaranteed to
           work with the PT2 compilation APIs (torch.compile,
