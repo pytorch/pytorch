@@ -890,9 +890,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      .def_readonly(
+          "gcnArchName",
 #if USE_ROCM
-      .def_readonly("gcnArchName", &cudaDeviceProp::gcnArchName)
+          &cudaDeviceProp::gcnArchName
+#else
+          ""
 #endif // USE_ROCM
+      )
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
