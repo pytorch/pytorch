@@ -105,7 +105,11 @@ class _NormBase(Module):
             #               this should have a default value of 0
             num_batches_tracked_key = prefix + "num_batches_tracked"
             if num_batches_tracked_key not in state_dict:
-                state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
+                state_dict[num_batches_tracked_key] = (
+                    self.num_batches_tracked
+                    if self.num_batches_tracked is not None
+                    else torch.tensor(0, dtype=torch.long)
+                )
 
         super()._load_from_state_dict(
             state_dict,
