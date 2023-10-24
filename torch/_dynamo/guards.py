@@ -1231,7 +1231,7 @@ class CheckFunctionManager:
 
 
 def build_guard_function(
-    code_parts, closure_args, shape_env_propagation_exprs=[]
+    code_parts, closure_args, shape_env_propagation_exprs=None
 ) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
@@ -1263,8 +1263,9 @@ def build_guard_function(
     # The alternatives such as adding a guard_pass_fn hook or a wrapper function cause overhead
     # every time the guard passes. We want to avoid it by moving the logic to generaged code
     # since in most cases additional_exprs will be empty.
-    for expr in shape_env_propagation_exprs:
-        guard_body.writeline(expr)
+    if shape_env_propagation_exprs is not None:
+        for expr in shape_env_propagation_exprs:
+            guard_body.writeline(expr)
 
     # Wrap the inner body into the actual guard function.
     guard = IndentedBuffer()
