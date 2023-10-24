@@ -10,7 +10,6 @@
 #include <cuda_runtime_api.h>
 #include <stdint.h>
 #include <deque>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -398,7 +397,7 @@ class CUDAHostAllocator {
         (void*)devptr == (void*)ptr,
         "Host and device pointer dont match with cudaHostRegister. "
         "Please dont use this feature by setting "
-        "PYTORCH_CUDA_ALLOC_CONF=use_cuda_host_register:False (default)",
+        "PYTORCH_PINNED_ALLOC_CONF=use_cuda_host_register:False (default)",
         "");
   }
 
@@ -413,31 +412,18 @@ class CUDAHostAllocator {
     size_t numMapThreads = c10::cuda::CUDACachingAllocator::
         CUDAAllocatorConfig::pinned_num_register_threads();
     if ((numMapThreads > 1) && (roundSize >= (pageSize * numMapThreads))) {
-      // parallelize the mapping of pages with a threadpool
       auto* pool = getThreadPool();
-      std::vector<std::promise<void>> promises;
-      std::vector<std::future<void>> futures;
-      promises.reserve(numMapThreads);
-      futures.reserve(numMapThreads);
-
       for (size_t i = 0; i < numMapThreads; i++) {
-        promises.emplace_back();
-        futures.push_back(promises[i].get_future());
-        auto task = [this, i, ptr, roundSize, numMapThreads, pageSize, &promises]() mutable {
-          mapPagesForRegister(
+        pool->run(std::bind(
+            &CUDAHostAllocator::mapPagesForRegister,
+            this,
             *ptr,
             roundSize,
             i, // thread task-id
             numMapThreads,
-            pageSize);
-          // set the promise when mapping pages are done
-          promises[i].set_value();
-        };
-        pool->run(task);
+            pageSize));
       }
-      for (auto& future : futures) {
-        future.wait();
-      }
+      pool->waitWorkComplete();
     } else {
       // Map pages in the same thread
       mapPagesForRegister(*ptr, roundSize, 0, 1, pageSize);
