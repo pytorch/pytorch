@@ -42,7 +42,7 @@ from ..allowed_functions import (
 )
 
 from ..device_interface import device_interfaces
-from ..exc import unimplemented, InternalTorchDynamoError
+from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
@@ -1360,7 +1360,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
 #
 # In all cases, the returned `TensorVariable` subclass will have an `example_value`
 # and that `example_value` must be a `FakeTensor` produced by the currently running
-# instance of Dynamo. 
+# instance of Dynamo.
 #
 # Upon closer inspection, you may notice that there are a slurry of non-Tensor
 # output cases.  What gives?  Well, we sometimes trace operations into the
@@ -1452,7 +1452,7 @@ def wrap_fx_proxy_cls(
             )
         if (
             not is_fake(example_value)
-            or not maybe_get_fake_mode(example_value) is tx.fake_mode
+            or maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
                 "`example_value` needs to be a `FakeTensor` wrapped by this instance of Dynamo"
