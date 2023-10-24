@@ -348,6 +348,7 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
+        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -478,6 +479,29 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif (
+            name == "as_subclass"
+            and len(args) == 1
+            and isinstance(args[0], UserDefinedClassVariable)
+        ):
+            from .builder import VariableBuilder
+            from .torch_function import TensorWithTFOverrideVariable
+
+            # [Note: __torch_function__] coerce this tensor variable into a TensorWithTFOverrideVariable
+            # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
+            # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
+            # It is up to the user whether this is correct behavior or not.
+            py_cls = args[0].as_python_constant()
+            torch_fn = VariableBuilder(
+                tx,
+                AttrSource(
+                    AttrSource(args[0].source, "__torch_function__"), "__func__"
+                ),
+            )(py_cls.__torch_function__.__func__)
+
+            return TensorWithTFOverrideVariable.from_tensor_var(
+                tx, self, py_cls, torch_fn
+            )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable.create(index, **options)
@@ -589,37 +613,8 @@ class TensorVariable(VariableTracker):
             )
             return ConstantVariable.create(None, **options)
         elif name in ("resize_", "resize_as_"):
-            if "memory_format" in kwargs:
-                memory_format = kwargs["memory_format"].as_python_constant()
-            else:
-                memory_format = torch.contiguous_format
-
-            if name == "resize_":
-                self.size = args[0].as_python_constant()
-                self.is_contiguous = (memory_format,)
-            else:
-                assert isinstance(args[0], TensorVariable)
-                if self.size and args[0].size:
-                    if (
-                        self.size == args[0].size
-                        or memory_format is torch.preserve_format
-                    ):
-                        self.is_contiguous = args[0].is_contiguous
-                    else:
-                        self.size = args[0].size
-                        self.stride = args[0].stride
-                        self.ndim = args[0].ndim
-                        self.is_contiguous = (memory_format,)
-
-            return wrap_fx_proxy(
-                tx,
-                tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    *proxy_args_kwargs([self] + list(args), kwargs),
-                ),
-                **options,
-            )
+            # Handling resizing in its full generality is difficult.
+            unimplemented(f"Tensor.{name}")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
@@ -845,95 +840,6 @@ class SymNodeVariable(VariableTracker):
         )
 
 
-class TensorWithTFOverrideVariable(VariableTracker):
-    """
-    Represents a tensor subclass instance with a __torch_function__ override.
-    """
-
-    @staticmethod
-    def create(
-        tx,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        var = TensorWithTFOverrideVariable(
-            tensor_variable,
-            torch_function_fn,
-            subclass_type,
-            **kwargs,
-        )
-        # stash the subclass type to rewrap an output tensor if needed
-        if var.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global(var.global_mangled_class_name(), subclass_type)
-
-        return var
-
-    def __init__(
-        self,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.tensor_variable = tensor_variable
-        self.torch_function_fn = torch_function_fn
-        self.subclass_type = subclass_type
-
-    def as_proxy(self):
-        return self.tensor_variable.as_proxy()
-
-    def python_type(self):
-        return self.subclass_type
-
-    def subclass_type_var(self):
-        from ..source import GlobalSource
-        from .user_defined import UserDefinedClassVariable
-
-        return UserDefinedClassVariable(
-            self.subclass_type, source=GlobalSource(self.global_mangled_class_name())
-        )
-
-    def global_mangled_class_name(self):
-        return f"__subclass_{self.subclass_type.__name__}_{id(self.subclass_type)}"
-
-    def call_torch_function(self, tx, fn, types, args, kwargs):
-        from .torch_function import call_torch_function
-
-        return call_torch_function(
-            tx,
-            self.subclass_type_var(),
-            self.torch_function_fn,
-            fn,
-            types,
-            args,
-            kwargs,
-        )
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        # This code block implements inlining the __torch_function__ override
-        # of `call_method`.
-        if tx.output.torch_function_enabled:
-            import torch
-            from .builder import SourcelessBuilder
-            from .torch_function import dispatch_torch_function
-
-            # [Note: __torch_function__] Currently we only support methods that are defined on tensor
-            # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
-            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
-            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
-        else:
-            return self.tensor_variable.call_method(tx, name, args, kwargs)
-
-
 class NumpyNdarrayVariable(TensorVariable):
     """
     Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
@@ -1093,15 +999,14 @@ class TensorSubclassVariable(VariableTracker):
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .builder import VariableBuilder
+            from .torch_function import TensorWithTFOverrideVariable
 
             torch_fn = VariableBuilder(
                 tx, AttrSource(self.source, "__torch_function__")
             )(self.value.__torch_function__)
-            return TensorWithTFOverrideVariable.create(
-                tx,
-                args[0],
-                torch_fn,
-                self.value,
+
+            return TensorWithTFOverrideVariable.from_tensor_var(
+                tx, args[0], self.value, torch_fn
             )
 
         return super().call_function(tx, args, kwargs)
