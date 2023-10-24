@@ -49,6 +49,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_profiling_origin_ops_with_chrome_json(self):
         # Verify that the OriginOp info encoded in the
         # kernel name string can be read correctly from the chrome

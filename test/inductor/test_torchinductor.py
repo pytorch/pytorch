@@ -7924,24 +7924,24 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
         @patch("torch._inductor.config.profiler_mark_wrapper_call", True)
-        def test_inductor_extern_kernel_nvtx_range(self):
+        def test_inductor_extern_kernel_marker(self):
             @torch._dynamo.optimize("inductor")
             def fn(x):
                 return torch.mm(x, x)
 
             x = torch.rand(32, 32, requires_grad=False, device="cuda")
             _, fwd_code = run_and_get_code(fn, x)
-            nvtx_mm_detected = False
+            record_mm_detected = False
             for code in fwd_code:
                 for line in code.split("\n"):
-                    # nvtx ranges are inserted in the generated code
+                    # Record function markers are inserted in generated code
                     # for extern_kernels.  Extern kernels directly
                     # call cuBlas or cuDNN, rather than generating
                     # a triton kernel.
-                    res = re.search(r"nvtx.range_push.*triton_info.*mm", line)
+                    res = re.search(r"record_function.*extern_kernel.*mm", line)
                     if res:
-                        nvtx_mm_detected = True
-            self.assertTrue(nvtx_mm_detected)
+                        record_mm_detected = True
+            self.assertTrue(record_mm_detected)
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
