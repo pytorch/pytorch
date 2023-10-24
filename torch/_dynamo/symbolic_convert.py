@@ -2215,12 +2215,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("Patched init cannot be inlined.")
 
         try:
-            if id(func.get_function()) in allowed_functions._disallowed_function_ids:
-                unimplemented(f"inlining disallowed: {func.get_function()}")
+            func_value = func.get_function()
         except NotImplementedError:
-            pass  # closures
+            func_value = None
 
-        result = skipfiles.check_verbose(func, extra_check=True)
+        if (
+            func.get_name() == "__torch_function__"
+            or func_value is torch._tensor._convert
+        ):
+            return skipfiles.SkipResult(False, "Allow __torch_function__")
+
+        if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
+            unimplemented(f"inlining disallowed: {func_value}")
+
+        result = skipfiles.check_verbose(func, allow_torch=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,

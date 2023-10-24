@@ -2935,9 +2935,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
+    def forward(self, L_y_ : torch.Tensor, L_x_ : torch.Tensor):
         child = L_y_
+        l_x_ = L_x_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
         _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
@@ -3225,7 +3225,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
-
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
