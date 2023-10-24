@@ -16,8 +16,8 @@ Tensor sum_dim(
     bool keepdim,
     const optional<ScalarType> dtype) {
   TORCH_CHECK(
-      self.dim() >= 2 && self.dim() <= 4,
-      "Vulkan sum.dim_IntList supports 2d, 3d, 4d tensors as input!");
+      self.dim() >= 1 && self.dim() <= 4,
+      "Vulkan sum.dim_IntList supports 1d, 2d, 3d, 4d tensors as input!");
 
   // Get the global Vulkan context
   api::Context* const context = api::context();
@@ -25,9 +25,6 @@ Tensor sum_dim(
   // Cast the input Tensor to a vTensor
   const Tensor input = self.is_vulkan() ? self : self.vulkan();
   const vTensor& v_input = convert(input);
-
-  // Normalize dim into range [0, self.dim()]
-  dim = utils::normalize(dim, self.dim());
 
   // Create the output texture
   std::vector<int64_t> output_size = self.sizes().vec();
@@ -102,16 +99,19 @@ Tensor sum_dim_IntList(
   std::set<int64_t> dims_set;
   if (opt_dim.has_value()) {
     auto dims = opt_dim.value();
-    for (const auto& d : dims) {
+    for (const auto& dim : dims) {
+      // Do dim check before normalization to report to specified wrong dim
+      // value to user
       TORCH_CHECK(
-          d >= -self.dim() && d < self.dim(),
+          dim >= -self.dim() && dim <= self.dim() - 1,
           "Vulkan sum.dim_IntList dimension out of range expected to be in range of [",
           -self.dim(),
           ",",
           self.dim() - 1,
           "], but got ",
-          d);
-      int64_t dim_normalized = utils::normalize(d, self.dim());
+          dim);
+      // Normalize dim into range [0, self.dim() - 1]
+      int64_t dim_normalized = utils::normalize(dim, self.dim());
       if (dims_set.find(dim_normalized) != dims_set.end()) {
         TORCH_CHECK(
             false,
@@ -122,6 +122,8 @@ Tensor sum_dim_IntList(
       dims_set.insert(dim_normalized);
     }
     Tensor result = self;
+    // Reduce the higher dimensionalities first, otherwise when keepdim is
+    // false, it will be reducing the wrong dimension.
     for (auto it = dims_set.rbegin(); it != dims_set.rend(); ++it) {
       result = sum_dim(result, *it, keepdim, dtype);
     }
@@ -130,11 +132,21 @@ Tensor sum_dim_IntList(
   return self;
 }
 
+Tensor sum(const Tensor& self, const c10::optional<ScalarType> dtype) {
+  std::vector<int64_t> dims;
+  for (int64_t d = 0; d < self.dim(); d++) {
+    dims.push_back(d);
+  }
+
+  return sum_dim_IntList(self, dims, false, dtype);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::sum.dim_IntList"), TORCH_FN(sum_dim_IntList));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sum"), TORCH_FN(sum));
 }
 
 #endif /* USE_VULKAN_API */

@@ -282,6 +282,34 @@ TEST_F(VulkanAPITest, zero_size_tensor) {
   ASSERT_TRUE(at::equal(out_vk, cpu));
 }
 
+TEST_F(VulkanAPITest, zero_dim_tensor_1) {
+  auto cpu = at::rand({}, at::device(at::kCPU).dtype(at::kFloat));
+  auto vv = cpu.item<float>();
+
+  auto vk = cpu.vulkan();
+  auto out_vk = vk.cpu();
+  ASSERT_TRUE(almostEqual(cpu, out_vk));
+
+  auto vk_vv = out_vk.item<float>();
+  EXPECT_NEAR(vv, vk_vv, kTolerance);
+}
+
+TEST_F(VulkanAPITest, zero_dim_tensor_2) {
+  float v = 3.14f;
+  auto cpu = at::empty({}, at::device(at::kCPU).dtype(at::kFloat)) + v;
+  auto vk = at::empty({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
+
+  ASSERT_TRUE(almostEqual(cpu, vk.cpu()));
+}
+
+TEST_F(VulkanAPITest, local_scalar_dense) {
+  float v = 8.31f;
+  // Force the zero-dim tensor to a non-zero constant v.
+  auto vk = at::zeros({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
+  c10::Scalar scalar = at::_local_scalar_dense(vk);
+  EXPECT_NEAR(v, scalar.toFloat(), kTolerance);
+}
+
 TEST_F(VulkanAPITest, copy_to_texture) {
   using namespace at::native::vulkan;
   at::Tensor test_tensors[] = {
@@ -434,6 +462,10 @@ TEST_F(VulkanAPITest, add_broadcast5) {
 
 TEST_F(VulkanAPITest, add_broadcast6) {
   test_add({1, 15, 5, 4}, {21, 1, 5, 4}, 1.8f);
+}
+
+TEST_F(VulkanAPITest, add_zero_dim) {
+ test_add({2, 6, 5, 6}, {}, 1.5f);
 }
 
 TEST_F(VulkanAPITest, add_) {
@@ -1874,6 +1906,10 @@ TEST_F(VulkanAPITest, div_broadcast6) {
   test_div({1, 15, 5, 4}, {21, 1, 5, 4});
 }
 
+TEST_F(VulkanAPITest, div_zero_dim) {
+  test_div({1, 15, 5, 4}, {});
+}
+
 TEST_F(VulkanAPITest, div_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -3281,6 +3317,10 @@ TEST_F(VulkanAPITest, mul_broadcast6) {
   test_mul({1, 15, 5, 4}, {21, 1, 5, 4});
 }
 
+TEST_F(VulkanAPITest, mul_zero_dim) {
+  test_mul({1, 15, 5, 4}, {});
+}
+
 TEST_F(VulkanAPITest, mul_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -3480,6 +3520,10 @@ TEST_F(VulkanAPITest, pow_broadcast) {
   test_pow({2, 1, 7, 1}, {1, 5, 1, 4});
   test_pow({1, 15, 5, 4}, {21, 1, 5, 4});
   test_pow({1, 1, 5, 5}, {8, 8, 1, 1}); // mul4ch
+}
+
+TEST_F(VulkanAPITest, pow_zero_dim) {
+  test_mul({1, 15, 5, 4}, {});
 }
 
 void test_pow_(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
@@ -4151,6 +4195,10 @@ TEST_F(VulkanAPITest, sub_broadcast6) {
   test_sub({1, 15, 5, 4}, {21, 1, 5, 4}, 1.8f);
 }
 
+TEST_F(VulkanAPITest, sub_zero_dim) {
+  test_sub({1, 15, 5, 4}, {}, 1.8f);
+}
+
 TEST_F(VulkanAPITest, sub_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -4361,9 +4409,15 @@ void test_sum_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_l
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, sum_dim_1d) {
+  test_sum_dim({7}, {-1});
+  test_sum_dim({3}, {0});
+}
+
 TEST_F(VulkanAPITest, sum_dim_2d) {
   test_sum_dim({2, 3}, {-1});
   test_sum_dim({2, 7}, {-2});
+  test_sum_dim({2, 7}, {-1, -2});
 }
 
 TEST_F(VulkanAPITest, sum_dim_3d) {
@@ -4374,8 +4428,13 @@ TEST_F(VulkanAPITest, sum_dim_3d) {
   test_sum_dim({10, 7, 5}, {0, 1});
   test_sum_dim({10, 7, 5}, {0, 2});
   test_sum_dim({10, 7, 5}, {1, 2});
+
   test_sum_dim({10, 7, 5}, {-1, -2});
-  test_sum_dim({10, 7, 5}, {0, -2});
+  test_sum_dim({10, 7, 5}, {-1, -3});
+  test_sum_dim({10, 7, 5}, {-2, -3});
+
+  test_sum_dim({10, 7, 5}, {0, 1, 2});
+  test_sum_dim({10, 7, 5}, {-1, -2, -3});
 }
 
 TEST_F(VulkanAPITest, sum_dim_4d) {
@@ -4398,6 +4457,18 @@ TEST_F(VulkanAPITest, sum_dim_4d) {
   test_sum_dim({10, 7, 5, 6}, {3, 2, 1});
   test_sum_dim({10, 7, 5, 6}, {3, -2, 1});
   test_sum_dim({10, 7, 5, 6}, {-3, -2, -1});
+
+  test_sum_dim({10, 7, 5, 6}, {-1, -2, -3});
+  test_sum_dim({10, 7, 5, 6}, {-1, -2, -4});
+  test_sum_dim({10, 7, 5, 6}, {-1, -3, -4});
+  test_sum_dim({10, 7, 5, 6}, {-2, -3, -4});
+
+  test_sum_dim({10, 7, 5, 6}, {-1, -2, -3, -4});
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_1d) {
+  test_sum_dim({5}, {-1}, true);
+  test_sum_dim({3}, {-1}, true);
 }
 
 TEST_F(VulkanAPITest, sum_dim_keepdim_2d) {
@@ -4413,6 +4484,8 @@ TEST_F(VulkanAPITest, sum_dim_keepdim_3d) {
   test_sum_dim({9, 5, 7}, {0, 1}, true);
   test_sum_dim({5, 9, 7}, {0, 2}, true);
   test_sum_dim({7, 9, 5}, {1, 2}, true);
+
+  test_sum_dim({7, 9, 5}, {0, 1, 2}, true);
 }
 
 TEST_F(VulkanAPITest, sum_dim_keepdim_4d) {
@@ -4431,7 +4504,37 @@ TEST_F(VulkanAPITest, sum_dim_keepdim_4d) {
   test_sum_dim({7, 11, 9, 5}, {-1, -2, -3}, true);
   test_sum_dim({11, 7, 9, 5}, {-1, -2, -4}, true);
   test_sum_dim({9, 5, 7, 11}, {-2, -3, -4}, true);
+
+  test_sum_dim({9, 5, 7, 11}, {-1, -2, -3, -4}, true);
 }
+
+void test_sum(const at::IntArrayRef input_shape) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::sum(in_cpu);
+  const auto out_vulkan = at::sum(in_vulkan);
+
+  ASSERT_TRUE(out_vulkan.dim() == 0);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "sum test failed with input shape: "
+              << input_shape << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sum_test) {
+  test_sum({6});
+  test_sum({5, 6});
+  test_sum({0, 3, 1});
+  test_sum({3, 3, 1});
+  test_sum({7, 6, 6});
+  test_sum({7, 8, 5, 6});
+}
+
 
 void test_uniform(at::Tensor a_vulkan, const float a_min, const float a_max) {
   auto a_cpu = a_vulkan.cpu();
