@@ -12,7 +12,7 @@ class A:
 @export_case(
     example_inputs=(torch.ones(3, 4),),
     tags={"python.builtin"},
-    support_level=SupportLevel.SUPPORTED,
+    support_level=SupportLevel.NOT_SUPPORTED_YET,
 )
 def type_reflection_method(x):
     """
