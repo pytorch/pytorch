@@ -8,7 +8,7 @@ import torch
 from torch import distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import DeviceMesh, DTensor as DT
+from torch.distributed._tensor import DeviceMesh, DTensor as DT, init_device_mesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
@@ -247,19 +247,28 @@ class TestTPFSDPIntegration(FSDPTest):
         inp = torch.rand(*inp_size).cuda(self.rank)
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
-        mesh_2d, fsdp_pg, tp_pg = self._get_sub_pgs(tensor_parallel_size)
-        fsdp_model = FSDP(
-            model, process_group=self.process_group, cpu_offload=cpu_offload
+        mesh_1d = init_device_mesh("cuda", (self.world_size,))
+        fsdp_model = FSDP(model, cpu_offload=cpu_offload, device_mesh=mesh_1d)
+        mesh_2d = init_device_mesh(
+            "cuda",
+            (self.world_size // tensor_parallel_size, tensor_parallel_size),
+            mesh_dim_names=["dp", "tp"],
         )
         # Shard with TP and then wrap with FSDP
         tp_fsdp_model = parallelize_module(
-            tp_fsdp_model, mesh_2d, SequenceParallel(), tp_mesh_dim=1
+            tp_fsdp_model,
+            mesh_2d["tp"],
+            SequenceParallel(),
         )
+        tp_pg = mesh_2d["tp"].get_dim_groups(mesh_dim=0)
         assert isinstance(tp_fsdp_model.net1.weight, DT)
         assert isinstance(tp_fsdp_model.net2.weight, DT)
         tp_fsdp_model = FSDP(
-            tp_fsdp_model, process_group=fsdp_pg, cpu_offload=cpu_offload
+            tp_fsdp_model,
+            cpu_offload=cpu_offload,
+            device_mesh=mesh_2d["dp"],
         )
+        fsdp_pg = mesh_2d["dp"].get_dim_groups(mesh_dim=0)
 
         # Check the forward by checking output equality
         fsdp_out = fsdp_model(inp)
