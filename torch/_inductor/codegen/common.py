@@ -7,7 +7,18 @@ import operator
 import re
 from collections import namedtuple
 from itertools import chain
-from typing import Any, Callable, ClassVar, Dict, List, NamedTuple, Optional, Set, Union
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from sympy.printing.printer import Printer
@@ -24,6 +35,7 @@ from ..utils import (
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
+    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, OpsValue, V
@@ -794,6 +806,49 @@ class CSE:
         return var
 
 
+class IndirectAssertLine(DeferredLineBase):
+    def __init__(self, line, assert_fn, var, mask, size_map):
+        self.var = var
+        self.mask = mask
+        self.line = line
+        self.assert_fn = assert_fn
+        self.size_map = size_map
+
+    def __call__(self):
+        size, size_str = self.size_map[(self.var, self.mask)]
+
+        # We assert if we've not been able to prove the bound
+        assert_min = (self.var.bounds.lower >= 0) != sympy.true
+        assert_max = (self.var.bounds.upper < size) != sympy.true
+
+        # FooBar interview question
+        if not (assert_min or assert_max):
+            return None
+        elif assert_min and assert_max:
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
+            cond_print = f"0 <= {self.var} < {size_str}"
+        elif assert_min:
+            cond = f"0 <= {self.var}"
+            cond_print = cond
+        else:
+            assert assert_max
+            cond = f"{self.var} < {size_str}"
+            cond_print = cond
+
+        if self.mask:
+            cond = f"({cond}) | ~{self.mask}"
+        return self.line.format(
+            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
+        )
+
+    def _new_line(self, line):
+        return IndirectAssertLine(
+            line, self.assert_fn, self.var, self.mask, self.size_map
+        )
+
+
 class CodeGen:
     def __init__(self):
         super().__init__()
@@ -825,9 +880,12 @@ class Kernel(CodeGen):
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
+        self._load_mask = None
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+        # Upper bounds for indirect_indexing and their str representation
+        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
 
         self.removed_buffers = set()
         # key: the buffer to write
@@ -929,9 +987,61 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var, size, check=True):
+            def indirect_indexing(var, size, check=True):
                 # Skip CSE since this doesn't return an expression
-                return self.indirect_indexing(index_var, size, check)  # type: ignore[attr-defined]
+
+                if var.bounds.lower < 0:
+                    new_bounds = ValueRanges.unknown()
+                    if var.bounds != ValueRanges.unknown() and isinstance(
+                        size, sympy.Number
+                    ):
+                        # Take the negative part of the bound and add size to it
+                        # Then take union of that and the positive part
+                        # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                        neg = var.bounds & ValueRanges(-sympy.oo, -1)
+                        new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                        # We don't have a good way of representing the empty range
+                        if var.bounds.upper >= 0:
+                            pos = var.bounds & ValueRanges(0, sympy.oo)
+                            new_bounds = new_bounds | pos
+
+                    stm = ops.add(var, self.rename_indexing(size))
+                    # Mixed negative and non-negative
+                    if var.bounds.upper >= 0:
+                        lt = ops.lt(var, "0")
+                        stm = ops.where(lt, stm, var)
+                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+
+                    new_var.update_on_args("index_wrap", (var,), {})
+                    var = new_var
+
+                if self.generate_assert(check):
+                    mask = self.load_mask(var)
+
+                    # An assertion line may have been written already, if so just
+                    # update the max size.
+                    map_key = (var, mask)
+                    existing_size, _ = self.indirect_max_sizes.get(
+                        map_key, (None, None)
+                    )
+                    if existing_size is not None:
+                        size = sympy.Min(size, existing_size)
+                    else:
+                        line = (
+                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
+                        )
+                        self.compute.writeline(
+                            IndirectAssertLine(
+                                line,
+                                self.assert_function,  # type: ignore[attr-defined]
+                                var,
+                                mask,
+                                self.indirect_max_sizes,
+                            )
+                        )
+
+                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))  # type: ignore[attr-defined]
+                return sympy_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
@@ -1013,6 +1123,13 @@ class Kernel(CodeGen):
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
+
+    def generate_assert(self, check):
+        return (check or config.debug_index_asserts) and config.assert_indirect_indexing
+
+    def load_mask(self, var):
+        # only the triton kernel requires mask
+        return ""
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
