@@ -423,6 +423,50 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
 
+    def test_sym_ite(self):
+        shape_env = ShapeEnv()
+        t = create_symint(shape_env, 5)
+        f = create_symint(shape_env, 4)
+        b1 = True
+        r1 = torch.sym_ite(b1, t, f)
+        self.assertTrue(r1 is t)
+        b2 = False
+        r2 = torch.sym_ite(b2, t, f)
+        self.assertTrue(r2 is f)
+        b3 = t == 5
+        r3 = torch.sym_ite(b3, t, f)
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertEqual(r3, 5)
+        self.assertEqual(type(t), type(r3))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Piecewise((s0, Eq(s0, 5)), (s1, True)), 5)""")
+        b4 = f == 5
+        r4 = torch.sym_ite(b4, t, f)
+        self.assertEqual(len(shape_env.guards), 1)
+        self.assertEqual(r4, 4)
+        self.assertEqual(type(f), type(r4))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Piecewise((s0, Eq(s1, 5)), (s1, True)), 4)""")
+
+    def test_tracing_sym_ite(self):
+        def f(x):
+            b = x.shape[0] == 5
+            ret = torch.sym_ite(b, x.shape[0], x.shape[1])
+            return ret
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.ones(4, 5))
+        self.assertEqual(len(gm.shape_env.guards), 0)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 5
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
+    sym_ite = torch.sym_ite(eq, sym_size, sym_size_1);  eq = sym_size = sym_size_1 = None
+    return sym_ite""")
+        r1 = gm(torch.ones(4, 5))
+        self.assertIsInstance(r1, int)
+        self.assertEqual(r1, 5)
+        r2 = gm(torch.ones(5, 4))
+        self.assertIsInstance(r2, int)
+        self.assertEqual(r2, 5)
 
     def test_int_conversion(self):
         shape_env = ShapeEnv()
@@ -684,7 +728,8 @@ class TestSymNumberMagicMethods(TestCase):
 
     @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
     def test_bool_method(self, fn):
-        if fn not in symbolic_shapes.bool_magic_methods:
+        # sym_ite has its own tests
+        if fn not in symbolic_shapes.bool_magic_methods or fn == "sym_ite":
             self.skipTest(f"{fn} is non-bool")
 
         is_unary_fn = fn in symbolic_shapes.unary_magic_methods
