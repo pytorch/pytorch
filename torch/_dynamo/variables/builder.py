@@ -994,7 +994,7 @@ class VariableBuilder:
             )
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
-        if self.tx.output.fake_mode.is_our_fake(value):
+        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
