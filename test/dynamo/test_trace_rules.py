@@ -312,13 +312,23 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         ignored_torch_obj_rule_set = {
             load_object(x) for x in ignored_torch_name_rule_set
         }
-        self.assertTrue(
-            ignored_torch_obj_rule_set.issubset(set(generated_torch_name_rule_set))
+        used_torch_name_rule_set = (
+            set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
         )
-        self.assertTrue(
-            generated_torch_name_rule_set
-            == set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
+        x = generated_torch_name_rule_set - used_torch_name_rule_set
+        y = used_torch_name_rule_set - generated_torch_name_rule_set
+        msg1 = (
+            f"New torch objects: {x} "
+            "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
+            "Please add them according the instruction at trace_rules.torch_name_rule_map."
         )
+        msg2 = (
+            f"Existing torch objects: {y} were removed. "
+            "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
+            "Refer the instruction at trace_rules.torch_name_rule_map for more details."
+        )
+        self.assertTrue(len(x) == 0, msg1)
+        self.assertTrue(len(y) == 0, msg2)
 
     def test_func_inlinelist_torch_function(self):
         def fn(x):
