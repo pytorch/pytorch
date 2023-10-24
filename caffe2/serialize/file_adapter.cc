@@ -11,18 +11,21 @@ namespace serialize {
 FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
   fp_ = fopen(file_name.c_str(), "rb");
   if (fp_ == nullptr) {
+    auto old_errno = errno;
+#if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
     char buf[1024];
     buf[0] = '\0';
-#if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
-  strerror_s(buf, sizeof(buf), errno);
+    char* error_msg = buf;
+    strerror_s(buf, sizeof(buf), old_errno);
 #else
-  strerror_r(errno, buf, sizeof(buf));
+    auto error_msg =
+        std::system_category().default_error_condition(old_errno).message();
 #endif
     AT_ERROR(
         "open file failed because of errno ",
-        errno,
+        old_errno,
         " on fopen: ",
-        buf,
+        error_msg,
         ", file path: ",
         file_name);
   }
@@ -35,7 +38,7 @@ FileAdapter::RAIIFile::~RAIIFile() {
 }
 
 // FileAdapter directly calls C file API.
-FileAdapter::FileAdapter(const std::string& file_name): file_(file_name) {
+FileAdapter::FileAdapter(const std::string& file_name) : file_(file_name) {
   const int fseek_ret = fseek(file_.fp_, 0L, SEEK_END);
   TORCH_CHECK(fseek_ret == 0, "fseek returned ", fseek_ret);
 #if defined(_MSC_VER)
@@ -68,11 +71,7 @@ size_t FileAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
   const int fseek_ret = fseeko(file_.fp_, pos, SEEK_SET);
 #endif
   TORCH_CHECK(
-    fseek_ret == 0,
-    "fseek returned ",
-    fseek_ret,
-    ", context: ",
-    what);
+      fseek_ret == 0, "fseek returned ", fseek_ret, ", context: ", what);
   return fread(buf, 1, n, file_.fp_);
 }
 

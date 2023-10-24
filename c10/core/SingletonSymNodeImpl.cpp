@@ -8,13 +8,15 @@ namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   TORCH_INTERNAL_ASSERT(lhs->singleton_int().has_value());
   c10::optional<int64_t> c = rhs->singleton_int();
-  return c.has_value() && lhs->singleton_int() == *c;
+  return (
+      c.has_value() && lhs->singleton_int() == *c &&
+      lhs->singleton_coeff() == rhs->singleton_coeff());
 }
 bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   if (auto mb_si = lhs->singleton_int()) {
     if (auto mb_si2 = rhs->singleton_int()) {
       if (*mb_si == *mb_si2) {
-        return true;
+        return lhs->singleton_coeff() >= rhs->singleton_coeff();
       }
       TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
     }
@@ -60,6 +62,15 @@ c10::SymNode SingletonSymNodeImpl::lt(const c10::SymNode& other) {
 c10::SymNode SingletonSymNodeImpl::le(const c10::SymNode& other) {
   return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
       _ge("le", other.get(), this)));
+}
+
+c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
+  if (auto mb_si = other->singleton_int()) {
+    TORCH_CHECK(false, "Singleton int cannot be multiplied by singleton int");
+  }
+  c10::optional<int64_t> c = other->constant_int();
+  TORCH_CHECK(c.has_value());
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c));
 }
 
 } // namespace c10

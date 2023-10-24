@@ -79,9 +79,9 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if tracing_context := torch._guards.TracingContext.get():
-        fw_metadata = tracing_context.fw_metadata
-        params_flat = tracing_context.params_flat
+    if torch._guards.TracingContext.get():
+        fw_metadata = torch._guards.TracingContext.get().fw_metadata
+        params_flat = torch._guards.TracingContext.get().params_flat
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
@@ -115,7 +115,7 @@ def freeze(
 class ErasedTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, name, owning_mod):
-        return super().__new__(cls, elem.to(device="meta"))  # type: ignore[call-arg]
+        return super().__new__(cls, elem.to(device="meta"))
 
     def __init__(self, elem, name: Optional[str], mod):
         self.erased_name = name
@@ -140,9 +140,7 @@ class ErasedTensor(torch.Tensor):
 
 @torch.utils._python_dispatch._disable_current_modes()
 def invalidate_eager_modules():
-    tracing_context = torch._guards.TracingContext.get()
-    assert tracing_context is not None
-    for mod in tracing_context.module_context.nn_modules.values():
+    for mod in torch._guards.TracingContext.get().module_context.nn_modules.values():
         if not isinstance(mod, torch.nn.Module):
             continue
 
@@ -155,7 +153,7 @@ def invalidate_eager_modules():
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
-                e_t._is_param = True  # type: ignore[attr-defined]
+                e_t._is_param = True
             setattr(mod, attr_name, e_t)
 
 
@@ -170,7 +168,7 @@ def discard_traced_gm_params(mod: torch.fx.GraphModule):
             e_t = ErasedTensor(tensor, attr_name, mod)
         if isinstance(tensor, torch.nn.Parameter):
             e_t.requires_grad_(True)
-            e_t._is_param = True  # type: ignore[attr-defined]
+            e_t._is_param = True
         setattr(mod, attr_name, e_t)
 
 

@@ -276,6 +276,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_ite: lift(lambda b, t, f: t if b else f),
             sym_sqrt: lift(ops.sqrt),
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
@@ -647,6 +648,7 @@ def bisect(shape_env):
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
             tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
             new_with_shape_env(shape_env, fake.storage_offset()),
+            fake.is_nested,
         )
 
     # Checks whether the given shape_env fails when produce_guards is called.

@@ -1,6 +1,5 @@
 import os
 import sys
-import typing
 
 import torch
 
@@ -15,6 +14,9 @@ disable_progress = True
 
 # Whether to enable printing the source code for each future
 verbose_progress = False
+
+# use fx aot graph codegen cache
+fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
@@ -77,11 +79,15 @@ group_fusion = False
 # enable pattern match with batch fusion (using torch op)
 batch_fusion = True
 
-# enable reordering pass
-reordering = True
+# enable reordering pass for improving memory locality
+reorder_for_locality = True
 
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
+
+# this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
+# but the mul gets fused with other pointwise ops instead.
+force_fuse_int_mm_with_mul = False
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
@@ -96,6 +102,29 @@ force_mixed_mm = False
 
 # TODO: capture whether the graph is from export
 from_export = False
+
+# enable reordering pass for increasing overlap between compute and communication
+reorder_for_compute_comm_overlap = False
+
+# passes (in execution order) for increasing overlap between compute and communication
+# for built-in passes, use string name; for user-defined passes, pass in the function handle
+reorder_for_compute_comm_overlap_passes = [
+    "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
+]
+
+# runtime estimation function for ops
+# for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
+estimate_op_runtime = "default"
+
+# unit: GB/s, uni-directional P2P bandwidth per card
+# default value is NVLink
+intra_node_bw = 300
+
+# unit: GB/s, uni-directional P2P bandwidth per node
+# default value is InfiniBand
+inter_node_bw = 25
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -114,6 +143,10 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
+
+# the value used as a fallback for the unbacked SymInts
+# that can appear in the input shapes (e.g., in autotuning)
+unbacked_symint_fallback = 8192
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
@@ -172,6 +205,9 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
@@ -189,6 +225,10 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
+
+# we always add constants into graph.constants without
+# performing any constant-inlining optimization
+always_keep_tensor_constants = False
 
 
 def is_fbcode():
@@ -550,11 +590,3 @@ from .._dynamo.config_utils import install_config_module
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
-
-if typing.TYPE_CHECKING:
-
-    def patch(*args, **kwargs):
-        ...
-
-    def codegen_config():
-        ...

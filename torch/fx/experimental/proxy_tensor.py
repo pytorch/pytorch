@@ -342,7 +342,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     #
     # If lift_fresh returns t directly, the subsequent add_ call will
     # modify the tensor constant. Really, the problem is we've violated
-    # the invariant the the argument to lift is fresh.  So what we should
+    # the invariant the argument to lift is fresh.  So what we should
     # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
     #
     #       t = self._tensor_constant0  # initialized to torch.tensor(1)

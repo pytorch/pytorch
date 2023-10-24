@@ -32,7 +32,7 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_constant
+from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -62,7 +62,6 @@ from .source import (
     GlobalSource,
     GlobalWeakRefSource,
     LocalSource,
-    Source,
 )
 from .utils import (
     counters,
@@ -135,7 +134,7 @@ def _step_logger():
 class BlockStackEntry:
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: Optional[ContextWrappingVariable] = None
+    with_context: ContextWrappingVariable = None
 
     def can_restore(self):
         return self.with_context is not None
@@ -148,7 +147,6 @@ class BlockStackEntry:
             return ReenterWith(self.stack_index)
 
     def exit(self, tx):
-        assert self.with_context is not None
         return self.with_context.exit(tx)
 
 
@@ -459,7 +457,6 @@ def break_graph_if_unsupported(*, push):
             cleanup: List[Instruction] = []
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
-                assert b.with_context is not None
                 self.output.add_output_instructions(
                     [
                         *b.with_context.reconstruct(cg),
@@ -575,12 +572,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inner_fn = fn.value
         if hasattr(fn, "fn"):
             inner_fn = fn.fn
-        if (
-            inner_fn
-            and callable(inner_fn)
-            and hasattr(inner_fn, "_dynamo_forbidden")
-            and inner_fn._dynamo_forbidden
-        ):
+        if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
@@ -770,7 +762,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert val is None or isinstance(
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
-        self.stack.append(val)  # type: ignore[arg-type]
+        self.stack.append(val)
 
     def push_many(self, vals: List[VariableTracker]):
         for val in vals:
@@ -832,7 +824,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def get_global_source(self, name):
         if self.output.global_scope is self.f_globals:
-            source: Source = GlobalSource(name)
+            source = GlobalSource(name)
         else:
             if "__name__" in self.f_globals:
                 source = AttrSource(
@@ -880,7 +872,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = inst.argval
         source = self.get_global_source(name)
         if name not in self.symbolic_globals:
-            self.symbolic_globals[name] = object()  # type: ignore[assignment] # sentinel object
+            self.symbolic_globals[name] = object()  # sentinel object
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
@@ -1148,7 +1140,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
-            kwargsvars: VariableTracker = ConstDictVariable({}, dict)
+            kwargsvars = ConstDictVariable({}, dict)
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -1178,9 +1170,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ) and argsvars.has_unpack_var_sequence(self):
             argsvars = TupleVariable(argsvars.unpack_var_sequence(self))
 
-        assert isinstance(argsvars, BaseListVariable) and isinstance(
+        if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
-        ), f"non-static call {typestr(argsvars)} {typestr(kwargsvars)} not implemented"
+        ):
+            unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
 
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
@@ -1195,6 +1188,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         kwargs = dict(zip(argnames, kwargs_list))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
+
+    def LOAD_METHOD_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        if sys.version_info < (3, 11):
+            self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
+        else:
+            self.LOAD_METHOD(dataclasses.replace(inst, argval=argval))
+
+    def LOAD_ATTR_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
 
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
@@ -1485,7 +1493,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
-            options = VariableTracker.propagate(self)  # type: ignore[arg-type]
+            options = VariableTracker.propagate(self)
             val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
@@ -1786,7 +1794,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def setup_or_before_with(self, inst):
         state = self.copy_graphstate()
         ctx = self.pop()
-        assert isinstance(ctx, ContextWrappingVariable), f"{inst.opname} {ctx}"
+        if not isinstance(ctx, ContextWrappingVariable):
+            unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             # Save the checkpoint to restore if there is
@@ -2243,12 +2252,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("Patched init cannot be inlined.")
 
         try:
-            if id(func.get_function()) in allowed_functions._disallowed_function_ids:
-                unimplemented(f"inlining disallowed: {func.get_function()}")
+            func_value = func.get_function()
         except NotImplementedError:
-            pass  # closures
+            func_value = None
 
-        result = skipfiles.check_verbose(func.get_filename(), extra_check=True)
+        if (
+            func.get_name() == "__torch_function__"
+            or func_value is torch._tensor._convert
+        ):
+            return skipfiles.SkipResult(False, "Allow __torch_function__")
+
+        if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
+            unimplemented(f"inlining disallowed: {func_value}")
+
+        result = skipfiles.check_verbose(func, allow_torch=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
@@ -2292,7 +2309,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
-            raise ArgsMismatchError(
+            raise ArgsMismatchError(  # noqa: TRY200
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
@@ -2507,7 +2524,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         unimplemented("cant resume while inlining")
 
     def RETURN_VALUE(self, inst):
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
 
 

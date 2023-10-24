@@ -9,7 +9,6 @@ Global flags for aot autograd
 """
 import os
 import sys
-import typing
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -39,10 +38,3 @@ from .._dynamo.config_utils import install_config_module
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])
-
-if typing.TYPE_CHECKING:
-    def patch(*args, **kwargs):
-        ...
-
-    def codegen_config():
-        ...

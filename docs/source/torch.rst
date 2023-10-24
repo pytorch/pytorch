@@ -132,6 +132,7 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unravel_index
     unsqueeze
     vsplit
     vstack
@@ -705,6 +706,7 @@ Symbolic Numbers
     sym_max
     sym_min
     sym_not
+    sym_ite
 
 Export Path
 -------------
@@ -717,6 +719,18 @@ Export Path
 
     export
     generated/exportdb/index
+
+Control Flow
+------------
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cond
 
 Optimizations
 -------------

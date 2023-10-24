@@ -190,7 +190,7 @@ A ``call_function`` node represents a call to an operator.
 - **Functional:** We say a callable is “functional” if it satisfies all the
   following requirements:
 
-  - Non-mutating: The the operator does not mutate the value of its input (for
+  - Non-mutating: The operator does not mutate the value of its input (for
     tensors, this includes both metadata and data).
   - No side effects: The operator does not mutate states that are visible
     from outside, like changing values of module parameters.

@@ -35,6 +35,7 @@ from torch import (  # noqa: F401
     sym_max,
     sym_min,
     sym_not,
+    sym_ite,
     SymBool,
     SymFloat,
     SymInt,
@@ -44,6 +45,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
@@ -961,6 +963,9 @@ class SymNode:
     def sym_max(self, other) -> "SymNode":  # noqa: F811
         return self._sym_max(other)  # type: ignore[attr-defined]
 
+    def sym_ite(self, then_val, else_val) -> "SymNode":
+        return self._sym_ite(then_val, else_val)
+
     def sym_sqrt(self) -> "SymNode":  # noqa: F811
         return self._sym_sqrt()  # type: ignore[attr-defined]
 
@@ -1180,6 +1185,7 @@ magic_methods = {
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
+    'sym_ite': lambda a, t, f: sympy.Piecewise((t, a), (f, True)),
     'sym_sqrt': lambda a: sympy.sqrt(a),
     'abs': lambda a: sympy.Abs(a),
 }
@@ -1317,13 +1323,13 @@ unary_magic_methods = {
 
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
-only_bool_magic_methods = {"and", "or", "sym_not"}
+only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
 # Methods that are also on SymBool, in addition to on SymInt and SymFloat
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not", "sym_ite"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 def method_to_operator(method):
@@ -1462,6 +1468,36 @@ def _make_node_magic(method, func):
 
     if method in unary_magic_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
+    elif method == "sym_ite":
+
+        def sym_ite_impl(pred_node, then_node, else_node):
+            out_hint = then_node.hint if pred_node.hint else else_node.hint
+            if SYM_FUNCTION_MODE:
+                return to_node(
+                    pred_node,
+                    _handle_sym_dispatch(
+                        sym_ite,
+                        (wrap_node(pred_node), wrap_node(then_node), wrap_node(else_node)), {}
+                    )
+                )
+
+            try:
+                out = func(pred_node.expr, then_node.expr, else_node.expr)
+            except Exception:
+                log.warning("failed to eval %s(%s, %s, %s)", method, pred_node.expr, then_node.expr, else_node.expr)
+                raise
+
+            out = safe_expand(out)
+            fx_node, _ = pred_node.shape_env.create_fx_call_function(
+                sym_ite,
+                (
+                    pred_node.fx_node,
+                    then_node.fx_node,
+                    else_node.fx_node
+                )
+            )
+            return SymNode(out, pred_node.shape_env, then_node.pytype, out_hint, fx_node=fx_node)
+        setattr(SymNode, f"_{method_attr}", sym_ite_impl)
     else:
         setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
@@ -1601,6 +1637,19 @@ def _make_user_magic(method, user_type):
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
+    elif method == "sym_ite":
+
+        def sym_ite_magic_impl(pred, then_val, else_val):
+            pred_node = pred.node
+            then_node = to_node(pred_node, then_val)
+            else_node = to_node(pred_node, else_val)
+            if then_node is NotImplemented or else_node is NotImplemented:
+                return NotImplemented
+            assert isinstance(then_node, SymNode) and isinstance(else_node, SymNode) and then_node.pytype == else_node.pytype
+            ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
+            return get_constant(ret) if ret.node.is_constant() else ret
+
+        setattr(user_type, f"__{method}__", sym_ite_magic_impl)
     else:
         setattr(user_type, f"__{method}__", binary_magic_impl)
         if method in reflectable_magic_methods:
@@ -2667,7 +2716,7 @@ class ShapeEnv:
                                           dynamic_dims: DimList[DimDynamic],
                                           constraint_dims: List[DimConstraint]
                                           ) -> List[sympy.Expr]:
-        assert all(isinstance(val, int) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
+        assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(tensor_size):
@@ -2724,9 +2773,11 @@ class ShapeEnv:
         # The order of checking the guards matters. In this specific example:
         # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
         # we may have an unnessary shape speciliazation for y.
+        assert not ex.is_nested
+
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
-            if isinstance(maybe_sym, SymInt):
+            if is_symbolic(maybe_sym):
                 assert maybe_sym.node.shape_env is not self, \
                     "expect the symbol is created from an shape env other than current one."
                 return maybe_sym.node.require_hint()
@@ -2939,7 +2990,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_unspecified_symbol(
         self,
-        val: int,
+        val: Union[int, SymInt],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -2975,7 +3026,11 @@ class ShapeEnv:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
+            # We don't expect to ever reach here even the user specifies
+            # dynamic=False, because automatic_dynamic skipped for
+            # nested tensors.
             return sympy.Integer(val)
+
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
             # if it was requested
@@ -2993,7 +3048,12 @@ class ShapeEnv:
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
             # We always associate vars to vals
-            self.var_to_val[sympy_expr] = sympy.Integer(val)
+            if isinstance(val, int):
+                self.var_to_val[sympy_expr] = sympy.Integer(val)
+            else:
+                # Only used for jagged layout nested tensors
+                self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), coeff=val.node.singleton_coeff())
+
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
             # Create a Z3 variable for the new symbol.
@@ -3003,32 +3063,39 @@ class ShapeEnv:
                 # Make sure to reuse this symbol for subsequent duck shaping
                 self.val_to_var[val] = sympy_expr
 
-            if positive:
-                # Add assertions for the newly created symbols
-                self._add_assertion(sympy_expr > 1)
+            if isinstance(val, int):
+                if positive:
+                    # Add assertions for the newly created symbols
+                    self._add_assertion(sympy_expr > 1)
 
-                # Apply default range, which assumes not zero-one
-                self.var_to_range[sympy_expr] = self._default_value_range()
+                    # Apply default range, which assumes not zero-one
+                    self.var_to_range[sympy_expr] = self._default_value_range()
+                else:
+                    self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
+
+                # Small performance optimization: if we have a min-max constraint,
+                # we can proactively narrow to that range
+                if isinstance(constraint_dim, StrictMinMaxConstraint):
+                    assert not duck
+                    self.var_to_range[sympy_expr] &= constraint_dim.vr
+
+                vr = self.var_to_range[sympy_expr]
+
+                if val not in vr:
+                    raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+
+                # Initialize default runtime range to match compile time range,
+                # for backed SymInts (this is allowed to diverge for unbacked)
+                self.runtime_var_to_range[sympy_expr] = vr
+
+                range_str = f"[{vr.lower}, {vr.upper}]"
             else:
-                self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
-
-            # Small performance optimization: if we have a min-max constraint,
-            # we can proactively narrow to that range
-            if isinstance(constraint_dim, StrictMinMaxConstraint):
-                assert not duck
-                self.var_to_range[sympy_expr] &= constraint_dim.vr
-
-            vr = self.var_to_range[sympy_expr]
-            if val not in vr:
-                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
-
-            # Initialize default runtime range to match compile time range,
-            # for backed SymInts (this is allowed to diverge for unbacked)
-            self.runtime_var_to_range[sympy_expr] = vr
+                # Skip var_range logic for SingletonInt
+                # Only used for jagged layout nested tensors
+                range_str = ""
 
             r = sympy_expr
-
-            self.log.info("create_symbol %s = %s for %s [%s, %s]", sympy_expr, val, source.name(), vr.lower, vr.upper)
+            self.log.info("create_symbol %s = %s for %s %s", sympy_expr, val, source.name(), range_str)
             self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
@@ -3240,6 +3307,8 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
+            assert not isinstance(val, SymInt) or is_symbolic(val)
+
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
                 val = val.node.maybe_as_int()
 
@@ -3314,22 +3383,32 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, Tensorlike)
+            sources_and_tensors = [(source, t)]
             if is_traceable_wrapper_subclass(t):
                 # If our placeholder is a tensor subclass, then the "true" symints
                 # come from the subclass's inner tensors.
                 attrs, _ = t.__tensor_flatten__()
                 from torch._dynamo.source import AttrSource
-                sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
-            else:
-                sources_and_tensors = [(source, t)]
+                inner_sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
+                if t.is_nested:
+                    # For NestedTensors we need to track BOTH symints on the outer
+                    # tensor and tensor because we'd like to guard on the ragged
+                    # size but the symint representing ragged size is not in terms
+                    # of the symints on the inner tensors.
+                    sources_and_tensors.extend(inner_sources_and_tensors)
+                else:
+                    # For other tensor subclasses, only track the symints from
+                    # the inner tensors
+                    sources_and_tensors = inner_sources_and_tensors
 
             for src, curr_t in sources_and_tensors:
                 for i, ss in enumerate(curr_t.size()):
                     property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
                     track_symint(property_source, ss, constraint[i])
-                for i, ss in enumerate(curr_t.stride()):
-                    track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
-                track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
+                if not t.is_nested:
+                    for i, ss in enumerate(curr_t.stride()):
+                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                    track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
@@ -3400,7 +3479,7 @@ class ShapeEnv:
             expr = self.simplify(guard.expr)
 
             # Avoid re-issueing the same guard.
-            if guard.expr in issued:
+            if expr in issued:
                 return
 
             issued.add(expr)
@@ -3464,7 +3543,10 @@ class ShapeEnv:
             for symbol, sources in symbol_to_source.items():
                 r = self.runtime_var_to_range.get(symbol)
                 if r is None:
+                    if symbol not in self.var_to_range:
+                        continue
                     r = self.var_to_range[symbol]
+
                 assert sources
                 assert symbol.is_integer
                 g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
@@ -3662,6 +3744,10 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
+            if isinstance(self.var_to_val.get(k, None), SingletonInt):
+                # Skip var_to_range logic for SingletonInt which is only used
+                # for jagged layout NestedTensors today
+                continue
             vr = self.var_to_range[k]
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
@@ -3968,7 +4054,8 @@ class ShapeEnv:
                     ''.join(traceback.format_list(user_tb))
                 )
             self.log.info(
-                "eval %s [guard added]%s (%s)%s",
+                "%s %s [guard added]%s (%s)%s",
+                prefix,
                 g,
                 maybe_user_loc,
                 format_frame(fsummary),
@@ -4186,6 +4273,11 @@ class ShapeEnv:
 
         for symbol in expr.free_symbols:
             assert isinstance(symbol, sympy.Symbol)
+
+            if isinstance(self.var_to_val.get(symbol, None), SingletonInt):
+                # Skip var_to_range logic for SingletonInt which is only used
+                # for jagged layout NestedTensors today
+                continue
 
             r = try_solve(expr, symbol)
 

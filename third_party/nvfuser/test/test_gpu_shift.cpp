@@ -4012,7 +4012,6 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingChain_CUDA) {
   int numel_y = 101;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
   std::vector<IValue> inputs = {t0};
@@ -4162,7 +4161,6 @@ TEST_F(NVFuserTest, FusionPartialSplit1_CUDA) {
       "Invalid extent of outer domain of partial split");
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x}, options);
   std::vector<IValue> inputs = {t0};
@@ -4242,7 +4240,6 @@ TEST_F(NVFuserTest, FusionPartialSplit3_CUDA) {
   const int numel_y = 32 + 3;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
   std::vector<IValue> inputs = {t0};

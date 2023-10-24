@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -22,11 +23,26 @@
     }                                 \
   } while (0)
 
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
-  if ((call) != AOTI_TORCH_SUCCESS) {                                      \
-    throw std::runtime_error(                                              \
-        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
-        std::to_string(__LINE__));                                         \
+#if defined(__GNUC__) || defined(__clang__)
+#define AOTI_NOINLINE __attribute__((noinline))
+#elif _MSC_VER
+#define AOTI_NOINLINE __declspec(noinline)
+#else
+#define AOTI_NOINLINE
+#endif
+
+AOTI_NOINLINE static void throw_exception(
+    const char* call,
+    const char* file,
+    int64_t line) {
+  std::stringstream ss;
+  ss << call << " API call failed at " << file << ", line " << line;
+  throw std::runtime_error(ss.str());
+}
+
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
+  if ((call) != AOTI_TORCH_SUCCESS) {           \
+    throw_exception(#call, __FILE__, __LINE__); \
   }
 
 using DeleterFnPtr = void (*)(void*);
@@ -74,6 +90,26 @@ class RAIIAtenTensorHandle {
 
   void reset() {
     handle_.reset();
+  }
+
+  int64_t size(int64_t d) {
+    int64_t size;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(handle_.get(), d, &size));
+    return size;
+  }
+
+  int64_t stride(int64_t d) {
+    int64_t stride;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_stride(handle_.get(), d, &stride));
+    return stride;
+  }
+
+  int64_t storage_offset() {
+    int64_t storage_offset;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
+    return storage_offset;
   }
 
  private:
