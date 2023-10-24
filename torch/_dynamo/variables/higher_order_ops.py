@@ -679,10 +679,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # This is operator for delegation within Executorch which calls a
         # specific function in the given lowered module with the given
@@ -690,6 +687,10 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         # This is a bad hierarchical violation since
         # executorch_call_delegate sits at a higher level than dynamo, but
         # there's no real solution to this issue yet.
+        if len(kwargs) > 0:
+            unimplemented(
+                "executorch_call_delegate: kwargs arguments were not enabled."
+            )
         lowered_module = tx.output.get_submodule(args[0].module_key)
 
         lowered_node = make_attr(tx, args[0].module_key)
@@ -702,8 +703,6 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args
-
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -922,7 +921,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not isinstance(out_dims, (ConstantVariable, TupleVariable)):
             unimplemented("torch.func.vmap: out_dims is not an int or tuple variable.")
 
-        if kwargs:
+        if len(kwargs) > 0:
             unimplemented(
                 "NYI - torch.func.vmap: kwargs arguments are currently unsupported."
             )
@@ -1235,7 +1234,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        if len(kwargs) != 0:
+        if len(kwargs) > 0:
             unimplemented("out_dtype does not handle kwargs")
 
         p_args = tuple(arg.as_proxy() for arg in args)
