@@ -1758,10 +1758,10 @@ def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Parameter)
         or (ignore_subclass and isinstance(e, torch.Tensor))
         or is_traceable_wrapper_subclass(e)
-    ):
+    ) and type(e) is not FakeTensor:
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
             e, is_tensor, guard_source=source.guard_source()
