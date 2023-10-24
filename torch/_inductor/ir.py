@@ -3751,14 +3751,15 @@ class UserDefinedTritonKernel(ExternKernel):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
+        new_name = wrapper.get_unique_kernel_name(kernel.__name__)
 
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            kernel.__name__,
+            new_name,
             self.grid,
             self.codegen_kwargs(),
         )
-        wrapper.define_user_defined_triton_kernel(kernel, self.kwargs)
+        wrapper.define_user_defined_triton_kernel(new_name, kernel, self.kwargs)
 
     def should_allocate(self):
         return False
@@ -3771,6 +3772,9 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_unbacked_symbol_defs(self):
         return {}
 
+    def get_mutation_names(self):
+        return [t.get_name() for t in self.inputs]
+
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
@@ -3782,6 +3786,7 @@ class UserDefinedTritonKernel(ExternKernel):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
+                V.graph.mark_buffer_mutated(t.get_name())
             else:
                 constant_args.append(v)
                 kwargs[k] = v

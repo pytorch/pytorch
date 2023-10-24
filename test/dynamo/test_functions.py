@@ -1834,6 +1834,36 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
+    def test_triton_kernel_multi_kernel(self, grad):
+        @torch.compile
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+            xi: torch.Tensor,
+            yi: torch.Tensor,
+        ):
+            output = torch.zeros_like(x, requires_grad=grad)
+            outputi = torch.zeros_like(xi)
+            n_elements = output.numel()
+
+            grid = (x.numel(),)
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            add_kernel[grid](xi, yi, outputi, n_elements, BLOCK_SIZE=16)
+
+            return (output, outputi)
+
+        t1 = torch.rand(5, device="cuda", requires_grad=grad)
+        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+        t1i = torch.randint(0, 5, (5,), device="cuda")
+        t2i = torch.randint(0, 5, (5,), device="cuda")
+
+        (result, resulti) = call_triton(t1, t2, t1i, t2i)
+        self.assertEqual(t1 + t2, result)
+        self.assertEqual(t1i + t2i, resulti)
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, backend):
