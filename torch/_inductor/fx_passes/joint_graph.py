@@ -113,13 +113,13 @@ def remove_no_ops(
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def remove_redundant_complex_views(gm: torch.fx.GraphModule):
+def remove_redundant_views(gm: torch.fx.GraphModule):
     """
-    Removes redundant complex views by reusing existing ones.
+    Removes redundant views by reusing existing ones.
     """
 
     # A dictionary mapping a tensor to all aliased views.
-    complex_views: Dict[torch.fx.Node, List[torch.fx.Node]] = {}
+    views: Dict[torch.fx.Node, List[torch.fx.Node]] = {}
     graph = gm.graph
 
     for node in graph.nodes:
@@ -130,14 +130,8 @@ def remove_redundant_complex_views(gm: torch.fx.GraphModule):
             continue
 
         src = node.args[0]
-        from_type = src.meta["val"].dtype
         to_type = node.args[1]
-
-        # Only handle complex views.
-        if not from_type.is_complex and not to_type.is_complex:
-            continue
-
-        existing_views = complex_views.get(src)
+        existing_views = views.get(src)
         is_needed = True
 
         if existing_views:
@@ -151,23 +145,23 @@ def remove_redundant_complex_views(gm: torch.fx.GraphModule):
                     break
         else:
             existing_views = [src]
-            complex_views[src] = existing_views
+            views[src] = existing_views
 
         if is_needed:
             # Save the new alias.
             existing_views.append(node)
-            complex_views[node] = existing_views
+            views[node] = existing_views
 
-    # Clean up unused complex_views.
+    # Clean up unused views.
     while True:
         unused_views = []
-        for alias in complex_views:
+        for alias in views:
             if not alias.users:
                 unused_views.append(alias)
         if len(unused_views) == 0:
             break
         for unused in unused_views:
-            complex_views.pop(unused)
+            views.pop(unused)
             graph.erase_node(unused)
 
 
@@ -261,7 +255,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 ones.add(new_node)
 
     remove_no_ops(gm, zeros, ones)
-    remove_redundant_complex_views(gm)
+    remove_redundant_views(gm)
 
 
 def joint_graph_passes(graph: torch.fx.GraphModule):
