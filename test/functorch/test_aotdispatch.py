@@ -3296,7 +3296,6 @@ symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -3306,7 +3305,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
@@ -3325,7 +3323,6 @@ symbolic_aot_autograd_failures = {
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
