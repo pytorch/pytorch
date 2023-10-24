@@ -1,9 +1,16 @@
+from typing import Dict, List
+
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
+from ..source import AttrSource, GlobalSource
 from ..utils import is_tensor_base_attr_getter
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
+from .tensor import TensorVariable
+from .user_defined import UserDefinedClassVariable
+
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
 # At a high level, a torch function tensor subclass is represented as a TensorWithTFOverrideVariable, which dispatches
@@ -47,9 +54,19 @@ def call_torch_function(
     return tx.inline_user_function_return(torch_function_var, tf_args, kwargs)
 
 
-def can_dispatch_torch_function(tx, args, kwargs):
-    from .tensor import TensorWithTFOverrideVariable
+def build_torch_function_fn(tx, value, source):
+    from .builder import SourcelessBuilder, VariableBuilder
 
+    if not source:
+        return VariableBuilder(
+            tx,
+            AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
+        )(value.__torch_function__.__func__)
+    else:
+        return SourcelessBuilder()(tx, value.__torch_function__.__func__)
+
+
+def can_dispatch_torch_function(tx, args, kwargs):
     if tx.output.torch_function_enabled:
         all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
         return any(isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args)
@@ -59,12 +76,11 @@ def can_dispatch_torch_function(tx, args, kwargs):
 
 def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
-    from .tensor import TensorWithTFOverrideVariable
 
     all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
-        lambda x: x.subclass_type,
+        lambda x: x.class_type,
     )
 
     for arg in overloaded_args:
@@ -82,3 +98,73 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     unimplemented(
         f"All __torch_function__ overrides for call {fn} with args {args} and kwargs {kwargs} returned NotImplemented"
     )
+
+
+class TensorWithTFOverrideVariable(TensorVariable):
+    """
+    Represents a tensor subclass instance with a __torch_function__ override.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.torch_function_fn = kwargs.pop("torch_function_fn")
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def from_tensor_var(cls, tx, tensor_var, class_type, torch_function_fn):
+        import torch
+
+        kwargs = dict(tensor_var.__dict__)
+        assert (
+            kwargs.pop("class_type") is torch.Tensor
+        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
+
+        # stash the subclass type to rewrap an output tensor if needed
+        # this is needed because the actual type needs to be available
+        # each time the compiled artifact is run and outputs a wrapped tensor.
+        if var.global_mangled_class_name() not in tx.output.global_scope:
+            tx.output.install_global(var.global_mangled_class_name(), class_type)
+
+        return var
+
+    def python_type(self):
+        return self.class_type
+
+    def subclass_type_var(self):
+        return UserDefinedClassVariable(
+            self.class_type, source=GlobalSource(self.global_mangled_class_name())
+        )
+
+    def global_mangled_class_name(self):
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}"
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        return call_torch_function(
+            tx,
+            self.subclass_type_var(),
+            self.torch_function_fn,
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This code block implements inlining the __torch_function__ override
+        # of `call_method`.
+        if tx.output.torch_function_enabled:
+            import torch
+            from .builder import SourcelessBuilder
+
+            # [Note: __torch_function__] Currently we only support methods that are defined on tensor
+            # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
+            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
+            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
+        else:
+            return self.tensor_variable.call_method(tx, name, args, kwargs)
