@@ -12,6 +12,9 @@
 #include <unordered_set>
 #include <utility>
 
+#include <time.h>
+#include <signal.h>
+
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -956,11 +959,40 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
 }
 
+void killNCCLPGWatchDogDeadlock(union sigval /* unused */) {
+  LOG(ERROR) << "NCCL PG Watchdog hang and timeout";
+  int rv = ::kill(::getpid(), SIGKILL);
+  TCCL_THROW_SYSTEM_IF(rv < 0, "kill", errno);
+}
+
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
   while (!done || !terminateProcessGroup_.load()) {
+    // Inside watchdog thread, we might still call CUDA Event and it will
+    // hang the thread and stuck there silent for hours. We want to use a
+    // timer to kill the process if watchdog timeout.
+    struct sigevent action;
+    std::memset(&action, 0, sizeof(action));
+    action.sigev_notify = SIGEV_THREAD;
+    action.sigev_notify_function = killNCCLPGWatchDogDeadlock;
+    timer_t timerId;
+
+    struct itimerspec timerspec;
+    std::memset(&timerspec, 0, sizeof(timerspec));
+    timerspec.it_value.tv_sec = 10 * 60; // Ten minutes and we will need to make this configurable.
+    rv = ::timer_settime(timerId, /*flags=*/0, &timerspec, /*old_value=*/nullptr);
+    if (rv < 0) {
+      const auto exitMsg = c10::str(
+            "[Rank ",
+            rank_,
+            "] NCCL watchdog thread terminated with timer set error");
+      LOG(ERROR) << exitMsg;
+      watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+      std::rethrow_exception(watchDogException_);
+    }
+
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
@@ -1034,6 +1066,17 @@ void ProcessGroupNCCL::workCleanupLoop() {
     }
 
     done = workMetaList_.empty();
+
+    rv = ::timer_delete(timerId);
+    if (rv < 0) {
+      const auto exitMsg = c10::str(
+            "[Rank ",
+            rank_,
+            "] NCCL watchdog thread terminated with timer delete error");
+      LOG(ERROR) << exitMsg;
+      watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+      std::rethrow_exception(watchDogException_);
+    }
   }
 }
 
