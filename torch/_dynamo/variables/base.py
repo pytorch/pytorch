@@ -118,7 +118,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # fields to leave unmodified in apply()
-    _nonvar_fields = ["value"]
+    _nonvar_fields = {
+        "value",
+        "guards",
+        "source",
+        "mutable_local",
+        "recursively_contains",
+        "user_code_variable_name",
+    }
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
@@ -202,6 +209,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def python_type(self):
         raise NotImplementedError(f"{self} has no type")
+
+    def var_type(self):
+        """
+        Similar to python_type but
+        returns a VariableTracker containing the type.
+        """
+        raise NotImplementedError(f"{self} has no variable tracker-ed type")
 
     def as_python_constant(self):
         """For constants"""
