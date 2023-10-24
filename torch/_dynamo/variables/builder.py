@@ -516,20 +516,6 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
-        elif (
-            istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
-            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-        ):
-            if callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            else:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
-                source=self.source,
-            )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
@@ -744,7 +730,10 @@ class VariableBuilder:
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            if callable(value):
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
             return SkipFilesVariable(
                 value,
                 skipfiles.check_verbose(value, allow_torch=True).reason,
@@ -790,15 +779,10 @@ class VariableBuilder:
             )
         elif isinstance(value, types.GetSetDescriptorType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return GetSetDescriptorVariable(
-                value
-            )
+            return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return MethodWrapperVariable(
-                value,
-                source=self.source
-            )
+            return MethodWrapperVariable(value, source=self.source)
         elif issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
