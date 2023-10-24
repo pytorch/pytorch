@@ -841,7 +841,7 @@ class TestCond(CondCases, TestCase):
         for A, p in itertools.product(As, p_neg):
             linalg.cond(A, p)
 
-    @skip(reason="NPY_VER: fails on CI")  # (
+    @skip(reason="NP_VER: fails on CI")  # (
     #    True, run=False, reason="Platform/LAPACK-dependent failure, see gh-18914"
     # )
     def test_nan(self):
