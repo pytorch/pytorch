@@ -1570,8 +1570,14 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
         import onnx
         import onnx.inliner
 
-        model_proto = onnx.inliner.inline_local_functions(export_output.model_proto)
+        # Workaround for inliner not supporting with models larger than 2GB.
+        # Save model to disk first separating out external data,
+        # and load back without external data for inliner to work on.
+        model_proto = export_output.model_proto
         onnx.save_model(model_proto, output_path, save_as_external_data=True)
+        model_proto = onnx.load(output_path, load_external_data=False)
+        model_proto = onnx.inliner.inline_local_functions(model_proto)
+        onnx.save_model(model_proto, output_path)
         return export_output
 
 
