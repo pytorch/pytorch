@@ -145,6 +145,7 @@ class GradModeVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.initialized = initialized
         install_guard(self._guards_singleton)
 
     def enter(self, tx):
