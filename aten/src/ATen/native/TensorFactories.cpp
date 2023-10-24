@@ -53,7 +53,7 @@
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/fill_native.h>
 #include <ATen/ops/flip.h>
-#include <ATen/ops/from_file_native.h>
+#include <ATen/ops/_from_file_native.h>
 #include <ATen/ops/full_like_native.h>
 #include <ATen/ops/full_native.h>
 #include <ATen/ops/hamming_window_native.h>
