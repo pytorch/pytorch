@@ -180,6 +180,9 @@ def speculate_subgraph(
     manually_set_subgraph_inputs=True,
     restore_side_effects=True,
     should_flatten_outputs=False,
+    # Pass in an originating tracer - this is needed for preserving context
+    # across fwd-bwd for autograd.Function
+    tracer=None,
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -191,13 +194,13 @@ def speculate_subgraph(
         )
 
     try:
-        with tx.output.new_subtracer(source_target) as tracer:
+        with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, tracer, tx, manually_set_subgraph_inputs
+                sub_args, subtracer, tx, manually_set_subgraph_inputs
             )
 
             validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(), tracer, tx, manually_set_subgraph_inputs=False
+                sub_kwargs.values(), subtracer, tx, manually_set_subgraph_inputs=False
             )
 
             autograd_ctx = (
@@ -235,7 +238,7 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return (output, treespec), tx.output.graph, tracer.lifted_freevars
+                return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
                 from . import TensorVariable
 
@@ -250,17 +253,17 @@ def speculate_subgraph(
                 # so lift them here.
                 output_proxies = output.as_proxy()
                 output_proxies = pytree.tree_map(
-                    tracer.maybe_lift_tracked_freevar_to_input, output_proxies
+                    subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
                 )
                 tx.output.create_node(
                     "output",
                     "output",
-                    (tracer.create_arg((output_proxies,))),
+                    (subtracer.create_arg((output_proxies,))),
                     {},
                 )
                 graph = tx.output.graph
                 graph.lint()
-                lifted_freevars = tracer.lifted_freevars
+                lifted_freevars = subtracer.lifted_freevars
 
                 return (
                     (output, treespec),
@@ -343,7 +346,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
-            return AutogradFunctionMethodHigherOrderVariable(value, source, **kwargs)
+            return AutogradFunctionMethodHigherOrderVariable(
+                value=value, source=source, **kwargs
+            )
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -1053,11 +1058,22 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def __init__(
+        self, value, fwd_bwd_tracer=None, source: Optional[Source] = None, **kwargs
+    ):
+        super().__init__(value, source, **kwargs)
+        # The fwd_bwd_tracer is owned by AutogradFunctionVariable and passed
+        # in for speculation. It allows us to share tracing information about proxies
+        # across fwd bwd, such as when users stash tensors on a context.
+        self.fwd_bwd_tracer = fwd_bwd_tracer
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable, UserFunctionVariable
         from .builder import wrap_fx_proxy
+
+        tracer = self.fwd_bwd_tracer
 
         self.check_kwargs(kwargs, ConstantVariable)
 
@@ -1094,6 +1110,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
+            tracer=tracer,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
