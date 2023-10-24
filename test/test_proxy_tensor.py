@@ -962,6 +962,16 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    def test_non_symint_size_spec(self):
+        # this isn't really a proxy tensor test, but it's the most convenient
+        # way to get a fake tensor with symbolic sizes
+        def f(x):
+            torch._C._non_sym_sizes(x)
+            return x + 1
+
+        x = torch.randn(2, 3)
+        make_fx(f, tracing_mode="symbolic")(x)
+
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
         def f(y, x):
