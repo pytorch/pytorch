@@ -150,7 +150,9 @@ def elu_backward(
 
 @register_decomposition([aten.fill.Scalar])
 def fill_scalar(self, value):
-    return torch.full_like(self, value)
+    # NOTE: Don't decompose to full as _refs.full is decomposed to fill
+    value_tensor = torch.scalar_tensor(value, dtype=self.dtype, device=self.device)
+    return aten.fill.Tensor(self, value_tensor)
 
 
 @register_decomposition([aten.fill.Tensor])
