@@ -966,6 +966,7 @@ class TestFromiter(TestCase):
         with pytest.raises(NIterError):
             np.fromiter(iterable, dtype=dtype, count=count)
 
+    @skip(reason="NPY_VER: fails on CI")
     def test_empty_result(self):
         class MyIter:
             def __length_hint__(self):

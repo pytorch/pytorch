@@ -3,6 +3,8 @@
 import itertools
 from unittest import expectedFailure as xfail, skipIf as skipif
 
+import numpy
+
 import pytest
 from pytest import raises as assert_raises
 
@@ -201,6 +203,7 @@ class TestArgmaxArgminCommon(TestCase):
         (256,),
     ]
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails on NumPy 1.21.x")
     @parametrize(
         "size, axis",
         list(
