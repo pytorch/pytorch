@@ -809,7 +809,7 @@ class WrapperCodeGen(CodeGen):
             @template(
                 num_stages={num_stages},
                 num_warps={num_warps},
-                meta={triton_meta!r}
+                triton_meta={triton_meta!r}
             )
             @triton.jit
             """
