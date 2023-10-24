@@ -355,8 +355,10 @@ Tensor to_permuted(
   c10::optional<Device> device,
   bool non_blocking
 ) {
+  auto options = self.options().merge_in(
+    TensorOptions().dtype(dtype).device(ensure_has_index(device)));
   auto out = at::empty_permuted_symint(
-      self.sym_sizes(), physical_layout, dtype, self.layout(), device, /*pin_memory=*/false);
+      self.sym_sizes(), physical_layout, options);
   return out.copy_(self, non_blocking);
 }
 
