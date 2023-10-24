@@ -85,6 +85,10 @@ reorder_for_locality = True
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
+# this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
+# but the mul gets fused with other pointwise ops instead.
+force_fuse_int_mm_with_mul = False
+
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
@@ -200,6 +204,9 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8

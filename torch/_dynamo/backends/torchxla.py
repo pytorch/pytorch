@@ -35,10 +35,10 @@ def openxla_eval_boxed(model, fake_tensor_inputs):
 def xla_backend_helper(model, fake_tensor_inputs, boxed=False):
     try:
         import torch_xla.core.dynamo_bridge as bridge  # type: ignore[import]
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please follow the instruction in https://github.com/pytorch/xla#pytorchxla to install torch_xla"
-        )
+        ) from e
 
     compiled_graph = None
 
