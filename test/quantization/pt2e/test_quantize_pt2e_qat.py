@@ -732,3 +732,78 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         self.checkGraphModuleNodes(
             exported_model.graph_module, expected_node_occurrence=node_occurrence
         )
+
+    def test_mixing_qat_ptq_with_checkpointing(self):
+        import io
+
+        buffer = io.BytesIO()
+        example_inputs = (torch.randn(2, 3, 4, 4),)
+        model = TestQuantizeMixQATAndPTQ.QATPTQTestModule()
+        model.train()
+
+        self._prepare_qat_linears(model)
+
+        loss = torch.nn.MSELoss()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+        for i in range(2):
+            after_prepare_result_pt2e = model(*example_inputs)
+            target = torch.rand_like(after_prepare_result_pt2e)
+            output = loss(after_prepare_result_pt2e, target)
+            output.backward()
+            optimizer.step()
+
+        state_dict_before = copy.deepcopy(model.state_dict())
+        torch.save(model.state_dict(), buffer)
+        buffer.seek(0)
+        model.load_state_dict(torch.load(buffer))
+        for i in range(2):
+            after_prepare_result_pt2e = model(*example_inputs)
+            target = torch.rand_like(after_prepare_result_pt2e)
+            output = loss(after_prepare_result_pt2e, target)
+            output.backward()
+            optimizer.step()
+
+        self.assertNotEqual(state_dict_before, model.state_dict())
+        state_dict_before = copy.deepcopy(model.state_dict())
+        buffer = io.BytesIO()
+        torch.save(model.state_dict(), buffer)
+
+        buffer.seek(0)
+        model.load_state_dict(torch.load(buffer))
+        self.assertEqual(state_dict_before, model.state_dict())
+        self._convert_qat_linears(model)
+        quant_result_pt2e = model(*example_inputs)
+
+        model_pt2e = capture_pre_autograd_graph(
+            model,
+            example_inputs,
+        )
+
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_module_type(torch.nn.Linear, None)
+        quantization_config = get_symmetric_quantization_config()
+        quantizer.set_global(quantization_config)
+        model_pt2e = prepare_pt2e(model_pt2e, quantizer)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+        model_pt2e = convert_pt2e(model_pt2e)
+        quant_result_pt2e = model_pt2e(*example_inputs)
+
+        exported_model = torch.export.export(model_pt2e, example_inputs)
+
+        node_occurrence = {
+            # conv2d: 1 for act, 1 for weight, 1 for output
+            # 3 x linear: 1 for act, 1 for output
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 9,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 9,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_channel.default
+            ): 3,
+            # There needs to be one for hardtanh
+        }
+        self.checkGraphModuleNodes(
+            exported_model.graph_module, expected_node_occurrence=node_occurrence
+        )
