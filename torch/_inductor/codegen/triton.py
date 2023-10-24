@@ -2168,18 +2168,6 @@ class TritonKernel(Kernel):
             triton=True,
         )
 
-    def codegen_nan_check(self):
-        if not config.nan_asserts:
-            return
-
-        wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
-        for arg in call_args:
-            line = f"assert not {arg}.isnan().any().item()"
-            wrapper.writeline(line)
-            line = f"assert not {arg}.isinf().any().item()"
-            wrapper.writeline(line)
-
     def warn_mix_layout(self, kernel_name):
         """
         Print message if the kernel have mixed layout inputs.
@@ -2613,7 +2601,6 @@ class TritonScheduling(BaseScheduling):
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
-        kernel.codegen_nan_check()
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
