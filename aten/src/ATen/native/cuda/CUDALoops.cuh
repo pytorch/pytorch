@@ -190,7 +190,42 @@ invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[]
 
 
 template <typename func_t>
+void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+
+  at::detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+
+  int64_t numel = iter.numel();
+
+  bool contiguous = iter.is_contiguous();
+
+  if (contiguous) {
+    return launch_vectorized_kernel(numel, f, data);
+  }
+  auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+  constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
+  launch_legacy_kernel<128,unroll_factor>(numel, [=]GPU_LAMBDA(int idx) {
+    auto offsets = offset_calc.get(idx);
+    arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+    *out = invoke(f, &data.data[1], &offsets.data[1], 1);
+  });
+}
+
+template <typename func_t>
 void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
+  if (!needs_dynamic_casting<func_t>::check(iter)) {
+    return gpu_kernel_impl_nocast(iter, f);
+  }
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;
@@ -207,40 +242,25 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   int64_t numel = iter.numel();
 
   bool contiguous = iter.is_contiguous();
-  bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
 
-  if (!dynamic_casting) {
-    if (contiguous) {
-      launch_vectorized_kernel(numel, f, data);
-    } else {
-        auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-        constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
-        launch_legacy_kernel<128,unroll_factor>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = invoke(f, &data.data[1], &offsets.data[1], 1);
-        });
-    }
+  if (contiguous) {
+    auto loader = memory::LoadWithCast<traits::arity>(iter);
+    auto storer = memory::StoreWithCast<1>(iter);
+    auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
+    auto output_offset_calculator = TrivialOffsetCalculator<1>();
+    launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
   } else {
-    if (contiguous) {
-      auto loader = memory::LoadWithCast<traits::arity>(iter);
-      auto storer = memory::StoreWithCast<1>(iter);
-      auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
-      auto output_offset_calculator = TrivialOffsetCalculator<1>();
-      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
-    } else {
-      at::detail::Array<ScalarType, ntensors> dtypes;
-      for (int i = 0; i < ntensors; i++) {
-        dtypes[i] = iter.dtype(i);
-      }
-      auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-      launch_legacy_kernel<128, 4>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        void* out = data[0] + offsets[0];
-        arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
+    at::detail::Array<ScalarType, ntensors> dtypes;
+    for (int i = 0; i < ntensors; i++) {
+      dtypes[i] = iter.dtype(i);
     }
+    auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+    launch_legacy_kernel<128, 4>(numel, [=]GPU_LAMBDA(int idx) {
+      auto offsets = offset_calc.get(idx);
+      void* out = data[0] + offsets[0];
+      arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+      c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+    });
   }
 }
 

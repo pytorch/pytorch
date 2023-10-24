@@ -94,30 +94,34 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_hsdp_init_with_device_mesh(self):
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        print(f"mesh_2d:{mesh_2d}")
         model, optim = self._create_model(mesh_2d)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(),
-            optim_state_dict_config=ShardedOptimStateDictConfig(),
         )
-        state_dict_type = model.get_state_dict_type(model)
+        state_dict = model.state_dict()
+        optim_state_dict = FSDP.optim_state_dict(model, optim)
 
+        for v in state_dict.values():
+            self.assertEqual(type(v), DTensor)
+            self.assertEqual(len(v.placements), 2)
+            self.assertEqual(v.placements, (Replicate(), Shard(0)))
+            self.assertEqual(v.device_mesh, mesh_2d)
+
+        for state in optim_state_dict["state"].values():
+            for k, v in state.items():
+                if k != "step":
+                    self.assertEqual(type(v), DTensor)
+                    self.assertEqual(len(v.placements), 2)
+                    self.assertEqual(v.placements, (Replicate(), Shard(0)))
+                    self.assertEqual(v.device_mesh, mesh_2d)
+
+        state_dict_type = model.get_state_dict_type(model)
         # If device_mesh is used when initializing FSDP, the field _use_dtensor will
         # automatically be set to True.
         self.assertEqual(state_dict_type.state_dict_config._use_dtensor, True)
         self.assertEqual(state_dict_type.optim_state_dict_config._use_dtensor, True)
-
-        for v in model.state_dict().values():
-            self.assertEqual(v.placements, (Replicate(), Shard(0)))
-            self.assertEqual(v.device_mesh, mesh_2d)
-
-        for v in optim.state_dict()["state"].values():
-            if isinstance(v, DTensor):
-                self.assertEqual(v.placements, (Replicate(), Shard(0)))
-                self.assertEqual(v.device_mesh, mesh_2d)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -141,11 +145,12 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         FSDP.set_state_dict_type(
             ref_model,
             StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
             optim_state_dict_config=ShardedOptimStateDictConfig(
                 offload_to_cpu=offload_to_cpu
             ),
         )
-        sharded_tensor_sd = model.state_dict()
+        sharded_tensor_sd = ref_model.state_dict()
         sharded_tensor_osd = FSDP.optim_state_dict(ref_model, ref_optim)
 
         # Check dtensor and sharded_tensor model state dict values are identical
@@ -154,12 +159,14 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         ):
             k1, v1 = dtensor_sd
             k2, v2 = sharded_tensor_sd
-            if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
-                self.assertEqual(k1, k2)
-                # check whether local_tensor are the same
-                self.assertEqual(v1.to_local(), v2.local_tensor())
-                # check whether device are the same
-                self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+            self.assertEqual(k1, k2)
+
+            self.assertEqual(type(v1), DTensor)
+            self.assertEqual(type(v2), ShardedTensor)
+            # check whether local_tensor are the same
+            self.assertEqual(v1.to_local(), v2.local_tensor())
+            # check whether device are the same
+            self.assertEqual(v1.to_local().device, v2.local_tensor().device)
 
         # Check dtensor and sharde_tensor optim state dict values are identical
         for dtensor_osd_state, sharded_tensor_osd_state in zip(
@@ -173,12 +180,17 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             ):
                 k1, v1 = dtensor_hyper_param
                 k2, v2 = sharded_tensor_hyper_param
-                if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
-                    self.assertEqual(k1, k2)
+                self.assertEqual(k1, k2)
+
+                if k1 != "step":
+                    self.assertEqual(type(v1), DTensor)
+                    self.assertEqual(type(v2), ShardedTensor)
                     # check whether local_tensor are the same
                     self.assertEqual(v1.to_local(), v2.local_tensor())
                     # check whether device are the same
                     self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+                else:
+                    self.assertEqual(v1, v2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -230,6 +242,10 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 # check whether DTensor are the same
                 self.assertEqual(v1, v2)
 
+                if k1 != "step":
+                    self.assertEqual(type(v1), DTensor)
+                    self.assertEqual(type(v2), DTensor)
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
@@ -242,7 +258,6 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             StateDictType.SHARDED_STATE_DICT,
             state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
         )
-        state_dict_type = model.get_state_dict_type(model)
 
         checkpoint = io.BytesIO()
         torch.save(model.state_dict(), checkpoint)
@@ -263,6 +278,9 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         for (k1, v1), (k2, v2) in zip(ref_state_dict.items(), new_state_dict.items()):
             # check whether fqn are the same
             self.assertEqual(k1, k2)
+
+            self.assertEqual(type(v1), DTensor)
+            self.assertEqual(type(v2), DTensor)
             # check whether DTensor are the same
             self.assertEqual(v1, v2)
 

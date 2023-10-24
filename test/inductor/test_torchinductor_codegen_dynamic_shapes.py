@@ -126,7 +126,6 @@ test_failures = {
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_masked_scatter_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
-    "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
@@ -159,7 +158,6 @@ test_failures = {
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_bucketize_dynamic_shapes": TestFailure("cpu"),
     "test_bucketize_default_kwargs_dynamic_shapes": TestFailure("cpu"),
     "test_bucketize_int_dynamic_shapes": TestFailure("cpu"),
@@ -250,6 +248,7 @@ test_failures = {
     "test_rand_like_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_repeat_interleave_2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_slice_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_strided_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_transposed_propagates_dynamic_shapes": TestFailure(
@@ -267,6 +266,10 @@ test_failures = {
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
+    # The input of this case has only 1 elements
+    "test_mutations_loop_fusion_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
 }
 
 

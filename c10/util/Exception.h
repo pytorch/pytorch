@@ -3,11 +3,11 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/variant.h>
 
 #include <cstddef>
 #include <exception>
 #include <string>
+#include <variant>
 #include <vector>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
@@ -115,7 +115,7 @@ class C10_API Warning {
   class C10_API UserWarning {};
   class C10_API DeprecationWarning {};
 
-  using warning_variant_t = c10::variant<UserWarning, DeprecationWarning>;
+  using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
   Warning(
       warning_variant_t type,

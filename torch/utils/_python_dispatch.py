@@ -240,6 +240,7 @@ and output of type {type(ret)}. But expected types to match."""
 class AliasInfo:
     alias_set: Set[str]
     is_write: bool
+    name: Optional[str]
 
 @dataclass
 class SchemaInfo:
@@ -272,21 +273,25 @@ def get_alias_info(func) -> SchemaInfo:
         torchgen_schema = torchgen.model.FunctionSchema.parse(torchgen_schema_str)
         arg_schemas = [AliasInfo(
             alias_set=set() if a.annotation is None else set(a.annotation.alias_set),
-            is_write=a.annotation is not None and a.annotation.is_write
+            is_write=a.annotation is not None and a.annotation.is_write,
+            name=a.name,
         ) for a in torchgen_schema.arguments.flat_all]
         out_schemas = [AliasInfo(
             alias_set=set() if a.annotation is None else set(a.annotation.alias_set),
-            is_write=a.annotation is not None and a.annotation.is_write
+            is_write=a.annotation is not None and a.annotation.is_write,
+            name=a.name,
         ) for a in torchgen_schema.returns]
     else:
         # For non-aten ops, torchgen is untested so we rely on torchscript schema parsing
         arg_schemas = [AliasInfo(
             alias_set=set() if a.alias_info is None else set(a.alias_info.before_set),
-            is_write=a.alias_info is not None and a.alias_info.is_write
+            is_write=a.alias_info is not None and a.alias_info.is_write,
+            name=a.name,
         ) for a in func._schema.arguments]
         out_schemas = [AliasInfo(
             alias_set=set() if a.alias_info is None else set(a.alias_info.before_set),
-            is_write=a.alias_info is not None and a.alias_info.is_write
+            is_write=a.alias_info is not None and a.alias_info.is_write,
+            name=a.name,
         ) for a in func._schema.returns]
     schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
     parsed_schema_map[func] = schema_info
@@ -322,14 +327,20 @@ def return_and_correct_aliasing(func, args, kwargs, out):
             return alias_set[0]
         return None
 
-    def get_arg_idx_from_alias(output_alias):
+    def get_arg_from_alias(output_alias, schema_info, args, kwargs):
+        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(func, args=args, kwargs=kwargs)
+
         arg_indices = [
             i for i, a in enumerate(schema_info.args)
             if output_alias in a.alias_set
         ]
         # For any dispatcher op with an output alias, we expect it to map to exactly one alias in the schema's input arguments.
         assert len(arg_indices) == 1
-        return arg_indices[0]
+        idx = arg_indices[0]
+        arg_info = schema_info.args[idx]
+        if arg_info.name is not None and arg_info.name in new_kwargs:
+            return new_kwargs[arg_info.name]
+        return new_args[idx]
 
     # Fix up the storages of any outs so that they point to the same storage as the input,
     # if func is a view op.
@@ -370,12 +381,11 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
     if len(func._schema.returns) == 1:
-        arg_idx = get_arg_idx_from_alias(get_write_alias(schema_info.outs[0]))
-        return args[arg_idx]
+        return get_arg_from_alias(get_write_alias(schema_info.outs[0]), schema_info, args, kwargs)
 
     # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
     outs_to_return = type(out)([
-        args[get_arg_idx_from_alias(get_write_alias(schema_info.outs[i]))]
+        get_arg_from_alias(get_write_alias(schema_info.outs[i]), schema_info, args, kwargs)
         if get_write_alias(r) is not None else o
         for ((i, r), o) in zip(enumerate(schema_info.outs), out)
     ])

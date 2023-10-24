@@ -84,7 +84,7 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) (EXPR)
 #else
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) \
-  ((CHECK) ? (EXPR) : ([] { assert(!#CHECK); }(), (EXPR)))
+  ((CHECK) ? (EXPR) : ([] { assert(false); }(), (EXPR)))
 #endif
 
 #if defined(__CUDA_ARCH__)

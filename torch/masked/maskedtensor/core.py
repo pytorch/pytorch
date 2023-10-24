@@ -331,5 +331,6 @@ class MaskedTensor(torch.Tensor):
         return self.layout == torch.sparse_csr
 
     # Update later to support more sparse layouts
+    @property
     def is_sparse(self):
         return self.is_sparse_coo() or self.is_sparse_csr()

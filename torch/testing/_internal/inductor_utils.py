@@ -1,7 +1,7 @@
 from subprocess import CalledProcessError
 
 from torch._inductor.codecache import CppCodeCache
-from torch._inductor.utils import has_triton
+from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,

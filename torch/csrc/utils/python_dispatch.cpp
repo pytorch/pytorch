@@ -7,6 +7,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
@@ -587,6 +588,9 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(AutogradNestedTensor)
       DEF_ONE(AutogradOther)
       DEF_ONE(Autograd)
+      DEF_ONE(Conjugate)
+      DEF_ONE(ZeroTensor)
+      DEF_ONE(Negative)
       DEF_ONE(BackendSelect)
       DEF_ONE(ADInplaceOrView)
       DEF_ONE(PythonTLSSnapshot)
@@ -645,6 +649,9 @@ void initDispatchBindings(PyObject* module) {
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
 
+  m.attr("_additional_keys_to_prop_for_wrapper_tensors") =
+      py::cast(at::functorch::kKeysToPropagateToWrapper);
+
   m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) {
     return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t);
   });
@@ -692,6 +699,10 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ExcludeDispatchKeyGuard,
       c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
 
+  py_context_manager<
+      c10::impl::ForceDispatchKeyGuard,
+      c10::DispatchKeySet,
+      c10::DispatchKeySet>(m, "_ForceDispatchKeyGuard");
   py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
       m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
@@ -720,6 +731,16 @@ void initDispatchBindings(PyObject* module) {
         }
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
+
+  m.def(
+      "_parse_dispatch_key",
+      [](const char* dispatch_key) -> c10::optional<c10::DispatchKey> {
+        try {
+          return c10::parseDispatchKey(dispatch_key);
+        } catch (const c10::Error& err) {
+          return c10::nullopt;
+        }
+      });
 
   m.def(
       "_dispatch_get_registrations_for_dispatch_key",
@@ -761,6 +782,16 @@ void initDispatchBindings(PyObject* module) {
     return at::functionalization::impl::commit_update(a);
   });
 
+  m.def("_dispatch_key_for_device", [](const std::string& device_type) {
+    auto device = c10::Device(device_type);
+    TORCH_CHECK(
+        !device.has_index(),
+        "Expected device_type string to not have a device index; got ",
+        device_type);
+    return c10::toString(
+        c10::computeDispatchKey(c10::nullopt, c10::nullopt, device));
+  });
+
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
     return (
@@ -768,9 +799,14 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 
-  m.def("_get_singleton_int", [](int64_t data) {
-    return c10::SymInt(
-        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
+  m.def("_get_singleton_int", [](int64_t data, int64_t coeff) {
+    return c10::SymInt(c10::SymNode(
+        c10::make_intrusive<c10::SingletonSymNodeImpl>(data, coeff)));
+  });
+
+  m.def("_get_constant_bool_symnode", [](int64_t data) {
+    return c10::SymNode(
+        c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
   });
 
   using c10::impl::TorchDispatchModeKey;

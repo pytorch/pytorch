@@ -17,6 +17,7 @@ import math
 import operator
 import os
 import pstats
+import subprocess
 import sys
 import textwrap
 import threading
@@ -26,6 +27,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
 try:
@@ -33,27 +35,30 @@ try:
 except ModuleNotFoundError:
     np = None
 
-import torch._logging
-import torch._numpy as tnp
-from torch._guards import detect_fake_mode  # noqa: F401
-from torch._logging import LazyString
-from . import config
+try:
+    import torch._logging
+    import torch._numpy as tnp
+    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._logging import LazyString
+    from . import config
 
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+    if np:
+        NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-if np:
-    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+        NP_TO_TNP_MODULE = {
+            np: tnp,
+            np.fft: tnp.fft,
+            np.linalg: tnp.linalg,
+            np.random: tnp.random,
+        }
+    else:
+        NP_SUPPORTED_MODULES = {}
 
-    NP_TO_TNP_MODULE = {
-        np: tnp,
-        np.fft: tnp.fft,
-        np.linalg: tnp.linalg,
-        np.random: tnp.random,
-    }
-else:
-    NP_SUPPORTED_MODULES = {}
-
-    NP_TO_TNP_MODULE = {}
+        NP_TO_TNP_MODULE = {}
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+except ImportError:
+    pass
 
 import importlib
 
@@ -62,7 +67,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
@@ -93,22 +98,43 @@ def tabulate(rows, headers):
         )
 
 
-def dynamo_profiled(func):
+def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
-        datafn = (
-            func.__name__ + f"{next(timer_counter)}.profile"
-        )  # Name the data file sensibly
+        profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
         prof = cProfile.Profile()
         prof.enable()
         retval = prof.runcall(func, *args, **kwargs)
         prof.disable()
         print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
         ps = pstats.Stats(prof)
-        ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
-        ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
-        prof.dump_stats(datafn)
+        prof.dump_stats(profile_path)
+        svg_path = profile_path.with_suffix(".svg")
+        try:
+            gprof2dot_process = subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    str(profile_path),
+                ],
+                stdout=subprocess.PIPE,
+            )
+            subprocess.run(
+                ["dot", "-Tsvg", "-o", str(svg_path)], stdin=gprof2dot_process.stdout
+            )
+            print(f"Generated SVG from profile at {str(svg_path)}")
+        except FileNotFoundError:
+            print(
+                "Failed to generate SVG from profile -- dumping stats instead."
+                "Try installing gprof2dot and dot for a better visualization"
+            )
+            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
         return retval
 
     return profile_wrapper
@@ -178,8 +204,13 @@ def print_time_report():
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+
+
 def dynamo_timed(original_function=None, phase_name=None):
     def dynamo_timed_inner(func):
+        if config.cprofile:
+            return func
+
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
@@ -406,18 +437,15 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    if sys.version_info < (3, 9):
-        return isinstance(value, typing._GenericAlias)
-    else:
-        return isinstance(
-            # `_SpecialForm`` is the parent class of `Optional`
-            value,
-            (
-                typing._SpecialGenericAlias,
-                typing._UnionGenericAlias,
-                typing._SpecialForm,
-            ),
-        )
+    # _Final catches most of typing classes:
+    #   - Any
+    #   - Callable
+    #   - Union
+    #   ...
+    #
+    # NB: we intentionally ignore classes that inherit from Generic, since they
+    # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    return isinstance(value, typing._Final) or value is typing.Generic
 
 
 def is_numpy_int_type(value):
@@ -1168,11 +1196,14 @@ def format_func_info(code):
 def disable_cache_limit():
     prior = config.cache_size_limit
     config.cache_size_limit = sys.maxsize
+    prior_acc_limit = config.accumulated_cache_size_limit
+    config.accumulated_cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         config.cache_size_limit = prior
+        config.accumulated_cache_size_limit = prior_acc_limit
 
 
 # map from transformed code back to original user code
@@ -1306,6 +1337,15 @@ def get_debug_dir():
     return _get_debug_dir(debug_root)
 
 
+def extract_fake_example_value(node, required=True):
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+        return node.meta["example_value"]
+    elif required:
+        unimplemented("`FakeTensor` example value was required but not available")
+    else:
+        return None
+
+
 def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
@@ -1319,6 +1359,10 @@ def get_fake_value(node, tx):
     )
 
     op = node.op
+
+    # FX Node should always return the same fake value
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+        return node.meta["example_value"]
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
@@ -1381,16 +1425,16 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(
-                UserErrorType.CONSTRAIN_VIOLATION,
+            raise UserError(  # noqa: TRY200
+                UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
-                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
+                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
                 "You will need to explicitly give hint to the compiler. Please take a look at "
-                "constrain_as_value OR constrain_as_size APIs",
+                f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
-            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
@@ -1415,7 +1459,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
 
-    Behavior is dicatated by a node's op.
+    Behavior is dictated by a node's op.
 
     run_node is useful for extracting real values out of nodes.
     See get_real_value for more info on common usage.
@@ -1584,7 +1628,7 @@ def tensor_always_has_static_shape(
 
     Args:
     tensor - the real tensor to evaluate, parameters force a static shape.
-    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    is_tensor - internal dynamo check, essentially "is_tensor": target_cls is TensorVariable,
     tensors not in a TensorVariable for whatever reason are forced static.
 
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
@@ -1712,7 +1756,7 @@ def to_numpy_helper(value):
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.cpu().numpy()
+        return value.numpy(force=True)
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1823,7 +1867,7 @@ def defake(x):
 
 
 def is_utils_checkpoint(obj):
-    # Lazy import to avoid circular dependenices
+    # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
@@ -1833,8 +1877,8 @@ def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
-    # TODO - This is a temporary sitaution where we have two versions of
-    # checkpointing implemetation. We will converge on one and remove the other.
+    # TODO - This is a temporary situation where we have two versions of
+    # checkpointing implementation. We will converge on one and remove the other.
     activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
@@ -1852,7 +1896,7 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
+        from torch.utils._triton import has_triton
 
         compile_supported = has_triton()
     else:
@@ -2126,3 +2170,36 @@ def get_static_address_type(t):
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
+
+
+def is_rng_state_getter_or_setter(value):
+    getters = (
+        torch.default_generator.get_state,
+        torch.get_rng_state,
+        torch.cuda.get_rng_state,
+    )
+    setters = (
+        torch.default_generator.set_state,
+        torch.set_rng_state,
+        torch.cuda.set_rng_state,
+    )
+    return value in (*setters, *getters)
+
+
+def is_tensor_base_attr_getter(value):
+    return (
+        isinstance(value, types.MethodWrapperType)
+        and value.__name__ == "__get__"
+        and isinstance(value.__self__, types.GetSetDescriptorType)
+        and value.__self__.__objclass__ is torch._C._TensorBase
+    )
+
+
+def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
+
+    return isinstance(vt, TensorWithTFOverrideVariable) or (
+        isinstance(vt, UserDefinedObjectVariable)
+        and hasattr(vt.value, "__torch_function__")
+    )

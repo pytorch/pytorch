@@ -43,6 +43,8 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
+extern const size_t kLargeBuffer;
+
 struct Stat {
   int64_t current = 0;
   int64_t peak = 0;
@@ -96,7 +98,7 @@ struct DeviceStats {
   Stat oversize_segments;
 
   // SIZE: maximum block size that is allowed to be split.
-  int64_t max_split_size = 0;
+  size_t max_split_size = 0;
 };
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
@@ -188,8 +190,6 @@ enum struct RecordContext {
   ALL = 3, // additionally record stacks for when something is freed
 };
 
-C10_CUDA_API void setAllocatorSettings(const std::string& env);
-
 // Size pretty-printer
 std::string format_size(uint64_t size);
 
@@ -251,7 +251,7 @@ class CUDAAllocator : public Allocator {
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
-  // instead it requres cudaMemcpyAsyncPeer
+  // instead it requires cudaMemcpyAsyncPeer
   //  with P2P Enabled, all combinations work
   //  with P2P Disabled:
   //                       cudaMalloc cudaMallocAsync/cuMemMap

@@ -955,7 +955,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "The new group's rank should be within the the world_size set by init_process_group",
+                "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -971,7 +971,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the the world_size set by init_process_group",
+                "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]
@@ -9771,7 +9771,7 @@ class DistributedTest:
             def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(device))._abort()
+                    pg._get_backend(torch.device(device))._shutdown()
                     time.sleep(1)
 
             if self.rank != 1:

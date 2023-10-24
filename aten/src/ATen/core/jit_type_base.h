@@ -145,11 +145,16 @@ struct as_shared_type<const T*> {
 
 struct TORCH_API Type {
   friend TORCH_API bool operator==(const Type& lhs, const Type& rhs);
- private:
+  private:
   TypeKind kind_;
 
   protected:
   Type(TypeKind kind) : kind_(kind) {}
+
+  Type(const Type&) = default;
+  Type& operator=(const Type&) = default;
+  Type(Type&&) noexcept = default;
+  Type& operator=(Type&&) noexcept = default;
 
   virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
     return str();
@@ -354,7 +359,7 @@ struct TORCH_API Type {
       // the representation is always OK, so here's an accessor to obey
       // the letter of the law.
       RawRepr rawRepr() const {
-        RawRepr repr;
+        RawRepr repr{};
         memcpy(&repr, reinterpret_cast<const char *>(this), sizeof(RawRepr));
         return repr;
       }
@@ -464,7 +469,7 @@ struct TORCH_API Type {
   }
 
   // Returns a human readable string that includes additional information like
-  // "type is inferred rather than explictly defined" to help construct more
+  // "type is inferred rather than explicitly defined" to help construct more
   // user-friendly messages.
   virtual std::string repr_str() const {
     return annotation_str();

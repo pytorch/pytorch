@@ -1,14 +1,17 @@
 import torch
-from torch._export import ExportedProgram
 from torch._guards import detect_fake_mode
+from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 
 
-def lift_constant_tensor_pass(ep: ExportedProgram) -> ExportedProgram:
+def lift_constant_tensor_pass(ep):
+    """
+    Takes an ExportedProgram and returns the ExportedProgram modified in-place,
+    with the constant tensors as buffers.
+    """
     if len([node for node in ep.graph.nodes if node.op == "placeholder"]) == 0:
         return ep
 
     graph_signature = ep.graph_signature
-    inputs_to_buffers = graph_signature.inputs_to_buffers
     buffers = graph_signature.buffers
 
     fake_mode = detect_fake_mode(
@@ -17,6 +20,7 @@ def lift_constant_tensor_pass(ep: ExportedProgram) -> ExportedProgram:
     assert fake_mode is not None
 
     first_user_input = None
+    lifted_buffers = []
     for node in ep.graph.nodes:
         if node.op == "placeholder" and node.name in graph_signature.user_inputs:
             first_user_input = node
@@ -36,16 +40,29 @@ def lift_constant_tensor_pass(ep: ExportedProgram) -> ExportedProgram:
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v
                 const_placeholder_node.meta["val"] = fake_mode.from_tensor(
-                    constant_tensor
+                    constant_tensor, static_shapes=True
                 )
                 const_placeholder_node.meta["val"].constant = constant_tensor
                 node.replace_all_uses_with(const_placeholder_node)
                 ep.graph.erase_node(node)
 
                 # Add the constant as a buffer to the graph signature
-                inputs_to_buffers[const_placeholder_node.name] = constant_tensor_fqn
+                lifted_buffers.append(
+                    InputSpec(
+                        kind=InputKind.BUFFER,
+                        arg=TensorArgument(name=const_placeholder_node.name),
+                        target=constant_tensor_fqn,
+                    )
+                )
                 buffers.append(constant_tensor_fqn)
                 ep.state_dict[constant_tensor_fqn] = constant_tensor
 
+    new_input_specs = []
+    for s in graph_signature.input_specs:
+        if s.kind == InputKind.USER_INPUT and len(lifted_buffers) > 0:
+            new_input_specs.extend(lifted_buffers)
+            lifted_buffers.clear()
+        new_input_specs.append(s)
+    ep.graph_signature.input_specs = new_input_specs
     ep.graph_module.recompile()
     return ep

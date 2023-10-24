@@ -13,7 +13,7 @@ from typing import (
 )
 
 from _typeshed import Incomplete
-from typing_extensions import Never
+from typing_extensions import Never, TypeAlias
 
 import torch
 from torch._classes import classes as classes
@@ -65,7 +65,7 @@ ScriptFunction = torch._C.ScriptFunction
 type_trace_db: JitTypeTraceStore
 
 # Defined in torch/csrc/jit/python/script_init.cpp
-ResolutionCallback = Callable[[str], Callable[..., Any]]
+ResolutionCallback: TypeAlias = Callable[[str], Callable[..., Any]]
 ClassVar = TypeVar("ClassVar", bound=type)
 
 def _reduce(cls) -> None: ...
@@ -205,7 +205,7 @@ def script(
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
 ) -> Never: ...
 @overload
-def script(
+def script(  # type: ignore[misc]
     obj: Dict,
     optimize: Optional[bool] = None,
     _frames_up: int = 0,
@@ -213,7 +213,7 @@ def script(
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
 ) -> torch.ScriptDict: ...
 @overload
-def script(
+def script(  # type: ignore[misc]
     obj: List,
     optimize: Optional[bool] = None,
     _frames_up: int = 0,

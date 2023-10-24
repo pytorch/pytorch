@@ -144,52 +144,6 @@ def is_hip_clang() -> bool:
         return False
 
 
-# TODO Remove once gloo submodule is recent enough to contain upstream fix.
-if is_hip_clang():
-    gloo_cmake_file = "third_party/gloo/cmake/Hip.cmake"
-    do_write = False
-    if os.path.exists(gloo_cmake_file):
-        with open(gloo_cmake_file) as sources:
-            lines = sources.readlines()
-        newlines = [line.replace(" hip_hcc ", " amdhip64 ") for line in lines]
-        if lines == newlines:
-            print(f"{gloo_cmake_file} skipped")
-        else:
-            with open(gloo_cmake_file, "w") as sources:
-                for line in newlines:
-                    sources.write(line)
-            print(f"{gloo_cmake_file} updated")
-
-gloo_cmake_file = "third_party/gloo/cmake/Modules/Findrccl.cmake"
-if os.path.exists(gloo_cmake_file):
-    do_write = False
-    with open(gloo_cmake_file) as sources:
-        lines = sources.readlines()
-    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIB_PATH") for line in lines]
-    if lines == newlines:
-        print(f"{gloo_cmake_file} skipped")
-    else:
-        with open(gloo_cmake_file, "w") as sources:
-            for line in newlines:
-                sources.write(line)
-        print(f"{gloo_cmake_file} updated")
-
-# TODO Remove once gloo submodule is recent enough to contain upstream fix.
-if is_hip_clang():
-    gloo_cmake_file = "third_party/gloo/cmake/Dependencies.cmake"
-    do_write = False
-    if os.path.exists(gloo_cmake_file):
-        with open(gloo_cmake_file) as sources:
-            lines = sources.readlines()
-        newlines = [line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS") for line in lines]
-        if lines == newlines:
-            print(f"{gloo_cmake_file} skipped")
-        else:
-            with open(gloo_cmake_file, "w") as sources:
-                for line in newlines:
-                    sources.write(line)
-            print(f"{gloo_cmake_file} updated")
-
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
