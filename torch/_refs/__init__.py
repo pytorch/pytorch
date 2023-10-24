@@ -5357,7 +5357,6 @@ def _like_constructor(
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
-        memory_format=memory_format,
     )
 
     if memory_format == torch.preserve_format:
@@ -5365,6 +5364,8 @@ def _like_constructor(
             utils.compute_elementwise_output_logical_to_physical_perm(a)
         )
         result = result.to_permuted(logical_to_physical_perm)
+    else:
+        result = result.to(memory_format=memory_format)
     return result
 
 
