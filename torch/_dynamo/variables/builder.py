@@ -663,11 +663,6 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif issubclass(type(value), type):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return UserDefinedClassVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
