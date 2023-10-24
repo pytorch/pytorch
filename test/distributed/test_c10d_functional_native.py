@@ -42,9 +42,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        torch._C._distributed_c10d._register_process_group(
-            "default", dist.group.WORLD
-        )
+        torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce(self) -> None:
