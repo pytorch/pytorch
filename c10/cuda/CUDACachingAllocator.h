@@ -98,7 +98,7 @@ struct DeviceStats {
   Stat oversize_segments;
 
   // SIZE: maximum block size that is allowed to be split.
-  int64_t max_split_size = 0;
+  size_t max_split_size = 0;
 };
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
