@@ -543,6 +543,10 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
 def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    if dtype.is_complex or x.get_dtype().is_complex:
+        return TensorBox.create(
+            ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
+        )
     return to_dtype_bitcast(x, dtype, copy=True)
 
 
@@ -1602,17 +1606,20 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
+def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
+        # Complex views are supported with IR ComplexView
+        if parent and parent.target == torch.ops.aten.view.dtype:
+            return False
         _warn_complex_not_supported()
         return True
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t):
+    if unsupported_input_tensor(t, parent):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1626,7 +1633,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.lift_fresh_copy.default:
         return False
 
-    def check_skip_condition(node, is_output):
+    def check_skip_condition(node, parent, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
 
@@ -1638,20 +1645,20 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta):
+                if unsupported_output_tensor(meta, parent):
                     return True
             else:
-                if unsupported_input_tensor(meta):
+                if unsupported_input_tensor(meta, parent):
                     return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, is_output=False):
+        if check_skip_condition(arg, node, is_output=False):
             return True
 
-    return check_skip_condition(node, is_output=True)
+    return check_skip_condition(node, node, is_output=True)
 
 
 def make_fallback(op, layout_constraint=None, warn=True):
