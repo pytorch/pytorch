@@ -324,7 +324,7 @@ class TorchVariable(VariableTracker):
             torch.nn.modules.utils._quadruple,
             torch.nn.modules.utils._ntuple,
         ):
-            return self._call_ntuple(tx, args, kwargs, {})
+            return self._call_ntuple(tx, args, kwargs)
         elif self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable

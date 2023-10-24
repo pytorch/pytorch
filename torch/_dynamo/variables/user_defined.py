@@ -152,7 +152,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             if isinstance(self, variables.UserDefinedClassVariable):
-                options = {**options, "type_tracker": self}
+                options = {"type_tracker": self}
             var = tx.output.side_effects.track_object_new(
                 self.source,
                 self.value,
