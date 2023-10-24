@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import operator
 import os
 import warnings
 from collections import defaultdict
@@ -8,7 +9,6 @@ from collections.abc import Iterable
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
-import operator
 
 import torch
 import torch.fx
@@ -2024,6 +2024,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
     )
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
+
 
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
