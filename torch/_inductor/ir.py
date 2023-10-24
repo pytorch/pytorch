@@ -2234,24 +2234,17 @@ class Layout(IRNode):
         if not self.stride:
             return True
 
-        # ignore expanded dims
-        stride = self.stride
-        size = self.size
-        while (
-            stride
-            and V.graph.sizevars.size_hint(stride[0]) == 0
-            and V.graph.sizevars.size_hint(size[0]) == 1
-        ):
-            stride = stride[1:]
-            size = size[1:]
-            order = order[1:]
+        # ignore dimensions of size 1, they dont affect layout
+        non_1_indices = [i for i, dim in enumerate(self.size) if V.graph.sizevars.size_hint(dim) != 1]
+
+        stride = [self.stride[i] for i in non_1_indices]
+        order = [order[i] for i in non_1_indices]
 
         def sorted_indices(arr):
             sorted_arr = sorted(arr)
             return [sorted_arr.index(element) for element in arr]
 
-        # since we may have removed expanded dimension, need to re-sort & re-index
-        # or original order may have an element out of bounds
+        # since we may have removed dimensions, need to re-sort & re-index order
         order = sorted_indices(order)
 
         # reorder the stride given order
