@@ -1530,6 +1530,10 @@ class OnnxModelFromDynamo(OnnxModel):
         super().__init__(output_directory, model, example_inputs, dynamic_shapes)
         self._dynamic_shapes = dynamic_shapes
         self._export_output = self._export(model, example_inputs, self.model_path)
+        # Clear the model proto to save memory.
+        # The model proto is saved to disk and no longer needed from `export_output`.
+        # `export_output` is kept for i/o adapter usage.
+        self._export_output.model_proto.Clear()
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(
@@ -2303,6 +2307,7 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
+            model_fp64 = None
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
                     self.deepcopy_and_maybe_ddp(model),
@@ -2323,6 +2328,8 @@ class BenchmarkRunner:
                 )
                 self.args.cosine = True
                 fp64_outputs = None
+            finally:
+                del model_fp64
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2334,6 +2341,7 @@ class BenchmarkRunner:
 
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2348,9 +2356,12 @@ class BenchmarkRunner:
                 )
                 log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2364,6 +2375,8 @@ class BenchmarkRunner:
                     else "eager_2nd_run_fail"
                 )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2393,6 +2406,7 @@ class BenchmarkRunner:
             # Run with Dynamo
             reset_rng_state()
             torch._dynamo.reset()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2419,6 +2433,8 @@ class BenchmarkRunner:
                     else "fail_to_run"
                 )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
