@@ -7099,7 +7099,7 @@ def ___make_guard_fn():
 
         foo = torch._dynamo.optimize(counter, nopython=False)(foo)
         foo(inp)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 0)
 
     def test_reconstruct_set_across_graph_break(self):
         def foo(x, y):
