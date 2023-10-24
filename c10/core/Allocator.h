@@ -247,7 +247,7 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
       Device device) = 0;
 
   virtual void reportOutOfMemory(
-      size_t alloc_size,
+      int64_t alloc_size,
       size_t total_allocated,
       size_t total_reserved,
       Device device);
@@ -264,7 +264,7 @@ C10_API void reportMemoryUsageToProfiler(
     Device device);
 
 C10_API void reportOutOfMemoryToProfiler(
-    size_t alloc_size,
+    int64_t alloc_size,
     size_t total_allocated,
     size_t total_reserved,
     Device device);

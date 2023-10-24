@@ -11,6 +11,7 @@ import torch._dynamo
 import torch.fx
 import torch.onnx
 from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal.diagnostics import infra
 
 
 class TorchExport(exporter.FXGraphExtractor):
@@ -49,8 +50,11 @@ class TorchExport(exporter.FXGraphExtractor):
         self.input_adapter.append_step(
             io_adapter.PrependParamsAndBuffersAotAutogradInputStep(model)
         )
-
         updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+
+        # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
+        # tensor, etc), we flatten the collection and register each element as output.
+        options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
 
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
@@ -63,8 +67,22 @@ class TorchExport(exporter.FXGraphExtractor):
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
-        # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
-        # tensor, etc), we flatten the collection and register each element as output.
-        options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+        # TODO: Import here to prevent circular dependency
+        from torch.onnx._internal.fx import analysis, passes
+
+        diagnostic_context = options.diagnostic_context
+
+        # ONNX does not support concept of (implicit) type promotion.
+        # Insert type casts explicitly where needed.
+        fx_module = passes.InsertTypePromotion(diagnostic_context, fx_module).run()
+
+        analysis.UnsupportedFxNodesAnalysis(
+            diagnostic_context, fx_module, options.onnxfunction_dispatcher
+        ).analyze(infra.levels.ERROR)
+
+        # TODO: Disabled this pass until "Segmentation fault (core dumped)" is fixed
+        # This operation should be invoked as the last pre export pass.
+        # See [NOTE: Modularize pass ordering]
+        # fx_module = passes.Modularize(diagnostic_context, fx_module).run()
 
         return fx_module
