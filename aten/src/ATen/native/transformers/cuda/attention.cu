@@ -858,11 +858,11 @@ _flash_attention_forward(
   debug_attn_mask =
       return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
   return std::make_tuple(
-      output,
-      logsumexp,
-      philox_seed,
-      philox_offset,
-      debug_attn_mask);
+      std::move(output),
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
 
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
