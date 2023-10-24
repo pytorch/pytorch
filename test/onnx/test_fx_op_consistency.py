@@ -371,6 +371,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
     ),
+    # See https://github.com/pytorch/pytorch/issues/111454
+    xfail(
+        "cumsum", dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("RUNTIME_EXCEPTION : \
+            Exception during initialization: /onnxruntime_src/onnxruntime/core/framework/\
+            allocation_planner.cc:230 int& onnxruntime::PlannerImpl::\
+            UseCount(onnxruntime::OrtValueIndex) n >= 0 && static_cast<size_t>(n) \
+            < ort_value_info_.size() was false.")
+    ),
     xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
