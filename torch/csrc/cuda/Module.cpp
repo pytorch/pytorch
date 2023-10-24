@@ -898,7 +898,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #else
           &cudaDeviceProp::name
 #endif // USE_ROCM
-      )
+          )
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
