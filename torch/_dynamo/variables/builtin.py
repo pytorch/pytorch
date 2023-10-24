@@ -1233,7 +1233,7 @@ class BuiltinVariable(VariableTracker):
                     getattr_var = None
 
                 if isinstance(getattr_var, variables.TensorVariable):
-                    # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
+                    # get_fake_val will get the same fake tensor
                     existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
 
                     # same tensor identiy, setattr is a no-op
