@@ -42,7 +42,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -61,7 +61,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
