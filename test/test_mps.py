@@ -11172,7 +11172,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES:
+        if dtype not in MPS_DTYPES + [torch.complex64]:
             with self.assertRaises(TypeError):
                 ones(device)
         else:

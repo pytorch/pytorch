@@ -86,6 +86,7 @@ static bool fill_mps_tensor_(Tensor& self, uint8_t value) {
 }
 
 Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
+  // check if it's possible to use fillBuffer() to fill the Tensor's storage
   if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
     return self;
 
@@ -95,8 +96,8 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
     auto self_as_real_imag = self_as_real.select(self.dim(), 1);
     if (value.isComplex()) {
       auto value_cdouble = value.to<c10::complex<double>>();
-      fill_scalar_mps_impl(self_as_real_real, Scalar(value_cdouble.real()));
-      fill_scalar_mps_impl(self_as_real_imag, Scalar(value_cdouble.imag()));
+      fill_scalar_mps_impl(self_as_real_real, value_cdouble.real());
+      fill_scalar_mps_impl(self_as_real_imag, value_cdouble.imag());
       return self;
     }
     fill_scalar_mps_impl(self_as_real_real, value);
@@ -118,9 +119,6 @@ Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
 }
 
 Tensor& zero_mps_(Tensor& self) {
-  // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (fill_mps_tensor_(self, 0) == true)
-    return self;
   return fill_scalar_mps(self, 0.0f);
 }
 
