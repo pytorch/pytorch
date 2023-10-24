@@ -1106,18 +1106,6 @@ class VariableBuilder:
         tensor_proxy.node.meta["grapharg"] = grapharg
         self.tx.output.add_symbol_bindings(grapharg)
 
-        if type(value) in config.traceable_tensor_subclasses:
-            # NB: This is slightly misnamed, a tensor subclass might not have
-            # any explicit __torch_function__ implementation and is relying
-            # on the default inherited from torch.Tensor
-            torch_fn = VariableBuilder(
-                self.tx,
-                AttrSource(AttrSource(self.source, "__torch_function__"), "__func__"),
-            )(value.__torch_function__.__func__)
-            return TensorWithTFOverrideVariable.create(
-                self.tx, tensor_variable, torch_fn, type(value)
-            )
-
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value):
