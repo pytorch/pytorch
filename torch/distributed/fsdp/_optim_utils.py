@@ -1334,7 +1334,7 @@ def _convert_all_state_info(
     gathered_state_info: List[Dict[str, StateInfo]],
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
-) -> Tuple[torch.dtype, Dict[str, List[Optional[torch.Tensor]]]]:
+) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
     the StateInfo into the original state if the state is not a non-scalar
@@ -1350,11 +1350,11 @@ def _convert_all_state_info(
             {n for state in state_info for n in state.tensors.keys()}
         )
         empty_ranks: Set[int] = set()
+        dtype: Optional[torch.dtype] = None
         # First check all the non-scalar states and get the information of
         # states on each rank.
         for state_name in all_tensor_states:
             numels = []
-            dtype: Optional[torch.dtype] = None
             _empty_ranks: Set[int] = set()
             for rank, object_state in enumerate(state_info):
                 numels.append(0)
@@ -1375,6 +1375,11 @@ def _convert_all_state_info(
                     None for _ in fsdp_param_info.param_indices
                 ]
             local_state = input_states[fqn].get(state_name, None)
+            # N.B. We need to move the state to compute_device. The reason is
+            # not yet clear and we need to figure out why the state may be on a
+            # different device.
+            if local_state is not None:
+                local_state = local_state.to(fsdp_param_info.state.compute_device)
             state_buffers[state_name][fsdp_param_info.param_indices[fqn]] = local_state
 
         # Restoring the scalar and non-tensor states. If the corresponding
@@ -1398,7 +1403,6 @@ def _convert_all_state_info(
                 ), f"Different ranks have different values for {name}."
                 gathered_state[name] = scalar_tensor_value
 
-    assert dtype is not None  # typing purpose
     return dtype, state_buffers
 
 
@@ -1476,6 +1480,9 @@ def _allgather_orig_param_states(
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states
     )
+
+    if len(state_buffers) == 0:
+        return output_states
 
     has_state_params: List[bool] = [
         True if fqn in output_states else False

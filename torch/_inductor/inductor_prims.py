@@ -29,7 +29,7 @@ def make_prim(
     )
 
 
-def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
+def eager_force_stride(input_tensor: Tensor, stride) -> tuple[int, ...]:
     if input_tensor.stride() == stride:
         return input_tensor
     new_tensor = input_tensor.clone().as_strided(

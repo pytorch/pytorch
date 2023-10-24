@@ -17,7 +17,6 @@ from typing import (
     Callable,
     Dict,
     Generic,
-    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -77,29 +76,6 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
-
-    def select(self, locals_, globals_):
-        # SHAPE_ENV counts as locals, because the guard expressions
-        # created by shape env can reference f_locals
-        #
-        # RANDOM_VALUE counts as locals, because what we do is we run
-        # Python RNG and assign it to a temporary, and then perform
-        # guard tests on that temporary
-        if self in (
-            GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
-            GuardSource.LOCAL_FSDP_MODULE,
-            GuardSource.SHAPE_ENV,
-            GuardSource.RANDOM_VALUE,
-        ):
-            return locals_
-        if self in (
-            GuardSource.GLOBAL,
-            GuardSource.GLOBAL_NN_MODULE,
-            GuardSource.GLOBAL_FSDP_MODULE,
-        ):
-            return globals_
-        raise NotImplementedError(str(self))
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -256,8 +232,8 @@ class Guard:
         output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
         return output
 
-    def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
-        return self.create_fn(self.source.select(local_builder, global_builder), self)
+    def create(self, builder: GuardBuilderBase):
+        return self.create_fn(builder, self)
 
     def is_nn_module(self):
         return self.source.is_nn_module()
@@ -409,8 +385,7 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
 
 
 class GlobalContextCheckpointState:
-    # TODO set value type to Tuple[Callable, Unpack[Any]] when mypy supports Unpack.
-    global_state: Dict[str, Tuple[Any, ...]] = {}
+    global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def __init__(self, global_states):
         self.global_state = global_states
@@ -449,8 +424,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
     }
 
     def __init__(self):
-        # TODO set value type to Tuple[Callable, Unpack[Any]] when mypy supports Unpack.
-        self.global_state: Dict[str, Tuple[Any, ...]] = {}
+        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
         return GlobalContextCheckpointState(dict(self.global_state))
@@ -505,7 +479,7 @@ class GuardsSet:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
-    def update(self, *others: Iterable[Guard]):
+    def update(self, *others: Set[Guard]):
         for o in others:
             for g in o:
                 self.add(g, skip=1)
@@ -740,7 +714,7 @@ def compile_context(context: CompileContext):
 
 
 @contextmanager
-def tracing(context: Optional[TracingContext]):
+def tracing(context: TracingContext):
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.
@@ -789,8 +763,6 @@ class Source:
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-# Note - there is an odd exception to this invariant of a single base,
-# see class SuperSource
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source

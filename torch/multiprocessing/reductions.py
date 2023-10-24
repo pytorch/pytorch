@@ -290,6 +290,14 @@ def reduce_tensor(tensor):
     # eliminated it so that we could just use tensor views to implement the same
     # thing.
     #
+
+    # TODO: Handle distinguishing between subclass and non-subclass versions of NT better
+    # https://github.com/pytorch/pytorch/issues/110543
+    from torch.nested._internal.nested_tensor import NestedTensor
+
+    if tensor.is_nested and not isinstance(tensor, NestedTensor):
+        return reduce_nested_tensor(tensor)
+
     if storage._untyped_storage.device.type == "cuda":
         (
             device,
@@ -334,6 +342,48 @@ def reduce_tensor(tensor):
         tensor.requires_grad,
     )
     return (rebuild_tensor, (type(tensor), storage, metadata))
+
+
+def rebuild_nested_tensor(
+    rebuild_buffer_func,
+    rebuild_buffer_args,
+    rebuild_sizes_func,
+    rebuild_sizes_args,
+    rebuild_strides_func,
+    rebuild_strides_args,
+    rebuild_offsets_func,
+    rebuild_offsets_args,
+):
+    buffer = rebuild_buffer_func(*rebuild_buffer_args)
+    sizes = rebuild_sizes_func(*rebuild_sizes_args)
+    strides = rebuild_strides_func(*rebuild_strides_args)
+    offsets = rebuild_offsets_func(*rebuild_offsets_args)
+    return torch._nested_view_from_buffer_copy(buffer, sizes, strides, offsets)
+
+
+def reduce_nested_tensor(nt):
+    rebuild_buffer_func, rebuild_buffer_args = reduce_tensor(nt.values())
+    rebuild_sizes_func, rebuild_sizes_args = reduce_tensor(nt._nested_tensor_size())
+    rebuild_strides_func, rebuild_strides_args = reduce_tensor(
+        nt._nested_tensor_strides()
+    )
+    rebuild_offsets_func, rebuild_offsets_args = reduce_tensor(
+        nt._nested_tensor_storage_offsets()
+    )
+
+    return (
+        rebuild_nested_tensor,
+        (
+            rebuild_buffer_func,
+            rebuild_buffer_args,
+            rebuild_sizes_func,
+            rebuild_sizes_args,
+            rebuild_strides_func,
+            rebuild_strides_args,
+            rebuild_offsets_func,
+            rebuild_offsets_args,
+        ),
+    )
 
 
 def fd_id(fd):

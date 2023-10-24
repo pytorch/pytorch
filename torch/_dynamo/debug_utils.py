@@ -9,14 +9,14 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, TypeVar
+from typing import Callable, Optional, Sequence, TypeVar
 
 import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 
 from torch._dynamo.testing import rand_strided
-from torch._prims_common import is_float_dtype, ShapeType
+from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
@@ -376,7 +376,7 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")
+                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -467,7 +467,7 @@ def backend_accuracy_fails(
             ignore_non_fp=ignore_non_fp,
         )
     except Exception as e:
-        # This means that the the minified graph is bad/exposes a different problem.
+        # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
             "While minifying the program in accuracy minification mode, "
@@ -486,7 +486,9 @@ def backend_accuracy_fails(
 # values should be.  These all coincide with factory functions, e.g., torch.empty
 
 
-def _stride_or_default(stride: Optional[ShapeType], *, shape: ShapeType) -> ShapeType:
+def _stride_or_default(
+    stride: Optional[Sequence[int]], *, shape: Sequence[int]
+) -> Sequence[int]:
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 

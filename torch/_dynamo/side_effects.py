@@ -1,6 +1,6 @@
 import collections
 import inspect
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import torch.nn
 
@@ -40,7 +40,7 @@ class AttributeMutation(MutableLocalBase):
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    def __init__(self, typ: MutableLocalSource, source: Optional[Source]):
+    def __init__(self, typ: MutableLocalSource, source: Source):
         super().__init__(typ)
         self.source = source
 
@@ -52,7 +52,7 @@ class AttributeMutationExisting(AttributeMutation):
 
 
 class AttributeMutationNew(AttributeMutation):
-    def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
+    def __init__(self, source: Source, cls_source: Source):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
 
@@ -161,14 +161,14 @@ class SideEffects:
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
-        assert isinstance(item.mutable_local, AttributeMutation)
+        assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
 
     def load_attr(self, item, name, deleted_ok=False):
-        assert isinstance(item.mutable_local, AttributeMutation)
+        assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item.mutable_local][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
@@ -203,14 +203,14 @@ class SideEffects:
         return isinstance(item.mutable_local, AttributeMutation)
 
     def has_pending_mutation(self, item):
-        return isinstance(item.mutable_local, AttributeMutation) and bool(
+        return self.is_attribute_mutation(item) and bool(
             self.store_attr_mutations.get(item.mutable_local)
         )
 
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
             return True
-        if isinstance(item.mutable_local, AttributeMutation):
+        if self.is_attribute_mutation(item):
             return item.mutable_local in self.store_attr_mutations
         return item.mutable_local.is_modified
 
@@ -305,7 +305,7 @@ class SideEffects:
                 live_new_objects.add(var.mutable_local)
             return var
 
-        def is_live(var: Union[VariableTracker, MutableLocalBase]):
+        def is_live(var: VariableTracker):
             if isinstance(var, AttributeMutationNew):
                 return var in live_new_objects
             if isinstance(var, VariableTracker):
@@ -345,7 +345,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -407,7 +407,8 @@ class SideEffects:
             # because we are running residuals firmly before .backward() can be run, it is sound to invoke
             # `register_hook` on a known tensor.
             #
-            # For tensors without a source, we graph break for now.
+            # For tensors without a source, we support a limited subset of hooks. Global functions only, and
+            # compiled_autograd must be enabled or we will graph break.
             #
             # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
             # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
@@ -422,7 +423,10 @@ class SideEffects:
             #     - Issue a register_hook call on the tensor, linking to the globally stored function.
             #     - Incorporate a handle if one was established in the eager phase.
             #  - For tensors without sources:
-            #    - We graph break
+            #    - We don't generate any instructions for registering a hook.
+            #    - Handles from intermediary hooks are NYI.
+            #    - We produce a call function that utilizes the trace_wrapped higher order op, closing over it.
+            #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
@@ -485,7 +489,7 @@ class SideEffects:
                         create_instruction("POP_TOP"),
                     ]
                 )
-            elif isinstance(var.mutable_local, AttributeMutation):
+            elif self.is_attribute_mutation(var):
                 for name, value in self.store_attr_mutations.get(
                     var.mutable_local, {}
                 ).items():
@@ -521,6 +525,7 @@ class SideEffects:
     def is_empty(self):
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
+            or self.tensor_hooks
             or self.save_for_backward
             or self.tensor_hooks
         )

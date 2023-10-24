@@ -255,7 +255,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
-    "torch/csrc/jit/passes/cuda_graph_fuser.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
@@ -501,6 +500,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aoti_model_runner.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
@@ -686,6 +686,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
+    "torch/csrc/inductor/aoti_model_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
@@ -1322,7 +1323,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/PointwiseOps.cpp",
     "aten/src/ATen/native/Pooling.cpp",
     "aten/src/ATen/native/Pow.cpp",
-    "aten/src/ATen/native/QuantizedLinear.cpp",
     "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/RangeFactories.cpp",
     "aten/src/ATen/native/ReduceAllOps.cpp",

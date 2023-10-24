@@ -21,18 +21,13 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import (
-    AttrSource,
-    GetItemSource,
-    is_constant_source,
-    SuperSource,
-    TypeSource,
-)
+from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
@@ -43,6 +38,7 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import EventVariable, StreamVariable
 from .dicts import ConstDictVariable
 from .lists import (
     BaseListVariable,
@@ -138,6 +134,12 @@ class BuiltinVariable(VariableTracker):
             operator.truediv,
             operator.mod,
             operator.add,
+            operator.lt,
+            operator.gt,
+            operator.ge,
+            operator.le,
+            operator.ne,
+            operator.eq,
             operator.sub,
             operator.getitem,
             operator.lshift,
@@ -581,14 +583,20 @@ class BuiltinVariable(VariableTracker):
 
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if self.fn in (int, float) and isinstance(args[0], SymNodeVariable):
+        if self.fn in (int, float) and isinstance(
+            args[0], (SymNodeVariable, variables.TensorVariable)
+        ):
+            if isinstance(args[0], variables.TensorVariable):
+                item = args[0].call_method(tx, "item", [], {})
+            else:
+                item = args[0]
             fn_ = sym_int if self.fn is int else sym_float
             out = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_,
-                    (args[0].as_proxy(),),
+                    (item.as_proxy(),),
                     {},
                 ),
                 **options,
@@ -1000,13 +1008,15 @@ class BuiltinVariable(VariableTracker):
             val = arg_type is isinstance_type
         return variables.ConstantVariable.create(val)
 
+    def call_issubclass(self, tx, left_ty, right_ty):
+        """Checks if first arg is subclass of right arg"""
+        left_ty = left_ty.as_python_constant()
+        right_ty = right_ty.as_python_constant()
+
+        return variables.ConstantVariable(issubclass(left_ty, right_ty))
+
     def call_super(self, tx, a, b):
-        source = (
-            None
-            if a.source is None or b.source is None
-            else SuperSource(type=a.source, base=b.source)
-        )
-        return variables.SuperVariable(a, b, source=source)
+        return variables.SuperVariable(a, b)
 
     def call_next(self, tx, arg):
         if isinstance(arg, variables.ListIteratorVariable):
@@ -1121,7 +1131,6 @@ class BuiltinVariable(VariableTracker):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
                         unimplemented(f"unexpected sourceless type bases: {bases}")
-
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
                 pass
@@ -1246,12 +1255,30 @@ class BuiltinVariable(VariableTracker):
                         return getattr_var
 
             obj.convert_to_unspecialized(tx)
+        # FIXME (tmanlaibaatar) this is utter hack to unblock HuggingFace export
+        # Export generally doesn't want to allow mutations on objects directly,
+        # but we don't have good way to do this rn. For now, we make it an undefined
+        # behaviour and just set attributes directly on the PretrainedConfig object
+        # for now.
+        elif isinstance(obj, variables.dicts.HFPretrainedConfigVariable) and tx.export:
+            if name_var.is_python_constant() and isinstance(
+                val, variables.ConstantVariable
+            ):
+                setattr(
+                    obj.obj, name_var.as_python_constant(), val.as_python_constant()
+                )
+                return ConstantVariable(None)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder
+
+        try:
+            return obj.var_type()
+        except NotImplementedError:
+            pass
 
         try:
             py_type = obj.python_type()
@@ -1420,13 +1447,20 @@ class BuiltinVariable(VariableTracker):
                 op(left._underlying_items, right._underlying_items)
             )
 
-        if isinstance(left, TensorVariable):
+        if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
+
+            if op is operator.is_ and isinstance(right, TensorVariable):
+                return ConstantVariable.create(
+                    id(extract_fake_example_value(left.as_proxy().node))
+                    == id(extract_fake_example_value(right.as_proxy().node))
+                )
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
             if (
-                isinstance(right, TensorVariable)
+                isinstance(left, TensorVariable)
+                and isinstance(right, TensorVariable)
                 and (left.size and right.size) is not None
                 and left.size != right.size
             ):
@@ -1435,19 +1469,23 @@ class BuiltinVariable(VariableTracker):
                 except RuntimeError:
                     # not broadcastable, can't be compared
                     _unimplemented()
+            tensor_cls = left if isinstance(left, TensorVariable) else right
             return wrap_fx_proxy_cls(
-                type(left),  # handle Ndarrays and Tensors
+                type(tensor_cls),  # handle Ndarrays and Tensors
                 tx,
-                op(left.as_proxy(), right.as_proxy()),
+                proxy,
             )
 
         if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
 
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return SymNodeVariable.create(
                 tx,
-                op(left.as_proxy(), right.as_proxy()),
+                proxy,
                 sym_num=None,
             )
 
@@ -1458,6 +1496,12 @@ class BuiltinVariable(VariableTracker):
             right, UserDefinedObjectVariable
         ):
             return ConstantVariable.create(op(left.value, right.value))
+
+        if (
+            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
+            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
+        ) and op is operator.eq:
+            return ConstantVariable(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False

@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Reshape_3"
-    name: "Constant_0"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -20,7 +20,7 @@ graph {
     input: "onnx::Reshape_0"
     input: "onnx::Reshape_3"
     output: "onnx::Shape_4"
-    name: "Reshape_1"
+    name: "Reshape_7"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -30,7 +30,7 @@ graph {
   }
   node {
     output: "onnx::Reshape_5"
-    name: "Constant_2"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -46,7 +46,7 @@ graph {
     input: "onnx::Reshape_1"
     input: "onnx::Reshape_5"
     output: "onnx::Shape_6"
-    name: "Reshape_3"
+    name: "Reshape_9"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -56,7 +56,7 @@ graph {
   }
   node {
     output: "onnx::Reshape_7"
-    name: "Constant_4"
+    name: "Constant_10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -72,7 +72,7 @@ graph {
     input: "onnx::Reshape_2"
     input: "onnx::Reshape_7"
     output: "onnx::Shape_8"
-    name: "Reshape_5"
+    name: "Reshape_11"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -83,19 +83,19 @@ graph {
   node {
     input: "onnx::Shape_4"
     output: "onnx::Concat_9"
-    name: "Shape_6"
+    name: "Shape_12"
     op_type: "Shape"
   }
   node {
     input: "onnx::Shape_6"
     output: "onnx::Concat_10"
-    name: "Shape_7"
+    name: "Shape_13"
     op_type: "Shape"
   }
   node {
     input: "onnx::Shape_8"
     output: "onnx::Concat_11"
-    name: "Shape_8"
+    name: "Shape_14"
     op_type: "Shape"
   }
   node {
@@ -103,7 +103,7 @@ graph {
     input: "onnx::Concat_10"
     input: "onnx::Concat_11"
     output: "onnx::Expand_12"
-    name: "Concat_9"
+    name: "Concat_15"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -113,7 +113,7 @@ graph {
   }
   node {
     output: "onnx::Concat_13"
-    name: "Constant_10"
+    name: "Constant_16"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -130,7 +130,7 @@ graph {
     input: "onnx::Concat_13"
     input: "onnx::Concat_13"
     output: "onnx::Reshape_14"
-    name: "Concat_11"
+    name: "Concat_17"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -142,7 +142,7 @@ graph {
     input: "onnx::Shape_4"
     input: "onnx::Reshape_14"
     output: "onnx::Expand_15"
-    name: "Reshape_12"
+    name: "Reshape_18"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -154,12 +154,12 @@ graph {
     input: "onnx::Expand_15"
     input: "onnx::Expand_12"
     output: "16"
-    name: "Expand_13"
+    name: "Expand_19"
     op_type: "Expand"
   }
   node {
     output: "onnx::Concat_17"
-    name: "Constant_14"
+    name: "Constant_20"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -176,7 +176,7 @@ graph {
     input: "onnx::Concat_10"
     input: "onnx::Concat_17"
     output: "onnx::Reshape_18"
-    name: "Concat_15"
+    name: "Concat_21"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -188,7 +188,7 @@ graph {
     input: "onnx::Shape_6"
     input: "onnx::Reshape_18"
     output: "onnx::Expand_19"
-    name: "Reshape_16"
+    name: "Reshape_22"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -200,12 +200,12 @@ graph {
     input: "onnx::Expand_19"
     input: "onnx::Expand_12"
     output: "20"
-    name: "Expand_17"
+    name: "Expand_23"
     op_type: "Expand"
   }
   node {
     output: "onnx::Concat_21"
-    name: "Constant_18"
+    name: "Constant_24"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -222,7 +222,7 @@ graph {
     input: "onnx::Concat_21"
     input: "onnx::Concat_11"
     output: "onnx::Reshape_22"
-    name: "Concat_19"
+    name: "Concat_25"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -234,7 +234,7 @@ graph {
     input: "onnx::Shape_8"
     input: "onnx::Reshape_22"
     output: "onnx::Expand_23"
-    name: "Reshape_20"
+    name: "Reshape_26"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -246,7 +246,7 @@ graph {
     input: "onnx::Expand_23"
     input: "onnx::Expand_12"
     output: "24"
-    name: "Expand_21"
+    name: "Expand_27"
     op_type: "Expand"
   }
   name: "main_graph"

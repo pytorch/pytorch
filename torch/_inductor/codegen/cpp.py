@@ -847,7 +847,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def to_dtype_bitcast(x, dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"reinterpret_cast<{DTYPE_TO_CPP[dtype]}&>({x})"
+        return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):

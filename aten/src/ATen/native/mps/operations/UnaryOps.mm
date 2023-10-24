@@ -6,6 +6,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/MPSFunctions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
@@ -36,9 +37,12 @@
 #include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/reciprocal_native.h>
+#include <ATen/ops/reshape.h>
 #include <ATen/ops/round_native.h>
 #include <ATen/ops/rsqrt_native.h>
+#include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
+#include <ATen/ops/sign_mps_dispatch.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
@@ -47,6 +51,7 @@
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh_native.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -451,6 +456,32 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
+}
+
+TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
+  if (!self.is_complex()) {
+    at::mps::sign_outf(self, const_cast<Tensor&>(output));
+    return;
+  }
+
+  if (!output.is_same_size(self)) {
+    output.resize_(self.sizes());
+  }
+
+  Tensor realInput = at::view_as_real(self);
+  Tensor realOutput = at::view_as_real(output);
+
+  auto complex_sgn_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> MPSGraphTensor* {
+    MPSGraphTensor* squares = [mpsGraph squareWithTensor:inputTensor name:nil];
+    MPSGraphTensor* sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
+    MPSGraphTensor* norm = [mpsGraph squareRootWithTensor:sumSquares name:nil];
+    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:norm.dataType];
+    MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:norm secondaryTensor:zero name:nil];
+    MPSGraphTensor* sgnTensor = [mpsGraph divisionWithPrimaryTensor:inputTensor secondaryTensor:norm name:nil];
+    return [mpsGraph selectWithPredicateTensor:isZero truePredicateTensor:zero falsePredicateTensor:sgnTensor name:nil];
+  };
+
+  mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
 }
 
 } // namespace at::native

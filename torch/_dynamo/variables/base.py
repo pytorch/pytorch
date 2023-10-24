@@ -1,6 +1,6 @@
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
 from ..current_scope_id import current_scope_id
@@ -64,8 +64,6 @@ class MutableLocal(MutableLocalBase):
     state.
     """
 
-    source: Source
-
     def __init__(self):
         super().__init__(MutableLocalSource.Local)
 
@@ -109,10 +107,17 @@ class VariableTracker(metaclass=HasPostInit):
     """
 
     # fields to leave unmodified in apply()
-    _nonvar_fields = ["value"]
+    _nonvar_fields = {
+        "value",
+        "guards",
+        "source",
+        "mutable_local",
+        "recursively_contains",
+        "user_code_variable_name",
+    }
 
     @staticmethod
-    def propagate(*vars: Union["VariableTracker", Iterable["VariableTracker"]]):
+    def propagate(*vars: List[List["VariableTracker"]]):
         """Combine the guards from many VariableTracker into **kwargs for a new instance"""
         guards = set()
 
@@ -221,6 +226,13 @@ class VariableTracker(metaclass=HasPostInit):
 
     def python_type(self):
         raise NotImplementedError(f"{self} has no type")
+
+    def var_type(self):
+        """
+        Similar to python_type but
+        returns a VariableTracker containing the type.
+        """
+        raise NotImplementedError(f"{self} has no variable tracker-ed type")
 
     def as_python_constant(self):
         """For constants"""
@@ -351,9 +363,9 @@ class VariableTracker(metaclass=HasPostInit):
         self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local
-        self.recursively_contains: Set[
-            Any
-        ] = recursively_contains  # provides hint to replace_all when replacing vars
+        self.recursively_contains = (
+            recursively_contains  # provides hint to replace_all when replacing vars
+        )
         self.user_code_variable_name = user_code_variable_name
 
     def __post_init__(self, *args, **kwargs):

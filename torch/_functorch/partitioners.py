@@ -14,7 +14,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import List, Tuple, Union
+from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
@@ -624,7 +624,7 @@ def min_cut_rematerialization_partition(
 
     To create the fwd and bwd graph, we copy the joint graph, manually set the
     outputs to just original forward or backward outputs. And then we run the
-    resulting graphs through dead code elimintation.
+    resulting graphs through dead code elimination.
 
     .. warning::
         This API is experimental and likely to change.
@@ -845,7 +845,7 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
 
@@ -916,7 +916,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: Union[str, List[str]] = None,
+    prog: str = None,
     parse_stack_trace: bool = False,
 ) -> None:
     if clear_meta:

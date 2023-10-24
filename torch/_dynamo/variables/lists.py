@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.fx
+from torch._subclasses.fake_tensor import is_fake
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
@@ -25,27 +26,47 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 
 
-def _listlike_contains_helper(items, search, tx, options):
+def _get_fake_tensor(vt):
+    fake_tensor = vt.as_proxy().node.meta.get("example_value")
+    if not is_fake(fake_tensor):
+        unimplemented("Cannot check Tensor object identity without its fake value")
+    return fake_tensor
+
+
+def _listlike_contains_helper(items, search, tx, options, check_tensor_identity=False):
     if search.is_python_constant():
-        result = any(
-            x.as_python_constant() == search.as_python_constant() for x in items
+        found = any(
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
         )
-        return variables.ConstantVariable.create(result, **options)
+        return variables.ConstantVariable.create(found, **options)
 
     from .builtin import BuiltinVariable
 
-    result = None
+    must_check_tensor_id = False
+    if check_tensor_identity and isinstance(search, variables.TensorVariable):
+        must_check_tensor_id = True
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
+
+    found = None
     for x in items:
-        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-        if result is None:
-            result = check
+        if must_check_tensor_id:
+            if isinstance(x, variables.TensorVariable):
+                if search is _get_fake_tensor(x):  # Object equivalence
+                    return ConstantVariable.create(True)
         else:
-            result = BuiltinVariable(operator.or_).call_function(
-                tx, [check, result], {}
-            )
-    if result is None:
-        result = ConstantVariable.create(None)
-    return result
+            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            if found is None:
+                found = check
+            else:
+                found = BuiltinVariable(operator.or_).call_function(
+                    tx, [check, found], {}
+                )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 class BaseListVariable(VariableTracker):
@@ -152,6 +173,12 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
             return _listlike_contains_helper(self.items, args[0], tx, options)
+        elif name == "index":
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -379,6 +406,12 @@ class ListVariable(CommonListMethodsVariable):
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not list:
+            return super().call_hasattr(tx, name)
+        options = VariableTracker.propagate(self)
+        return variables.ConstantVariable.create(hasattr([], name), **options)
 
 
 class DequeVariable(CommonListMethodsVariable):
@@ -639,7 +672,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                unimplemented(f"NamedTupleVariable.{name}")
+                super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)].add_options(self)
 
@@ -786,15 +819,22 @@ class SetVariable(VariableTracker):
     # Note - this is only used for producing a set
     def _as_set_element(self, vt):
         from .base import VariableTracker
+        from .misc import MethodWrapperVariable
         from .tensor import TensorVariable
 
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            tensor_node = vt.as_proxy().node
-            return SetVariable.SetElement(vt, tensor_node)
+            fake_tensor = vt.as_proxy().node.meta.get("example_value")
+            if fake_tensor is None:
+                unimplemented(
+                    "Cannot check Tensor object identity without its fake value"
+                )
+            return SetVariable.SetElement(vt, fake_tensor)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, MethodWrapperVariable):
+            return SetVariable.SetElement(vt, vt.as_python_constant())
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
@@ -871,7 +911,9 @@ class SetVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return _listlike_contains_helper(self.items, args[0], tx, options)
+            return _listlike_contains_helper(
+                self.items, args[0], tx, options, check_tensor_identity=True
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
