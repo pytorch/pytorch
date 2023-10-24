@@ -330,10 +330,10 @@ def reorder_compute_and_comm_for_overlap(
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
         if torch.distributed.get_rank() == 0:
-            overlap_log.debug(f"==== Visualization of overlap before reordering pass {p} ====")
+            overlap_log.debug(f"==== Visualize overlap before reordering pass {p} ====")
             visualize_overlap(order)
         order = p(order)  # type: ignore[operator]
         if torch.distributed.get_rank() == 0:
-            overlap_log.debug(f"==== Visualization of overlap after reordering pass {p} ====")
+            overlap_log.debug(f"==== Visualize overlap after reordering pass {p} ====")
             visualize_overlap(order)
     return order

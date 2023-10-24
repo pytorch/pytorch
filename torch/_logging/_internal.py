@@ -293,7 +293,7 @@ def set_logs(
         fusion (:class:`bool`):
             Whether to emit detailed Inductor fusion decisions. Default: ``False``
 
-        fusion (:class:`bool`):
+        overlap (:class:`bool`):
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
         modules (dict):

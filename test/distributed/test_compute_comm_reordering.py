@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.utils._triton import has_triton
-from torch.testing._internal.logging_utils import make_logging_test
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):
