@@ -602,7 +602,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
-        mapped_tensor_fake_value = get_fake_value(args[1].as_proxy().node, tx)
+        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
 
         if len(sample_shape) < 1 or sample_shape[0] == 0:
             unimplemented(
@@ -654,7 +654,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r.new_empty(
-            [mapped_tensor_fake_value.shape[0], *r.shape]
+            [sample_shape[0], *r.shape]
         )
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
