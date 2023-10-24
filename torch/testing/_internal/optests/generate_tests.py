@@ -721,7 +721,7 @@ class FailuresDict:
             else:
                 dct = json.loads(contents)
                 assert "data" in dct
-                assert "_version" in dct and dct["_version"] == version
+                assert "_version" in dct and dct["_version"] == VERSION
         return FailuresDict(path, dct["data"])
 
     def _save(self, to_str=False) -> Optional[str]:
