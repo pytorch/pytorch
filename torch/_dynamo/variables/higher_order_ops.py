@@ -391,6 +391,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
+        args = VariableTracker.apply(lambda x: x.realize(), args)
+        kwargs = VariableTracker.apply(lambda x: x.realize(), kwargs)
+
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
@@ -599,8 +602,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
-        assert type(args[1]) is TensorVariable
+        assert type(args[0].realize()) in (
+            UserFunctionVariable,
+            NestedUserFunctionVariable,
+        )
+        assert type(args[1].realize()) is TensorVariable
 
         sample_shape = args[1].get_real_value().size()
         if len(sample_shape) < 1 or sample_shape[0] == 0:
