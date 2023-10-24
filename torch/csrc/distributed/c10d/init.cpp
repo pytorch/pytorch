@@ -2239,12 +2239,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_abort",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::optional<std::string>& abortReason) {
-                return self->abort(abortReason);
+              "_shutdown",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+                return self->shutdown();
               },
-              py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
