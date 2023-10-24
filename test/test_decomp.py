@@ -164,9 +164,6 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
 
 
 def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs):
-    if decomp == NotImplemented:
-        return
-
     assert orig.dtype == decomp.dtype, f"{i} Operation:  {op}"
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
@@ -215,9 +212,6 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
 
 
 def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
-    if decomp == NotImplemented:
-        return
-
     test_case.assertEqual(
         orig.dtype, decomp.dtype, f"Operation: {op}, orig.dtype: {orig.dtype}, decomp.dtype: {decomp.dtype}, {args}, {kwargs}")
     # Before adding an entry to this table, make sure your decomposition is right :)
