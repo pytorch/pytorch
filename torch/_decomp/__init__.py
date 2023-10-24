@@ -416,7 +416,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.threshold,
             aten.threshold_,
             aten.threshold_backward,
-            aten.to_permuted,
             aten.trace,
             aten.transpose.int,
             aten.tril,
