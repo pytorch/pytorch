@@ -300,7 +300,7 @@ def node_summary(snode):
 
 
 def visualize_overlap(order):
-    total_est_runtime = 0
+    total_est_runtime: float = 0.0
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
@@ -313,7 +313,7 @@ def visualize_overlap(order):
                 )
             else:  # exposed compute op
                 total_est_runtime += estimate_op_runtime(snode)
-            overlap_log.debug(f"{node_summary(snode)}")
+            overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
             if isinstance(snode.node, ir.CollectiveKernel):
                 raise Exception(
@@ -321,11 +321,13 @@ def visualize_overlap(order):
                     "`visualize_overlap` needs to be updated to handle this case."
                 )
             elif isinstance(snode.node, ir.Wait):  # end of this comm op
-                overlap_log.debug(f"{node_summary(snode)}")
+                overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op
                 overlap_log.debug(f"| {node_summary(snode)}")
-    overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
+    overlap_log.debug(
+        f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"
+    )  # noqa: G004
 
 
 def reorder_compute_and_comm_for_overlap(
@@ -336,10 +338,14 @@ def reorder_compute_and_comm_for_overlap(
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
         if torch.distributed.get_rank() == 0:
-            overlap_log.debug(f"==== Visualize overlap before reordering pass {p} ====")
+            overlap_log.debug(
+                f"==== Visualize overlap before reordering pass {p} ===="
+            )  # noqa: G004
             visualize_overlap(order)
         order = p(order)  # type: ignore[operator]
         if torch.distributed.get_rank() == 0:
-            overlap_log.debug(f"==== Visualize overlap after reordering pass {p} ====")
+            overlap_log.debug(
+                f"==== Visualize overlap after reordering pass {p} ===="
+            )  # noqa: G004
             visualize_overlap(order)
     return order
