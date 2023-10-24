@@ -42,7 +42,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        torch._C._distributed_c10d._register_pg_for_native_c10d_functional(
+        torch._C._distributed_c10d._register_process_group(
             "default", dist.group.WORLD
         )
 
