@@ -731,8 +731,7 @@ class VariableBuilder:
             )
         elif (
             issubclass(type(value), type)
-            and trace_rules.check(value)
-            == trace_rules.TraceRule.SUPPORTED_CTX_MANAGER_CLASS
+            and trace_rules.check(value) == TorchCtxManagerClassVariable
         ):
             return TorchCtxManagerClassVariable(
                 value,

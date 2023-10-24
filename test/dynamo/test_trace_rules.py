@@ -307,7 +307,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             m = importlib.import_module(module_name)
             self.assertTrue(isinstance(getattr(m, fn_name), types.FunctionType))
 
-    def test_torch_name_rule_map_correctness(self):
+    def test_torch_name_rule_map(self):
         generated_torch_name_rule_set = generate_allow_list()
         ignored_torch_obj_rule_set = {
             load_object(x) for x in ignored_torch_name_rule_set

@@ -349,7 +349,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
                 and trace_rules.check(obj.__class__)
-                == trace_rules.TraceRule.SUPPORTED_CTX_MANAGER_CLASS
+                == variables.TorchCtxManagerClassVariable
                 and not (args or kwargs)
             ):
                 return variables.TorchCtxManagerClassVariable(

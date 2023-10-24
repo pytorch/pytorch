@@ -1,67 +1,50 @@
-import enum
 import functools
 import importlib
 
-from . import variables
+from .variables import TorchCtxManagerClassVariable
+
 
 """
-Define the Dynamo tracing rules for Torch objects.
-* IN_GRAPH_FUNCTION: The functions should be put into the FX graph or can be constant folded. E.g.,
+Map of torch objects to their tracing rules (Dynamo variables).
+* TorchVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
-* SUPPORTED_CTX_MANAGER_CLASS: The context manager classes are supported by Dynamo. E.g., torch.no_grad
-* SKIP: The objects should be skipped from tracing.
-* INLINE: The functions should be inlined.
-"""
+* TorchCtxManagerClassVariable: The context manager classes are supported by Dynamo. E.g., torch.no_grad
+* SkipFilesVariable: The objects should be skipped from tracing.
+* UserFunctionVariable: The functions should be inlined.
 
-
-class TraceRule(enum.Enum):
-    IN_GRAPH_FUNCTION = 0
-    SUPPORTED_CTX_MANAGER_CLASS = 1
-    SKIP = 2
-    INLINE = 3
-
-
-trace_rule_map = {
-    TraceRule.IN_GRAPH_FUNCTION: variables.TorchVariable,
-    TraceRule.SUPPORTED_CTX_MANAGER_CLASS: variables.TorchCtxManagerClassVariable,
-    TraceRule.SKIP: variables.SkipFilesVariable,
-    TraceRule.INLINE: variables.UserFunctionVariable,
-}
-
-"""
-Map of torch object to its trace rule.
-
-We explicitly list torch objects which are treated as IN_GRAPH_FUNCTION and SUPPORTED_CTX_MANAGER_CLASS.
+We explicitly list torch objects which should be wrapped as TorchCtxManagerClassVariable.
 The initial list comes from the heuristic in test/dynamo/test_trace_rules.py:generate_allow_list.
 
 For developers: If you add/remove a torch level API, it may trigger failures from
-test/dynamo/test_trace_rules.py:test_torch_name_rule_map_correctness.
-To fix them, please follow these steps:
-* Add/remove the function name with TraceRule.IN_GRAPH_FUNCTION to this map if it's treated as IN_GRAPH_FUNCTION.
-* Add/remove the context manager class name with TraceRule.SUPPORTED_CTX_MANAGER_CLASS to this map
-  if you added/removed Dynamo implementation for that context manager.
-* Add/remove the object name to test/dynamo/test_trace_rules.ignored_torch_name_rule_set if you think
-  it's not IN_GRAPH_FUNCTION or SUPPORTED_CTX_MANAGER_CLASS.
+test/dynamo/test_trace_rules.py:test_torch_name_rule_map. To fix the failures:
+If you are adding a new torch level API or Dynamo implementation:
+* Add the name with TorchCtxManagerClassVariable to this map
+  if you are adding Dynamo implementation for that context manager.
+* Remove the object name from test/dynamo/test_trace_rules.ignored_torch_name_rule_set if it's there.
 
-TraceRule.SKIP and TraceRule.INLINE are not used for now. Please check the skip/inline rules at skipfiles.check.
+If you are removing an existing torch level API:
+* Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_torch_name_rule_set
+  depends on where it is.
+
+TODO: Add torch object names mapping to TorchVariable for in graph and constant fold functions.
 TODO: We would consolidate the skipfiles.check rules into trace_rules.check later.
-TODO: We would support explictly list objects treated as SKIP/INLINE after the skipfiles.check
-and trace_rules.check consolidation is done. Then the explicit listing of SKIP/INLINE objects have
+TODO: We would support explictly list objects treated as skip/inline after the skipfiles.check
+and trace_rules.check consolidation is done. Then the explicit listing of skip/inline objects have
 a higher priority, which can be used to override the skipfiles.check rules in some cases.
 """
 torch_name_rule_map = {
-    "torch._C.DisableTorchFunctionSubclass": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.amp.autocast_mode.autocast": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.autograd.grad_mode.enable_grad": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.autograd.grad_mode.inference_mode": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.autograd.grad_mode.no_grad": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.autograd.grad_mode.set_grad_enabled": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.autograd.profiler.profile": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.autograd.profiler.record_function": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.cpu.amp.autocast_mode.autocast": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.cuda.amp.autocast_mode.autocast": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
-    "torch.profiler.profiler.profile": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
+    "torch._C.DisableTorchFunctionSubclass": TorchCtxManagerClassVariable,
+    "torch.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
+    "torch.autograd.grad_mode.enable_grad": TorchCtxManagerClassVariable,
+    "torch.autograd.grad_mode.inference_mode": TorchCtxManagerClassVariable,
+    "torch.autograd.grad_mode.no_grad": TorchCtxManagerClassVariable,
+    "torch.autograd.grad_mode.set_grad_enabled": TorchCtxManagerClassVariable,
+    "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
+    "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
+    "torch.cpu.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
+    "torch.cuda.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
+    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
 }
 
 

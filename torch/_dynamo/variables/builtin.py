@@ -1176,10 +1176,7 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif (
-                trace_rules.check(member)
-                == trace_rules.TraceRule.SUPPORTED_CTX_MANAGER_CLASS
-            ):
+            elif trace_rules.check(member) == TorchCtxManagerClassVariable:
                 return TorchCtxManagerClassVariable(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
