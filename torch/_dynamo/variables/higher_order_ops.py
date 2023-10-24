@@ -393,6 +393,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
+
+        for k in ["pred", "true_fn", "false_fn", "operands"]:
+            if v := kwargs.pop(k, None):
+                args.append(v)
+
+        if kwargs:
+            unimplemented(f"torch.cond: Got unexpected kwargs: {list[kwargs.keys()]}")
+
         if len(args) != 4:
             unimplemented(
                 f"Expected 4 arguments but got {len(args)}.\n"
