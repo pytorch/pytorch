@@ -1063,7 +1063,6 @@ class TypedStorage:
             filename,
             shared,
             size * torch._utils._element_size(cls.dtype))
-        untyped_storage.filename = filename
         storage = cls(wrap_storage=untyped_storage)
         return storage
 
