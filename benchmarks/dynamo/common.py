@@ -2300,38 +2300,38 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-        # Collect the fp64 reference outputs to be used later for accuracy checking.
-        fp64_outputs = None
-        try:
-            model_fp64, inputs_fp64 = cast_to_fp64(
-                self.deepcopy_and_maybe_ddp(model),
-                clone_inputs(example_inputs),
-            )
-            self.init_optimizer(name, current_device, model_fp64.parameters())
-            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
-            fp64_outputs = tree_map(
-                lambda x: x.to(torch.float64)
-                if isinstance(x, torch.Tensor) and x.is_floating_point()
-                else x,
-                fp64_outputs,
-            )
-        except Exception:
-            log.warning(
-                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
-                name,
-            )
-            self.args.cosine = True
-            fp64_outputs = None
-
-        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
-            self.args.training, current_device, name
-        )
-
-        # Cast the model to float16/float32 as necessary
-        model, example_inputs = self.maybe_cast(model, example_inputs)
-        accuracy_status = "pass"
-
         with self.pick_grad(name, self.args.training):
+            # Collect the fp64 reference outputs to be used later for accuracy checking.
+            fp64_outputs = None
+            try:
+                model_fp64, inputs_fp64 = cast_to_fp64(
+                    self.deepcopy_and_maybe_ddp(model),
+                    clone_inputs(example_inputs),
+                )
+                self.init_optimizer(name, current_device, model_fp64.parameters())
+                fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+                fp64_outputs = tree_map(
+                    lambda x: x.to(torch.float64)
+                    if isinstance(x, torch.Tensor) and x.is_floating_point()
+                    else x,
+                    fp64_outputs,
+                )
+            except Exception:
+                log.warning(
+                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                    name,
+                )
+                self.args.cosine = True
+                fp64_outputs = None
+
+            tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+                self.args.training, current_device, name
+            )
+
+            # Cast the model to float16/float32 as necessary
+            model, example_inputs = self.maybe_cast(model, example_inputs)
+            accuracy_status = "pass"
+
             # Get results of native pytorch
             reset_rng_state()
             try:
