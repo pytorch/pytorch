@@ -2753,10 +2753,10 @@
     CompositeExplicitAutograd: full_like
   autogen: full_like.out
 
-- func: _from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: from_file
-  autogen: _from_file.out
+  autogen: from_file.out
 
 - func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
