@@ -207,6 +207,9 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
@@ -228,6 +231,9 @@ constant_and_index_propagation = True
 # we always add constants into graph.constants without
 # performing any constant-inlining optimization
 always_keep_tensor_constants = False
+
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
 
 
 def is_fbcode():
@@ -428,9 +434,6 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
-
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
 
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
