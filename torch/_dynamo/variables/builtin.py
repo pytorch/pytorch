@@ -27,6 +27,7 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
@@ -37,6 +38,7 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import EventVariable, StreamVariable
 from .dicts import ConstDictVariable
 from .lists import (
     BaseListVariable,
@@ -1431,6 +1433,12 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
+            if op is operator.is_ and isinstance(right, TensorVariable):
+                return ConstantVariable.create(
+                    id(extract_fake_example_value(left.as_proxy().node))
+                    == id(extract_fake_example_value(right.as_proxy().node))
+                )
+
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
             if (
@@ -1472,6 +1480,12 @@ class BuiltinVariable(VariableTracker):
             right, UserDefinedObjectVariable
         ):
             return ConstantVariable.create(op(left.value, right.value))
+
+        if (
+            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
+            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
+        ) and op is operator.eq:
+            return ConstantVariable(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
