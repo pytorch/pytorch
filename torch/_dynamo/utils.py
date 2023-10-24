@@ -1352,7 +1352,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     allow_non_graph_fake: whether to allow the return result to be:
         1. non-fake or 2. fake that is not created by this instance of Dynamo.
         If `True`, you must be prepared to deal with such return values, ideally
-        by further wrapping them as fakes.
+        by further wrapping them as this graph's fakes.
     """
     from .exc import (
         TorchRuntimeError,
