@@ -2,11 +2,9 @@ import functools
 import logging
 import math
 import typing
-from typing import Optional
 
 import torch
 import torch._decomp as decomp
-import torch._prims_common as utils
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -314,84 +312,6 @@ def view_copy_default(self, size):
 @register_decomposition([aten.view_copy.dtype])
 def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
-
-
-def get_like_layout(
-    tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
-) -> torch.memory_format:
-    # TODO: _to_copy tensor to stride permutation
-    if memory_format in (torch.preserve_format, None):
-        return utils.suggest_memory_format(tensor)
-    else:
-        return memory_format
-
-
-@register_decomposition(aten.rand_like)
-def rand_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
-    return torch.rand(
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
-
-
-@register_decomposition(aten.randn_like)
-def randn_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
-    return torch.randn(
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
-
-
-@register_decomposition(aten.full_like)
-def full_like(
-    self,
-    fill_value,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    requires_grad=False,
-    memory_format=torch.preserve_format,
-):
-    return torch.full(
-        [*self.size()],
-        fill_value,
-        dtype=dtype or self.dtype,
-        layout=layout or self.layout,
-        device=device or self.device,
-        requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
-
-
-@register_decomposition(aten.randint_like.default)
-def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **kwargs):
-    return aten.randint.low(
-        0,
-        high,
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
-
-
-@register_decomposition(aten.randint_like.low_dtype)
-def randint_like_low(
-    self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs
-):
-    return aten.randint.low(
-        low,
-        high,
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint.default)
