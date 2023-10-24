@@ -583,7 +583,7 @@ class TORCH_API ThreadLocalSubqueue {
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-    // report collective communication metadata
+    // report extra metadata, i.e. collective communication meta
     AppendOnlyList<extra_meta_t, BlockSize> extra_meta_;
 
     // ProfilerState::KINETO_GPU_FALLBACK or
