@@ -1829,6 +1829,17 @@ if(MSVC)
   endforeach()
 endif()
 
+# Create a job pool with a limited number of jobs
+set_property(GLOBAL PROPERTY JOB_POOLS compile_pool=2)
+
+if (USE_FLASH_ATTENTION)
+  foreach(tmp ${FLASH_ATTENTION_CUDA_SOURCES})
+    FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
+    SET(tmp_path "../${tmp_path}")
+    set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-t 2")
+  endforeach()
+endif()
+
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
 # This is because the build rules here written in such a way that they always
 # appear to need to be re-run generating >600 pieces of work during the pytorch
