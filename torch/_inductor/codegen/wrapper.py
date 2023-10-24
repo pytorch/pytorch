@@ -1219,6 +1219,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():
+            self.prefix.splice(
+                """
+                    py::gil_scoped_release release;
+                """
+            )
             # assign inputs and outputs in both cases so the later codegen can be simplified
             if V.graph.aot_mode:
                 if config.aot_inductor.abi_compatible:
@@ -1427,6 +1432,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         + f"new at::Tensor({output}));"
                     )
         else:
+            self.wrapper_call.writeline("py::gil_scoped_acquire acquire;")
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
     def generate_end(self, result):
