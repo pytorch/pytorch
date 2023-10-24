@@ -92,13 +92,7 @@ class FunctionIdSet:
         return idx in self()
 
 
-def make_function_id_set(
-    lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
-) -> FunctionIdSet:
-    return FunctionIdSet(lazy_initializer)
-
-
-@make_function_id_set
+@FunctionIdSet
 def _disallowed_function_ids() -> Set[int]:
     remove: List[Any] = [
         True,
@@ -154,7 +148,7 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-@make_function_id_set
+@FunctionIdSet
 def _allowed_function_ids() -> Dict[int, str]:
     """
     Walk torch.* and get the ids of all the stuff in it
@@ -280,13 +274,13 @@ def _allowed_function_ids() -> Dict[int, str]:
     return torch_object_ids
 
 
-@make_function_id_set
+@FunctionIdSet
 def _allowed_user_defined_function_ids() -> Dict[int, str]:
     rv: Dict[int, str] = {}
     return rv
 
 
-@make_function_id_set
+@FunctionIdSet
 def _builtin_function_ids() -> Dict[int, str]:
     rv = {
         id(v): f"builtins.{k}"
@@ -308,7 +302,7 @@ def _builtin_function_ids() -> Dict[int, str]:
     return rv
 
 
-@make_function_id_set
+@FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
     rv = dict()
     for mod in NP_SUPPORTED_MODULES:
@@ -323,7 +317,7 @@ def _numpy_function_ids() -> Dict[int, str]:
     return rv
 
 
-@make_function_id_set
+@FunctionIdSet
 def _builtin_constant_ids() -> Dict[int, str]:
     """
     Collects constant builtins by eliminating callable items.
