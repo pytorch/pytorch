@@ -69,7 +69,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import tree_map
 
 
 counters = collections.defaultdict(collections.Counter)
@@ -1346,9 +1346,14 @@ def extract_fake_example_value(node, required=True):
         return None
 
 
-def get_fake_value(node, tx):
+def get_fake_value(node, tx, allow_non_graph_fake=False):
     """
     Run the computation represented by `node` using fake tensors and return the result.
+
+    allow_non_graph_fake: whether to allow the return result to be:
+        1. non-fake or 2. fake that is not created by this instance of Dynamo.
+        If `True`, you must be prepared to deal with such return values, ideally
+        by further wrapping them as fakes.
     """
     from .exc import (
         TorchRuntimeError,
@@ -1366,18 +1371,11 @@ def get_fake_value(node, tx):
 
     def ensure_fake(e):
         if isinstance(e, torch.Tensor):
-            assert is_fake(e)
+            assert is_fake(e) and maybe_get_fake_mode(e) is tx.fake_mode
         return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
-
-    def wraps_non_fake(e):
-        if not (
-            is_fake(e) and maybe_get_fake_mode(e) is tx.fake_mode
-        ):
-            e = deepcopy_to_fake_tensor(e)
-        return e
 
     args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
     args = tree_map(ensure_fake, args)
@@ -1444,7 +1442,8 @@ def get_fake_value(node, tx):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
-    ret_val = tree_map_only(torch.Tensor, wraps_non_fake, ret_val)
+    if not allow_non_graph_fake:
+        _ = tree_map(torch.Tensor, ensure_fake, ret_val)
     return ret_val
 
 

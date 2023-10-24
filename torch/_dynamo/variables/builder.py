@@ -1400,7 +1400,7 @@ def wrap_fx_proxy_cls(
                 isinstance(value, FakeTensor)
                 or (
                     # Is functional tensor fakeified by this instance of Dynamo
-                    torch._is_functional_tensor(value) 
+                    torch._is_functional_tensor(value)
                     and maybe_get_fake_mode(value) is tx.fake_mode
                 )
                 or value.is_nested
@@ -1412,7 +1412,9 @@ def wrap_fx_proxy_cls(
 
     with preserve_rng_state():
         if example_value is None:
-            example_value = get_fake_value(proxy.node, tx)
+            # only allow_non_graph_fake in this instance because we handle the non-fake
+            # cases properly below.
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
         # Handle recursive calls here
         elif (
@@ -1444,12 +1446,9 @@ def wrap_fx_proxy_cls(
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
-        if (
-            isinstance(example_value, torch.Tensor)
-            and (
-                not is_fake(example_value)
-                or maybe_get_fake_mode(example_value) is not tx.fake_mode
-            )
+        if isinstance(example_value, torch.Tensor) and (
+            not is_fake(example_value)
+            or maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
                 "`example_value` needs to be a `FakeTensor`"
