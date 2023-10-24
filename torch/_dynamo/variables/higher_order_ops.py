@@ -19,12 +19,12 @@ from torch._guards import Source
 from torch.utils import _pytree as pytree
 
 from ..exc import (
+    InternalTorchDynamoError,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
     UserError,
     UserErrorType,
-    InternalTorchDynamoError,
 )
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
@@ -1200,7 +1200,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
-        
+
         # This flattens the kwargs into lifted args
         p_args, _, example_value, treespec = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
