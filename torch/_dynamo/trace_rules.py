@@ -2,15 +2,54 @@ import enum
 import functools
 import importlib
 
+from . import variables
+
+"""
+Define the Dynamo tracing rules for Torch objects.
+* IN_GRAPH_FUNCTION: The functions should be put into the FX graph or can be constant folded. E.g.,
+  - torch.add: should be put into the FX graph.
+  - torch.is_floating_point: constant folded.
+* SUPPORTED_CTX_MANAGER_CLASS: The context manager classes are supported by Dynamo. E.g., torch.no_grad
+* SKIP: The objects should be skipped from tracing.
+* INLINE: The functions should be inlined.
+"""
+
 
 class TraceRule(enum.Enum):
     IN_GRAPH_FUNCTION = 0
-    CONST_FOLD_FUNCTION = 1
-    SUPPORTED_CTX_MANAGER_CLASS = 2
-    SKIP = 3
-    INLINE = 4
+    SUPPORTED_CTX_MANAGER_CLASS = 1
+    SKIP = 2
+    INLINE = 3
 
 
+trace_rule_map = {
+    TraceRule.IN_GRAPH_FUNCTION: variables.TorchVariable,
+    TraceRule.SUPPORTED_CTX_MANAGER_CLASS: variables.TorchCtxManagerClassVariable,
+    TraceRule.SKIP: variables.SkipFilesVariable,
+    TraceRule.INLINE: variables.UserFunctionVariable,
+}
+
+"""
+Map of torch object to its trace rule.
+
+We explicitly list torch objects which are treated as IN_GRAPH_FUNCTION and SUPPORTED_CTX_MANAGER_CLASS.
+The initial list comes from the heuristic of test/dynamo/test_trace_rules.py:generate_allow_list.
+
+For developers: If you add a new torch level API, it may trigger failures from
+test/dynamo/test_trace_rules.py:test_torch_name_rule_map_correctness.
+To fix them, please follow these steps:
+* Add the new function name with TraceRule.IN_GRAPH_FUNCTION if it's treated as IN_GRAPH_FUNCTION.
+* Add the context manager class name with TraceRule.SUPPORTED_CTX_MANAGER_CLASS if you added
+  Dynamo implementation for that context manager.
+* Add the object name to test/dynamo/test_trace_rules.ignored_torch_name_rule_set if you think
+  they are not IN_GRAPH_FUNCTION or SUPPORTED_CTX_MANAGER_CLASS.
+
+TraceRule.SKIP and TraceRule.INLINE are not used for now. Please check the skip/inline rules at skipfiles.check.
+TODO: We would consolidate the skipfiles.check rules into trace_rules.check later.
+TODO: We would support explictly list objects treated as SKIP/INLINE after the skipfiles.check
+and trace_rules.check consolidation is done. Then the explicit listing of SKIP/INLINE objects have
+a higher priority, which can be used to override the skipfiles.check rules in some cases.
+"""
 torch_name_rule_map = {
     "torch._C.DisableTorchFunctionSubclass": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
     "torch.amp.autocast_mode.autocast": TraceRule.SUPPORTED_CTX_MANAGER_CLASS,
