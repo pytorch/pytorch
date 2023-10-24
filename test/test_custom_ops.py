@@ -1675,6 +1675,16 @@ def forward(self, x_1):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
+    def test_define_with_tags(self):
+        lib = self.lib()
+        tags = (torch.Tag.pointwise,)
+        torch.library.define(
+            f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib, tags=tags
+        )
+        actual = self.ns().foo.default.tags
+        self.assertTrue(isinstance(actual, list))
+        self.assertEqual(actual, list(tags))
+
     def test_define_and_impl(self):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
