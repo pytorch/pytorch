@@ -62,10 +62,7 @@ class Kernel:
 
 def get_all_kernels() -> List[Kernel]:
     for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
-        # for direction in ["fwd", "bwd", "fwd_split"]:
-        # TODO For now we will not build fwd_split kernels
-        # Follow up
-        for direction in ["fwd", "bwd"]:
+        for direction in ["fwd", "bwd", "fwd_split"]:
             yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, direction=direction)
 
 
@@ -76,7 +73,8 @@ def write_kernel(kernel: Kernel, autogen_dir: Path) -> None:
 // Splitting the different head dimensions to different files to speed up compilation.
 // This file is auto-generated. See "generate_kernels.py"\n
 """
-    include = f"#include <ATen/native/transformers/cuda/flash_attn/flash_{kernel.direction}_launch_template.h>\n"
+    launch_template_str = kernel.direction if kernel.direction != "fwd_split" else "fwd"
+    include = f"#include <ATen/native/transformers/cuda/flash_attn/flash_{launch_template_str}_launch_template.h>\n"
     namespace = "namespace pytorch_flash{\n"
     namespace_end = "} // namespace pytorch_flash\n"
     (autogen_dir / kernel.filename).write_text(
