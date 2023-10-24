@@ -23,7 +23,9 @@ install_ubuntu() {
     maybe_libiomp_dev="libiomp-dev"
   fi
 
-  if [[ "$CLANG_VERSION" == 12 ]]; then
+  if [[ "$CLANG_VERSION" == 15 ]]; then
+    maybe_libomp_dev="libomp-15-dev"
+  elif [[ "$CLANG_VERSION" == 12 ]]; then
     maybe_libomp_dev="libomp-12-dev"
   elif [[ "$CLANG_VERSION" == 10 ]]; then
     maybe_libomp_dev="libomp-10-dev"

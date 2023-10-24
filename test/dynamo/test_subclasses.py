@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import functools
+import unittest
 
 import torch
 
@@ -13,7 +14,10 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import jagged_from_list
+from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class MockSubclass(torch.Tensor):
@@ -498,7 +502,7 @@ class GraphModule(torch.nn.Module):
             sizes,
             exp_graphs,
             exp_frame_count,
-            different_shape_env,
+            share_shape_env,
             exp_shape_env_guards,
         ):
             torch._dynamo.reset()
@@ -509,7 +513,7 @@ class GraphModule(torch.nn.Module):
                 shape_env=ShapeEnv()
             )
             for i, size in enumerate(sizes):
-                if different_shape_env:
+                if not share_shape_env:
                     fake_mode = torch._subclasses.fake_tensor.FakeTensorMode(
                         shape_env=ShapeEnv()
                     )
@@ -550,30 +554,14 @@ class GraphModule(torch.nn.Module):
             [3, 3, 4, 5],
             exp_graphs=[true_graph, true_graph, false_graph, false_graph],
             exp_frame_count=[1, 1, 2, 2],
-            different_shape_env=True,
+            share_shape_env=False,
             exp_shape_env_guards=[
-                # The shape_env is different from iterations to iterations. Each shape_env gets a new guard installed.
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Ne(s0, 4)"],
-                ["Ne(s0, 5)"],
-            ],
-        )
-
-        test_recompilation(
-            f,
-            torch.randn([3, 4]),
-            [3, 3, 4, 5],
-            exp_graphs=[true_graph, true_graph, false_graph, false_graph],
-            exp_frame_count=[1, 1, 2, 2],
-            different_shape_env=False,
-            exp_shape_env_guards=[
-                # The shape_env is shared. pred are simplified to concreate values for the latter three export,
-                # specifically, they become True, False, False. Only the first export installs a guard in outer shape_env
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
+                # The shape_env is different in each iteration. Each shape_env gets a single guard installed.
+                # TODO(yidi): simplifiy the guards to Eq(s0, 3) and Ne(s0, 4)
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)"],
+                ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
             ],
         )
 
@@ -583,29 +571,14 @@ class GraphModule(torch.nn.Module):
             [4, 5, 3, 3],
             exp_graphs=[false_graph, false_graph, true_graph, true_graph],
             exp_frame_count=[1, 1, 2, 2],
-            different_shape_env=True,
+            share_shape_env=False,
             exp_shape_env_guards=[
-                # The shape_env is different from iterations to iterations. Each shape_env gets a new guard installed.
-                ["Ne(s0, 4)"],
-                ["Ne(s0, 5)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-            ],
-        )
-
-        test_recompilation(
-            f,
-            torch.randn([3, 4]),
-            [4, 5, 3, 3],
-            exp_graphs=[false_graph, false_graph, true_graph, true_graph],
-            exp_frame_count=[1, 1, 2, 2],
-            different_shape_env=False,
-            exp_shape_env_guards=[
-                # The shape_env is shared. guards are simplified and accumulated in outer shape_env
-                ["Ne(s0, 4)"],
-                ["Ne(s0, 4)", "Ne(s0, 5)"],
-                ["Ne(s0, 4)", "Ne(s0, 5)", "Eq(s0, 3)"],
-                ["Ne(s0, 4)", "Ne(s0, 5)", "Eq(s0, 3)"],
+                # The shape_env is different in each iteration. Each shape_env gets a single guard installed.
+                # TODO(yidi): simplifiy the guards to Eq(s0, 3) and Ne(s0, 4)
+                ["Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)"],
+                ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
             ],
         )
 
@@ -654,11 +627,17 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
 
     def test_binary_recompiles(self):
+        def binary(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
         # Binary recompiles because singleton ints no longer match
         nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
     def test_binary_recompiles_due_to_duck_sizing(self):
         # Even though the input is unused, we still guard due to duck sizing
@@ -666,6 +645,39 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+
+    # TODO: cannot parametrize this test class with device for some reason
+    def _test_autograd(self, backend):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt, offsets = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], offsets)
+
+        def fn1(nt1, nt2):
+            return (nt1 + nt2).sin().cos()
+
+        compiled_f = torch.compile(
+            fn1, fullgraph=True, backend="aot_eager", dynamic=True
+        )
+        out = compiled_f(nt, nt2)
+        out_buffer = ViewBufferFromNested.apply(out)
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
+        out_ref = compiled_f(nt, nt2)
+        out_buffer_ref = ViewBufferFromNested.apply(out_ref)
+        ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
+
+        self.assertTrue(torch.allclose(ga, ga_ref))
+        self.assertTrue(torch.allclose(gb, gb_ref))
+        self.assertTrue(torch.allclose(gc, gc_ref))
+
+    def test_basic_autograd(self):
+        self._test_autograd("aot_eager")
+
+    @requires_cuda()
+    def test_basic_autograd_inductor(self):
+        self._test_autograd("inductor")
 
 
 if __name__ == "__main__":

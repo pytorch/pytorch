@@ -1285,10 +1285,10 @@ class TestControlFlowTraced(TestCase):
 def forward(self, x_1):
     sym_size = torch.ops.aten.sym_size(x_1, 0)
     eq = sym_size == 4;  sym_size = None
-    cast_symbool_to_symint = torch.ops.higher_order.cast_symbool_to_symint(eq);  eq = None
+    sym_ite = torch.sym_ite(eq, 1, 0);  eq = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint = true_graph_0 = false_graph_0 = x_1 = None
+    conditional = torch.ops.higher_order.cond(sym_ite, true_graph_0, false_graph_0, [x_1]);  sym_ite = true_graph_0 = false_graph_0 = x_1 = None
     return conditional""")  # noqa: B950
 
         # We expect the traced graph module to work even if input size changes.
@@ -1463,11 +1463,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
-    def _expected_inline_normalized(self, actual_code, exp_code):
-        normalized_actual = "".join(actual_code.split())
-        normalized_exp = "".join(exp_code.split())
-        self.assertExpectedInline(normalized_actual, normalized_exp)
-
     def test_map_unfunc_boolean_tensor_for_nested_map_cond(self):
         def map_fn(pred, x):
             def fn(x, pred):
@@ -1489,24 +1484,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return wrapper
 
         gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
-        exp_graph = """\
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
-  body_graph_0 = x_1 = pred_1 = None
+    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);  body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
-    return getitem
-"""
-        exp_body_graph = """\
+    return getitem""")
+        self.assertExpectedInline(gm.body_graph_0.code.strip(), """\
 def forward(self, arg0_1, arg1_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0,\
- [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
-    return [conditional]
-"""
-        self._expected_inline_normalized(gm.code, exp_graph)
-        self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
+    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    return [conditional]""")  # noqa: B950
 
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
 
@@ -1568,11 +1557,23 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, x_1):
     sym_size = torch.ops.aten.sym_size(x_1, 0)
     eq = sym_size == 4;  sym_size = None
-    cast_symbool_to_symint = torch.ops.higher_order.cast_symbool_to_symint(eq);  eq = None
+    sym_ite = torch.sym_ite(eq, 1, 0);  eq = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint = true_graph_0 = false_graph_0 = x_1 = None
+    conditional = torch.ops.higher_order.cond(sym_ite, true_graph_0, false_graph_0, [x_1]);  sym_ite = true_graph_0 = false_graph_0 = x_1 = None
     return conditional""")  # noqa: B950
+
+            self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    sub = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
+    return sub""")
+
+            self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
+    return add""")
 
     def _create_test_fns_for_cond(self, pred, inner_most_fn, operands, closure_list, nested_level):
         if nested_level == 0:
