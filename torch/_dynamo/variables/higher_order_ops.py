@@ -24,6 +24,7 @@ from ..exc import (
     Unsupported,
     UserError,
     UserErrorType,
+    InternalTorchDynamoError,
 )
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
@@ -599,6 +600,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
+        if len(kwargs) > 0:
+            InternalTorchDynamoError(
+                "builtins.map: kwargs should never be allowed for builtin map."
+            )
+
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
@@ -656,8 +662,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
         )
 
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
-
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -665,7 +669,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
@@ -1196,8 +1200,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
-
-        p_args, p_kwargs, example_value, treespec = self.create_wrapped_node(
+        
+        # This flattens the kwargs into lifted args
+        p_args, _, example_value, treespec = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
 
@@ -1208,7 +1213,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
