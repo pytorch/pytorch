@@ -369,13 +369,11 @@ void initDispatchBindings(PyObject* module) {
           [](const py::object& self,
              const char* schema,
              const char* alias_analysis,
-             std::vector<at::Tag> tags) {
+             const std::vector<at::Tag>& tags) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
-                std::move(parsed_schema),
-                tags,
-                register_or_verify());
+                std::move(parsed_schema), tags, register_or_verify());
             // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
