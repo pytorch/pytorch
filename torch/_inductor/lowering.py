@@ -2015,13 +2015,10 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
+            # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
 
-        efficient_kernels = (
-            aten._scaled_dot_product_efficient_attention.default,
-            aten._scaled_dot_product_efficient_attention_backward.default,
-        )
-        ALIGNMENT = 16 if fx_node.target in efficient_kernels else 8
+        ALIGNMENT = 16
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
