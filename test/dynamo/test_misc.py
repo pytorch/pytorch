@@ -1466,6 +1466,9 @@ utils_device.CURRENT_DEVICE == None""",
         for op, t1_np, t2_np in itertools.product(
             operators, (True, False), (True, False)
         ):
+            if op in [operator.eq, operator.ne]:
+                # returns equivalent of torch.eq/ne
+                continue
             if op is operator.getitem:
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
@@ -1594,6 +1597,34 @@ utils_device.CURRENT_DEVICE == None""",
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_tolist(self):
+        def fn(x):
+            return x.tolist()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = np.arange(5)
+        r = opt_fn(x)
+
+        self.assertEqual(r, [0, 1, 2, 3, 4])
+        self.assertEqual(type(r), list)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_size_attr(self):
+        def fn(x):
+            return x.size + x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = np.arange(5)
+        r = opt_fn(x)
+
+        self.assertEqual(r, fn(x))
+        self.assertEqual(type(r), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_no_raise(self):

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -217,7 +218,7 @@ class TestExport(TestCase):
             torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
         em = torch.export.export(m, (a,))
         x = torch.randn(3, 5)
-        with self.assertRaisesRegex(RuntimeError, "\\[1\\] to be equal to 4"):
+        with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
 
     def test_not_correct_dim(self):
@@ -1138,25 +1139,24 @@ class TestExport(TestCase):
             torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "expected input arg1_1 to be equal to 5, but got 6"
+            RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"
         ):
             _ = exported(torch.ones(8, 5), 6)
 
         exported = torch.export.export(f, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes)
         with self.assertRaisesRegex(
-            RuntimeError, "expected input arg1_1 to be equal to 5.0, but got 6.0"
+            RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
     def test_runtime_assert_for_prm_str(self):
+
         def g(a, b, mode):
             return torch.div(a, b, rounding_mode=mode)
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
         exported = torch._export.export(g, inps)
-        with self.assertRaisesRegex(
-            RuntimeError, "expected input arg2_1 to be equal to trunc, but got floor"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
@@ -1487,6 +1487,23 @@ class TestExport(TestCase):
         ep = export(f, (torch.ones(2),))
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
+
+    def test_redundant_asserts(self):
+        def f(x):
+            y = x.item()
+            torch._constrain_as_size(y)
+            return torch.zeros(y)
+
+        ep = export(f, (torch.tensor([3]),))
+        self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
+def forward(self, arg0_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+    ge = _local_scalar_dense >= 0
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
+    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (zeros,)""")
 
 if __name__ == '__main__':
     run_tests()
