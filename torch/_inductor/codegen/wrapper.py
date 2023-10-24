@@ -1297,12 +1297,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_->at("{constants_key}").get();"""
+                            f"""auto {constants_key} = constants_.at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_->at("{constants_key}").get());"""
+                            + f"""constants_.at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1406,7 +1406,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
 
-            self.prefix.writeline("constants_ = constants_map;")
+            self.prefix.writeline("update_constants_map(std::move(constants_map));")
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
@@ -1672,7 +1672,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_device_type_{device.type}(),{device.index if device.index else 0}"
+            return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
 
@@ -1684,7 +1684,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_dtype_{str(dtype).split('.')[-1]}()"
+            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
