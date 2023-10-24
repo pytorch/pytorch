@@ -1201,9 +1201,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         # This flattens the kwargs into lifted args
-        p_args, _, example_value, treespec = self.create_wrapped_node(
+        p_args, p_kwargs, example_value, treespec = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
