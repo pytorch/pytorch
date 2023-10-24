@@ -16,6 +16,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -83,13 +84,15 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float, torch.bfloat16))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
     def test_cache_load_function(self, device, dtype):
         """
         Verify that we can populate and load functions from the cache.
         """
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("requires CUDA")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -121,13 +124,15 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float, torch.float16))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
     def test_cache_load_model(self, device, dtype):
         """
         Verify that we can populate and load models from the cache.
         """
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("requires CUDA")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
 
         model = MyModel().to(dtype=dtype, device=device)
 

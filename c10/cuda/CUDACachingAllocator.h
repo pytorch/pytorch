@@ -98,7 +98,7 @@ struct DeviceStats {
   Stat oversize_segments;
 
   // SIZE: maximum block size that is allowed to be split.
-  int64_t max_split_size = 0;
+  size_t max_split_size = 0;
 };
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
@@ -251,7 +251,7 @@ class CUDAAllocator : public Allocator {
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
-  // instead it requres cudaMemcpyAsyncPeer
+  // instead it requires cudaMemcpyAsyncPeer
   //  with P2P Enabled, all combinations work
   //  with P2P Disabled:
   //                       cudaMalloc cudaMallocAsync/cuMemMap

@@ -13,6 +13,7 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -409,45 +410,28 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
-  try {
-    // if timing is disabled we won't have allocated start events
-    if (!timingEnabled_) {
+  // if timing is disabled we won't have allocated start events
+  if (!timingEnabled_) {
+    return false;
+  }
+  for (const auto i : c10::irange(devices_.size())) {
+    // Checking the work's corresponding CUDA events' status
+    if (!(*ncclStartEvents_)[i].query()) {
       return false;
     }
-    for (const auto i : c10::irange(devices_.size())) {
-      // Checking the work's corresponding CUDA events' status
-      if (!(*ncclStartEvents_)[i].query()) {
-        return false;
-      }
-    }
-  } catch (const std::exception& e) {
-    if (std::string(e.what()).find("driver shutting down") ==
-        std::string::npos) {
-      throw;
-    }
-    LOG(INFO) << "[Rank " << rank_
-              << "] Event query failed with exception: " << e.what();
   }
 
   return true;
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
-  try {
-    for (const auto i : c10::irange(devices_.size())) {
-      // Checking the work's corresponding CUDA events' status
-      if (!(*ncclEndEvents_)[i].query()) {
-        return false;
-      }
+  for (const auto i : c10::irange(devices_.size())) {
+    // Checking the work's corresponding CUDA events' status
+    if (!(*ncclEndEvents_)[i].query()) {
+      return false;
     }
-  } catch (const std::exception& e) {
-    if (std::string(e.what()).find("driver shutting down") ==
-        std::string::npos) {
-      throw;
-    }
-    LOG(INFO) << "[Rank " << rank_
-              << "] Event query failed with exception: " << e.what();
   }
+
   return true;
 }
 
@@ -690,13 +674,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
   LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options:"
-#ifdef NCCL_VERSION_CODE
-            // NCCL > 2.3.5 should have NCCL_VERSION_CODE defined
-            << "NCCL VERSION: " << NCCL_VERSION_CODE
-#else
-            << "NCCL VERSION: " << NCCL_MAJOR << NCCL_MINOR << NCCL_PATCH
-#endif
+            << "] ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion()
             << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
@@ -922,15 +901,26 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
-    // Append error message reported from workCleanupLoop
-    const auto exitMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] NCCL watchdog thread terminated with exception: ",
-        e.what());
-    LOG(ERROR) << exitMsg;
-    watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
-    std::rethrow_exception(watchDogException_);
+    if (std::string(e.what()).find("driver shutting down") !=
+        std::string::npos) {
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
+          << " (Watchdog caught exception: " << e.what();
+
+    } else {
+      // Append error message reported from workCleanupLoop
+      const auto exitMsg = c10::str(
+          "[Rank ",
+          rank_,
+          "] NCCL watchdog thread terminated with exception: ",
+          e.what());
+      LOG(ERROR) << exitMsg;
+      // TODO(whc) clean up the rethrow - why is it stored in a class var and
+      // rethrown?
+      watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+      std::rethrow_exception(watchDogException_);
+    }
   } catch (...) {
     const auto exitMsg = c10::str(
         "[Rank ",
@@ -1037,6 +1027,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         } else {
           it = workMetaList_.erase(it);
         }
+        at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -1084,20 +1075,30 @@ void ProcessGroupNCCL::runHookLoop() {
         it = completedWorkList_.erase(it);
       }
     } catch (std::exception& e) {
-      // PythonOnCompletionHook has already extracted Python exception message
-      // and wrapped it with a cpp one. So we no longer need to acquire GIL
-      // here.
-      const auto errorStr = c10::str(
-          "Caught exception on rank ",
-          rank_,
-          " while running onCompletion hook for ProcessGroupNCCL: ",
-          e.what(),
-          ". Aborting all communicators.");
+      if (std::string(e.what()).find("driver shutting down") !=
+          std::string::npos) {
+        LOG(INFO)
+            << "[Rank " << rank_
+            << "] main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
+            << " (runHookLoop caught exception: " << e.what();
 
-      // No need to call abort() on WorkNCCL here as that collective has already
-      // finished successfully at this point. We just need to abort the process
-      // Abort all NCCL Communicators on this ProcessGroupNCCL instance.
-      abort(errorStr);
+      } else {
+        // PythonOnCompletionHook has already extracted Python exception message
+        // and wrapped it with a cpp one. So we no longer need to acquire GIL
+        // here.
+        const auto errorStr = c10::str(
+            "Caught exception on rank ",
+            rank_,
+            " while running onCompletion hook for ProcessGroupNCCL: ",
+            e.what(),
+            ". Aborting all communicators.");
+
+        // No need to call abort() on WorkNCCL here as that collective has
+        // already finished successfully at this point. We just need to abort
+        // the process Abort all NCCL Communicators on this ProcessGroupNCCL
+        // instance.
+        abort(errorStr);
+      }
     }
 
     // Lock is still acquired at this point
@@ -1848,8 +1849,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
@@ -2027,8 +2033,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Enqueue P2P op so that it can be cancelled by NCCL watchdog
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
+
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
@@ -2731,6 +2743,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   int dev_in_group = 0;
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // Note 2: for asyncOp = false, we don't want to record streams because we
+  // know that the NCCL stream will join back to the "current" stream right
+  // after this op. So we might just as well keep the stream ownership of the
+  // input/output tensors unchanged. The benefit would be that the
+  // allocation/free of the tensors would look deterministic to the "current"
+  // stream so that the caching allocator can reuse memory pool for this stream
+  // in a clever way. This setting is added for libraries like FSDP which uses
+  // `reduce_scatter_tensor`.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       inputs,
       outputs,
@@ -2738,7 +2760,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        if (!avoidRecordStreams_) {
+        if (!avoidRecordStreams) {
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
         }
@@ -3308,7 +3330,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
-    const AllgatherOptions& /*unused */) {
+    const AllgatherOptions& opts) {
   check_gpu_single_tensor(input_tensor);
   check_gpu_single_tensor(output_tensor);
 
@@ -3327,6 +3349,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   auto outputs = std::vector<at::Tensor>{output_tensor};
 
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // Note 2: for asyncOp = false, we don't want to record streams because we
+  // know that the NCCL stream will join back to the "current" stream right
+  // after this op. So we might just as well keep the stream ownership of the
+  // input/output tensors unchanged. The benefit would be that the
+  // allocation/free of the tensors would look deterministic to the "current"
+  // stream so that the caching allocator can reuse memory pool for this stream
+  // in a clever way. This setting is added for libraries like FSDP which uses
+  // `all_gather_into_tensor`.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       inputs,
       outputs,
@@ -3334,7 +3366,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        if (!avoidRecordStreams_) {
+        if (!avoidRecordStreams) {
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
         }

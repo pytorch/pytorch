@@ -338,9 +338,10 @@ class TestDeserialize(TestCase):
 
     def test_sym_bool(self):
         def f(x, y):
-            return x.size(0) in y
+            assert x.size(0) in y
+            return x + y
 
-        self.check_graph(f, (torch.ones(2), torch.ones(3)))
+        self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
     def test_shape(self):
         def f(x):

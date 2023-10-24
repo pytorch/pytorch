@@ -1,11 +1,12 @@
 import contextlib
 import dataclasses
 import functools
-import itertools
 import logging
+import os
 import sys
 import time
 import warnings
+from itertools import count
 
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
@@ -294,7 +295,7 @@ def compile_fx_inner(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-):
+) -> Union[CompiledFxGraph, str]:
     """
     Inductor API that compiles a single graph.
 
@@ -342,8 +343,8 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache:
-        compiled_graph: CompiledFxGraph = FxGraphCache.load(
+    if config.fx_graph_cache and not aot_mode:
+        compiled_graph = FxGraphCache.load(
             fx_codegen_and_compile, graph_args, graph_kwargs
         )
     else:
@@ -485,7 +486,7 @@ def fx_codegen_and_compile(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-) -> CompiledFxGraph:
+) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -521,7 +522,12 @@ def fx_codegen_and_compile(
     # .view() call.
     view_to_reshape(gm)
 
-    fake_mode = fake_tensor_prop(gm, example_inputs)
+    # It is safe to run FakeTensorProp under no_grad because by the time
+    # we're in inductor, we assume that AOTAutograd has already "taken care"
+    # of autograd, so there should be no more autograd-related API's in the
+    # graph.
+    with torch.no_grad():
+        fake_mode = fake_tensor_prop(gm, example_inputs)
 
     # pattern matcher passes might not preserve striding information
     # on node.meta["val"]. if in the future we rely on these being
@@ -861,7 +867,7 @@ def compile_fx_aot(
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
-        return compile_fx(
+        compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -871,9 +877,13 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
+        assert os.path.exists(
+            compiled_lib_path
+        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
+        return compiled_lib_path
 
 
-_graph_counter = itertools.count(0)
+_graph_counter = count(0)
 
 
 def fw_compiler_freezing(
@@ -988,6 +998,14 @@ def compile_fx(
                     if node.op == "placeholder"
                 ]
                 if all(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi.device != i.device:
+                            raise ValueError(
+                                f"Device mismatch between fake input and example input at position #{idx}: "
+                                f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                "make sure torch.export() and torch.aot_compile() run on the same device."
+                            )
                     inputs_ = fake_inputs
             return compile_fx(
                 model_,
