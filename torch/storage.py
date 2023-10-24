@@ -25,6 +25,7 @@ class _StorageBase:
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
+    # If storage is created from a file, this attribute will be set to the filename
     filename: _Optional[str] = None
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704
