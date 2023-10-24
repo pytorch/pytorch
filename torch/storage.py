@@ -25,8 +25,6 @@ class _StorageBase:
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
-    # If storage is created from a file, this attribute will be dynamically set to the filename on the first access
-    _filename: _Optional[Union[str, int]] = None
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
@@ -86,7 +84,7 @@ class _StorageBase:
     @classmethod
     def _expired(cls, *args, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     def _byteswap(self, *args, **kwargs): ...  # noqa: E704
-    def _get_filename(self, *args, **kwargs) -> Union[str, int]: ...  # type: ignore[empty-body, misc] # noqa: E704
+    def _get_filename(self, *args, **kwargs) -> _Optional[str]: ...  # type: ignore[empty-body, misc] # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -238,7 +236,7 @@ class _StorageBase:
         return pinned_tensor.untyped_storage()
 
     def share_memory_(self):
-        """See :meth:torch.UntypedStorage.share_memory_"""
+        """See :meth:`torch.UntypedStorage.share_memory_`"""
         from torch.multiprocessing import get_sharing_strategy
         if self.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
             pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
@@ -324,10 +322,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
     def filename(self) -> _Optional[str]:
         """Returns the file name associated with this storage if the storage was memory mapped from a file.
            or ``None`` if the storage was not created by memory mapping a file."""
-        if self._filename is None:
-            self._filename = self._get_filename()
-        return None if self._filename == -1 else self._filename  # type: ignore[return-value]
-
+        return self._get_filename()
 
     @_share_memory_lock_protected
     def share_memory_(self, *args, **kwargs):
@@ -886,7 +881,7 @@ class TypedStorage:
         return self._new_wrapped_storage(self._untyped_storage.pin_memory(device=device))
 
     def share_memory_(self):
-        """See :meth:torch.UntypedStorage.share_memory_"""
+        """See :meth:`torch.UntypedStorage.share_memory_`"""
         _warn_typed_storage_removal()
         return self._share_memory_()
 
