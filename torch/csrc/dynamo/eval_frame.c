@@ -791,7 +791,6 @@ inline static PyObject* eval_custom_code_impl(
   #else
   Py_ssize_t nlocals_new = code->co_nlocals;
   Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
-  DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   Py_ssize_t ncells = PyCode_GetNCellvars(code);
   Py_ssize_t nfrees = PyCode_GetNFreevars(code);
