@@ -1281,17 +1281,14 @@ class TestControlFlowTraced(TestCase):
         # The symbols in make_fx's shape_env should not be speciliazed.
         self.assertEqual(len(gm.shape_env.guards), 0)
 
-        exp_code = """\
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
     sym_size = torch.ops.aten.sym_size(x_1, 0)
     eq = sym_size == 4;  sym_size = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
-eq = true_graph_0 = false_graph_0 = x_1 = None
-    return conditional
-"""
-        self._expected_inline_normalized(gm.code, exp_code)
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional""")  # noqa: B950
 
         # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
@@ -1465,11 +1462,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
-    def _expected_inline_normalized(self, actual_code, exp_code):
-        normalized_actual = "".join(actual_code.split())
-        normalized_exp = "".join(exp_code.split())
-        self.assertExpectedInline(normalized_actual, normalized_exp)
-
     def test_map_unfunc_boolean_tensor_for_nested_map_cond(self):
         def map_fn(pred, x):
             def fn(x, pred):
@@ -1491,24 +1483,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return wrapper
 
         gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
-        exp_graph = """\
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
-  body_graph_0 = x_1 = pred_1 = None
+    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);  body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
-    return getitem
-"""
-        exp_body_graph = """\
+    return getitem""")
+        self.assertExpectedInline(gm.body_graph_0.code.strip(), """\
 def forward(self, arg0_1, arg1_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0,\
- [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
-    return [conditional]
-"""
-        self._expected_inline_normalized(gm.code, exp_graph)
-        self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
+    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    return [conditional]""")  # noqa: B950
 
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
 
@@ -1563,36 +1549,29 @@ def forward(self, arg0_1, arg1_1):
         def foo(x):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
-        exp_graph = """\
-class foo(torch.nn.Module):
-    def forward(self, x_1: f32[s0, s1]):
-        # No stacktrace found for following nodes
-        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
-        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional: f32[s0, s1] = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
-eq = true_graph_0 = false_graph_0 = x_1 = None
-        return conditional
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1]):
-            # No stacktrace found for following nodes
-            cos: f32[s0, s1] = torch.ops.aten.cos.default(arg0_1)
-            sub: f32[s0, s1] = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
-            return sub
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1]):
-            # No stacktrace found for following nodes
-            sin: f32[s0, s1] = torch.ops.aten.sin.default(arg0_1)
-            add: f32[s0, s1] = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
-            return add
-"""
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
-            self._expected_inline_normalized(gm.print_readable(print_output=False), exp_graph)
+            self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional""")  # noqa: B950
+
+            self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    sub = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
+    return sub""")
+
+            self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
+    return add""")
 
     def _create_test_fns_for_cond(self, pred, inner_most_fn, operands, closure_list, nested_level):
         if nested_level == 0:
