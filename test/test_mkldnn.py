@@ -1440,12 +1440,12 @@ class TestMkldnn(TestCase):
 
     @skipIfNoTorchVision
     def test_resnet18(self):
-        model = torchvision.models.resnet.resnet18(pretrained=False)
+        model = torchvision.models.resnet.resnet18(weights=None)
         self._test_imagenet_model(model)
 
     @skipIfNoTorchVision
     def test_resnext50_32x4d(self):
-        model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
+        model = torchvision.models.resnet.resnext50_32x4d(weights=None)
         self._test_imagenet_model(model)
 
     def _lstm_params_list(self):
