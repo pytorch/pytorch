@@ -273,6 +273,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
     bool timingEnabled_;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    c10::optional<uint64_t> trace_id_;
     friend class ProcessGroupNCCL;
   };
 
@@ -497,6 +500,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
 
+  void shutdown();
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -523,7 +528,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+      const std::vector<at::Tensor>& inputs = {},
+      const std::vector<at::Tensor>& outputs = {});
 
   virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
   initCoalescedWork(
@@ -793,7 +799,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
   c10::intrusive_ptr<Backend> uccPG_;
 #endif
+  size_t uid_;
 };
+
+TORCH_API std::string dump_nccl_trace();
 
 } // namespace c10d
 
