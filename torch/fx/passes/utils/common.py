@@ -1,12 +1,15 @@
-from torch.nn import Module
+from typing import Dict, Tuple
+
+from torch.fx._compatibility import compatibility
+from torch.fx.graph import Graph
 
 from torch.fx.graph_module import GraphModule
-from torch.fx.graph import Graph
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
-from torch.fx._compatibility import compatibility
+from torch.nn import Module
 
 
-__all__ = ['HolderModule', 'lift_subgraph_as_module', 'compare_graphs']
+__all__ = ["HolderModule", "lift_subgraph_as_module", "compare_graphs"]
+
 
 @compatibility(is_backward_compatible=False)
 class HolderModule(Module):
@@ -22,7 +25,12 @@ class HolderModule(Module):
 
 
 @compatibility(is_backward_compatible=False)
-def lift_subgraph_as_module(gm: GraphModule, subgraph: Graph, class_name: str = 'GraphModule') -> GraphModule:
+def lift_subgraph_as_module(
+    gm: GraphModule,
+    subgraph: Graph,
+    comp_name: str = "",
+    class_name: str = "GraphModule",
+) -> Tuple[GraphModule, Dict[str, str]]:
     """
     Create a GraphModule for subgraph, which copies the necessary attributes from the original parent graph_module.
 
@@ -30,6 +38,8 @@ def lift_subgraph_as_module(gm: GraphModule, subgraph: Graph, class_name: str = 
         gm (GraphModule): parent graph module
 
         subgraph (Graph): a valid subgraph that contains copied nodes from the parent graph
+
+        comp_name (str): name for the new component
 
         class_name (str): name for the submodule
 
@@ -42,6 +52,7 @@ def lift_subgraph_as_module(gm: GraphModule, subgraph: Graph, class_name: str = 
     # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
     # the original module.
     submodule = HolderModule({})
+    orig_to_split_fqn_mapping: Dict[str, str] = {}
     for n in subgraph.nodes:
         if n.op not in ("call_module", "get_attr"):
             continue
@@ -62,10 +73,11 @@ def lift_subgraph_as_module(gm: GraphModule, subgraph: Graph, class_name: str = 
         leaf_node_name = target_name_parts[-1]
         leaf_node = getattr(orig_gm, leaf_node_name)
 
+        orig_to_split_fqn_mapping[target] = f"{comp_name}.{target}"
         # Relies on custom __setattr__ magic.
         setattr(curr, leaf_node_name, leaf_node)
 
-    return GraphModule(submodule, subgraph, class_name)
+    return GraphModule(submodule, subgraph, class_name), orig_to_split_fqn_mapping
 
 
 @compatibility(is_backward_compatible=False)

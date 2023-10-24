@@ -29,25 +29,44 @@ __all__ = [
     "randint",
     "shuffle",
     "uniform",
-    "USE_NUMPY_RANDOM",
 ]
 
 
-USE_NUMPY_RANDOM = False
+def use_numpy_random():
+    # local import to avoid ref cycles
+    import torch._dynamo.config as config
+
+    return config.use_numpy_random_stream
 
 
 def deco_stream(func):
     @functools.wraps(func)
     def inner(*args, **kwds):
-        if USE_NUMPY_RANDOM is False:
+        if not use_numpy_random():
             return func(*args, **kwds)
-        elif USE_NUMPY_RANDOM is True:
-            from numpy import random as nr
-
-            f = getattr(nr, func.__name__)
-            return f(*args, **kwds)
         else:
-            raise ValueError(f"USE_NUMPY_RANDOM={USE_NUMPY_RANDOM} not understood.")
+            import numpy
+
+            from ._ndarray import ndarray
+
+            f = getattr(numpy.random, func.__name__)
+
+            # numpy funcs accept numpy ndarrays, unwrap
+            args = tuple(
+                arg.tensor.numpy() if isinstance(arg, ndarray) else arg for arg in args
+            )
+            kwds = {
+                key: val.tensor.numpy() if isinstance(val, ndarray) else val
+                for key, val in kwds.items()
+            }
+
+            value = f(*args, **kwds)
+
+            # `value` can be either numpy.ndarray or python scalar (or None)
+            if isinstance(value, numpy.ndarray):
+                value = ndarray(torch.as_tensor(value))
+
+            return value
 
     return inner
 
@@ -64,11 +83,12 @@ def random_sample(size=None):
         size = ()
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.empty(size, dtype=dtype).uniform_()
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
-@deco_stream
 def rand(*size):
+    if size == ():
+        size = None
     return random_sample(size)
 
 
@@ -82,14 +102,14 @@ def uniform(low=0.0, high=1.0, size=None):
         size = ()
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.empty(size, dtype=dtype).uniform_(low, high)
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream
 def randn(*size):
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.randn(size, dtype=dtype)
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream
@@ -98,15 +118,24 @@ def normal(loc=0.0, scale=1.0, size=None):
         size = ()
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.empty(size, dtype=dtype).normal_(loc, scale)
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream
-@normalizer
-def shuffle(x: ArrayLike):
-    perm = torch.randperm(x.shape[0])
-    xp = x[perm]
-    x.copy_(xp)
+def shuffle(x):
+    # no @normalizer because we do not cast e.g. lists to tensors
+    from ._ndarray import ndarray
+
+    if isinstance(x, torch.Tensor):
+        tensor = x
+    elif isinstance(x, ndarray):
+        tensor = x.tensor
+    else:
+        raise NotImplementedError("We do not random.shuffle lists in-place")
+
+    perm = torch.randperm(tensor.shape[0])
+    xp = tensor[perm]
+    tensor.copy_(xp)
 
 
 @deco_stream
@@ -118,7 +147,7 @@ def randint(low, high=None, size=None):
     if high is None:
         low, high = 0, low
     values = torch.randint(low, high, size=size)
-    return array_or_scalar(values, int, return_scalar=size is None)
+    return array_or_scalar(values, int, return_scalar=size == ())
 
 
 @deco_stream

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import dis
 import functools
 import inspect
@@ -13,8 +12,6 @@ import threading
 import traceback
 import types
 import warnings
-import weakref
-from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -37,7 +34,9 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
+from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, DimDynamic
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
@@ -61,9 +60,10 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
-from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
+from .code_context import code_context
+from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import DynamoCallback
+from .types import CacheEntry, DynamoCallback
 from .utils import compile_times
 
 log = logging.getLogger(__name__)
@@ -77,12 +77,6 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    StrictMinMaxConstraint,
-)
-from torch.utils._sympy.value_ranges import ValueRanges
-
 
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
@@ -92,7 +86,62 @@ class Unset(Enum):
 unset = Unset.token
 
 compile_lock = threading.RLock()
-most_recent_backend: Optional[CompilerFn] = None
+guarded_backend_cache = threading.local()
+
+
+def _maybe_init_guarded_backend_cache():
+    if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):
+        guarded_backend_cache.skip_backend_check_for_run_only_mode = False
+    if not hasattr(guarded_backend_cache, "current_backend"):
+        guarded_backend_cache.current_backend = None
+    if not hasattr(guarded_backend_cache, "cached_backends"):
+        guarded_backend_cache.cached_backends = {}
+
+
+def _reset_guarded_backend_cache():
+    _maybe_init_guarded_backend_cache()
+    guarded_backend_cache.skip_backend_check_for_run_only_mode = False
+    guarded_backend_cache.current_backend = None
+    cached_backends = guarded_backend_cache.cached_backends
+    for backend in cached_backends.values():
+        if hasattr(backend, "reset"):
+            backend.reset()
+    cached_backends.clear()
+    guarded_backend_cache.cached_backends = {}
+
+
+@contextlib.contextmanager
+def backend_cache_wrapper(callback: CompilerFn):
+    _maybe_init_guarded_backend_cache()
+
+    # callback is False for RunOnlyContext. RunOnlyContext is used
+    # as a way to re-use the previous compiled cache.
+    # We therefore skip the check and re-use whatever code that's already cached.
+    # Note: the cache that's actually used depends on the caching policy.
+    if callback is False:
+        try:
+            prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = True
+            yield None
+        finally:
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
+    else:
+        backend = innermost_fn(callback)
+
+        def _set_current_backend(backend: CompilerFn):
+            prev_backend = guarded_backend_cache.current_backend
+            guarded_backend_cache.current_backend = backend
+            # Mapping id of a CompilerFn to itself
+            guarded_backend_cache.cached_backends[id(backend)] = backend
+            return prev_backend
+
+        prev_backend = _set_current_backend(backend)
+        try:
+            yield backend
+        finally:
+            _set_current_backend(prev_backend)
+
+
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
@@ -100,15 +149,21 @@ DONT_WRAP_FILES = {
 }
 
 
-CacheEntry = namedtuple("CacheEntry", "check_fn, code")
-
-
-def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+def _debug_get_cache_entry_list(
+    code: Union[types.CodeType, Callable[..., Any]]
+) -> List[CacheEntry]:  # type: ignore[valid-type]
     """
-    Given a code object, retrieve the cache entries stored in this code.
+    Given a code object or a callable object, retrieve the cache entries
+     stored in this code.
     """
-    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    return list(map(CacheEntry._make, cache_list))
+    if callable(code):
+        code = code.__code__
+    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    cache_list = []
+    while cache_head is not None:
+        cache_list.append(cache_head)
+        cache_head = cache_head.next
+    return cache_list
 
 
 class OptimizedModule(torch.nn.Module):
@@ -127,7 +182,7 @@ class OptimizedModule(torch.nn.Module):
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
-            inspect.getsourcefile(self._orig_mod.forward)
+            self._orig_mod.forward
         ):
             # This may be a torch.nn.* instance in skipfiles.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -212,7 +267,7 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
     if enable is None:
         yield
     elif enable:
-        # Assume everything is dynamic by deafult
+        # Assume everything is dynamic by default
         with config.patch(assume_static_by_default=False):
             yield
     else:
@@ -256,6 +311,8 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
+        self.backend_cache_manager = backend_cache_wrapper(self.callback)
+        self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
         self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -268,6 +325,7 @@ class _TorchDynamoContext:
         # TODO: This is totally not the right way to chain contexts manually
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
+        self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -275,6 +333,14 @@ class _TorchDynamoContext:
             return self.compiler_config
 
         fn = innermost_fn(fn)
+
+        # add context containing GraphModule to any GraphModule forward functions
+        if isinstance(fn, torch.fx.GraphModule):
+            # Assume that the underlying node metadata of `fn`,
+            # a GraphModule instance, accurately represents
+            # all instances of type(fn).
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
@@ -296,7 +362,7 @@ class _TorchDynamoContext:
         except TypeError:
             filename = None
         if (
-            (filename is None or skipfiles.check(filename))
+            (filename is None or skipfiles.check(fn))
             and (
                 getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
             )
@@ -323,8 +389,19 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
+            if torch.jit.is_tracing():
+                if config.error_on_nested_jit_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to torch.jit.trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn(*args, **kwargs)
+
             on_enter()
             prior = set_eval_frame(callback)
+            backend_cache_manager = backend_cache_wrapper(self.callback)
+            backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -335,6 +412,7 @@ class _TorchDynamoContext:
                 set_eval_frame(prior)
                 dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
+                backend_cache_manager.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -394,10 +472,6 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    @staticmethod
-    def _different_backend(old, new):
-        return not (old == new or old is None)
-
     def __init__(
         self,
         callback,
@@ -409,19 +483,8 @@ class OptimizeContext(_TorchDynamoContext):
         compiler_config=None,
     ):
         def on_enter():
-            global most_recent_backend
-            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
-                if config.raise_on_backend_change:
-                    raise ResetRequired()
-                else:
-                    warnings.warn(
-                        "changing options to `torch.compile()` may require "
-                        "calling `torch._dynamo.reset()` to take effect"
-                    )
-            most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
-        compiler_fn = innermost_fn(callback)
         super().__init__(
             callback=callback,
             on_enter=on_enter,
@@ -459,13 +522,13 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size, frame_state):
+    def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or skipfiles.check(frame.f_code.co_filename)
+            or skipfiles.check(frame.f_code)
             or config.disable
         ):
             log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
@@ -483,14 +546,16 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
-                    hijacked_callback = convert_frame.convert_frame(
+                    assert hasattr(
+                        callback, "_clone_with_backend"
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    hijacked_callback = callback._clone_with_backend(
                         ddp_optimizer.compile_fn,
-                        hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks, frame_state)
+                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
         with compile_lock, _disable_current_modes():
-            return callback(frame, cache_size, hooks, frame_state)
+            return callback(frame, cache_entry, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
@@ -651,14 +716,13 @@ def explain(f, *extra_args, **extra_kwargs):
             nonlocal out_guards
             out_guards.extend(guards)
 
-        with patch(f"{__name__}.most_recent_backend", None):
-            opt_f = optimize(
-                dynamo_graph_accumulating_compiler,
-                nopython=False,
-                guard_export_fn=guard_export_print,
-            )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-            opt_f(*args, **kwargs)
+        opt_f = optimize(
+            dynamo_graph_accumulating_compiler,
+            nopython=False,
+            guard_export_fn=guard_export_print,
+        )(f)
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
+        opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
 
@@ -704,103 +768,6 @@ def explain(f, *extra_args, **extra_kwargs):
         return inner
 
 
-@dataclasses.dataclass
-class ConstraintTarget:
-    """
-    This represents input tensor dimensions.  Don't create this
-    class directly; instead, use :func:`torch._export.dynamic_dim`.
-    """
-
-    w_tensor: weakref.ReferenceType[torch.Tensor]
-    # TODO: We don't need t_id; we can get it off of w_tensor
-    t_id: int
-    dim: int
-
-
-@dataclasses.dataclass
-class Constraint(ConstraintTarget):
-    """
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.  Don't create this
-    class directly; instead, use :func:`torch._export.dynamic_dim`.
-    """
-
-    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: StrictMinMaxConstraint
-    # Represent that `constraint_range` is shared with another ConstraintTarget, which
-    # typically arises because of a specified equality with another dynamic dimension.
-    shared: Optional[ConstraintTarget] = None
-
-    def _clone_with_range(self, lower=2, upper=sympy.oo):
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
-            warn_only=False,
-        )
-        return Constraint(
-            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
-        )
-
-    def __ge__(self, lower):
-        return self._clone_with_range(lower=lower)
-
-    def __gt__(self, lower):
-        return self._clone_with_range(lower=lower + 1)
-
-    def __le__(self, upper):
-        return self._clone_with_range(upper=upper)
-
-    def __lt__(self, upper):
-        return self._clone_with_range(upper=upper - 1)
-
-    def __bool__(self):
-        # NOTE(avik): We do not support compound expressions like a <= x <= b.
-        # This is because Python implicitly desugars them into bool(a <= x) and bool(x <= b),
-        # and moreover, enforces that any overload of __bool__ must return True or False.
-        # FWIW, sympy also raises TypeError in this case.
-        raise TypeError(
-            "Cannot determine truth value of Constraint. "
-            "If you are trying to combine Constraints with logical connectives, "
-            "you can specify them separately instead."
-        )
-
-    @property
-    def serializable_spec(self):
-        # We need a serialization compatible format of the constraint so that it
-        # can be savedin the graph module w/o breaking the module serialization.
-        # The saved constraints will be used directly for the post-exporting pass
-        # that converts constraints to runtime assertion. The saved constraints
-        # will not be saved in the serialized module.
-        # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
-        # which is not reliable
-        return {
-            "t_id": self.t_id,
-            "dim": self.dim,
-            "min": self.constraint_range.vr.lower,
-            "max": self.constraint_range.vr.upper,
-            "shared": (
-                None
-                if self.shared is None
-                else {
-                    "t_id": self.shared.t_id,
-                    "dim": self.shared.dim,
-                }
-            ),
-        }
-
-    def __eq__(self, other):
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & other.constraint_range.vr,
-            warn_only=False,
-        )
-        return Constraint(
-            self.w_tensor,
-            self.t_id,
-            self.dim,
-            constraint_range,
-            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim),
-        )
-
-
 class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def __init__(
         self,
@@ -809,10 +776,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
+        flat_args_dynamic_dims: List[Set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ):
         super().__init__(m)
 
+        assert len(flat_args_dynamic_dims) == len(flat_args)
         matched_input_elements_to_fake = {
             val: example_fake_inputs[ix]
             for ix, val in enumerate(matched_input_elements_positions)
@@ -827,7 +796,16 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                 # Fill node.mata["val"] with faketensor from the input,
                 # if it's not found in matched_input_elements_positions
                 if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
-                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+                    # TODO(zhxchen17) Also preserve all the user constraints here.
+                    arg.node.meta["val"] = fake_mode.from_tensor(
+                        flat_args[i],
+                        dynamic_dims=[
+                            DimDynamic.DYNAMIC
+                            if d in flat_args_dynamic_dims[i]
+                            else DimDynamic.STATIC
+                            for d in range(len(flat_args[i].shape))
+                        ],
+                    )
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
@@ -913,45 +891,63 @@ def rewrite_signature(
     graph_captured_input,
     graph_captured_output,
     dynamo_traced_result,
+    flat_args_dynamic_dims,
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    def produce_matching(source_args, candidate_args):
-        matched_elements_positions = []
-        dict_of_source_args = dict()
-        for i in range(0, len(source_args)):
-            element_id = id(source_args[i])
-            dict_of_source_args[element_id] = i
+    supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool)
 
-        for i in range(0, len(candidate_args)):
-            arg = candidate_args[i]
-            # 1-element tensor arg can be unspec int/float
-            if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
-                if id(arg) in dict_of_source_args:
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
-                elif id(arg.item()) in dict_of_source_args:
-                    matched_elements_positions.append(
-                        dict_of_source_args[id(arg.item())]
-                    )
+    def is_supported_type(val):
+        return isinstance(val, supported_types)
+
+    def produce_matching(sources, candidates):
+        source_types = " or ".join(
+            [
+                desc
+                + " of types: ("
+                + ", ".join([str(type(val)) for val in vals])
+                + ")"
+                for desc, vals in sources.items()
+            ]
+        )
+        source_vals = [val for vals in sources.values() for val in vals]
+        matched_elements_positions = []
+        dict_of_source_vals = {}
+        for i, val in enumerate(source_vals):
+            dict_of_source_vals[id(val)] = i
+
+        for candidate_desc, candidate_vals in candidates.items():
+            for i, val in enumerate(candidate_vals):
+                if is_supported_type(val):
+                    if id(val) in dict_of_source_vals:
+                        matched_elements_positions.append(dict_of_source_vals[id(val)])
+                    else:
+                        raise AssertionError(
+                            f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
+                        )
                 else:
                     raise AssertionError(
-                        "Dynamo input/output is not consistent with traced input/output"
+                        f"{candidate_desc} #{i+1} is {val}, but only "
+                        f"the following types are supported: {supported_types}"
                     )
-            else:
-                assert (
-                    id(arg) in dict_of_source_args
-                ), "Dynamo input and output is a strict subset of traced input/output"
-                matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
-    matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
+    matched_input_elements_positions = produce_matching(
+        sources={"original inputs": flat_args},
+        candidates={"graph-captured input": graph_captured_input},
+    )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
-    flat_both = list(graph_captured_output) + flat_args
-    matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
+    matched_output_elements_positions = produce_matching(
+        sources={
+            "graph-captured outputs": list(graph_captured_output),
+            "original inputs": flat_args,
+        },
+        candidates={"original output": flat_results_traced},
+    )
 
     new_graph = FlattenInputOutputSignature(
         graph,
@@ -959,6 +955,7 @@ def rewrite_signature(
         matched_input_elements_positions,
         matched_output_elements_positions,
         example_fake_inputs,
+        flat_args_dynamic_dims,
         fake_mode,
     ).transform()
 
@@ -1163,7 +1160,35 @@ def export(
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
-                graph_captured_result = graph(*graph_inputs)
+
+                named_parameters = dict(graph.named_parameters(remove_duplicate=False))
+                named_buffers = dict(graph.named_buffers(remove_duplicate=False))
+
+                ambient_fake_mode = (
+                    _guards.detect_fake_mode(graph_inputs)
+                    if _guards.detect_fake_mode(graph_inputs) is not None
+                    else fake_mode
+                )
+
+                with ambient_fake_mode, enable_python_dispatcher():
+                    params_and_buffers = {
+                        **dict(named_parameters),
+                        **dict(named_buffers),
+                    }
+                    fake_params_buffers = dict()
+
+                    for name, value in params_and_buffers.items():
+                        fake_params_buffers[name] = ambient_fake_mode.from_tensor(
+                            value, static_shapes=True
+                        )
+
+                    fake_graph_inputs = pytree.tree_map(
+                        ambient_fake_mode.from_tensor, graph_inputs
+                    )
+                    graph_captured_result = torch.func.functional_call(
+                        graph, fake_params_buffers, fake_graph_inputs
+                    )
+
                 return graph_captured_result
 
             return result_capturing_wrapper
@@ -1176,7 +1201,7 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with patch(f"{__name__}.most_recent_backend", None), config.patch(
+        with config.patch(
             specialize_int=True,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
@@ -1192,7 +1217,7 @@ def export(
                 export=True,
                 export_constraints=constraints,
             )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
             except ConstraintViolationError as e:
@@ -1202,17 +1227,14 @@ def export(
         if (
             (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
-            and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+            and not skipfiles.check(call_to_inspect)
         ):
             dim_constraints.solve()
-            msg = dim_constraints.prettify_results(original_signature)
+            dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
-            if forced_specializations:
-                msg = (
-                    "Some dynamic dimensions need to be specialized because "
-                    "the constraints inferred for them are too complex to specify.\n"
-                    f"{forced_specializations}\n{msg}"
-                )
+            msg = dim_constraints.prettify_results(
+                original_signature, constraint_violation_error, forced_specializations
+            )
             if constraint_violation_error:
                 constraint_violation_error.args = (
                     constraint_violation_error.args[0] + msg,
@@ -1245,7 +1267,7 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        # This check need to happend before aten_graph
+        # This check need to happened before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx
         if same_signature:
             check_signature_rewritable(graph)
@@ -1273,9 +1295,17 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(  # noqa: TRY200
+                        UserErrorType.DYNAMIC_CONTROL_FLOW,
+                        str(e),
+                        case_name="cond_operands",
+                    )
 
         if same_signature:
+            flat_args_dynamic_dims = [
+                {c.dim for c in (constraints or ()) if c.w_tensor() is x}
+                for x in flat_args
+            ]
             graph = rewrite_signature(
                 original_signature,
                 graph,
@@ -1286,6 +1316,7 @@ def export(
                 graph_captured_input,
                 graph_captured_result,
                 result_traced,
+                flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
         graph.meta["input_shape_constraints"] = (
@@ -1351,13 +1382,6 @@ class TorchPatcher:
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        optimizers = [
-            opt
-            for opt in torch.optim.__dict__.values()
-            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
-        ]
-
-        # Note: this excludes the optimizers that are unsupported in excluded_opts below
         from ..optim import (
             adadelta,
             adagrad,
@@ -1365,38 +1389,44 @@ class TorchPatcher:
             adamax,
             adamw,
             asgd,
+            lbfgs,
             nadam,
+            radam,
             rmsprop,
             rprop,
             sgd,
+            sparse_adam,
         )
 
-        all_opts = {
+        optimizer_modules = {
             adadelta,
             adagrad,
             adam,
             adamax,
             adamw,
             asgd,
+            lbfgs,
             nadam,
+            radam,
             rmsprop,
             rprop,
             sgd,
+            sparse_adam,
         }
 
-        disabled_multi_tensor_opts = {
+        disabled_multi_tensor_opt_modules = {
             adamax,
-            nadam,
+            radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
-        for opt_mod in all_opts:
+        for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
             if (
                 hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opts
+                and opt_mod in disabled_multi_tensor_opt_modules
             ):
                 setattr(
                     opt_mod,
@@ -1409,10 +1439,20 @@ class TorchPatcher:
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
                 )
 
+        optimizer_classes = [
+            opt
+            for opt in torch.optim.__dict__.values()
+            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
+        ]
+
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
-        excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
-        for opt in optimizers:
-            if opt in excluded_opts:
+        excluded_optimizer_classes = {
+            torch.optim.SparseAdam,
+            torch.optim.RAdam,
+            torch.optim.LBFGS,
+        }
+        for opt in optimizer_classes:
+            if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 
             if hasattr(opt, "_init_group"):
@@ -1429,10 +1469,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
-        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
-        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

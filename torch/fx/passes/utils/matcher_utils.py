@@ -2,8 +2,10 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
 import torch
-from torch.fx.graph import Graph
-from torch.fx.node import Node
+from torch.fx import (
+    Node,
+    Graph,
+)
 from torch.fx._compatibility import compatibility
 from typing import Dict, List, Set, Any, Union, Tuple
 import logging
@@ -41,6 +43,10 @@ class InternalMatch:
 
     # nodes in matched subgraph returned by output
     returning_nodes: List[Node] = field(default_factory=list)
+
+    # map from a string name to a node in the target graph
+    # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
+    name_node_map: Dict[str, Node] = field(default_factory=dict)
 
     def __copy__(self):
         return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),

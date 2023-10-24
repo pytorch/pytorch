@@ -841,6 +841,9 @@ class OpInfo:
     # whether the op supports sparse bsc inputs, defaults to False
     supports_sparse_bsc: bool = None
 
+    # whether the op promotes integer inputs to float
+    promotes_int_to_float: bool = False
+
     # the following metadata relates to complex support and is checked in test_ops.py
 
     test_conjugated_samples: bool = True
@@ -1499,12 +1502,11 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault("inplace_variant", None)
         kwargs.setdefault("sample_inputs_func", sample_inputs_func)
-        super().__init__(name, **kwargs)
+        super().__init__(name, promotes_int_to_float=promotes_int_to_float, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
         self.supports_multiple_dims = supports_multiple_dims
-        self.promotes_int_to_float = promotes_int_to_float
         self.promotes_int_to_int64 = promotes_int_to_int64
         self.complex_to_real = complex_to_real
         self.result_dtype = result_dtype
@@ -2061,7 +2063,6 @@ class BinaryUfuncInfo(OpInfo):
         error_inputs_func=None,
         lhs_make_tensor_kwargs=None,
         rhs_make_tensor_kwargs=None,
-        promotes_int_to_float=False,  # Set to true if the op promotes integer inputs to float
         always_returns_bool=False,  # Set to true if the op always returns bool tensors
         supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
         supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
@@ -2098,7 +2099,6 @@ class BinaryUfuncInfo(OpInfo):
             rhs_make_tensor_kwargs = {}
         self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
 
-        self.promotes_int_to_float = promotes_int_to_float
         self.always_returns_bool = always_returns_bool
         self.supports_rhs_python_scalar = supports_rhs_python_scalar
         self.supports_one_python_scalar = supports_one_python_scalar
@@ -2620,6 +2620,8 @@ def sample_inputs_foreach(
     high=None,
     zero_size: bool,
     requires_grad: bool,
+    # mutually exclusive from same_size and zero_size, which are all or nothing
+    intersperse_empty_tensors: bool = False,
 ):
     if zero_size:
         return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
@@ -2637,8 +2639,11 @@ def sample_inputs_foreach(
             for _ in range(N)
         ]
     else:
+        # interweave some empty tensors + have the last 2 tensors be empty (see #100701)
         return [
-            make_tensor(
+            torch.empty(0, dtype=dtype, device=device, requires_grad=requires_grad)
+            if (i % 3 == 0 or i >= N - 2) and intersperse_empty_tensors
+            else make_tensor(
                 (N - i, N - i),
                 dtype=dtype,
                 device=device,
@@ -2670,15 +2675,18 @@ class ForeachFuncInfo(OpInfo):
     def __init__(
         self,
         name,
+        sample_inputs_func,
+        *,
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
         dtypesIfROCM=None,
         supports_alpha_param=False,
-        sample_inputs_func=sample_inputs_foreach,
-        supports_autograd=False,
+        supports_autograd=True,
+        supports_inplace_autograd=True,
         supports_scalar_self_arg=False,
-        supports_forward_ad=False,
+        supports_forward_ad=True,
         backward_requires_result=False,
+        has_no_out_of_place=False,
         **kwargs,
     ):
         (
@@ -2687,13 +2695,13 @@ class ForeachFuncInfo(OpInfo):
             torch_ref_method,
             torch_ref_inplace,
         ) = get_foreach_method_names(name)
-        if name == "zero":
+        if has_no_out_of_place:
             # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
             assert foreach_method is None
-            foreach_method = torch.zero_
+            foreach_method = getattr(torch.Tensor, f"{name}_")
         super().__init__(
             name="_foreach_" + name,
             op=foreach_method,
@@ -2713,6 +2721,9 @@ class ForeachFuncInfo(OpInfo):
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
         self.backward_requires_result = backward_requires_result
+        self.has_no_out_of_place = has_no_out_of_place
+        self.has_no_in_place = self.inplace_variant is None
+        self.supports_inplace_autograd = supports_inplace_autograd
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
@@ -2724,6 +2735,13 @@ class ForeachFuncInfo(OpInfo):
             # because maximum ref does not support inplace or scalar
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
+
+    def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):
+            return []
+        return self.sample_inputs_func.sample_zero_size_tensor_inputs(
+            self, device, dtype, requires_grad, **kwargs
+        )
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):

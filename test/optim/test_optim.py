@@ -60,67 +60,93 @@ class TestOptim(TestCase):
         scheduler_constructors=None,
         sparse_only=False,
         maximize=False,
+        multi_tensor=False
     ):
         if scheduler_constructors is None:
             scheduler_constructors = []
         # For rosenbrock tests, it is mandated that the param is a tensor with 2 numbers
-        param_t = torch.tensor([1.5, 1.5])
+        if multi_tensor:
+            params_t = [torch.tensor([1.5, 1.5]), torch.tensor([1.5, 1.5], dtype=torch.float64)]
+        else:
+            params_t = [torch.tensor([1.5, 1.5])]
 
-        param = Parameter(param_t)
-        optimizer = constructor([param])
+        params = [Parameter(param_t) for param_t in params_t]
+        optimizer = constructor(params)
         schedulers = []
         for scheduler_constructor in scheduler_constructors:
             schedulers.append(scheduler_constructor(optimizer))
 
         if not sparse_only:
-            param_c = Parameter(param_t.clone())
-            optimizer_c = constructor([param_c])
+            params_c = [Parameter(param_t.clone()) for param_t in params_t]
+            optimizer_c = constructor(params_c)
 
         solution = torch.tensor([1, 1])
         with torch.no_grad():
-            initial_dist = param.dist(solution)
+            initial_dist = sum([param.dist(solution) for param in params])
 
-        def eval(param, sparse_grad, w):
-            # Depending on w, provide only the x or y gradient
-            optimizer.zero_grad()
-            loss = rosenbrock(param)
-            loss.backward()
+        def get_grad(param, sparse_grad):
             grad = drosenbrock(param)
             # NB: We torture test the optimizer by returning an
             # uncoalesced sparse tensor
-            if w:
-                i = torch.LongTensor([[0, 0]])
-                x = grad[0]
-                v = torch.tensor([x / 4.0, x - x / 4.0])
-            else:
-                i = torch.LongTensor([[1, 1]])
-                y = grad[1]
-                v = torch.tensor([y - y / 4.0, y / 4.0])
-            x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
-            with torch.no_grad():
-                if sparse_grad:
-                    param.grad = x
+
+            # Depending on w, provide only the x or y gradient
+            if sparse_grad:
+                if w:
+                    i = torch.LongTensor([[0, 0]])
+                    x = grad[0]
+                    v = torch.tensor([x / 4.0, x - x / 4.0])
                 else:
-                    param.grad = x.to_dense()
+                    i = torch.LongTensor([[1, 1]])
+                    y = grad[1]
+                    v = torch.tensor([y - y / 4.0, y / 4.0])
+                grad_out = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
+            else:
+                if w:
+                    grad_out = torch.tensor([grad[0], 0], dtype=param.dtype)
+                else:
+                    grad_out = torch.tensor([0, grad[1]], dtype=param.dtype)
+            return grad_out
+
+        def eval(params, sparse_grad, w):
+            optimizer.zero_grad()
+            if multi_tensor:
+                loss = sum(rosenbrock(param) for param in params)
+            else:
+                loss = rosenbrock(params[0])
+            loss.backward()
+
+            grads_out = [get_grad(param, sparse_grad) for param in params]
+            with torch.no_grad():
+                params[0].grad = grads_out[0]
+                if multi_tensor:
+                    params[1].grad = grads_out[1].to(dtype=torch.float64)
             return loss
 
         for i in range(2000):
             # Do cyclic coordinate descent
             w = i % 2
-            optimizer.step(functools.partial(eval, param, True, w))
+            optimizer.step(functools.partial(eval, params, True, w))
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
-                    scheduler.step(rosenbrock(param))
+                    scheduler.step(rosenbrock(params[0]))
                 else:
                     scheduler.step()
             if not sparse_only:
-                optimizer_c.step(functools.partial(eval, param_c, False, w))
-                self.assertEqual(param, param_c)
+                optimizer_c.step(functools.partial(eval, params_c, False, w))
+                # Tolerance is increased due to floating point error from different
+                # code path for dense case: x v.s. x - x / 4.0 + x / 4.0
+                self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
 
         if not maximize:
-            self.assertLessEqual(param.dist(solution), initial_dist)
+            self.assertLessEqual(
+                sum([param.dist(solution) for param in params]),
+                initial_dist
+            )
         else:
-            self.assertGreaterEqual(rosenbrock(param), rosenbrock(param_t))
+            self.assertGreaterEqual(
+                sum([rosenbrock(param) for param in params]),
+                sum([rosenbrock(param_t) for param_t in params_t]),
+            )
 
     def _test_basic_cases_template(
         self,
@@ -597,11 +623,13 @@ class TestOptim(TestCase):
     def test_sgd_sparse(self):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
-                lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach)
+                lambda params: optim.SGD(params, lr=4.8e-3, foreach=foreach),
+                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=0.0048, foreach=foreach),
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+                multi_tensor=foreach,
             )
 
     def test_sgd_complex(self):
@@ -669,6 +697,9 @@ class TestOptim(TestCase):
             res, state = [], []
             for enabled in (False, True):
                 kwargs_clone = deepcopy(kwargs)
+                if optimizer_constructor.__name__ == "ASGD" and kwarg == "foreach" and not enabled:
+                    # single tensor ASGD does not support capturable
+                    kwargs_clone["capturable"] = False
                 kwargs_clone[kwarg] = enabled
 
                 params_clone = []
@@ -731,6 +762,9 @@ class TestOptim(TestCase):
                 )
                 model.to(dtype=torch.float64, device=device)
                 params_with_flags = deepcopy(params)
+                if optimizer_constructor.__name__ == "ASGD" and flag == "foreach" and not flag_value:
+                    # single tensor ASGD does not support capturable
+                    params_with_flags["capturable"] = False
                 params_with_flags[flag] = flag_value
 
                 # foreach/fused optimizers should be tested with a param_groups['params'] with
@@ -779,7 +813,12 @@ class TestOptim(TestCase):
             max_mems = []
             for flag_value in (False, True):
                 kwargs_with_flags = deepcopy(kwargs)
-                kwargs_with_flags['foreach'] = flag_value
+                if optimizer_constructor.__name__ == "ASGD" and kwargs_with_flags.get("capturable", False) and not flag_value:
+                    # single tensor ASGD does not support capturable
+                    kwargs_with_flags["capturable"] = False
+
+                kwargs_with_flags["foreach"] = flag_value
+
 
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole
@@ -807,14 +846,16 @@ class TestOptim(TestCase):
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
             if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
-                    optimizer_constructor.__name__ == "Adadelta"):
+                    optimizer_constructor.__name__ in ["Adadelta", "ASGD"]):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
+                # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
                 nintermediates = 3
                 if optimizer_constructor.__name__ == "NAdam":
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
+
             elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
@@ -832,12 +873,22 @@ class TestOptim(TestCase):
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
+            (
+                optim.Adam,
+                dict(lr=torch.tensor(.001), weight_decay=1.0, amsgrad=True,
+                     capturable=True, maximize=True)
+            ),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
+            (
+                optim.AdamW,
+                dict(lr=torch.tensor(.001), weight_decay=0.0, amsgrad=False,
+                     capturable=True, maximize=True)
+            ),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
@@ -874,6 +925,8 @@ class TestOptim(TestCase):
             (optim.RAdam, dict(weight_decay=0)),
             (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
+            (optim.RAdam, dict(weight_decay=0, decoupled_weight_decay=True)),
+            (optim.RAdam, dict(weight_decay=1, decoupled_weight_decay=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
@@ -884,6 +937,10 @@ class TestOptim(TestCase):
             (optim.ASGD, dict(weight_decay=1)),
             (optim.ASGD, dict(weight_decay=0, maximize=True)),
             (optim.ASGD, dict(weight_decay=1, maximize=True)),
+            (optim.ASGD, dict(weight_decay=0, capturable=True)),
+            (optim.ASGD, dict(weight_decay=1, capturable=True)),
+            (optim.ASGD, dict(weight_decay=0, maximize=True, capturable=True)),
+            (optim.ASGD, dict(weight_decay=1, maximize=True, capturable=True)),
             (optim.Adamax, dict(weight_decay=0)),
             (optim.Adamax, dict(weight_decay=1)),
             (optim.Adamax, dict(weight_decay=0, maximize=True)),
@@ -907,6 +964,7 @@ class TestOptim(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
     @largeTensorTest("72GB", "cuda")
+    @skipIfRocm
     def test_multi_tensor_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._multi_tensor_optimizer_configs:
             # note(crcrpar): H100 wasn't sufficient for Adamax, surprisingly
@@ -931,6 +989,7 @@ class TestOptim(TestCase):
         return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
+                dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
@@ -949,6 +1008,7 @@ class TestOptim(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
     @largeTensorTest("64GB", "cuda")
+    @skipIfRocm
     def test_fused_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._fused_optimizer_configs:
             params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]
@@ -1097,11 +1157,25 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=torch.tensor(1e-3),
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.Adam)
         self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
         self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1110,6 +1184,11 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -1152,13 +1231,33 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.AdamW(
+                [weight, bias],
+                lr=torch.tensor(1e-3),
+                weight_decay=1,
+                amsgrad=True,
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.AdamW)
         self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
         self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -1227,13 +1326,13 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
-        # Handles https://github.com/pytorch/pytorch/issues/69698
+        # Handles https://github.com/pytorch/pytorch/issues/110606
         self.rel_tol = 2e-2
-        for optimizer in [optim.Adadelta]:
-            self._test_complex_optimizer(lambda weight: optimizer([weight]))
-            self._test_complex_optimizer(lambda weight: optimizer([weight], rho=0.95))
+        for foreach in (False, True):
+            self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], foreach=foreach))
+            self._test_complex_optimizer(lambda weight: optim.Adadelta([weight], rho=0.95, foreach=foreach))
             self._test_complex_optimizer(
-                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+                lambda weight: optim.Adadelta([weight], rho=0.95, weight_decay=1, foreach=foreach)
             )
 
     def test_nadam(self):
@@ -1301,6 +1400,28 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
             optim.NAdam(None, lr=1e-2, momentum_decay=-0.2)
 
+    def test_nadam_complex(self):
+        for foreach in (False, True):
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam([param], lr=1e-1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.NAdam(
+                    [param],
+                    lr=1e-1,
+                    momentum_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+
     def test_adagrad(self):
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: optim.Adagrad(
@@ -1361,7 +1482,8 @@ class TestOptim(TestCase):
     def test_adagrad_sparse(self):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
-                lambda params: optim.Adagrad(params, lr=1e-1, foreach=foreach)
+                lambda params: optim.Adagrad(params, lr=1e-1, foreach=foreach),
+                multi_tensor=foreach,
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.Adagrad(params, lr=0.1, foreach=foreach),
@@ -1369,6 +1491,7 @@ class TestOptim(TestCase):
                     lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
                     lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
                 ],
+                multi_tensor=foreach,
             )
 
     def test_adagrad_complex(self):
@@ -1450,6 +1573,23 @@ class TestOptim(TestCase):
             ],
             constructor_accepts_foreach=True,
         )
+        # RAdamW tests
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.RAdam(
+                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
+            ),
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.RAdam(
+                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
+            ),
+            [
+                lambda opt: ExponentialLR(opt, gamma=0.9),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+            constructor_accepts_foreach=True,
+        )
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
         ):
@@ -1457,6 +1597,29 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.RAdam(None, lr=1e-2, weight_decay=-1)
+
+    def test_radam_complex(self):
+        for foreach in (False, True):
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam([param], lr=1e-1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    foreach=foreach,
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optim.RAdam(
+                    [param],
+                    lr=1e-1,
+                    weight_decay=0.01,
+                    decoupled_weight_decay=True,
+                    foreach=foreach,
+                )
+            )
 
     def test_rmsprop(self):
         for foreach in (False, True):
@@ -2309,7 +2472,17 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.RAdam,
+                {"lr": 0.9, "weight_decay": 0.1, "decoupled_weight_decay": True, "differentiable": True},
+                *state.values(),
+            ),
+        )
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):

@@ -10,6 +10,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
@@ -86,6 +87,7 @@
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/normal_native.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/rad2deg.h>
 #include <ATen/ops/rad2deg_native.h>
@@ -368,20 +370,64 @@ Tensor& fill_sparse_csr_(Tensor& self, const Scalar& value) {
   return unary_op_inplace(self, &TensorBase::fill_, value);
 }
 
-Tensor sparse_mask_sparse_csr(
+Tensor sparse_mask_sparse_compressed(
     const Tensor& self,
-    const Tensor& sparse_mask) {
-  TORCH_CHECK(sparse_mask.is_sparse_csr(), "sparse_mask_sparse_csr expects mask to be sparse csr");
-  TORCH_CHECK(self.dim() == 2, "sparse_mask_sparse_csr expects self to be 2D");
-  TORCH_CHECK(sparse_mask.dim() == 2, "sparse_mask_sparse_csr expects mask to be 2D");
+    const Tensor& mask) {
+  TORCH_CHECK(at::sparse_csr::is_sparse_compressed(mask),
+              "sparse_mask_sparse_compressed expects mask to have sparse compressed layout, got ", mask.layout());
+  TORCH_CHECK(
+      mask.sizes().equals(self.sizes()),
+      "sparse_mask(): operands have incompatible sizes; self has size ",
+      self.sizes(),
+      " but mask has size ",
+      mask.sizes());
 
-  // We are computing self.mul(at::ones_like(sparse_mask))
-  // But mul(dense, sparse_csr) is not implemented yet
-  if (self.layout() == sparse_mask.layout()) {
-    // Both inputs are CSR
-    return self.mul(at::ones_like(sparse_mask));
+  if (self.is_same(mask)) {
+    return self;
+  }
+
+  if (!mask.numel() || !mask._nnz()) {
+    return mask.clone().to(self.device(), self.scalar_type());
+  }
+
+  if (self.layout() == kStrided) {
+    Tensor compressed_indices, plain_indices;
+    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(mask);
+    auto mask_values = mask.values();
+    auto dense_mask = at::native::_sparse_compressed_tensor_unsafe(
+        compressed_indices,
+        plain_indices,
+        at::ones({1}, self.options().dtype(kBool)).expand_as(mask_values),
+        self.sizes(),
+        kBool,
+        mask.layout(),
+        self.device()).to_dense();
+    return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        mask.layout(), "sparse_mask_sparse_compressed",
+        [&] {
+          return at::native::dense_to_sparse_with_mask(self, dense_mask, mask.layout(), {}, mask.dense_dim());
+        },
+        [&] {
+          auto blocksize = at::sparse_csr::getBlockSize(mask);
+          return at::native::dense_to_sparse_with_mask(self, dense_mask, mask.layout(), blocksize, mask.dense_dim());
+        });
+  } else if (self.layout() == mask.layout()) {
+    // TODO: keeping this for BC but the method used here may lead to
+    // incorrect indices.
+    return self.mul(at::ones_like(mask)).to(self.scalar_type());
   } else {
-    return self.sparse_mask(sparse_mask.to_sparse()).to_sparse_csr();
+    // TODO: keeping this for BC but the method used here cannot
+    // support batch dimensions because sparse COO tensors are batch
+    // dimension ignorant.
+    return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        mask.layout(), "sparse_mask_sparse_compressed",
+        [&] {
+          return self.sparse_mask(mask.to_sparse()).to_sparse(mask.layout());
+        },
+        [&] {
+          auto blocksize = at::sparse_csr::getBlockSize(mask);
+          return self.sparse_mask(mask.to_sparse()).to_sparse(mask.layout(), blocksize);
+        });
   }
 }
 

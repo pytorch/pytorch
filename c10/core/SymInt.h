@@ -145,6 +145,20 @@ class C10_API SymInt {
   // number can be used to diagnose overspecialization.
   int64_t guard_int(const char* file, int64_t line) const;
 
+  // Insert a guard that this SymInt must be size-like, returning true if
+  // the integer actually is >= 0.  Unlike manually performing a >= 0 test,
+  // if the SymInt in question is an unbacked SymInt (or, potentially in the
+  // future, if it contains unbacked SymInts), we will also treat the
+  // unbacked SymInt as statically testing >= 2 (which will prevent us from
+  // choking on, e.g., contiguity checks.)
+  bool expect_size(const char* file, int64_t line) const;
+
+  // Distinguish actual symbolic values from constants stored on the heap
+  bool is_symbolic() const {
+    return is_heap_allocated() &&
+        !toSymNodeImplUnowned()->constant_int().has_value();
+  }
+
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
   // where `is_heap_allocated` is always false and optimize dead code paths
@@ -196,6 +210,11 @@ class C10_API SymInt {
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
 
+  // If both are symbolic, this checks if
+  // they share the same node.
+  // If both are not symbolic this just checks normal equality.
+  bool is_same(const SymInt& other) const;
+
   operator SymFloat() const;
 
   // Don't use this.  Prefer maybe_as_int instead
@@ -209,15 +228,10 @@ class C10_API SymInt {
       return c10::make_optional(data_);
     }
     auto* node = toSymNodeImplUnowned();
-    int64_t c = node->large_negative_int();
-    if (c != 0) {
-      return c10::make_optional(c);
+    if (auto c = node->constant_int()) {
+      return c;
     }
-    c10::optional<int64_t> d = node->maybe_as_int();
-    if (d.has_value()) {
-      return d;
-    }
-    return c10::nullopt;
+    return node->maybe_as_int();
   }
 
   // Return whether the integer is directly coercible to a SymInt

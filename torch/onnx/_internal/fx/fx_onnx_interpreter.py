@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import operator
 import re
 import types
@@ -16,6 +17,7 @@ import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
+    _pass,
     diagnostics,
     onnxfunction_dispatcher,
     op_validation,
@@ -33,6 +35,17 @@ def _fx_node_to_onnx_message_formatter(
     **kwargs,
 ) -> str:
     return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
+
+
+@_beartype.beartype
+def _fx_graph_to_onnx_message_formatter(
+    fn: Callable,
+    self,
+    fx_graph_module: torch.fx.GraphModule,
+    *args,
+    **kwargs,
+) -> str:
+    return f"FX Graph: {fx_graph_module._get_name()}. "
 
 
 def _location_from_fx_stack_trace(
@@ -121,7 +134,7 @@ def _retrieve_or_adapt_input_to_graph_set(
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
-                # dim, and onnx-script will promote it to tensot(int64)
+                # dim, and onnx-script will promote it to tensor(int64)
                 sequence_mixed_elements.append([tensor])
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
@@ -204,7 +217,7 @@ def _fill_tensor_shape_type(
     expected_values: Union[
         fx_type_utils.META_VALUE_TYPE,
         List[fx_type_utils.META_VALUE_TYPE],
-        Tuple[fx_type_utils.META_VALUE_TYPE, ...],
+        Tuple[Optional[fx_type_utils.META_VALUE_TYPE], ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -221,10 +234,15 @@ def _fill_tensor_shape_type(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # aten::sym_size output is a int, not a tensor, which stands
-        # for the size of one dim. We treat it as 0-D tensor.
-        # TODO(titaiwang): set shape?
-        if isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        if expected_value is None:
+            # There is no shape/type from None.
+            # NOTE: according to https://github.com/pytorch/pytorch/blob/main/torch/_meta_registrations.py,
+            # None could be a valid value for return type, so we need to handle it.
+            # e.g. the function: meta__scaled_dot_product_flash() in cpu mode.
+            continue
+        elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # aten::sym_size output is a int, not a tensor, which stands
+            # for the size of one dim. We treat it as 0-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
@@ -396,9 +414,8 @@ class FxOnnxInterpreter:
             diagnostic = self.diagnostic_context.inflight_diagnostic(
                 rule=diagnostics.rules.fx_node_to_onnx
             )
-            diagnostic.with_additional_message(
-                f"### PyTorch source information\n```\n{node_stack_trace}\n```"
-            )
+            with diagnostic.log_section(logging.INFO, "PyTorch source information"):
+                diagnostic.info("```\n%s\n```", node_stack_trace)
             location = _location_from_fx_stack_trace(node_stack_trace)
             if location is not None:
                 diagnostic.with_location(location)
@@ -439,7 +456,10 @@ class FxOnnxInterpreter:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
     @_beartype.beartype
-    @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
+    @diagnostics.diagnose_call(
+        diagnostics.rules.fx_graph_to_onnx,
+        diagnostic_message_formatter=_fx_graph_to_onnx_message_formatter,
+    )
     def run(
         self,
         fx_graph_module: torch.fx.GraphModule,
@@ -459,15 +479,42 @@ class FxOnnxInterpreter:
                 `fx_graph_module` is a submodule. If not provided,
                 `fx_graph_module` is assumed to be the root module.
         """
+        diagnostic = self.diagnostic_context.inflight_diagnostic()
+        with diagnostic.log_section(logging.DEBUG, "FX Graph:"):
+            diagnostic.debug(
+                "```\n%s\n```",
+                diagnostics.LazyString(fx_graph_module.print_readable, False),
+            )
+
+        if parent_onnxscript_graph is not None:
+            # If parent_onnxscript_graph is provided, we assume fx_graph_module is a
+            # submodule representing a forward call of an nn.Module.
+            # Compose package and version where the nn.Module is defined as domain name
+            # for the local function.
+
+            onnx_meta: Optional[_pass.GraphModuleOnnxMeta] = fx_graph_module.meta.get(
+                "onnx"
+            )
+            if onnx_meta is None:
+                raise RuntimeError(
+                    f"ONNX meta is not found in submodule {fx_graph_module._get_name()}. "
+                    f"Only submodules produced by `Modularize` pass is supported in ONNX export."
+                )
+
+            onnx_domain = onnx_meta.package_info.to_onnx_domain_string()
+        else:
+            # Leave as default domain name for the root module.
+            onnx_domain = None
+
         onnxscript_graph = onnxscript_graph_building.TorchScriptGraph(
-            parent_onnxscript_graph
+            parent_onnxscript_graph, domain_name=onnx_domain
         )
         onnxscript_tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
             onnxscript_graph
         )
         # In the following loop, a TorchScript graph is created to
         # represent the input FX graph with ONNX symbols (e.g., onnx::add).
-        # To connect the values to nodes in the TorchScript graph, we maintian
+        # To connect the values to nodes in the TorchScript graph, we maintain
         # fx_name_to_onnxscript_value. Basically, we want to translate
         #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
         # to
@@ -498,6 +545,9 @@ class FxOnnxInterpreter:
                     onnxscript_tracer,
                     fx_name_to_onnxscript_value,
                 )
+
+        with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)
 
         return onnxscript_graph
 
@@ -761,6 +811,11 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
+        # TODO: Constant tensors and buffer/weights are both categorized into `get_attr`,
+        # but they are different to ONNX. We need to distinguish them.
+        # Constant tensors should become ONNX constants in the graph, while buffers/weights ONNX initializers.
+        # For now they are all converted to ONNX initializers.
+
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
@@ -768,7 +823,8 @@ class FxOnnxInterpreter:
         # Parameter/buffer name cannot contain "."
         # Revert from "/" to restore namespace formatting.
         input_ = onnxscript_graph.add_initializer(
-            node.target.replace("/", "."), attr_tensor
+            name=node.target.replace("/", "."),
+            value=attr_tensor,
         )
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)

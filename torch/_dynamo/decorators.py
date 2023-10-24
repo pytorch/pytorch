@@ -93,6 +93,7 @@ def allow_in_graph(fn):
     assert callable(fn), "allow_in_graph expects a callable"
     allowed_functions._allowed_function_ids.add(id(fn))
     allowed_functions._disallowed_function_ids.remove(id(fn))
+    allowed_functions._allowed_user_defined_function_ids.add(id(fn))
     return fn
 
 
@@ -108,6 +109,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
             )
         allowed_functions._allowed_function_ids.remove(id(fn))
         allowed_functions._disallowed_function_ids.add(id(fn))
+        allowed_functions._allowed_user_defined_function_ids.remove(id(fn))
         return fn
 
     return inner
@@ -169,7 +171,7 @@ def mark_dynamic(t, index):
     1) torch._dynamo.config dynamic_shapes True or False.
         a) dynamic_shapes=True - dynamic_shapes must be True for mark_dynamic to work.
         a) dynamic_shapes=False - This config will raise an exception when used in conjunction with
-        mark_dyamic. We will eventually support this.
+        mark_dynamic. We will eventually support this.
 
     2) If the dimension is fully constrained - as in, it does not allow more than a single value
     in both eager (torch.compile, torch._dynamo.optimize) mode and export mode (torch._dynamo.export),
@@ -236,36 +238,48 @@ def mark_static(t, index=None):
             mark_static(t, i)
 
 
-# Note: it's preferable to not make `import torch` eagerly import other libs.
-# However, we want to provide a grace period to make borderline versions of einops
-# compatible with torch.compile.
+@forbid_in_graph
+def mark_static_address(t, guard=True):
+    """
+    Marks an input tensor whose data_ptr will not change across multiple calls
+    to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
+    is not needed for this input. The data_ptr will be guarded if guard=True. Note:
+    Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
+    """
+    if not isinstance(t, torch.Tensor):
+        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
+
+    if guard:
+        t._dynamo_static_input_type = "guarded"
+    else:
+        t._dynamo_static_input_type = "unguarded"
+
+
+# Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
+    import einops
+
     try:
-        import einops
+        # requires einops > 0.6.1, torch >= 2.0
+        from einops._torch_specific import (  # noqa: F401
+            _ops_were_registered_in_torchdynamo,
+        )
 
-        try:
-            # requires einops > 0.6.1, torch >= 2.0
-            from einops._torch_specific import (  # noqa: F401
-                _ops_were_registered_in_torchdynamo,
-            )
-
-            # einops > 0.6.1 will call the op registration logic as it is imported.
-            pass
-        except ImportError:
-            # einops <= 0.6.1
-            allow_in_graph(einops.rearrange)
-            allow_in_graph(einops.reduce)
-            if hasattr(einops, "repeat"):
-                allow_in_graph(einops.repeat)  # available since einops 0.2.0
-            if hasattr(einops, "einsum"):
-                allow_in_graph(einops.einsum)  # available since einops 0.5.0
-            if hasattr(einops, "pack"):
-                allow_in_graph(einops.pack)  # available since einops 0.6.0
-            if hasattr(einops, "unpack"):
-                allow_in_graph(einops.unpack)  # available since einops 0.6.0
-    except ImportError:
+        # einops > 0.6.1 will call the op registration logic as it is imported.
         pass
+    except ImportError:
+        # einops <= 0.6.1
+        allow_in_graph(einops.rearrange)
+        allow_in_graph(einops.reduce)
+        if hasattr(einops, "repeat"):
+            allow_in_graph(einops.repeat)  # available since einops 0.2.0
+        if hasattr(einops, "einsum"):
+            allow_in_graph(einops.einsum)  # available since einops 0.5.0
+        if hasattr(einops, "pack"):
+            allow_in_graph(einops.pack)  # available since einops 0.6.0
+        if hasattr(einops, "unpack"):
+            allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-_allow_in_graph_einops()
+allowed_functions.add_module_init_func("einops", _allow_in_graph_einops)

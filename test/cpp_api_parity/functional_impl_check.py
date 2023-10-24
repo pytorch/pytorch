@@ -173,7 +173,7 @@ def write_test_to_test_class(
 
     assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), (
         "Only one of `cpp_options_args` and `cpp_function_call` entries "
-        "should be present in test params dict:\n{}").format(pprint.pformat(test_params_dict))
+        f"should be present in test params dict:\n{pprint.pformat(test_params_dict)}")
 
     functional_name = compute_functional_name(test_params_dict)
 

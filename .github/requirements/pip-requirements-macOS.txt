@@ -16,7 +16,7 @@ pytest-xdist==3.3.1
 pytest-rerunfailures==10.3
 pytest-flakefinder==1.1.0
 pytest-shard==0.1.2
-scipy==1.9.0
+scipy==1.10.1
 sympy==1.11.1
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0
@@ -25,3 +25,5 @@ sympy==1.11.1
 pytest-cpp==2.3.0
 rockset==1.0.3
 z3-solver==4.12.2.0
+tensorboard==2.13.0
+optree==0.9.1

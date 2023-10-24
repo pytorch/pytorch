@@ -106,7 +106,7 @@ class ReLU(Module):
 
 
 class RReLU(Module):
-    r"""Applies the randomized leaky rectified liner unit function, element-wise,
+    r"""Applies the randomized leaky rectified linear unit function, element-wise,
     as described in the paper:
 
     `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
@@ -1108,6 +1108,11 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
 
+        why_not_fast_path = ''
+        if ((attn_mask is not None and torch.is_floating_point(attn_mask))
+           or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
+            why_not_fast_path = "floating-point masks are not supported for fast path."
+
         is_batched = query.dim() == 3
 
         key_padding_mask = F._canonical_mask(
@@ -1128,7 +1133,6 @@ class MultiheadAttention(Module):
         )
 
 
-        why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:

@@ -150,7 +150,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                 op_name = 'GivenTensorInt64Fill'
             elif array.dtype == str:
                 op_name = 'GivenTensorStringFill'
-            elif array.dtype == np.bool:
+            elif array.dtype == bool:
                 op_name = 'GivenTensorBoolFill'
             else:
                 op_name = 'GivenTensorFill'

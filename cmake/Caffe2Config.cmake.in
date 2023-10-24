@@ -101,7 +101,9 @@ if(@USE_CUDA@)
   endif()
 endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
+if(@CAFFE2_USE_MKL@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
+endif()
 
 if(@USE_MKLDNN@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake")

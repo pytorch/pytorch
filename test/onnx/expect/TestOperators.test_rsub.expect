@@ -1,10 +1,10 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Sub_1"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -19,10 +19,10 @@ graph {
     input: "onnx::Sub_1"
     input: "onnx::Sub_0"
     output: "2"
-    name: "Sub_1"
+    name: "Sub_2"
     op_type: "Sub"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Sub_0"
     type {
@@ -57,5 +57,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

@@ -17,7 +17,7 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, GeneratorStateSource, Source
+from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
@@ -25,9 +25,9 @@ from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
-    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch_function import TensorWithTFOverrideVariable
 
 
 @dataclasses.dataclass
@@ -94,21 +94,18 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if (
-            value.source is not None
-            and allow_cache
-            and not isinstance(value.source, GeneratorStateSource)
-        ):
+        if value.source is not None and allow_cache:
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
-            tensor_variable = value.tensor_variable
-            graph_outputs_key = self.add_graph_output(tensor_variable)
+            graph_outputs_key = self.add_graph_output(value)
             output.append(
-                self.create_load_global(value.global_class_name(), True, add=True)
+                self.create_load_global(
+                    value.global_mangled_class_name(), True, add=True
+                )
             )
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.extend(create_call_function(1, True))

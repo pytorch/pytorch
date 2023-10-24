@@ -16,7 +16,17 @@ if is_fbcode():
 else:
 
     def exportdb_error_message(case_name):
-        return ""
+        return (
+            "For more information about this error, see: "
+            + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+            + case_name.replace("_", "-")
+        )
+
+
+import logging
+
+log = logging.getLogger(__name__)
+graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
@@ -111,7 +121,7 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
-    CONSTRAIN_VIOLATION = auto()
+    CONSTRAINT_VIOLATION = auto()
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
 
@@ -128,14 +138,45 @@ class UserError(Unsupported):
         """
         if case_name is not None:
             assert isinstance(case_name, str)
+            if msg.endswith("."):
+                msg += " "
+            else:
+                msg += "\n"
             msg += exportdb_error_message(case_name)
         super().__init__(msg)
         self.error_type = error_type
         self.message = msg
 
 
+class UncapturedHigherOrderOpError(TorchDynamoException):
+    pass
+
+
 class IncorrectUsage(Exception):
     pass
+
+
+# These exceptions are ok to fallback to eager/graph_break.
+exceptions_allowed_to_be_fallback = (
+    torch._subclasses.fake_tensor.DataDependentOutputException,
+    torch._subclasses.fake_tensor.DynamicOutputShapeException,
+    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+    torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+)
+
+
+def unimplemented_with_warning(e, code, msg):
+    # This function calls unimplemented internally and eventually graph breaks
+    # or falls to eager. unimplemented itself does not print any user warnings,
+    # i.e., its very silent. This helper function is intended when an error is
+    # encountered in the torch.compile stack which is worth showing as warning
+    # to the user. For example, if AOT Autograd backend fails with a fake tensor
+    # exception, its ok to fallback to eager but not silently. Here, we can use
+    # this function to log the message and the stack trace.
+    graph_break_msg = format_error_msg_verbose(e, code)
+    graph_breaks_log.debug("%s", graph_break_msg)
+    log.warning(msg)
+    raise unimplemented(msg) from e
 
 
 def unimplemented(msg: str):
@@ -280,6 +321,6 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
         msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"
+ line {code.co_firstlineno} \ndue to: \n{format_exc()}"
 
     return msg

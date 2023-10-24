@@ -174,10 +174,23 @@ The ``spawn`` function below addresses these concerns and takes care
 of error propagation, out of order termination, and will actively
 terminate processes upon detecting an error in one of them.
 
+.. automodule:: torch.multiprocessing.spawn
+.. currentmodule:: torch.multiprocessing.spawn
+
 .. autofunction:: spawn
+
+.. currentmodule:: torch.multiprocessing
+
 
 .. class:: SpawnContext
 
    Returned by :func:`~spawn` when called with ``join=False``.
 
    .. automethod:: join
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.multiprocessing.pool
+.. py:module:: torch.multiprocessing.queue
+.. py:module:: torch.multiprocessing.reductions

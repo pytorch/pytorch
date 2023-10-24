@@ -7,12 +7,14 @@ import torch
 import torch.nn.functional as F
 from torch.ao.quantization.observer import PerChannelMinMaxObserver
 from torch.ao.quantization.quantizer.quantizer import (
-    OperatorConfig,
-    OperatorPatternType,
     QuantizationAnnotation,
-    QuantizationConfig,
     QuantizationSpec,
     Quantizer,
+)
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
 )
 
 __all__ = [

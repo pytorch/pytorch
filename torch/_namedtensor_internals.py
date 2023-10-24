@@ -50,8 +50,8 @@ def single_ellipsis_index(names, fn_name):
     ellipsis_indices = [i for i, name in enumerate(names) if is_ellipsis(name)]
     if len(ellipsis_indices) >= 2:
         raise RuntimeError(
-            "{}: More than one Ellipsis ('...') found in names ("
-            "{}). This function supports up to one Ellipsis.".format(fn_name, names)
+            f"{fn_name}: More than one Ellipsis ('...') found in names ("
+            f"{names}). This function supports up to one Ellipsis."
         )
     if len(ellipsis_indices) == 1:
         return ellipsis_indices[0]
@@ -97,15 +97,8 @@ def update_names_with_mapping(tensor, rename_map, inplace):
             dim_map[old_dim] = new_dim
         else:
             raise RuntimeError(
-                (
-                    "{api_name}: Tried to rename dim '{old_dim}' to dim "
-                    "{new_dim} in Tensor[{dims}] but dim '{old_dim}' does not exist"
-                ).format(
-                    old_dim=old_dim,
-                    new_dim=new_dim,
-                    dims=tensor.names,
-                    api_name=namer_api_name(inplace),
-                )
+                f"{namer_api_name(inplace)}: Tried to rename dim '{old_dim}' to dim "
+                f"{new_dim} in Tensor[{tensor.names}] but dim '{old_dim}' does not exist"
             )
     return tensor._update_names(tuple(dim_map.values()), inplace)
 
@@ -149,10 +142,10 @@ def update_names(tensor, names, rename_map, inplace):
     has_rename_pairs = bool(rename_map)
     if has_names and has_rename_pairs:
         raise RuntimeError(
-            "{api_name}: This function takes either positional "
-            "args or keyword args, but not both. Use tensor.{api_name}(*names) "
-            "to name dims and tensor.{api_name}(**rename_map) to rename "
-            "dims.".format(api_name=namer_api_name(inplace))
+            f"{namer_api_name(inplace)}: This function takes either positional "
+            f"args or keyword args, but not both. Use tensor.{namer_api_name(inplace)}(*names) "
+            f"to name dims and tensor.{namer_api_name(inplace)}(**rename_map) to rename "
+            "dims."
         )
 
     # Special case for tensor.rename(*[]), which is valid for a 0 dim tensor.

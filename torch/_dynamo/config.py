@@ -31,7 +31,13 @@ minimum_call_count = 1
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
-cache_size_limit = 64
+
+# controls the maximum number of cache entries with a guard on same ID_MATCH'd
+# object. It also controls the maximum size of cache entries if they don't have
+# any ID_MATCH'd guards.
+cache_size_limit = 8
+# controls the maximum number of entries for a code object.
+accumulated_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -87,6 +93,20 @@ allow_ignore_mark_dynamic = False
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
+# Uses CPython internal dictionary tags to detect mutation. There is some
+# overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.
+# guard_nn_modules unspecializes the nn module instance and adds guard for each
+# relevant member of the nn modules. On the other hand,
+# guard_nn_modules_using_dict_tags specializes on each nn module instance but
+# uses low overhead dict version matching to detect mutations, obviating the
+# need to guard on members of the nn modules. With
+# guard_nn_modules_using_dict_tags, the guard_nn_modules is not really required
+# but kept around for debugging and discussing unspecializing nn module
+# variables.
+# TODO(janimesh, voz): Remove both of these flags (or atleast guard_nn_modules)
+# once we have reached stability for the guard_nn_modules_using_dict_tags.
+guard_nn_modules_using_dict_tags = True
+
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
@@ -124,21 +144,11 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# If a PyTorch module is in this allowlist, torchdynamo will be allowed
-# to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-    torch.testing,
-    torch.ao.nn,
-    torch._refs,
-    torch._prims,
-    torch._decomp,
-    torch.utils._contextlib,
-    torch.utils._pytree,
-    torch.fx._pytree,
-    torch.sparse,
-}
+# Get a cprofile trace of Dynamo
+cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
+
+# legacy config, does nothing now!
+skipfiles_inline_module_allowlist = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -196,6 +206,16 @@ capture_scalar_outputs = False
 # (these are separated for historical reasons).
 capture_dynamic_output_shape_ops = False
 
+# By default, dynamo will treat all ints as backed SymInts, which means (1) it
+# will wait to see the int change over multiple runs before generalizing and
+# (2) it will still always 0/1 specialize an int.  When true, this knob
+# forces dynamo to treat _length_per_key and _offset_per_key on
+# KeyedJaggedTensor from torchrec as size-like unbacked SymInts, so that
+# they (1) generalize immediately and (2) unsoundly never compare equal to
+# 0/1.  This is not on by default as AOTAutograd/Inductor cannot currently
+# compile this code; however, this can be useful for export.
+force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
+
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
@@ -221,8 +241,9 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# Throw an error if backend changes without reset
-raise_on_backend_change = False
+# If true, error if you torch.jit.trace over a dynamo-optimized function.
+# If false, silently suppress dynamo
+error_on_nested_jit_trace = True
 
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
@@ -239,6 +260,9 @@ error_on_recompile = False
 # causing recompilations.
 report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
 
+# Whether to report all guard failures or just the first one that fails
+report_all_guard_failures = False
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
@@ -250,12 +274,34 @@ translation_validation = (
 translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
+# Disables bisection for translation validation.
+#
+# Translation validation bisection is enabled by default, if translation validation
+# is also enabled. This should help finding guard simplification issues. However,
+# since validation uses Z3 for bisecting, it might take a lot of time.
+#
+# Set this configuration option so as to avoid bisecting.
+translation_validation_no_bisect = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
+)
+# Checks whether replaying ShapeEnv events on a freshly constructed one yields
+# the a ShapeEnv with the same state. This should be used only in testing.
+check_shape_env_recorded_events = False
+
+# Trace through NumPy or graphbreak
+trace_numpy = True
+
+# Trace through torch.distributed code
+trace_distributed = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
 numpy_default_float = "float64"
 numpy_default_complex = "complex128"
 numpy_default_int = "int64"
+
+# use numpy's PRNG if True, pytorch otherwise
+use_numpy_random_stream = False
 
 
 def is_fbcode():
@@ -290,6 +336,11 @@ capture_func_transforms = True
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
+# wraps (un)equalities with 'Not' class after recording the correct expression
+# in the FX graph. This should incorrectly construct the divisible and replacement
+# lists, and incorrectly issue guards.
+inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
+
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
     "requires_grad",
@@ -302,6 +353,10 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
+
+# support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
+# WARNING: this is an experimental flag and is subject to change.
+_experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 from .config_utils import install_config_module
 

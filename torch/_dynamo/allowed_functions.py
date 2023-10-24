@@ -6,12 +6,18 @@ import inspect
 import itertools
 import math
 import operator
+import sys
 import types
 import warnings
 
-from typing import cast, Dict, Optional, Set
+from collections import defaultdict
+from typing import Callable, cast, Dict, List, Optional, Set
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 import torch
 import torch._functorch.deprecated as deprecated_func
@@ -104,6 +110,7 @@ def _disallowed_function_ids():
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
+        torch.jit.isinstance,
         torch.set_anomaly_enabled,
         torch.set_autocast_cache_enabled,
         torch.set_autocast_cpu_dtype,
@@ -112,11 +119,10 @@ def _disallowed_function_ids():
         torch.set_autocast_gpu_dtype,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
+        torch.Tensor.__init__,
+        torch.resize_as_,
+        torch._tensor._convert,
     ]
-    if torch.distributed.is_available():
-        from torch.distributed import _functional_collectives
-
-        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
 
     # extract all dtypes from torch
     dtypes = [
@@ -154,9 +160,10 @@ def _allowed_function_ids():
         # Tensor.set_ with a Storage, and Storages cannot be traced with
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
-        disallowed_modules = (
+        disallowed_modules = [
             "torch.optim.",
             "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
+            "torch.utils._pytree",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
@@ -165,7 +172,17 @@ def _allowed_function_ids():
             "torch.fx.",
             "torch.distributed.fsdp.",
             "torch.distributed._tensor.",
-        )
+            # Inline through the ActivationWrapper in
+            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
+            # nn module calls torch.utils.checkpoint internally. If Dynamo does
+            # not trace this, AOT Autograd will try to trace this and can cause
+            # issues observed in
+            # https://github.com/pytorch/pytorch/issues/108269
+            "torch.distributed.algorithms.",
+        ]
+        if config.trace_distributed:
+            disallowed_modules.append("torch.distributed.")
+
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
         if module is None:
@@ -204,6 +221,8 @@ def _allowed_function_ids():
                     deprecated_func.grad,
                     torch.func.vmap,
                     deprecated_func.vmap,
+                    torch.nn.functional.triplet_margin_with_distance_loss,
+                    torch.cond,
                 ):
                     continue
 
@@ -221,10 +240,25 @@ def _allowed_function_ids():
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
+    if config.trace_distributed:
+        from torch.distributed import _functional_collectives_impl as fci
+
+        for f in [
+            fci._all_gather_into_tensor,
+            fci._all_reduce,
+            fci._reduce_scatter_tensor,
+            fci._all_reduce_coalesced,
+            fci._all_gather_into_tensor_coalesced,
+            fci._reduce_scatter_tensor_coalesced,
+        ]:
+            torch_object_ids[id(f)] = repr(f)
+
     # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(method, types.MethodDescriptorType):
+        if isinstance(
+            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
             torch_object_ids[id(method)] = f"torch.Tensor.{name}"
 
     for idx in _disallowed_function_ids():
@@ -235,6 +269,12 @@ def _allowed_function_ids():
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
+
+
+@make_function_id_set
+def _allowed_user_defined_function_ids():
+    rv = {}
+    return rv
 
 
 @make_function_id_set
@@ -287,18 +327,60 @@ def _builtin_constant_ids():
     return rv
 
 
+_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+
+
+def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
+    """Register a module without eagerly importing it"""
+    # If the module is already imported, eagerly run init
+    assert "." not in name, f"Expected a root module name, but got {name}"
+    if name in sys.modules:
+        init_func()
+
+    # Module is not yet imported, delay processing until needed
+    assert name not in _lazy_module_init
+    _lazy_module_init[name].append(init_func)
+
+
+def _maybe_init_lazy_module(obj: object) -> None:
+    module = getattr(obj, "__module__", None)
+    if module is None:
+        return
+
+    base_module = module.split(".")[0]
+    init_funcs = _lazy_module_init.pop(base_module, None)
+    if init_funcs is not None:
+        for fn in init_funcs:
+            fn()
+
+
 def is_allowed(obj):
     """Is this safe to trace like torch.add ?"""
-    # torch.ops is populated lazily so we don't necessarily have them in
-    # _allowed_function_ids.  Figure it out by testing the type instead
-    # in those cases
+    _maybe_init_lazy_module(obj)
+
     if id(obj) in _disallowed_function_ids:
         return False
 
-    return id(obj) in _allowed_function_ids or isinstance(
+    if id(obj) in _allowed_function_ids:
+        return True
+
+    # torch.ops is populated lazily so we don't necessarily have them in
+    # _allowed_function_ids.  Figure it out by testing the type instead
+    # in those cases
+    return isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
     )
+
+
+def is_user_defined_allowed(obj):
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _allowed_user_defined_function_ids
+
+
+def is_forbidden(obj):
+    _maybe_init_lazy_module(obj)
+    return getattr(obj, "_dynamo_forbidden", False)
 
 
 def torch_get_name(obj, default):
@@ -315,4 +397,6 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
-    return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
+    if np is None:
+        return False
+    return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids

@@ -31,579 +31,264 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <cuda_fp16.h>
 #include <ATen/native/transformers/cuda/flash_attn/philox.cuh>
+#include <ATen/native/transformers/cuda/flash_attn/utils.h>
 
-namespace fmha {
+namespace pytorch_flash {
+
+using namespace cute;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ float apply_exp_(float x, float max) {
-    return __expf(x - max);
+template<bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
+__device__ inline void thread_reduce_(Tensor<Engine0, Layout0> const &tensor, Tensor<Engine1, Layout1> &summary, Operator &op) {
+    static_assert(Layout0::rank == 2, "Only support 2D Tensor");
+    static_assert(Layout1::rank == 1, "Only support 1D Tensor");
+    CUTE_STATIC_ASSERT_V(size<0>(summary) == size<0>(tensor));
+    #pragma unroll
+    for (int mi = 0; mi < size<0>(tensor); mi++) {
+        summary(mi) = zero_init ? tensor(mi, 0) : op(summary(mi), tensor(mi, 0));
+        #pragma unroll
+        for (int ni = 1; ni < size<1>(tensor); ni++) {
+            summary(mi) = op(summary(mi), tensor(mi, ni));
+        }
+    }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-inline __device__ float apply_exp2_(float x, float max) {
-    return exp2f(x - max);
-    // With fast-math, this produces the same PTX instruction as the assembly below
-    // float diff = x - max;
-    // float res;
-    // asm ("ex2.approx.ftz.f32 %0, %1;\n\t" : "=f"(res) : "f"(diff));
-    // return res;
+template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
+__device__ inline void quad_allreduce_(Tensor<Engine0, Layout0> &dst, Tensor<Engine1, Layout1> &src, Operator &op) {
+    CUTE_STATIC_ASSERT_V(size(dst) == size(src));
+    #pragma unroll
+    for (int i = 0; i < size(dst); i++){
+        dst(i) = Allreduce<4>::run(src(i), op);
+    }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+template<bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
+__device__ inline void reduce_(Tensor<Engine0, Layout0> const& tensor, Tensor<Engine1, Layout1> &summary, Operator &op) {
+    thread_reduce_<zero_init>(tensor, summary, op);
+    quad_allreduce_(summary, summary, op);
+}
 
-template<int COLS> struct ReadType {};
-template<> struct ReadType<4> { using T = float;};
-template<> struct ReadType<8> { using T = float2;};
+template<bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
+__device__ inline void reduce_max(Tensor<Engine0, Layout0> const& tensor, Tensor<Engine1, Layout1> &max){
+    MaxOp<float> max_op;
+    reduce_<zero_init>(tensor, max, max_op);
+}
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+template<typename Engine0, typename Layout0, typename Engine1, typename Layout1>
+__device__ inline void reduce_sum(Tensor<Engine0, Layout0> const& tensor, Tensor<Engine1, Layout1> &sum){
+    SumOp<float> sum_op;
+    reduce_(tensor, sum, sum_op);
+}
 
-template <typename Cta_tile, typename Kernel_traits>
-struct Smem_tile_reduce {
-    // Helper class to distribute MMA tiles reduced over rows per warp over quads.
-
-    // The Mma tile.
-    using Mma_tile = fmha::Hmma_tile<Cta_tile>;
-
-    // The number of MMAs in M/N dimensions.
-    static constexpr int MMAS_M = Mma_tile::MMAS_M;
-    static constexpr int MMAS_N = Mma_tile::MMAS_N;
-
-    static constexpr int WARPS_M = Cta_tile::WARPS_M;
-    static constexpr int WARPS_N = Cta_tile::WARPS_N;
-
-
-    static constexpr int ROWS = WARPS_M * MMAS_M * 16;
-    static constexpr int COLS = WARPS_N;
-    static_assert(COLS == 4 || COLS == 8);
-    static constexpr int ROWS_PER_XOR_PATTERN = (COLS == 8) ? 4 : 8;
-    static constexpr int BYTES_PER_TILE = ROWS * COLS * sizeof(float);
-    static constexpr int ELTS_PER_TILE = ROWS * COLS;
-
-    static constexpr int THREADS_PER_GROUP = Kernel_traits::Gmem_tile_o::THREADS_PER_ROW;
-    // TD [2022-05-02]: No longer true if head_dim != 64
-    // static_assert(THREADS_PER_GROUP == 16); // DEBUG
-    static constexpr int ROWS_PER_WARP = 32 / THREADS_PER_GROUP;
-    static constexpr int LOOPS = Kernel_traits::Gmem_tile_o::LOOPS;
-    static_assert(LOOPS == 1);
-
-    using read_t = typename ReadType<COLS>::T;
-
-    __device__ inline Smem_tile_reduce(float *smem_, const int tidx) {
-
-        int lane = tidx % 32;
-        int warp = tidx / 32;
-
-        int warp_m = warp % WARPS_M;
-        int warp_n = warp / WARPS_M;
-
-        qid_ = lane % 4;
-        int qp = lane / 4;
-
-        // Swizzle the column to avoid 2-fold bank conflicts when we have 8 warps.
-        // This won't affect reading as we assume commutative reduction ops.
-        const int col = warp_n ^ (qp / ROWS_PER_XOR_PATTERN);
-        smem_write_ = &smem_[warp_m * 16 * MMAS_M * WARPS_N + qp * WARPS_N + col];
-        smem_read_ = &reinterpret_cast<read_t *>(smem_)[warp_m * 16 * MMAS_M * 4 + qp * 4 + qid_];
-        smem_read_row_ = &reinterpret_cast<read_t *>(smem_)[warp_m * 16 * MMAS_M * 4 + qid_];
-
-    }
-
-    __device__ inline void store(float (&frag)[2 * MMAS_M]) {
-        if( qid_ == 0 ) {
-            #pragma unroll
-            for( int mi = 0; mi < MMAS_M; mi++ ) {
-                int offset = mi * 16 * WARPS_N;
-                smem_write_[offset + 0 * 8 * WARPS_N] = frag[mi * 2 + 0];
-                smem_write_[offset + 1 * 8 * WARPS_N] = frag[mi * 2 + 1];
-            }
-        }
-    }
-
-    __device__ inline void load(read_t (&frag)[2 * MMAS_M]) {
+// Apply the exp to all the elements.
+template <bool Scale_max=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
+inline __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> const &max, const float scale) {
+    static_assert(Layout0::rank == 2, "Only support 2D Tensor");
+    static_assert(Layout1::rank == 1, "Only support 1D Tensor");
+    CUTE_STATIC_ASSERT_V(size<0>(max) == size<0>(tensor));
+    #pragma unroll
+    for (int mi = 0; mi < size<0>(tensor); ++mi) {
+        // If max is -inf, then all elements must have been -inf (possibly due to masking).
+        // We don't want (-inf - (-inf)) since that would give NaN.
+        // If we don't have float around M_LOG2E the multiplication is done in fp64.
+        const float max_scaled = max(mi) == -INFINITY ? 0.f : max(mi) * (Scale_max ? scale : float(M_LOG2E));
         #pragma unroll
-        for( int mi = 0; mi < MMAS_M; mi++ ) {
-            int offset = mi * 16 * 4;
-            frag[mi * 2 + 0] = smem_read_[offset + 0 * 8 * 4];
-            frag[mi * 2 + 1] = smem_read_[offset + 1 * 8 * 4];
-        }
-    }
-
-    __device__ inline void load_row(read_t (&frag)[MMAS_M], int row) {
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M; mi++ ) {
-            int offset = mi * 16 * 4;
-            frag[mi] = smem_read_row_[offset + 0 * 8 * 4 + row * 4];
-        }
-    }
-
-    int qid_;
-    float *smem_write_;
-    read_t *smem_read_;
-    read_t *smem_read_row_;
-
-};
-
-
-template<typename Cta_tile, typename Kernel_traits>
-struct Softmax_base {
-
-    // The Mma tile.
-    using Mma_tile = fmha::Hmma_tile<Cta_tile>;
-
-    // The number of MMAs in M/N dimensions.
-    static constexpr int MMAS_M = Mma_tile::MMAS_M;
-    static constexpr int MMAS_N = Mma_tile::MMAS_N;
-
-    // The number of groups of warp such that we have at most 4 warps writing consecutive elements.
-    static constexpr int GROUPS = fmha::DivUpConstexpr(Cta_tile::WARPS_N, 4);
-    // The number of elements that we are going to store per row.
-    static constexpr int ELEMENTS_PER_ROW = Cta_tile::WARPS_N / GROUPS;
-    // The number of rows.
-    static constexpr int ROWS = Cta_tile::M * GROUPS;
-    // The total number of elements.
-    static constexpr int ELEMENTS = ROWS * ELEMENTS_PER_ROW;
-
-    // Ctor.
-    template<typename Params>
-    inline __device__ Softmax_base(const Params &params, void *smem, int tidx)
-        :  // packed_mask_ptr_(reinterpret_cast<const char*>(params.packed_mask_ptr)),
-          smem_(reinterpret_cast<float *>(smem)), tidx_(tidx) {
-
-        // Move to the 1st mask loaded by the thread+ tidx;
-        // packed_mask_ptr_ += bidb * params.packed_mask_stride_in_bytes + tidx * sizeof(uint32_t);
-
-        // Extract the position in the warp.
-        int warp = tidx / Cta_tile::THREADS_PER_WARP;
-        int lane = tidx % Cta_tile::THREADS_PER_WARP;
-
-        // Decompose the warp index into M and N.
-        int warp_m = warp % Cta_tile::WARPS_M;
-        int warp_n = warp / Cta_tile::WARPS_M;
-
-        // Decompose the warp-n index into group/position-inside-the-group.
-        int warp_g = warp_n / ELEMENTS_PER_ROW;
-        int warp_i = warp_n % ELEMENTS_PER_ROW;
-
-        // The location written by the threads.
-        int write_row = warp_g * (ROWS / GROUPS) + warp_m * Mma_tile::M_PER_MMA + lane / 4;
-        int write_col = warp_i;
-
-        // Assemble the write pointer.
-        smem_write_ = &smem_[write_row * ELEMENTS_PER_ROW + write_col];
-
-        // Assemble the read pointer.
-        smem_read_ = &smem_[warp_m * Mma_tile::M_PER_MMA + lane / 4];
-    }
-
-    template<bool zero=false, typename Mask>
-    inline __device__ void apply_mask(const Mask &mask) {
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M; ++mi ) {
-            #pragma unroll
-            for( int ii = 0; ii < 2; ++ii ) {
-                #pragma unroll
-                for( int ni = 0; ni < MMAS_N; ++ni ) {
-                    #pragma unroll
-                    for( int jj = 0; jj < 4; ++jj ) {
-                        if( !mask.is_valid(mi, ni, ii, jj) ) {
-                            elt_[2 * mi + ii][4 * ni + jj] = zero ? 0.f : -INFINITY;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply the exp to all the elements.
-    template <bool max_in_base2=false, bool elt_in_base2=false>
-    inline __device__ void apply_exp(const float (&max)[MMAS_M * 2]) {
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
+        for (int ni = 0; ni < size<1>(tensor); ++ni)  {
             // Instead of computing exp(x - max), we compute exp2(x * log_2(e) -
             // max * log_2(e)) This allows the compiler to use the ffma
             // instruction instead of fadd and fmul separately.
-            constexpr float kLog2e = M_LOG2E;
-            const float max_base2 = max_in_base2 ? max[mi] : max[mi] * kLog2e;
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N * 4; ++ni ) {
-                // elt_[mi][ni] = apply_exp_(elt_[mi][ni], max[mi]);
-                elt_[mi][ni] = apply_exp2_(elt_in_base2 ? elt_[mi][ni] : elt_[mi][ni] * kLog2e,
-                                           max_base2);
-            }
+            tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
         }
     }
+}
 
-    // Apply the exp to all the elements.
-    template <bool scale_max=true>
-    inline __device__ void scale_apply_exp(const float (&max)[MMAS_M * 2], const float scale_) {
-        const float max_scale = scale_max ? scale_ * M_LOG2E : M_LOG2E;
-        const float scale = scale_ * M_LOG2E;
+// Apply the exp to all the elements.
+template <bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
+inline __device__ void max_scale_exp2_sum(Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> &max, Tensor<Engine1, Layout1> &sum, const float scale) {
+    static_assert(Layout0::rank == 2, "Only support 2D Tensor");
+    static_assert(Layout1::rank == 1, "Only support 1D Tensor");
+    CUTE_STATIC_ASSERT_V(size<0>(max) == size<0>(tensor));
+    #pragma unroll
+    for (int mi = 0; mi < size<0>(tensor); ++mi) {
+        MaxOp<float> max_op;
+        max(mi) = zero_init ? tensor(mi, 0) : max_op(max(mi), tensor(mi, 0));
         #pragma unroll
-        for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
+        for (int ni = 1; ni < size<1>(tensor); ni++) {
+            max(mi) = max_op(max(mi), tensor(mi, ni));
+        }
+        max(mi) = Allreduce<4>::run(max(mi), max_op);
+        // If max is -inf, then all elements must have been -inf (possibly due to masking).
+        // We don't want (-inf - (-inf)) since that would give NaN.
+        const float max_scaled = max(mi) == -INFINITY ? 0.f : max(mi) * scale;
+        sum(mi) = 0;
+        #pragma unroll
+        for (int ni = 0; ni < size<1>(tensor); ++ni)  {
             // Instead of computing exp(x - max), we compute exp2(x * log_2(e) -
             // max * log_2(e)) This allows the compiler to use the ffma
             // instruction instead of fadd and fmul separately.
-            const float max_scaled = max[mi] * max_scale;
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N * 4; ++ni ) {
-                elt_[mi][ni] = apply_exp2_(elt_[mi][ni] * scale, max_scaled);
-            }
+            tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
+            sum(mi) += tensor(mi, ni);
         }
+        SumOp<float> sum_op;
+        sum(mi) = Allreduce<4>::run(sum(mi), sum_op);
     }
+}
 
-    // Apply the exp to all the elements.
-    template <bool max_in_base2=false>
-    inline __device__ void apply_exp_col(const float (&max)[MMAS_N * 4]) {
+template <typename Engine, typename Layout>
+inline __device__ void apply_mask(Tensor<Engine, Layout> &tensor, const uint32_t max_seqlen_k,
+                                  const uint32_t col_idx_offset_ = 0) {
+    // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+    static_assert(Layout::rank == 2, "Only support 2D Tensor");
+    const uint32_t lane_id = threadIdx.x % 32;
+    const uint32_t col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
+    #pragma unroll
+    for (int nj = 0; nj < size<1, 1>(tensor); ++nj) {
+        const uint32_t col_idx_base = col_idx_offset + nj * 8;
         #pragma unroll
-        for( int ni = 0; ni < MMAS_N * 4; ++ni ) {
-            constexpr float kLog2e = M_LOG2E;
-            const float max_base2 = max_in_base2 ? max[ni] : max[ni] * kLog2e;
-            #pragma unroll
-            for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
-                elt_[mi][ni] = apply_exp2_(elt_[mi][ni] * kLog2e, max_base2);
-            }
-        }
-    }
-    // inline __device__ void apply_exp_col(const float (&max)[MMAS_N]) {
-    //     constexpr float kLog2e = M_LOG2E;
-    //     #pragma unroll
-    //     for( int ni = 0; ni < MMAS_N * 4; ++ni ) {
-    //         float max_base2 = max_in_base2 ? max[ni / 4] : max[ni / 4] * kLog2e;
-    //         max_base2 = __shfl_sync(0xffffffff, max_base2, (ni % 4) * 8 + threadIdx.x % 8);
-    //         #pragma unroll
-    //         for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
-    //             elt_[mi][ni] = apply_exp2_(elt_[mi][ni] * kLog2e, max_base2);
-    //         }
-    //     }
-    // }
-
-    template <bool encode_dropout_in_sign_bit=false>
-    inline __device__ void apply_dropout_16bits(Philox &ph, uint16_t p_dropout_in_uint16_t) {
-        // We encode the dropout pattern in the sign bit of the non-negative
-        // softmax to distinguish from pre-existing zeros
-        auto encode_dropout = [](bool keep, float val) {
-            return keep ? val : (encode_dropout_in_sign_bit ? -val : float(0));
-        };
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M; mi++ ) {
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N; ni++ ) {
-                uint16_t tmp[8];
-                // fmha::uint4_to_ushort8(ph(), tmp);
-                uint4 tmp_32 = ph();
-                fmha::uint4_to_ushort8(tmp_32, tmp);
-                // if ((threadIdx.x % 32 == 0) && (blockIdx.x == 0) && (blockIdx.y == 0)) {
-                //     printf("tidx = %d, ni = %d, ph  Philox: %u, %u, %u, %u\n", threadIdx.x, ni, tmp_32.x, tmp_32.y, tmp_32.z, tmp_32.w);
-                // }
+        for (int j = 0; j < size<1, 0>(tensor); ++j) {
+            const uint32_t col_idx = col_idx_base + j;
+            if (col_idx >= max_seqlen_k) {
+                // Without the "make_coord" we get wrong results
                 #pragma unroll
-                for (int ii = 0; ii < 2; ++ii) {
-                    #pragma unroll
-                    for (int jj = 0; jj < 4; ++jj) {
-                        elt_[mi * 2 + ii][4 * ni + jj] =
-                            encode_dropout(tmp[ii * 4 + jj] <= p_dropout_in_uint16_t, elt_[mi * 2 + ii][4 * ni + jj]);
-                    }
+                for (int mi = 0; mi < size<0>(tensor); ++mi) {
+                    tensor(mi, make_coord(j, nj)) = -INFINITY;
                 }
             }
         }
     }
+}
 
-    template <bool encode_dropout_in_sign_bit=false>
-    inline __device__ void apply_dropout_16bits(Philox &ph, uint16_t p_dropout_in_uint16_t,
-                                                unsigned long long philox_subsequence) {
-        // We encode the dropout pattern in the sign bit of the non-negative
-        // softmax to distinguish from pre-existing zeros
-        auto encode_dropout = [](bool keep, float val) {
-            return keep ? val : (encode_dropout_in_sign_bit ? -val : float(0));
-        };
-        static_assert(MMAS_M == 1);  // We're assuming 16x16 blocks.
+template <typename Engine, typename Layout>
+inline __device__ void apply_mask_causal(Tensor<Engine, Layout> &tensor, const uint32_t col_idx_offset_,
+                                         const uint32_t max_seqlen_k, const uint32_t row_idx_offset_,
+                                         const uint32_t warp_row_stride) {
+    // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+    static_assert(Layout::rank == 2, "Only support 2D Tensor");
+    const uint32_t lane_id = threadIdx.x % 32;
+    // const uint32_t row_idx_offset = row_idx_offset_ + lane_id / 4;
+    const uint32_t row_idx_offset = row_idx_offset_;
+    const uint32_t col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
+    #pragma unroll
+    for (int mi = 0; mi < size<0, 1>(tensor); ++mi) {
+        const uint32_t row_idx_base = row_idx_offset + mi * warp_row_stride;
         #pragma unroll
-        for( int mi = 0; mi < MMAS_M; mi++ ) {
+        for (int i = 0; i < size<0, 0>(tensor); ++i) {
+            const uint32_t row_idx = row_idx_base + i * 8;
+            const uint32_t col_idx_limit = std::min(max_seqlen_k, row_idx + 1);
             #pragma unroll
-            for( int ni = 0; ni < MMAS_N; ni++ ) {
-                uint16_t tmp[8];
-                // fmha::uint4_to_ushort8(ph(), tmp);
-                fmha::uint4_to_ushort8(ph(philox_subsequence + ni * Cta_tile::WARPS_N), tmp);
-                // uint4 tmp_32 = ph(philox_subsequence + ni * Cta_tile::WARPS_N);
-                // fmha::uint4_to_ushort8(tmp_32, tmp);
-                // if ((threadIdx.x == 0) && (blockIdx.x == 0) && (blockIdx.y == 0)) {
-                //     printf("ni = %d, ph  Philox: %u, %u, %u, %u\n", ni, tmp_32.x, tmp_32.y, tmp_32.z, tmp_32.w);
-                // }
+            for (int nj = 0; nj < size<1, 1>(tensor); ++nj) {
+                const uint32_t col_idx_base = col_idx_offset + nj * 8;
                 #pragma unroll
-                for (int ii = 0; ii < 2; ++ii) {
-                    #pragma unroll
-                    for (int jj = 0; jj < 4; ++jj) {
-                        elt_[mi * 2 + ii][4 * ni + jj] =
-                            encode_dropout(tmp[ii * 4 + jj] <= p_dropout_in_uint16_t, elt_[mi * 2 + ii][4 * ni + jj]);
+                for (int j = 0; j < size<1, 0>(tensor); ++j) {
+                    const uint32_t col_idx = col_idx_base + j;
+                    if (col_idx >= col_idx_limit) {
+                        tensor(make_coord(i, mi), make_coord(j, nj)) = -INFINITY;
                     }
                 }
             }
+            // if (cute::thread0()) {
+            //     printf("mi = %d, i = %d, row_idx = %d, max_seqlen_k = %d\n", mi, i, row_idx, max_seqlen_k);
+            //     print(tensor(make_coord(i, mi), _));
+            //     // print(tensor(_, j + nj * size<1, 0>(tensor)));
+            // }
         }
     }
+}
 
-    template <bool encode_dropout_in_sign_bit=false>
-    inline __device__ void apply_dropout_16bits(Philox &ph0, Philox &ph1, uint16_t p_dropout_in_uint16_t) {
-        // We encode the dropout pattern in the sign bit of the non-negative
-        // softmax to distinguish from pre-existing zeros
-        auto encode_dropout = [](bool keep, float val) {
-            return keep ? val : (encode_dropout_in_sign_bit ? -val : float(0));
-        };
+template <typename Engine0, typename Layout0, typename Engine1, typename Layout1>
+inline __device__ void apply_mask_causal_w_idx(
+    Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> const &idx_rowcol,
+    const uint32_t col_idx_offset_, const uint32_t max_seqlen_k, const uint32_t row_idx_offset_)
+{
+    // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+    static_assert(Layout0::rank == 2, "Only support 2D Tensor");
+    static_assert(Layout1::rank == 2, "Only support 2D Tensor");
+    CUTE_STATIC_ASSERT_V(size<0>(tensor) == size<0>(idx_rowcol));
+    CUTE_STATIC_ASSERT_V(size<1>(tensor) == size<1>(idx_rowcol));
+    #pragma unroll
+    for (int mi = 0; mi < size<0>(tensor); ++mi) {
+        const uint32_t col_idx_limit = std::min(max_seqlen_k, 1 + row_idx_offset_ + get<0>(idx_rowcol(mi, 0)));
         #pragma unroll
-        for( int mi = 0; mi < MMAS_M; mi++ ) {
-            static_assert(MMAS_N % 2 == 0);
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N; ni += 2 ) {
-                uint16_t tmp[8];
-                fmha::uint4_to_ushort8(ph0(), tmp);
-                // if ((threadIdx.x == 0) && (blockIdx.x == 0) && (blockIdx.y == 0)) {
-                //     printf("ni = %d, ph  Philox: %u, %u, %u, %u\n", ni, tmp.x, tmp.y, tmp.z, tmp.w);
-                // }
+        for (int ni = 0; ni < size<1, 1>(tensor); ++ni) {
+            if (col_idx_offset_ + get<1>(idx_rowcol(0, ni)) >= col_idx_limit) {
+                tensor(mi, ni) = -INFINITY;
+            }
+        }
+        // if (cute::thread0()) {
+        //     printf("ni = %d, j = %d, col_idx = %d, max_seqlen_k = %d\n", ni, j, col_idx, max_seqlen_k);
+        //     print(tensor(_, make_coord(j, ni)));
+        //     // print(tensor(_, j + ni * size<1, 0>(tensor)));
+        // }
+    }
+}
+
+template <bool encode_dropout_in_sign_bit=false, typename Engine, typename Layout>
+inline __device__ void apply_dropout(Tensor<Engine, Layout> &tensor, uint8_t p_dropout_in_uint8_t,
+                                     unsigned long long seed, unsigned long long offset,
+                                     uint32_t block_row_start, uint32_t block_col_start,
+                                     uint32_t block_row_stride) {
+    // tensor has shape (8, MMA_M, MMA_N / 2)
+    using T = typename Engine::value_type;
+    auto encode_dropout = [](bool keep, T val) {
+        return keep ? val : (encode_dropout_in_sign_bit ? -val : T(0));
+    };
+    static_assert(decltype(size<2>(tensor))::value % 2 == 0);
+    const uint16_t p_dropout_8bit_in_uint16_t = uint16_t(p_dropout_in_uint8_t);
+    const uint32_t p_dropout_8bit_in_uint32_t = (uint32_t(p_dropout_8bit_in_uint16_t) << 16) | uint32_t(p_dropout_8bit_in_uint16_t);
+    // if (cute::thread0()) { printf("threshold2 = 0x%x\n", p_dropout_8bit_in_uint32_t); }
+    #pragma unroll
+    for (int m = 0; m < size<1>(tensor); ++m, block_row_start += block_row_stride) {
+        uint2 rowcol = make_uint2(block_row_start, block_col_start);
+        #pragma unroll
+        for (int n = 0; n < size<2>(tensor) / 2; ++n, ++rowcol.y) {
+            // if (cute::thread(32, 0)) { printf("m = %d, n = %d, row = %d, col = %d\n", m, n, int(rowcol.x), int(rowcol.y));}
+            uint4 random_uint4 = pytorch_flash::philox(seed, reinterpret_cast<unsigned long long&>(rowcol), offset);
+            // if (cute::thread0()) { printf("philox = %u, %d, %d, %d\n", random_uint4.x, random_uint4.y, random_uint4.z, random_uint4.w);}
+            uint8_t (&rnd_8)[16] = reinterpret_cast<uint8_t (&)[16]>(random_uint4);
+            // Special implementation for 16-bit types: we duplicate the threshold to the
+            // low and high 16 bits of a 32-bit value, then use the f16x2 comparison instruction
+            // to get a mask. The low 16 bits of the mask will be either 0xffff or 0x0000,
+            // and the high 16 bits will be either 0xffff or 0x0000, depending on whether
+            // the random value is less than the threshold.
+            // We then do a bit-wise AND between the mask and the original value (in 32-bit).
+            // We're exploiting the fact that floating point comparison is equivalent to integer
+            // comparison, since we're comparing unsigned integers whose top 8-bits are zero.
+            if (!encode_dropout_in_sign_bit
+                && (std::is_same<T, cutlass::half_t>::value || std::is_same<T, cutlass::bfloat16_t>::value)) {
+                uint16_t rnd_16[16];
                 #pragma unroll
-                for (int ii = 0; ii < 2; ++ii) {
-                    #pragma unroll
-                    for (int jj = 0; jj < 4; ++jj) {
-                        elt_[mi * 2 + ii][4 * ni + jj] =
-                            encode_dropout(tmp[ii * 4 + jj] <= p_dropout_in_uint16_t, elt_[mi * 2 + ii][4 * ni + jj]);
-                    }
-                }
-                fmha::uint4_to_ushort8(ph1(), tmp);
-                // if ((threadIdx.x == 0) && (blockIdx.x == 0) && (blockIdx.y == 0)) {
-                //     printf("ni = %d, ph  Philox: %u, %u, %u, %u\n", ni, tmp.x, tmp.y, tmp.z, tmp.w);
-                // }
+                for (int i = 0; i < 16; i++) { rnd_16[i] = uint16_t(rnd_8[i]); }
+                uint32_t (&rnd_32)[8] = reinterpret_cast<uint32_t (&)[8]>(rnd_16);
                 #pragma unroll
-                for (int ii = 0; ii < 2; ++ii) {
+                for (int j = 0; j < 2; j++) {
+                    Tensor tensor_uint32 = recast<uint32_t>(tensor(_, m, n * 2 + j));
+                    // if (cute::thread0()) { printf("random = 0x%x, 0x%x, 0x%x, 0x%x\n", rnd_32[j * 4 + 0], rnd_32[j * 4 + 1], rnd_32[j * 4 + 2], rnd_32[j * 4 + 3]); }
+                    // if (cute::thread0()) { printf("tensor_uint32 = 0x%x, 0x%x, 0x%x, 0x%x\n", tensor_uint32(0), tensor_uint32(1), tensor_uint32(2), tensor_uint32(3)); }
                     #pragma unroll
-                    for (int jj = 0; jj < 4; ++jj) {
-                        elt_[mi * 2 + ii][4 * (ni + 1) + jj] =
-                            encode_dropout(tmp[ii * 4 + jj] <= p_dropout_in_uint16_t, elt_[mi * 2 + ii][4 * (ni + 1) + jj]);
+                    for (int i = 0; i < 4; i++) {
+                        uint32_t mask;
+                        asm volatile("set.le.u32.f16x2 %0, %1, %2;\n" : "=r"(mask) : "r"(rnd_32[j * 4 + i]), "r"(p_dropout_8bit_in_uint32_t));
+                        tensor_uint32(i) &= mask;
                     }
+                    // if (cute::thread0()) { printf("tensor_uint32 = 0x%x, 0x%x, 0x%x, 0x%x\n", tensor_uint32(0), tensor_uint32(1), tensor_uint32(2), tensor_uint32(3)); }
+                }
+            } else {
+                #pragma unroll
+                for (int j = 0; j < 2; j++) {
+                    #pragma unroll
+                    for (int i = 0; i < 8; i++) {
+                        tensor(i, m, n * 2 + j) = encode_dropout(rnd_8[j * 8 + i] <= p_dropout_in_uint8_t, tensor(i, m, n * 2 + j));
+                    }
+                    Tensor tensor_uint32 = recast<uint32_t>(tensor(_, m, n * 2 + j));
+                    // if (cute::thread0()) { printf("tensor_uint32 = 0x%x, 0x%x, 0x%x, 0x%x\n", tensor_uint32(0), tensor_uint32(1), tensor_uint32(2), tensor_uint32(3)); }
                 }
             }
+            // // if ((threadIdx.x == 0) && (blockIdx.x == 0) && (blockIdx.y == 0)) {
+            // //     printf("n = %d, ph  Philox: %u, %u, %u, %u\n", n, rnd_8.x, rnd_8.y, rnd_8.z, rnd_8.w);
+            // // }
         }
     }
+}
 
-    // Scale all the elements.
-    inline __device__ void scale(const float (&sum)[MMAS_M * 2]) {
-        // Precompute the inverse sum to normalize. Without -use_fast_math, it makes a huge deal.
-        float inv_sum[MMAS_M * 2];
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
-            inv_sum[mi] = (sum[mi] == 0.f || sum[mi] != sum[mi]) ? 1.f : 1.f / sum[mi];
-        }
-
-        // Update the values.
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N * 4; ++ni ) {
-                elt_[mi][ni] *= inv_sum[mi];
-            }
-        }
-    }
-
-    // Subtract all elements by dp_sum
-    inline __device__ void subtract_dp_sum(const float (&dp_sum)[MMAS_M * 2]) {
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M * 2; ++mi ) {
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N * 4; ++ni ) {
-                elt_[mi][ni] -= dp_sum[mi];
-            }
-        }
-    }
-
-    // The pointer to the mask.
-    const char *packed_mask_ptr_;
-    // Shared memory for the CTA-wide reduction.
-    float *smem_, *smem_write_, *smem_read_;
-    // The current thread index.
-    int tidx_;
-    // The elements.
-    float elt_[MMAS_M * 2][MMAS_N * 4];
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-template<typename Cta_tile, typename Kernel_traits>
-struct Softmax : public Softmax_base<Cta_tile, Kernel_traits> {
-
-    // The base class.
-    using Base = Softmax_base<Cta_tile, Kernel_traits>;
-    // The fragment.
-    using Fragment_a = fmha::Fragment_a<fmha::Row>;
-
-    static_assert(Fragment_a::NUM_REGS == 4);
-
-    static constexpr int WARPS_M = Cta_tile::WARPS_M;
-    static constexpr int WARPS_N = Cta_tile::WARPS_N;
-    // The MMAs.
-    static constexpr int MMAS_M = Base::MMAS_M;
-    static constexpr int MMAS_N = Base::MMAS_N;
-
-    // The accumulators.
-    using Accumulator = fmha::Fragment_accumulator;
-    using Accumulator_out = Fragment<uint16_t, 8>;
-    static_assert(Accumulator_out::NUM_REGS == 4);
-
-    static_assert(std::is_same<Accumulator::Data_type, float>::value);
-
-    using Smem_tile_red = Smem_tile_reduce<Cta_tile, Kernel_traits>;
-    static_assert(Smem_tile_red::ELTS_PER_TILE == Cta_tile::M * WARPS_N);
-    // Ctor.
-    template<typename Params>
-    inline __device__ Softmax(const Params &params, void *smem, int tidx)
-        : Base(params, smem, tidx)
-        , params_scale_bmm1_(params.scale_bmm1)
-        , smem_sum_(static_cast<float*>(smem), tidx)
-        , smem_max_(static_cast<float*>(smem) + Smem_tile_red::ELTS_PER_TILE, tidx) {
-    }
-
-    // Pack the data to a fragment for the next GEMM.
-    template<typename elem_type=__half, int K, int M>
-    inline __device__ void pack(Fragment_a (&dst)[K][M]) const {
-        #pragma unroll
-        for( int mi = 0; mi < M; ++mi ) {
-            #pragma unroll
-            for( int ki = 0; ki < K; ++ki ) {
-
-                // 1st row - 4 elements per row.
-                float tmp_00 = this->elt_[2 * mi + 0][4 * ki + 0];
-                float tmp_01 = this->elt_[2 * mi + 0][4 * ki + 1];
-                float tmp_02 = this->elt_[2 * mi + 0][4 * ki + 2];
-                float tmp_03 = this->elt_[2 * mi + 0][4 * ki + 3];
-
-                // 2nd row - 4 elements per row.
-                float tmp_10 = this->elt_[2 * mi + 1][4 * ki + 0];
-                float tmp_11 = this->elt_[2 * mi + 1][4 * ki + 1];
-                float tmp_12 = this->elt_[2 * mi + 1][4 * ki + 2];
-                float tmp_13 = this->elt_[2 * mi + 1][4 * ki + 3];
-
-                // Pack to 4 registers.
-                dst[ki][mi].reg(0) = fmha::float2_pack<elem_type>(tmp_00, tmp_01);
-                dst[ki][mi].reg(1) = fmha::float2_pack<elem_type>(tmp_10, tmp_11);
-                dst[ki][mi].reg(2) = fmha::float2_pack<elem_type>(tmp_02, tmp_03);
-                dst[ki][mi].reg(3) = fmha::float2_pack<elem_type>(tmp_12, tmp_13);
-            }
-        }
-    }
-
-    // Scale FP32 fragments
-    inline __device__ void unpack(const Accumulator (&acc)[MMAS_M][MMAS_N]) {
-        const float scalef = reinterpret_cast<const float &>(this->params_scale_bmm1_);
-
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M; ++mi ) {
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N; ++ni ) {
-                // 1st row - 4 elements per row.
-                this->elt_[2 * mi + 0][4 * ni + 0] = acc[mi][ni].elt(0) * scalef;
-                this->elt_[2 * mi + 0][4 * ni + 1] = acc[mi][ni].elt(1) * scalef;
-                this->elt_[2 * mi + 0][4 * ni + 2] = acc[mi][ni].elt(4) * scalef;
-                this->elt_[2 * mi + 0][4 * ni + 3] = acc[mi][ni].elt(5) * scalef;
-                // 2nd row - 4 elements per row.
-                this->elt_[2 * mi + 1][4 * ni + 0] = acc[mi][ni].elt(2) * scalef;
-                this->elt_[2 * mi + 1][4 * ni + 1] = acc[mi][ni].elt(3) * scalef;
-                this->elt_[2 * mi + 1][4 * ni + 2] = acc[mi][ni].elt(6) * scalef;
-                this->elt_[2 * mi + 1][4 * ni + 3] = acc[mi][ni].elt(7) * scalef;
-            }
-        }
-    }
-
-    // Scale FP32 fragments
-    inline __device__ void unpack_noscale(const Accumulator (&acc)[MMAS_M][MMAS_N]) {
-
-        #pragma unroll
-        for( int mi = 0; mi < MMAS_M; ++mi ) {
-            #pragma unroll
-            for( int ni = 0; ni < MMAS_N; ++ni ) {
-                // 1st row - 4 elements per row.
-                this->elt_[2 * mi + 0][4 * ni + 0] = acc[mi][ni].elt(0);
-                this->elt_[2 * mi + 0][4 * ni + 1] = acc[mi][ni].elt(1);
-                this->elt_[2 * mi + 0][4 * ni + 2] = acc[mi][ni].elt(4);
-                this->elt_[2 * mi + 0][4 * ni + 3] = acc[mi][ni].elt(5);
-                // 2nd row - 4 elements per row.
-                this->elt_[2 * mi + 1][4 * ni + 0] = acc[mi][ni].elt(2);
-                this->elt_[2 * mi + 1][4 * ni + 1] = acc[mi][ni].elt(3);
-                this->elt_[2 * mi + 1][4 * ni + 2] = acc[mi][ni].elt(6);
-                this->elt_[2 * mi + 1][4 * ni + 3] = acc[mi][ni].elt(7);
-            }
-        }
-    }
-
-    template<bool zero_init=true, typename Operator>
-    __device__ inline void thread_reduce_(float (&frag)[2 * MMAS_M], Operator &op) {
-        #pragma unroll
-        for( int mi = 0; mi < 2 * MMAS_M; mi++ ) {
-            frag[mi] = zero_init ? this->elt_[mi][0] : op(frag[mi], this->elt_[mi][0]);
-            #pragma unroll
-            for( int ni = 1; ni < 4 * MMAS_N; ni++ ) {
-                frag[mi] = op(frag[mi], this->elt_[mi][ni]);
-            }
-        }
-    }
-
-    template<bool zero_init=true, typename Operator>
-    __device__ inline void reduce_(float (&frag)[2 * MMAS_M], Operator &op, Smem_tile_red & smem_red) {
-        thread_reduce_<zero_init>(frag, op);
-        quad_reduce(frag, frag, op);
-        smem_red.store(frag);
-        __syncthreads();
-        typename Smem_tile_red::read_t tmp[2 * MMAS_M];
-        smem_red.load(tmp);
-        quad_allreduce(frag, tmp, op);
-    }
-
-    template<bool zero_init=true>
-    __device__ inline void reduce_max(float (&frag)[2 * MMAS_M]){
-        MaxOp<float> max;
-        reduce_<zero_init>(frag, max, smem_max_);
-    }
-
-    __device__ inline void reduce_sum(float (&frag)[2 * MMAS_M]){
-        SumOp<float> sum;
-        reduce_(frag, sum, smem_sum_);
-    }
-
-    template<bool zero_init=true>
-    __device__ inline void reduce_sum_before_sync_(float (&frag)[2 * MMAS_M]){
-        SumOp<float> sum;
-        thread_reduce_<zero_init>(frag, sum);
-        quad_reduce(frag, frag, sum);
-        smem_sum_.store(frag);
-    }
-
-    template<int NROWS, typename Operator>
-    __device__ inline void reduce_after_sync_(float (&frag)[NROWS][MMAS_M],
-                                              const int (&rows)[NROWS],
-                                              Operator &op, Smem_tile_red & smem_red) {
-        #pragma unroll
-        for (int ii = 0; ii < NROWS; ii++) {
-            typename Smem_tile_red::read_t tmp[MMAS_M];
-            smem_red.load_row(tmp, rows[ii]);
-            quad_allreduce(frag[ii], tmp, op);
-        }
-    }
-
-    template<int NROWS>
-    __device__ inline void reduce_sum_after_sync_(float (&frag)[NROWS][MMAS_M],
-                                                  const int (&rows)[NROWS]){
-        SumOp<float> sum;
-        reduce_after_sync_(frag, rows, sum, smem_sum_);
-    }
-
-    template<int NROWS>
-    __device__ inline void reduce_max_after_sync_(float (&frag)[NROWS][MMAS_M],
-                                                  const int (&rows)[NROWS]){
-        MaxOp<float> max;
-        reduce_after_sync_(frag, rows, max, smem_max_);
-    }
-
-    const uint32_t params_scale_bmm1_;
-    Smem_tile_red smem_max_;
-    Smem_tile_red smem_sum_;
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-}  // namespace fmha
+}  // namespace pytorch_flash

@@ -360,8 +360,8 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
-    string key =
-        string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" + keepdim_info;
+    string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" +
+        keepdim_info + ":" + toString(in_dtype) + ":" + to_string(castInputData);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
@@ -504,7 +504,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     for (const auto i : c10::irange(num_input_dims)) {
       bool found = false;
       for (const auto j : c10::irange(num_reduce_dims)) {
-        if (i == dim_value[j]) {
+        if (i == maybe_wrap_dim(dim_value[j], num_input_dims)) {
           found = true;
           break;
         }
