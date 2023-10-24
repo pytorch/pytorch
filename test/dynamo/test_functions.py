@@ -1377,6 +1377,9 @@ class WrapperModule(torch.nn.Module):
 
 if HAS_TRITON:
     # Define shared triton kernels here so that multiple tests can access it
+    # NB: This also addresses a triton limitation where if the kernels are
+    # getting called indirectly, triton cannot find the kernels unless they
+    # are at top level.
     @triton.jit
     def add_kernel(
         in_ptr0,
@@ -1426,6 +1429,23 @@ if HAS_TRITON:
     @triton.jit
     def zero_negs(x):
         return tl.where(x >= 0, x, 0)
+
+    @triton.jit
+    def indirection_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+        ACTIVATION: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        if ACTIVATION == "mul2_inplace_kernel":
+            mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        tl.store(out_ptr + offsets, x, mask=mask)
 
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
@@ -1852,8 +1872,20 @@ def forward(self, x_1, output_1):
             block_start = pid * BLOCK_SIZE
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
-            mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
-            mul2_inplace_kernel(in_ptr1, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+            indirection_kernel(
+                in_ptr0,
+                in_ptr0,
+                n_elements,
+                BLOCK_SIZE=BLOCK_SIZE,
+                ACTIVATION="mul2_inplace_kernel",
+            )
+            indirection_kernel(
+                in_ptr1,
+                in_ptr1,
+                n_elements,
+                BLOCK_SIZE=BLOCK_SIZE,
+                ACTIVATION="mul2_inplace_kernel",
+            )
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output = x + y
@@ -2223,6 +2255,24 @@ def forward(self, x_1, output_1):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+        ]:
+
+            def fn(x):
+                return op(-10, x)
+
+            opt_fn = torch.compile(fullgraph=True)(fn)
+
+            x = torch.randn(10)
+            self.assertEqual(opt_fn(x), fn(x))
 
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)

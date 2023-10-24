@@ -132,7 +132,6 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
                     Expr,
-                    torch._inductor.ir.ExpandView,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -736,13 +735,20 @@ class Reduction(Loops):
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
-            if input_node is not None and isinstance(input_node, TensorBox):
-                ranges, reduction_ranges = extract_input_node_reduction_ranges(
+            if (
+                len(ranges) == 0
+                and input_node is not None
+                and isinstance(input_node, TensorBox)
+            ):
+                # Only handles the case where keep_dim = False.
+                # Otherwise, we need to propagate reduction dim info to the stage where
+                # the intermediate loader of the first Reduction is generated.
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
-                if reduction_ranges is not None:
+                if new_ranges is not None and new_reduction_ranges is not None:
                     extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(ranges + reduction_ranges)
+                        sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         # If the input_node or its dependent nodes are also Reduction nodes,
@@ -4243,9 +4249,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
         serializer = GraphModuleSerializer(None, None)
-        named_arguments = serializer.serialize_inputs(
-            self.op_overload, args, kwargs, include_default_values=False
-        )
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
         def handle_single_output(return_type, output):
@@ -4398,6 +4402,69 @@ class FallbackKernel(ExternKernelAlloc):
 
 
 @dataclasses.dataclass
+class ComplexView(ExternKernelAlloc):
+    """View a complex number as two dtyped numbers or vice versa"""
+
+    def should_allocate(self):
+        return False
+
+    def has_aliasing(self):
+        return True
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].get_name()]
+
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+    ):
+        super().__init__(
+            layout,
+            tuple(tensor_args),
+            tuple(nontensor_args),
+        )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs: Sequence[Any] = []
+        self.kernel = kernel
+
+    @classmethod
+    def create(cls, kernel, *args, **kwargs):
+        context = V.graph.fake_mode
+        with context:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        device = FallbackKernel.find_device(tensor_args, example_output)
+        assert device, "Not sure where to find device info"
+
+        packed = ComplexView(
+            MultiOutputLayout(device), kernel, tensor_args, non_tensor_args
+        )
+
+        layout = FixedLayout(
+            example_output.device,
+            example_output.dtype,
+            convert_shape_to_inductor(example_output.size()),
+            convert_shape_to_inductor(example_output.stride()),
+        )
+        outputs = MultiOutput(layout, packed, [])
+
+        packed.outputs = [outputs]
+        return outputs
+
+
+@dataclasses.dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
@@ -4444,7 +4511,7 @@ class MultiOutput(ExternKernel):
 
     def has_aliasing(self):
         return any(
-            isinstance(inp, FallbackKernel) and inp.has_aliasing()
+            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
             for inp in self.inputs
         )
 
@@ -6131,6 +6198,8 @@ class Wait(ExternKernelAlloc):
         return False
 
     def codegen(self, wrapper):
+        from .codegen.wrapper import ReuseLine
+
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
@@ -6141,7 +6210,7 @@ class Wait(ExternKernelAlloc):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(f"{self.get_name()} = {input_collective}")
+        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
