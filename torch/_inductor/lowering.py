@@ -1,7 +1,6 @@
 import functools
 import itertools
 import logging
-import operator
 import os
 import warnings
 from collections import defaultdict
@@ -2017,6 +2016,26 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        efficient_kernels = (
+            aten._scaled_dot_product_efficient_attention.default,
+            aten._scaled_dot_product_efficient_attention_backward.default,
+        )
+        ALIGNMENT = 16 if fx_node.target in efficient_kernels else 8
+
+        def is_aligned(x):
+            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+
+        unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
+            arg
+        )
+        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
+
+        # input is padded, requiring_stride_order will unwrap the view and unpad.
+        # Would be nice to be able to require certain padding from inductor ir, nyi
+        if aligned_input_view:
+            return arg
+
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
     args = tuple(
