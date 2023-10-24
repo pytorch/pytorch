@@ -17,6 +17,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
+from torch._logging import warning_once
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -449,7 +450,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
