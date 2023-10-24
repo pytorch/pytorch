@@ -828,6 +828,8 @@ _flash_attention_forward(
             softmax_scale,
             false /*zero_tensors*/,
             is_causal,
+            -1, /*window_size_left*/
+            -1, /*window_size_right*/
             return_debug_mask,
             c10::nullopt /*gen_*/);
   } else {
@@ -848,6 +850,8 @@ _flash_attention_forward(
             dropout_p,
             softmax_scale,
             is_causal,
+            -1, /*window_size_left*/
+            -1, /*window_size_right*/
             return_debug_mask, /*return_softmax (this is used for testing)*/
             c10::nullopt);
   }

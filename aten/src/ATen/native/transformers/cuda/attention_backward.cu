@@ -95,6 +95,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         philox_seed,
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
@@ -113,6 +115,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         philox_seed,
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);

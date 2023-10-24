@@ -20,6 +20,10 @@ void run_mha_fwd_<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params &params, cudaStream_t st
     run_mha_fwd_hdim{HEAD_DIM}<{DTYPE}>(params, stream);
 }}
 """
+KERNEL_IMPL_TEMPLATE_FWD_SPLIT = """
+
+template void run_mha_fwd_splitkv_dispatch<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params &params, cudaStream_t stream);
+"""
 
 KERNEL_IMPL_TEMPLATE_BWD = """
 template<>
@@ -42,8 +46,12 @@ class Kernel:
             return KERNEL_IMPL_TEMPLATE_FWD.format(
                 DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
             )
-        else:
+        elif self.direction == "bwd":
             return KERNEL_IMPL_TEMPLATE_BWD.format(
+                DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
+            )
+        else:
+            return KERNEL_IMPL_TEMPLATE_FWD_SPLIT.format(
                 DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
             )
 
@@ -54,6 +62,9 @@ class Kernel:
 
 def get_all_kernels() -> List[Kernel]:
     for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
+        # for direction in ["fwd", "bwd", "fwd_split"]:
+        # TODO For now we will not build fwd_split kernels
+        # Follow up
         for direction in ["fwd", "bwd"]:
             yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, direction=direction)
 
@@ -93,8 +104,7 @@ if __name__ == "__main__":
         "-o",
         "--output_dir",
         required=False,
-        help="Where to generate the kernels "
-        " will default to <ATen/native/transformers/cuda/flash_attn/kernels/> ",
+        help="Where to generate the kernels " " will default to the current directory ",
     )
     args = parser.parse_args()
     main(args.output_dir)
