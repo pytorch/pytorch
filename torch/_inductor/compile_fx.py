@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import logging
+import os
 import sys
 import time
 import warnings
@@ -21,7 +22,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import detect_fake_mode
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
@@ -54,6 +55,7 @@ else:
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
 
 
@@ -294,14 +296,14 @@ def compile_fx_inner(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-):
+) -> Union[CompiledFxGraph, str]:
     """
     Inductor API that compiles a single graph.
 
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    if dynamo_utils.count_calls(gm.graph) == 0:
+    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
 
     if config.save_args:
@@ -342,8 +344,8 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache:
-        compiled_graph: CompiledFxGraph = FxGraphCache.load(
+    if config.fx_graph_cache and not aot_mode:
+        compiled_graph = FxGraphCache.load(
             fx_codegen_and_compile, graph_args, graph_kwargs
         )
     else:
@@ -485,7 +487,7 @@ def fx_codegen_and_compile(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-) -> CompiledFxGraph:
+) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -521,7 +523,12 @@ def fx_codegen_and_compile(
     # .view() call.
     view_to_reshape(gm)
 
-    fake_mode = fake_tensor_prop(gm, example_inputs)
+    # It is safe to run FakeTensorProp under no_grad because by the time
+    # we're in inductor, we assume that AOTAutograd has already "taken care"
+    # of autograd, so there should be no more autograd-related API's in the
+    # graph.
+    with torch.no_grad():
+        fake_mode = fake_tensor_prop(gm, example_inputs)
 
     # pattern matcher passes might not preserve striding information
     # on node.meta["val"]. if in the future we rely on these being
@@ -531,6 +538,7 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
+        post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
@@ -861,7 +869,7 @@ def compile_fx_aot(
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
-        return compile_fx(
+        compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -871,6 +879,10 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
+        assert os.path.exists(
+            compiled_lib_path
+        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
+        return compiled_lib_path
 
 
 _graph_counter = count(0)
