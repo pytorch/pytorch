@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, List
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
@@ -17,7 +17,7 @@ from tools.testing.target_determination.heuristics.utils import get_correlated_t
 # test to see files were involved in each tests and used to build a correlation
 # dict (where all ratings are 1).
 class Profiling(HeuristicInterface):
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:

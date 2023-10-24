@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, List
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
@@ -19,7 +19,7 @@ from tools.testing.target_determination.heuristics.utils import get_correlated_t
 # future commits that change fileA should probably run testFileA. Based on this,
 # a correlation dict is built based on what files were edited in commits on main.
 class HistorialEditedFiles(HeuristicInterface):
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
