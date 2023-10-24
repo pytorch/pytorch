@@ -1081,7 +1081,7 @@ def from_column_list(
         'col_names and col_blobs must have the same length.'
     )
     root = _SchemaNode('root', 'Struct')
-    for col_name, col_type, col_blob, col_metadata in zip(
+    for col_name, col_type, col_blob, col_md in zip(
         col_names, col_types, col_blobs, col_metadata
     ):
         columns = col_name.split(FIELD_SEPARATOR)
@@ -1095,7 +1095,7 @@ def from_column_list(
                 field = Scalar(
                     dtype=col_type,
                     blob=col_blob,
-                    metadata=col_metadata
+                    metadata=col_md
                 )
             next = current.add_child(name, type_str)
             if field is not None:
