@@ -9771,7 +9771,7 @@ class DistributedTest:
             def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(device))._abort()
+                    pg._get_backend(torch.device(device))._shutdown()
                     time.sleep(1)
 
             if self.rank != 1:
