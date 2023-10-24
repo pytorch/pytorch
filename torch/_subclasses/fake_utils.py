@@ -101,7 +101,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         if fake_r is not None:
             r_flat, _ = tree_flatten(r)
             f_flat, _ = tree_flatten(fake_r)
-            assert len(r_flat) == len(
+            assert len(f_flat) == len(
                 r_flat
             ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
 
