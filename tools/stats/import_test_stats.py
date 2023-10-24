@@ -21,6 +21,7 @@ SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
 TEST_TIMES_FILE = "test-times.json"
+TEST_CLASS_TIMES_FILE = "test-class-times.json"
 TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
 TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
 
@@ -84,6 +85,14 @@ def get_test_times() -> Dict[str, Dict[str, float]]:
     return get_from_test_infra_generated_stats(
         "test-times.json",
         TEST_TIMES_FILE,
+        "Couldn't download test times...",
+    )
+
+
+def get_test_class_times() -> Dict[str, Dict[str, float]]:
+    return get_from_test_infra_generated_stats(
+        "test-class-times.json",
+        TEST_CLASS_TIMES_FILE,
         "Couldn't download test times...",
     )
 
