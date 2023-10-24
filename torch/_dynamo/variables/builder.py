@@ -1117,10 +1117,9 @@ class VariableBuilder:
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
         # Note: this information is conveyed via subclass_type now
-        fake_tensor_value = None
-        example_value = tensor_variable.proxy.node.meta["example_value"]
-        if is_fake(example_value):
-            fake_tensor_value = example_value
+        fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
+        if not is_fake(fake_tensor_value):
+            raise InternalTorchDynamoError("Wrapped Tensor must have a fake value")
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
