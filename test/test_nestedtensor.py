@@ -399,6 +399,10 @@ class TestNestedTensor(TestCase):
         assert not nt_noncontiguous.is_contiguous()
         self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
+        # Test querying by memory_format
+        self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
+
     @torch.inference_mode()
     def test_repr_string(self):
         a = torch.nested.nested_tensor([])
@@ -2889,7 +2893,7 @@ class TestNestedTensorSubclass(TestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
 
         def grad_test_func(a, b, c, weight):
             nt, _ = jagged_from_list([a, b, c], None)
@@ -2923,7 +2927,7 @@ class TestNestedTensorSubclass(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "expected lhs and rhs to have the same exact offsets tensor",
+            "cannot call binary pointwise function .* with inputs of shapes",
             lambda: nt1 * nt2)
 
         # Correct usage: chain the calls using the same offsets tensor object
@@ -3028,6 +3032,17 @@ class TestNestedTensorSubclass(TestCase):
             # offsets should still be int64 on the original device
             self.assertEqual(orig_device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
+
+    def test_unbind(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            out = nt.unbind()
+            self.assertEqual(len(out), len(tensor_list))
+            for i, t in enumerate(out):
+                self.assertEqual(t, tensor_list[i])
 
 
 instantiate_parametrized_tests(TestNestedTensor)

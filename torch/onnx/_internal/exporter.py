@@ -352,7 +352,7 @@ class ResolvedExportOptions(ExportOptions):
     @_beartype.beartype
     def __init__(
         self,
-        options: Optional[Union[ExportOptions, "ResolvedExportOptions"]] = None,
+        options: Union[ExportOptions, "ResolvedExportOptions"],
         model: Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]] = None,  # type: ignore[name-defined]
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
@@ -361,7 +361,6 @@ class ResolvedExportOptions(ExportOptions):
             torch_export_graph_extractor,
         )
 
-        assert options is not None, "ExportOptions must be specified."
         if isinstance(options, ResolvedExportOptions):
             self.dynamic_shapes = options.dynamic_shapes
             self.op_level_debug = options.op_level_debug
@@ -840,11 +839,11 @@ class ExportOutput:
             else:
                 try:
                     serializer.serialize(self, destination)
-                except ValueError:
+                except ValueError as exc:
                     raise ValueError(
                         "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
                         "External tensor data will be saved alongside the model on disk."
-                    )
+                    ) from exc
 
     @_beartype.beartype
     def save_diagnostics(self, destination: str) -> None:
