@@ -66,7 +66,7 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 #   conda build scripts themselves. These should really be consolidated
 # Pick only one package of multiple available (which happens as result of workflow re-runs)
 pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
-if [[ "$PYTORCH_BUILD_VERSION" == "*dev*" ]]; then
+if [[ "\$PYTORCH_BUILD_VERSION" == *dev* ]]; then
     CHANNEL="nightly"
 else
     CHANNEL="test"
