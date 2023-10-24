@@ -40,7 +40,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
-from tools.stats.export_test_times import TEST_TIMES_FILE
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, TEST_TIMES_FILE
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
@@ -1424,7 +1424,9 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
+def download_test_times(
+    file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
+) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
@@ -1695,7 +1697,7 @@ def main():
             )
             return s.strip()
 
-    test_times_dict = download_test_times(TEST_TIMES_FILE)
+    test_times_dict = download_test_times(ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
     # Each batch will be run sequentially
