@@ -56,7 +56,7 @@ try:
         NP_SUPPORTED_MODULES = {}
 
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
     pass
 
@@ -1373,7 +1373,9 @@ def get_fake_value(node, tx):
         return n.meta["example_value"]
 
     def wraps_non_fake(e):
-        if not tx.output.fake_mode.is_our_fake(e):
+        if not (
+            is_fake(e) and maybe_get_fake_mode(e) is tx.fake_mode
+        ):
             e = deepcopy_to_fake_tensor(e)
         return e
 

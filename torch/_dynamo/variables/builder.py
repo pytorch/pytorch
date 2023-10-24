@@ -1393,22 +1393,16 @@ def wrap_fx_proxy_cls(
 
     initial_example_value = example_value
 
-    def _is_functional_tensor_fakified_by_dynamo(x):
-        if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
-            reapply_views = torch._C._functionalization_reapply_views_tls()
-            unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
-            return (
-                isinstance(unwrapped, FakeTensor)
-                and unwrapped.fake_mode == tx.fake_mode
-            )
-        return False
-
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not (
                 isinstance(value, FakeTensor)
-                or _is_functional_tensor_fakified_by_dynamo(value)
+                or (
+                    # Is functional tensor fakeified by this instance of Dynamo
+                    torch._is_functional_tensor(value) 
+                    and maybe_get_fake_mode(value) is tx.fake_mode
+                )
                 or value.is_nested
             ):
                 # NB: ensure strides are preserved
@@ -1424,7 +1418,7 @@ def wrap_fx_proxy_cls(
         elif (
             is_fake(example_value)
             and maybe_get_fake_mode(example_value) is tx.fake_mode
-        ) or _is_functional_tensor_fakified_by_dynamo(example_value):
+        ):
             pass
 
         elif isinstance(example_value, torch.Tensor):
@@ -1451,11 +1445,15 @@ def wrap_fx_proxy_cls(
                 example_value, tx=tx, **kwargs
             )
         if (
-            not is_fake(example_value)
-            or maybe_get_fake_mode(example_value) is not tx.fake_mode
+            isinstance(example_value, torch.Tensor)
+            and (
+                not is_fake(example_value)
+                or maybe_get_fake_mode(example_value) is not tx.fake_mode
+            )
         ):
             raise InternalTorchDynamoError(
-                "`example_value` needs to be a `FakeTensor` wrapped by this instance of Dynamo"
+                "`example_value` needs to be a `FakeTensor`"
+                f"wrapped by this instance of Dynamo. Found: {example_value}"
             )
 
     if isinstance(example_value, torch.Tensor):
