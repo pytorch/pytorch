@@ -149,5 +149,9 @@ TORCH_API Module parse_and_initialize_jit_module(
     ExtraFilesMap& extra_files,
     c10::optional<at::Device> device);
 
+TORCH_API c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFunc(
+    const at::StrongTypePtr& type,
+    IValue input);
+
 } // namespace jit
 } // namespace torch

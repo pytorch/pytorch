@@ -518,7 +518,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return index
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype):
+    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
         x = ValueRanges.wrap(x)
 
         if dtype == torch.bool:

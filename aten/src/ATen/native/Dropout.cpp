@@ -35,8 +35,7 @@ Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (const auto i : c10::irange(2, input.dim())) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   return input.new_empty_symint(sizes);

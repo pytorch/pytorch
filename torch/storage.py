@@ -198,6 +198,14 @@ class _StorageBase:
         """Casts this storage to complex float type"""
         return self._to(torch.cfloat)
 
+    def float8_e5m2(self):
+        """Casts this storage to float8_e5m2 type"""
+        return self._to(torch.float8_e5m2)
+
+    def float8_e4m3fn(self):
+        """Casts this storage to float8_e4m3fn type"""
+        return self._to(torch.float8_e4m3fn)
+
     def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
         r"""Determine whether the CPU storage is already pinned on device.
 
@@ -1026,6 +1034,16 @@ class TypedStorage:
         """Casts this storage to complex float type"""
         _warn_typed_storage_removal()
         return self._to(torch.cfloat)
+
+    def float8_e5m2(self):
+        """Casts this storage to float8_e5m2 type"""
+        _warn_typed_storage_removal()
+        return self._to(torch.float8_e5m2)
+
+    def float8_e4m3fn(self):
+        """Casts this storage to float8_e4m3fn type"""
+        _warn_typed_storage_removal()
+        return self._to(torch.float8_e4m3fn)
 
     @classmethod
     def from_file(cls, filename, shared, size):

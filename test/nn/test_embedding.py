@@ -602,8 +602,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     # Fill one row with duplicate index so we can test with a fully
                     # padded row
                     duplicate_row = random.randint(0, indices_dim0 - 1)
-                    fill_value = indices[duplicate_row][0].clone()
-                    indices[duplicate_row] = fill_value
+                    indices[duplicate_row] = indices[duplicate_row][0]
 
             for padding_idx in list(set(indices.flatten(0, -1).tolist())):
                 weights = torch.randn(num_words, num_features, dtype=dtype, device=device, requires_grad=True)

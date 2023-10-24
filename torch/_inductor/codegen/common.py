@@ -360,6 +360,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"abs({self._print(expr.args[0])})"
+
 
 class OpOverrides:
     def __init__(self, parent):
@@ -703,7 +707,12 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
+        if config.aot_inductor.abi_compatible:
+            # In the abi_compatible model, we just return the buf here.
+            # We will form correct call args later in wrapper.generate_kernel_all.
+            return buf
+        else:
+            return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
 
     def wrap_size_arg(self, size):
         return f"{size}"
@@ -868,7 +877,7 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
-        self.cse = CSE(self.newvar_prefix, self.suffix)
+        self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
         self._load_mask = None
@@ -883,6 +892,8 @@ class Kernel(CodeGen):
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
         self.inplace_update_buffers = dict()
+        # Set minimum number of elements processed per thread.
+        self.min_elem_per_thread = 1
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -1130,7 +1141,9 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if x.name.startswith("s") or x.name.startswith("ps")
+            if x.name.startswith("s")
+            or x.name.startswith("ps")
+            or (x.name.startswith("i") and not x.name.startswith("idx"))
         }
         return sympy_subs(index, replacements)
 

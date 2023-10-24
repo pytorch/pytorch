@@ -196,7 +196,7 @@ void unfolded2d_acc_kernel(
   // output_width*dW does not overflow a int64_t
 
   if (is_channels_last) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_acc_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, dtype, "unfolded2d_acc_channels_last", [&] {
       unfolded2d_acc_channels_last(
           static_cast<scalar_t*>(finput_data),
           static_cast<scalar_t*>(input_data),
@@ -210,7 +210,7 @@ void unfolded2d_acc_kernel(
           output_width);
      });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_acc", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, dtype, "unfolded2d_acc", [&] {
       unfolded2d_acc(
           static_cast<scalar_t*>(finput_data),
           static_cast<scalar_t*>(input_data),
@@ -413,7 +413,7 @@ void unfolded2d_copy_kernel(
   // output_width*dW does not overflow a int64_t
 
   if (is_channels_last) {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_copy_channels_last", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, dtype, "unfolded2d_copy_channels_last", [&] {
       unfolded2d_copy_channels_last(
           static_cast<scalar_t*>(input_data),
           static_cast<scalar_t*>(finput_data),
@@ -427,7 +427,7 @@ void unfolded2d_copy_kernel(
             output_width);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_copy", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, dtype, "unfolded2d_copy", [&] {
       unfolded2d_copy(
           static_cast<scalar_t*>(input_data),
           static_cast<scalar_t*>(finput_data),

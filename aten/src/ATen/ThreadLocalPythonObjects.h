@@ -4,8 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <unordered_map>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 struct TORCH_API ThreadLocalPythonObjects {
   static void set(const std::string& key, std::shared_ptr<SafePyObject> value);
@@ -19,5 +18,4 @@ struct TORCH_API ThreadLocalPythonObjects {
   std::unordered_map<std::string, std::shared_ptr<c10::SafePyObject>> obj_dict_;
 };
 
-} // namespace impl
-} // namespace at
+} // namespace at::impl

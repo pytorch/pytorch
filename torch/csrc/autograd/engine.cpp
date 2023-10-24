@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -1230,7 +1229,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
@@ -1591,7 +1589,7 @@ void GraphTask::init_to_execute(
       // In terms of populating the rest of exec_info though, you can basically
       // think of this as the same as setting `needed_` is true directly.
       if (!info.captures_) {
-        info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
+        info.captures_ = std::make_unique<std::vector<ExecInfo::Capture>>();
       }
       info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }

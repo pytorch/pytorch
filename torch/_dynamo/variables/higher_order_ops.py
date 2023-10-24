@@ -12,6 +12,8 @@ import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.builtin import BuiltinVariable
+from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
@@ -26,8 +28,9 @@ from ..exc import (
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
+from .dicts import ConstDictVariable
 from .lists import ListVariable, TupleVariable
-from .nn_module import NNModuleVariable
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
 
 log = logging.getLogger(__name__)
@@ -69,13 +72,13 @@ def dynamo_enable_grad(tx):
         GradModeVariable.create(tx, org_value)
 
 
-def are_tensors(var):
-    from . import TensorVariable
-
-    if isinstance(var, TensorVariable):
+def only_consist_of(var, types):
+    if isinstance(var, types):
         return True
     if isinstance(var, (TupleVariable, ListVariable)):
-        return all(are_tensors(item) for item in var.items)
+        return all(only_consist_of(item, types) for item in var.items)
+    if isinstance(var, ConstDictVariable):
+        return all(only_consist_of(item, types) for item in var.items.values())
     return False
 
 
@@ -132,10 +135,21 @@ def validate_args_and_maybe_create_graph_inputs(
                 tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
         else:
-            raise unimplemented(
-                f"HigherOrderOperator with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
+            if manually_set_subgraph_inputs:
+                raise unimplemented(
+                    f"HigherOrderOperator with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            else:
+                # leverage tracer's lifting mechanism to lift these args.
+                if only_consist_of(
+                    a, (ConstantVariable, SymNodeVariable, TensorVariable)
+                ):
+                    new_arg = a
+                else:
+                    unimplemented(
+                        "HigherOrderOperator with body that accepts non-Tensors as input that can't be lifted by tracer."
+                    )
 
         args.append(new_arg)
     return args
@@ -151,6 +165,9 @@ def speculate_subgraph(
     checkpoint,
     description,
     *,
+    # source_target is the .value of HigherOrderOpVariable and is the
+    # target of the proxy that we created for the higherOrderOperator.
+    source_target=None,
     always_restore=False,
     enable_grad=False,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
@@ -162,6 +179,10 @@ def speculate_subgraph(
     #       argument.
     manually_set_subgraph_inputs=True,
     restore_side_effects=True,
+    should_flatten_outputs=False,
+    # Pass in an originating tracer - this is needed for preserving context
+    # across fwd-bwd for autograd.Function
+    tracer=None,
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -173,13 +194,13 @@ def speculate_subgraph(
         )
 
     try:
-        with tx.output.new_subtracer() as tracer:
+        with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, tracer, tx, manually_set_subgraph_inputs
+                sub_args, subtracer, tx, manually_set_subgraph_inputs
             )
 
             validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(), tracer, tx, manually_set_subgraph_inputs=False
+                sub_kwargs.values(), subtracer, tx, manually_set_subgraph_inputs=False
             )
 
             autograd_ctx = (
@@ -200,6 +221,16 @@ def speculate_subgraph(
                 # pure functions.
                 tx.output.side_effects = prev_side_effects
 
+            treespec = None
+            if should_flatten_outputs:
+                # Flatten the speculated subgraph output.
+                tree_flatten = UserFunctionVariable(pytree.tree_flatten)
+                tree_flatten_output = tree_flatten.call_function(tx, [output], {})
+                output, treespec = tree_flatten_output.unpack_var_sequence(tx)
+                # Actually, transform the list (returned by flatten) into a tuple
+                # for dynamo consistency.
+                output = BuiltinVariable(tuple).call_function(tx, [output], {})
+
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output
@@ -207,9 +238,11 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return output, tx.output.graph, tracer.lifted_freevars
+                return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
-                if not are_tensors(output):
+                from . import TensorVariable
+
+                if not only_consist_of(output, TensorVariable):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
@@ -220,28 +253,31 @@ def speculate_subgraph(
                 # so lift them here.
                 output_proxies = output.as_proxy()
                 output_proxies = pytree.tree_map(
-                    tracer.maybe_lift_tracked_freevar_to_input, output_proxies
+                    subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
                 )
                 tx.output.create_node(
                     "output",
                     "output",
-                    (tracer.create_arg((output_proxies,))),
+                    (subtracer.create_arg((output_proxies,))),
                     {},
                 )
                 graph = tx.output.graph
                 graph.lint()
-                lifted_freevars = tracer.lifted_freevars
+                lifted_freevars = subtracer.lifted_freevars
 
                 return (
-                    output,
+                    (output, treespec),
                     graph,
                     lifted_freevars,
                 )
 
     except Unsupported as ex:
+        f_name = f"{type(f).__name__}"
+        if isinstance(f, UserFunctionVariable):
+            f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
-            f"to trace function `{f.get_name()}` into a single graph. This means "
+            f"to trace function `{f_name}` into a single graph. This means "
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
@@ -295,7 +331,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def make(value, source=None, **kwargs):
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "map":
+        elif value.__name__ in ("map", "map_impl"):
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
@@ -310,7 +346,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
-            return AutogradFunctionMethodHigherOrderVariable(value, source, **kwargs)
+            return AutogradFunctionMethodHigherOrderVariable(
+                value=value, source=source, **kwargs
+            )
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -320,6 +358,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "trace_wrapped":
+            return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -390,14 +430,24 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # branches
         assert isinstance(
             args[1],
-            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                NNModuleVariable,
+                UnspecializedNNModuleVariable,
+            ),
         ), str(
             type(args[1])
         )  # true_fn
 
         assert isinstance(
             args[2],
-            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                NNModuleVariable,
+                UnspecializedNNModuleVariable,
+            ),
         ), str(
             type(args[2])
         )  # false_fn
@@ -421,7 +471,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # NB: 0 is predicate
             ix = 1 if branch else 2
             # TODO: Support kwargs
-            ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
+            (ret_val, _), ret_graph, ret_lifted_freevars = speculate_subgraph(
                 tx,
                 args[ix],
                 operands,
@@ -429,6 +479,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 graph_checkpoint,
                 checkpoint,
                 "cond",
+                source_target=self.value,
             )
 
             if not isinstance(ret_val, TensorVariable):
@@ -562,12 +613,12 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
         first_dim = args[1].call_method(
-            tx, "__getitem__", args=[ConstantVariable(0)], kwargs={}
+            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
         )
 
         # TODO: Support kwargs
         (
-            body_r,
+            (body_r, _),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
@@ -581,6 +632,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx.output.graph,
             checkpoint,
             "torch.ops.higher_order.map",
+            source_target=self.value,
         )
 
         body_nn_modules = tx.copy_graphstate().output.nn_modules
@@ -708,7 +760,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # with no_grad():  # This will not disable grad tracking inside of grad(f).
         #     grad_o = torch.func.grad(f)(x)
         # TODO: Support kwargs
-        body_r, body_graph, body_lifted_freevars = speculate_subgraph(
+        (body_r, _), body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             func,
             args[3].items,
@@ -716,6 +768,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             "torch.func.grad",
+            source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
         )
@@ -810,21 +863,25 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 items = []
                 for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable(idx),), {}
+                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable(items)
         else:  # case: has_aux.value = True
             # fx_proxy -> Tuple(grads, aux)
-            grads = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(0),), {})
-            aux = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(1),), {})
+            grads = fx_proxy.call_method(
+                tx, "__getitem__", (ConstantVariable.create(0),), {}
+            )
+            aux = fx_proxy.call_method(
+                tx, "__getitem__", (ConstantVariable.create(1),), {}
+            )
             if isinstance(argnums_v, int):
                 return TupleVariable([grads.call_method(tx, "contiguous", (), {}), aux])
             else:
                 items = []
                 for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
-                        tx, "__getitem__", (ConstantVariable(idx),), {}
+                        tx, "__getitem__", (ConstantVariable.create(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable([TupleVariable(items), aux])
@@ -871,22 +928,39 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "NYI - torch.func.vmap is not implemented when chunk_size is passed"
             )
 
-        flat_args, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
-        in_dims_v = in_dims.as_python_constant()
-        in_dims_v = in_dims_v if isinstance(in_dims_v, int) else list(in_dims_v)
-        broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
-            in_dims_v, arg_spec
+        # Trace into tree_flatten with the list of batch_input_args.
+        tree_flatten = UserFunctionVariable(pytree.tree_flatten)
+        flat_args, arg_spec = tree_flatten.call_function(
+            tx, [ListVariable(batch_input_args)], {}
+        ).unpack_var_sequence(tx)
+
+        # Transform in_dims into a list if it's not an integer literal.
+        in_dims_v = (
+            in_dims
+            if isinstance(in_dims.as_python_constant(), int)
+            else BuiltinVariable(list).call_function(tx, [in_dims], {})
+        )
+
+        # Trace into broadcast_to_and_flatten with the transformed in_dims.
+        broadcast_to_and_flatten = UserFunctionVariable(
+            pytree._broadcast_to_and_flatten
+        )
+        broadcasted_in_dims = broadcast_to_and_flatten.call_function(
+            tx, [in_dims_v, arg_spec], {}
         )
 
         # We want to pass unbatched input to speculate subgraph.
         # So we loop through the inputs and select only one sample
         # from the batch.
         unbatched_input_args = []
-        for arg, in_dim in zip(flat_args, broadcasted_in_dims):
+        for arg, in_dim in zip(
+            flat_args.unpack_var_sequence(tx),
+            broadcasted_in_dims.unpack_var_sequence(tx),
+        ):
             if in_dim is not None:
                 assert isinstance(arg, TensorVariable)
                 unbatched_arg = arg.call_method(
-                    tx, "select", (ConstantVariable(in_dim), ConstantVariable(0)), {}
+                    tx, "select", [in_dim, ConstantVariable.create(0)], {}
                 )
                 unbatched_input_args.append(unbatched_arg)
             else:
@@ -895,16 +969,22 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Ban ops like `stride`, `storage_offset` in the traced functions.
         # NOTE: We are conservatively banning more ops (vmap should be able
         #       to handle a few of them).
+        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
         with tx.strict_translation_mode():
             # trace through the function with unbatched inputs.
             _, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 fn,
-                torch.utils._pytree.tree_unflatten(unbatched_input_args, arg_spec),
+                # Returns a ListVariable, since that's where we started flattening.
+                # However, we really want to pass the inner Python list as argument.
+                tree_unflatten.call_function(
+                    tx, [ListVariable(unbatched_input_args), arg_spec], {}
+                ).unpack_var_sequence(tx),
                 {},
                 graph_checkpoint,
                 checkpoint,
                 "torch.vmap",
+                source_target=self.value,
             )
 
         body_name = add_subgraph(
@@ -921,9 +1001,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #       as speculate_subgraph does not supports functions with non-Tensor args.
         #       (so we graph-break above)
         updated_in_dims = TupleVariable(
-            [ConstantVariable(dim) for dim in broadcasted_in_dims]
+            broadcasted_in_dims.unpack_var_sequence(tx)
             + [
-                ConstantVariable(None),
+                ConstantVariable.create(None),
             ]
             * len(body_lifted_freevars)
         )
@@ -978,11 +1058,22 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def __init__(
+        self, value, fwd_bwd_tracer=None, source: Optional[Source] = None, **kwargs
+    ):
+        super().__init__(value, source, **kwargs)
+        # The fwd_bwd_tracer is owned by AutogradFunctionVariable and passed
+        # in for speculation. It allows us to share tracing information about proxies
+        # across fwd bwd, such as when users stash tensors on a context.
+        self.fwd_bwd_tracer = fwd_bwd_tracer
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable, UserFunctionVariable
         from .builder import wrap_fx_proxy
+
+        tracer = self.fwd_bwd_tracer
 
         self.check_kwargs(kwargs, ConstantVariable)
 
@@ -1002,7 +1093,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         # TODO: Support kwargs
         (
-            body_r,
+            (body_r, _),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
@@ -1015,9 +1106,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             graph_checkpoint,
             checkpoint,
             "the user-defined autograd.Function",
+            source_target=self.value,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
+            tracer=tracer,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
@@ -1061,7 +1154,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         graph_checkpoint = tx.output.graph
 
         (
-            body_r,
+            (body_r, treespec),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
@@ -1072,7 +1165,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             description,
+            source_target=self.value,
             manually_set_subgraph_inputs=False,
+            should_flatten_outputs=True,
         )
 
         body_name = add_subgraph(
@@ -1095,19 +1190,19 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value
+        return proxy_args, {}, example_value, treespec
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args, p_kwargs, example_value = self.create_wrapped_node(
+        p_args, p_kwargs, example_value, treespec = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
 
         # Store the invocation as a call
-        return wrap_fx_proxy(
+        variable = wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
@@ -1117,6 +1212,16 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=example_value,
         )
+
+        if treespec is None:
+            return variable
+
+        # Transform variable back into a list (previously made into a tuple by
+        # speculate_subgraph function) so as to respect the pytree API typing.
+        variable = BuiltinVariable(list).call_function(tx, [variable], {})
+
+        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
+        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1156,20 +1261,25 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
+        from torch.utils.checkpoint import noop_context_fn
         from .builder import wrap_fx_proxy
+
+        if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
+            context_fn = kwargs.pop("context_fn")
+            self.value.context_fn = context_fn.fn
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        p_args, _, example_value = self.create_wrapped_node(
+        p_args, _, example_value, treespec = self.create_wrapped_node(
             tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint"
         )
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
         # Store the invocation as a call
-        return wrap_fx_proxy(
+        variable = wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
@@ -1179,6 +1289,16 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             ),
             example_value=example_value,
         )
+
+        if treespec is None:
+            return variable
+
+        # Transform variable back into a list (previously made into a tuple by
+        # speculate_subgraph function) so as to respect the pytree API typing.
+        variable = BuiltinVariable(list).call_function(tx, [variable], {})
+
+        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
+        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1199,3 +1319,18 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=None,
         )
+
+
+class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import TensorVariable
+
+        assert "fn" in kwargs
+        fn = kwargs["fn"]
+        assert len(args) == 1
+        grad = args[0]
+        assert isinstance(grad, TensorVariable)
+
+        return fn.call_function(tx, args, {})

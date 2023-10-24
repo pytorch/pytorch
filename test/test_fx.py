@@ -1777,13 +1777,13 @@ class TestFX(JitTestCase):
             if node.op == 'get_attr':
                 node.meta["nn_module_stack"] = "self"
                 node.meta["stack_trace"] = "stack_trace"
-                node.meta["source_fn"] = "source_fn"
+                node.meta["source_fn_stack"] = "source_fn_stack"
         new_gm = Transformer(gm).transform()
         for node in new_gm.graph.nodes:
             if node.op == 'get_attr':
                 self.assertEqual(node.meta["nn_module_stack"], "self")
                 self.assertEqual(node.meta["stack_trace"], "stack_trace")
-                self.assertEqual(node.meta["source_fn"], "source_fn")
+                self.assertEqual(node.meta["source_fn_stack"], "source_fn_stack")
 
 
     def test_interpreter(self):
@@ -3794,6 +3794,26 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         copy_m = copy.deepcopy(m)  # finishes
         self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
 
+    def test_enum(self):
+        from enum import Enum
+
+        class Foo(Enum):
+            A = 1
+            B = 2
+
+        def leaf_fn(arr, enum_val):
+            # Use the raw enum.
+            arr.append(enum_val)
+            return arr[-1].value
+
+        def foo(x):
+            # Pass the enum as argument.
+            return leaf_fn(x, Foo.A)
+
+        traced = torch.fx.symbolic_trace(foo)
+        self.assertEqual(foo([]), traced([]))
+
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
@@ -4021,7 +4041,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                   f"unintended, please revert it. If it was intended, check with the FX " \
                   f"team to ensure that the proper deprecation protocols have been followed " \
                   f"and subsequently --accept the change."
-            raise AssertionError(msg)
+            raise AssertionError(msg)  # noqa: TRY200
 
     def test_class_member_back_compat(self):
         """

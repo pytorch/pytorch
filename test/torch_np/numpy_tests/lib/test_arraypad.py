@@ -1,13 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
-import pytest
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import torch._numpy as np
 from torch._numpy.testing import assert_allclose, assert_array_equal
 
+from torch.testing._internal.common_utils import run_tests, TestCase
 
-class TestConstant:
-    @pytest.mark.xfail(reason="tuple values")
+
+class TestConstant(TestCase):
+    @xfail  # (reason="tuple values")
     def test_check_constant(self):
         a = np.arange(100)
         a = np.pad(a, (25, 20), "constant", constant_values=(10, 20))
@@ -355,7 +357,7 @@ class TestConstant:
         )
         assert_allclose(test, expected)
 
-    @pytest.mark.xfail(reason="tuple values")
+    @xfail  # (reason="tuple values")
     def test_check_constant_float3(self):
         a = np.arange(100, dtype=float)
         a = np.pad(a, (25, 20), "constant", constant_values=(-1.1, -1.2))
@@ -526,7 +528,7 @@ class TestConstant:
         )
         assert_allclose(test, expected)
 
-    @pytest.mark.xfail(reason="tuple values")
+    @xfail  # (reason="tuple values")
     def test_check_constant_pad_2d(self):
         arr = np.arange(4).reshape(2, 2)
         test = np.lib.pad(
@@ -543,7 +545,9 @@ class TestConstant:
         )
         assert_allclose(test, expected)
 
-    @pytest.mark.xfail(reason="int64 overflow")
+    @skipif(
+        True, reason="passes on MacOS, fails otherwise"
+    )  # (reason="int64 overflow")
     def test_check_large_integers(self):
         int64_max = 2**63 - 1
         arr = np.full(5, int64_max, dtype=np.int64)
@@ -558,6 +562,4 @@ class TestConstant:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

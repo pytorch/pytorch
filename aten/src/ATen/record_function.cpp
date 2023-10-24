@@ -554,7 +554,7 @@ void RecordFunction::end() {
 }
 
 const char* RecordFunction::name() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [](const std::string& name) { return name.c_str(); },
           [](const schema_ref_t schema) {
@@ -564,7 +564,7 @@ const char* RecordFunction::name() const {
 }
 
 size_t RecordFunction::num_inputs() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) { return inputs_.size(); },
           [](const schema_ref_t schema) {
@@ -574,7 +574,7 @@ size_t RecordFunction::num_inputs() const {
 }
 
 size_t RecordFunction::num_outputs() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) { return outputs_.size(); },
           [](const schema_ref_t schema) {
@@ -584,7 +584,7 @@ size_t RecordFunction::num_outputs() const {
 }
 
 c10::optional<OperatorName> RecordFunction::operator_name() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) -> c10::optional<OperatorName> {
             return c10::nullopt;
@@ -596,7 +596,7 @@ c10::optional<OperatorName> RecordFunction::operator_name() const {
 }
 
 c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
             return c10::nullopt;

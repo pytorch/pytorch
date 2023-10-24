@@ -7,8 +7,7 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import dynamic_dim, export, save, load
-from torch._export.constraints import constrain_as_size
+from torch._export import export, save, load
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -101,11 +100,12 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-        exported_module = export(MyModule(), (input,))
+        exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
+        # split.Tensor gets decomposed to split_with_sizes by the core ATen decomposition table
+        self.assertEqual(node.target, "torch.ops.aten.split_with_sizes.default")
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
         # tensor([[0, 1],
@@ -144,7 +144,7 @@ class TestSerialize(TestCase):
         exported_module = export(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
-        )
+        ).run_decompositions()
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
@@ -169,25 +169,24 @@ class TestSerialize(TestCase):
             return torch.searchsorted(x, values, side="right", right=True)
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export(f, (x,))
+        exported_module = export(f, (x,)).run_decompositions()
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
-        self.assertEqual(len(node.inputs), 6)
-        self.assertEqual(node.inputs[2].arg.as_bool, False)
-        self.assertEqual(node.inputs[3].arg.as_bool, True)
-        self.assertEqual(node.inputs[4].arg.as_string, "right")
-        self.assertEqual(node.inputs[5].arg.as_none, ())
+        self.assertEqual(len(node.inputs), 4)
+        self.assertEqual(node.inputs[2].name, "right")
+        self.assertEqual(node.inputs[2].arg.as_bool, True)
+        self.assertEqual(node.inputs[3].name, "side")
+        self.assertEqual(node.inputs[3].arg.as_string, "right")
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
-    def check_graph(self, fn, inputs, constraints=None, _check_meta=True) -> None:
+    def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
-        constraints = [] if constraints is None else constraints
-        ep = export(fn, inputs, {}, constraints)
+        ep = torch.export.export(fn, inputs, {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
@@ -273,10 +272,10 @@ class TestDeserialize(TestCase):
                     #     node1.meta.get("nn_module_stack", None),
                     #     node2.meta.get("nn_module_stack", None),
                     # )
-                    # Check "source_fn" metadata
+                    # Check "source_fn_stack" metadata
                     self.assertEqual(
-                        node1.meta.get("source_fn", None),
-                        node2.meta.get("source_fn", None),
+                        node1.meta.get("source_fn_stack", None),
+                        node2.meta.get("source_fn_stack", None),
                     )
 
         _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module, _check_meta)
@@ -332,20 +331,17 @@ class TestDeserialize(TestCase):
                 e = d.view(d_s3)
                 return torch.cat([e, e])
 
-
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
-        constraints = [
-            dynamic_dim(inputs[0], 0),
-            dynamic_dim(inputs[2], 0),
-            dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
-        ]
-        self.check_graph(DynamicShapeSimpleModel(), inputs, constraints)
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
+        self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
     def test_sym_bool(self):
         def f(x, y):
-            return x.size(0) in y
+            assert x.size(0) in y
+            return x + y
 
-        self.check_graph(f, (torch.ones(2), torch.ones(3)))
+        self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
     def test_shape(self):
         def f(x):
@@ -353,11 +349,9 @@ class TestDeserialize(TestCase):
             return z + y + x[0], z
 
         inputs = (torch.ones(2, 3),)
-        constraints = [
-            dynamic_dim(inputs[0], 0),
-            dynamic_dim(inputs[0], 1),
-        ]
-        self.check_graph(f, inputs, constraints)
+        dim0_x, dim1_x = torch.export.dims("dim0_x", "dim1_x")
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
+        self.check_graph(f, inputs, dynamic_shapes)
 
     def test_module(self):
         class M(torch.nn.Module):
@@ -418,7 +412,7 @@ class TestDeserialize(TestCase):
     def test_constraints(self):
         def f(x, y):
             n = x.item()
-            constrain_as_size(n, min=2)
+            torch._constrain_as_size(n, min=2)
             return y.sum() + torch.ones(n, 5).sum()
 
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
