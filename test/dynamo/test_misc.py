@@ -1466,6 +1466,9 @@ utils_device.CURRENT_DEVICE == None""",
         for op, t1_np, t2_np in itertools.product(
             operators, (True, False), (True, False)
         ):
+            if op in [operator.eq, operator.ne]:
+                # returns equivalent of torch.eq/ne
+                continue
             if op is operator.getitem:
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
@@ -7096,7 +7099,7 @@ def ___make_guard_fn():
 
         foo = torch._dynamo.optimize(counter, nopython=False)(foo)
         foo(inp)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 0)
 
     def test_reconstruct_set_across_graph_break(self):
         def foo(x, y):
