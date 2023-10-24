@@ -234,6 +234,7 @@ def mps_ops_modifier(ops):
         'empty_strided',
         'eye',
         'flatten',
+        'fill',
         'full',
         'imag',
         'isfinite',
@@ -11002,6 +11003,7 @@ class TestConsistency(TestCaseMPS):
                 atol = None
                 rtol = None
 
+            print(cpu_out, mps_out)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
