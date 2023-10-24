@@ -70,8 +70,8 @@ synchronization. Please see :doc:`/notes/multiprocessing` for more details.
         `open(2) <https://man7.org/linux/man-pages/man2/open.2.html>`_ to open the filename passed by the user.
     * Both use an `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_ with ``MAP_SHARED``
         to map the file/object into the current virtual address space
-    * ``share_memory_`` will call ``shm_unlink(3)`` on the file after mapping it to make sure the shared memory
-        object is freed when no object has the file open. ``torch.from_file(shared=True)`` does not unlink the
+    * ``share_memory_`` will call ``shm_unlink(3)`` on the object after mapping it to make sure the shared memory
+        object is freed when no process has the object open. ``torch.from_file(shared=True)`` does not unlink the
         file. This file is persistent and will remain until it is deleted by the user.
 
 
