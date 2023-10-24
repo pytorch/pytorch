@@ -1231,7 +1231,7 @@ class CheckFunctionManager:
 
 
 def build_guard_function(
-    code_parts, closure_args, shape_env_propagation_exprs
+    code_parts, closure_args, shape_env_propagation_exprs=[]
 ) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
