@@ -15,11 +15,11 @@ from torch._inductor import ir
 from torch._inductor.comm_analysis import (
     baseLat,
     hwLat,
+    llMaxBws,
     NCCL_ALGO,
     NCCL_HW,
     NCCL_PROTO,
     NVIDIA_GPU_TYPE,
-    llMaxBws,
 )
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (

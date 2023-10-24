@@ -1,13 +1,13 @@
 # pyre-strict
 
 from typing import List
-import copy
+
+import torch
 
 from . import config, ir, scheduler
 from .dependencies import WeakDep
 from .utils import tuple_sorted
 
-import torch
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 
@@ -291,8 +291,12 @@ def node_summary(snode):
     detail = ""
     if isinstance(snode.node, ir.ExternKernelOut):
         detail = f" ({snode.node.kernel})"
-    out_tensor_info = f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
-    return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({snode.node.name})"
+    out_tensor_info = (
+        f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
+    )
+    return (
+        f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({snode.node.name})"
+    )
 
 
 def visualize_overlap(order):
@@ -304,7 +308,9 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif isinstance(snode.node, ir.Wait):
-                raise Exception("Wait is not expected when there is no collective running.")
+                raise Exception(
+                    "Wait is not expected when there is no collective running."
+                )
             else:  # exposed compute op
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")
