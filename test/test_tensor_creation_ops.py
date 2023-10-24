@@ -3523,9 +3523,6 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
-
-
-
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
     exact_dtype = True
