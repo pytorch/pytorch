@@ -1403,7 +1403,7 @@ class TestMPS(TestCaseMPS):
 
         helper(0, [1024], torch.float32)
         helper(0.2, [2, 3], torch.float32)
-        helper(0.2+0.5j, [2, 3], torch.complex64)
+        helper(0.2 + 0.5j, [2, 3], torch.complex64)
 
     def test_fill_storage_offset(self):
         shape = [2, 10]
