@@ -694,7 +694,16 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
+        real_args_tensor_ids = set(
+            pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), real_sub_args)
+        )
+
         example_res = lowered_module.original_module(*real_sub_args)
+
+        real_res_tensor_ids = set(
+            pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), example_res)
+        )
+        assert real_args_tensor_ids.isdisjoint(real_res_tensor_ids)
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args
