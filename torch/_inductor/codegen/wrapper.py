@@ -857,6 +857,10 @@ class WrapperCodeGen(CodeGen):
                         compile_wrapper.splice(symbol.src, strip=True)
                         symbols_included.add(symbol_name)
                         traverse(symbol)
+                    elif isinstance(symbol, (int, str, bool)):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        symbols_included.add(symbol_name)
 
         traverse(kernel)
 
