@@ -11,6 +11,7 @@ import linecache
 import logging
 import operator
 import sys
+import threading
 import traceback
 import types
 import typing
@@ -88,6 +89,7 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .variables.lazy import LazyMutableLocal
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -123,6 +125,7 @@ log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
+tls = threading.local()
 
 
 @functools.lru_cache(None)
@@ -342,8 +345,9 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
             # if __bool__ is missing, trying __len__ to infer a truth value.
-            if x.is_python_constant() and x.as_python_constant() is None:
+            if isinstance(x, GetAttrVariable):
                 x = value.var_getattr(self, "__len__")
+
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
@@ -583,7 +587,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return oldvar.mutable_local not in v.recursively_contains
+            return oldvar.mutable_local not in v.recursively_contains and not any(
+                # recursively_contains will miss things for LazyVariableTracker
+                (isinstance(x, LazyMutableLocal) and x.vt is not None)
+                for x in v.recursively_contains
+            )
 
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
@@ -1998,6 +2006,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 class InstructionTranslator(InstructionTranslatorBase):
     mutated_closure_cell_contents: Set[str]
 
+    @staticmethod
+    def current_tx() -> "InstructionTranslator":
+        return tls.current_tx
+
+    @contextlib.contextmanager
+    def set_current_tx(self):
+        prior = getattr(tls, "current_tx", None)
+        tls.current_tx = self
+        yield
+        tls.current_tx = prior
+
     def __init__(
         self,
         instructions: List[Instruction],
@@ -2044,7 +2063,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
-        with tracing(self.output.tracing_context):
+        with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
             self.mutated_closure_cell_contents = mutated_closure_cell_contents
@@ -2058,17 +2077,20 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars.extend(cells_and_freevars)
             cells_and_freevars_set = set(cells_and_freevars)
 
-            self.symbolic_locals = collections.OrderedDict(
-                (
-                    k,
-                    VariableBuilder(
-                        self,
-                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
-                    )(f_locals[k]),
+            self.symbolic_locals = {
+                k: variables.LazyVariableTracker(
+                    f_locals[k],
+                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
                 )
                 for k in vars
                 if k in f_locals
-            )
+            }
+            if export:
+                # export gets confused if we never realize unused inputs
+                # in export mode just eagerly realize everything
+                self.symbolic_locals = VariableTracker.apply(
+                    lambda x: x.realize(), self.symbolic_locals
+                )
 
             self.init_local_index_guards_hack()
 

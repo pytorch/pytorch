@@ -90,15 +90,26 @@ def is_side_effect_safe(m: MutableLocalBase):
     return m.scope == scope_id
 
 
-# metaclass to call post_init
-class HasPostInit(type):
+class VariableTrackerMeta(type):
     def __call__(cls, *args, **kwargs):
+        """Call __post_init__"""
         obj = type.__call__(cls, *args, **kwargs)
         obj.__post_init__(*args, **kwargs)
         return obj
 
+    def __instancecheck__(cls, instance) -> bool:
+        """Make isinstance work with LazyVariableTracker"""
+        if type.__instancecheck__(
+            variables.LazyVariableTracker, instance
+        ) and cls not in (
+            VariableTracker,
+            variables.LazyVariableTracker,
+        ):
+            instance = instance.realize()
+        return type.__instancecheck__(cls, instance)
 
-class VariableTracker(metaclass=HasPostInit):
+
+class VariableTracker(metaclass=VariableTrackerMeta):
     """
     Base class for tracked locals and stack values
 
@@ -167,18 +178,25 @@ class VariableTracker(metaclass=HasPostInit):
 
         if isinstance(value, VariableTracker):
             if not skip_fn(value):
-                updated_dict = dict(value.__dict__)
-                for key in updated_dict.keys():
-                    if key not in value._nonvar_fields:
-                        updated_dict[key] = cls.apply(
-                            fn, updated_dict[key], cache, skip_fn
-                        )
-                result = fn(value.clone(**updated_dict))
+
+                def updated_dict(v):
+                    rv = dict(v.__dict__)
+                    for key in rv.keys():
+                        if key not in v._nonvar_fields:
+                            rv[key] = cls.apply(fn, rv[key], cache, skip_fn)
+                    return rv
+
+                value = value.unwrap()
+                was_realized = value.is_realized()
+                result = fn(value.clone(**updated_dict(value)))
+                if not was_realized and value.is_realized():
+                    # running fn() resulted in value getting realized,
+                    # which means we missed updating the contents of result
+                    result = result.clone(**updated_dict(result.unwrap()))
                 if update_contains is False:
                     result._update_contains()
             else:
-                result = fn(value)
-
+                result = fn(value).unwrap()
         elif istype(value, list):
             result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
         elif istype(value, tuple):
@@ -264,12 +282,6 @@ class VariableTracker(metaclass=HasPostInit):
             return self.source.make_guard(fn)
         raise NotImplementedError()
 
-    def replace_guards(self, guards, *fns):
-        name = self.source.name()
-        new_guards = {g for g in (guards or []) if g.name != name}
-        new_guards.update(self.source.make_guard(fn) for fn in fns)
-        return new_guards
-
     def const_getattr(self, tx, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError()
@@ -350,6 +362,18 @@ class VariableTracker(metaclass=HasPostInit):
             return self
         new_vt = self.clone(user_code_variable_name=new_name)
         return tx.replace_all(self, new_vt)
+
+    def realize(self) -> "VariableTracker":
+        """Used by LazyVariableTracker to build the real VariableTracker"""
+        return self
+
+    def unwrap(self) -> "VariableTracker":
+        """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
+        return self
+
+    def is_realized(self):
+        """Used by LazyVariableTracker to indicate an unrealized node"""
+        return True
 
     def __init__(
         self,
