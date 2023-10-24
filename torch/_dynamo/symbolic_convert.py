@@ -452,8 +452,6 @@ def break_graph_if_unsupported(*, push):
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
-            if len(self.output.graph.nodes) == 0:
-                raise exc.SkipFrame("Empty graph")
 
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
