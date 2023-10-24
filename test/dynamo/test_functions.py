@@ -1377,6 +1377,9 @@ class WrapperModule(torch.nn.Module):
 
 if HAS_TRITON:
     # Define shared triton kernels here so that multiple tests can access it
+    # NB: This also addresses a triton limitation where if the kernels are
+    # getting called indirectly, triton cannot find the kernels unless they
+    # are at top level.
     @triton.jit
     def add_kernel(
         in_ptr0,
@@ -1422,6 +1425,27 @@ if HAS_TRITON:
         x = tl.load(ptr + offsets, mask=mask)
         output = 2 * x
         tl.store(ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def zero_negs(x):
+        return tl.where(x >= 0, x, 0)
+
+    @triton.jit
+    def indirection_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+        ACTIVATION: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        if ACTIVATION == "mul2_inplace_kernel":
+            mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        tl.store(out_ptr + offsets, x, mask=mask)
 
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
@@ -1835,6 +1859,40 @@ def forward(self, x_1, output_1):
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
+        @triton.jit
+        def mul2_and_add_and_zero_negatives_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            ACTIVATION: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            indirection_kernel(
+                in_ptr0,
+                in_ptr0,
+                n_elements,
+                BLOCK_SIZE=BLOCK_SIZE,
+                ACTIVATION="mul2_inplace_kernel",
+            )
+            indirection_kernel(
+                in_ptr1,
+                in_ptr1,
+                n_elements,
+                BLOCK_SIZE=BLOCK_SIZE,
+                ACTIVATION="mul2_inplace_kernel",
+            )
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            if ACTIVATION == "zero_negs":
+                output = zero_negs(output)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
         @torch.compile
         def call_triton(
             x: torch.Tensor,
@@ -1847,19 +1905,31 @@ def forward(self, x_1, output_1):
             n_elements = output.numel()
 
             grid = (x.numel(),)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            add_kernel[grid](xi, yi, outputi, n_elements, BLOCK_SIZE=16)
+            mul2_and_add_and_zero_negatives_kernel[grid](
+                x, y, output, n_elements, BLOCK_SIZE=16, ACTIVATION="zero_negs"
+            )
+            mul2_and_add_and_zero_negatives_kernel[grid](
+                xi, yi, outputi, n_elements, BLOCK_SIZE=16, ACTIVATION=None
+            )
 
             return (output, outputi)
 
-        t1 = torch.rand(5, device="cuda", requires_grad=grad)
-        t2 = torch.rand(5, device="cuda", requires_grad=grad)
-        t1i = torch.randint(0, 5, (5,), device="cuda")
-        t2i = torch.randint(0, 5, (5,), device="cuda")
+        t1 = torch.tensor(
+            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
+        )
+        t2 = torch.tensor(
+            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
+        )
+        float_result = 2 * t1 + 2 * t2
+        float_result = float_result.where(float_result >= 0, 0.0)
+
+        t1i = torch.randint(-2, 2, (5,), device="cuda")
+        t2i = torch.randint(-2, 2, (5,), device="cuda")
+        int_result = 2 * t1i + 2 * t2i
 
         (result, resulti) = call_triton(t1, t2, t1i, t2i)
-        self.assertEqual(t1 + t2, result)
-        self.assertEqual(t1i + t2i, resulti)
+        self.assertEqual(float_result, result)
+        self.assertEqual(int_result, resulti)
 
     @requires_cuda()
     @requires_triton()
