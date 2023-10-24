@@ -254,6 +254,7 @@ class ConvertIntSource(ChainedSource):
         # We need to install a new function to disable dynamo from tracing into torch.sym_ite
         # while keep original function unchanged.
         import torch
+
         fn_name = "___sym_ite_with_dynamo_disabled"
         codegen.tx.output.install_global(fn_name, torch._dynamo.disable(torch.sym_ite))
         return [
@@ -273,8 +274,9 @@ class ConvertIntSource(ChainedSource):
         # To accomplish this, we cast the outer SymBool to an integer before executing the guard expression
         # generated for Dynamo's SymInt.
 
-        # Note: ITE_WITH_HINT doesn't install guard in the outer shape_env of SymBool input because we have to make sure all the guards
-        # pass and the cached code will be executed. Otherwise, we will specialize the outer shape_env accidentlely.
+        # Note: ITE_WITH_HINT doesn't install guard in the outer shape_env of SymBool input because we
+        # have to make sure all the guards pass and the cached code will be executed. Otherwise, we will
+        # accidently specialize the outer shape_env.
         return f"ITE_WITH_HINT({self.base.name()}, 1, 0)"
 
 
