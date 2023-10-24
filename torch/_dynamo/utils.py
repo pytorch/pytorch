@@ -69,7 +69,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 
 
 counters = collections.defaultdict(collections.Counter)
@@ -1364,7 +1364,7 @@ def get_fake_value(node, tx):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    def fake_wrapper(e):
+    def ensure_fake(e):
         if isinstance(e, torch.Tensor):
             assert is_fake(e)
         return e
@@ -1372,9 +1372,14 @@ def get_fake_value(node, tx):
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
 
+    def wraps_non_fake(e):
+        if not tx.output.fake_mode.is_our_fake(e):
+            e = deepcopy_to_fake_tensor(e)
+        return e
+
     args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map(fake_wrapper, args)
-    kwargs = tree_map(fake_wrapper, kwargs)
+    args = tree_map(ensure_fake, args)
+    kwargs = tree_map(ensure_fake, kwargs)
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -1396,7 +1401,7 @@ def get_fake_value(node, tx):
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
-            return wrap_fake_exception(
+            ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
     except Unsupported:
@@ -1436,6 +1441,9 @@ def get_fake_value(node, tx):
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+
+    ret_val = tree_map_only(torch.Tensor, wraps_non_fake, ret_val)
+    return ret_val
 
 
 _current_node = threading.local()

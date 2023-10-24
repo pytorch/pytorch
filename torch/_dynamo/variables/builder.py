@@ -42,7 +42,7 @@ from ..allowed_functions import (
 )
 
 from ..device_interface import device_interfaces
-from ..exc import unimplemented
+from ..exc import unimplemented, InternalTorchDynamoError
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
@@ -1350,7 +1350,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
 #      instead it is converted into a fake tensor using
 #      wrap_to_fake_tensor_and_record and registered as a graph input.)
 #
-#   2. "Wrapping" the result of some Tensor operation Dynamo traced over.  In
+#   2. "Wrapping" the result of some Tensor operation Dynamo traced over. In
 #      this case, example_value is None (and we are going to figure it out
 #      ourselves using FakeTensors, via get_fake_value, which will run
 #      the operation represented by the (singular!) FX node referenced by
@@ -1358,6 +1358,10 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
 #
 # The expectation is you end up with a Tensor output, and everything is
 # straightforwardly traced into the graph.
+#
+# In all cases, the returned `TensorVariable` subclass will have an `example_value`
+# and that `example_value` must be a `FakeTensor` produced by the currently running
+# instance of Dynamo. 
 #
 # Upon closer inspection, you may notice that there are a slurry of non-Tensor
 # output cases.  What gives?  Well, we sometimes trace operations into the
@@ -1446,6 +1450,13 @@ def wrap_fx_proxy_cls(
             kwargs["source"] = options["source"]
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
+            )
+        if (
+            not is_fake(example_value)
+            or not maybe_get_fake_mode(example_value) is tx.fake_mode
+        ):
+            raise InternalTorchDynamoError(
+                "`example_value` needs to be a `FakeTensor` wrapped by this instance of Dynamo"
             )
 
     if isinstance(example_value, torch.Tensor):
