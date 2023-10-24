@@ -204,7 +204,6 @@ __all__ = [
     "copy_to",  # TODO: add OpInfo (or implement .to)
     "item",
     "to",
-    "to_permuted",
     #
     # Reduction ops
     #
@@ -1945,28 +1944,6 @@ def clone(
     return result
 
 
-@register_decomposition(aten.to_permuted)
-def to_permuted(
-    self: TensorLikeType,
-    physical_layout: StrideType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    non_blocking: bool = False,
-) -> TensorLikeType:
-    perm = self.permute(physical_layout)
-    if device is not None:
-        device = utils.canonicalize_device(device)
-    out_perm = perm.to(  # type: ignore[call-overload]
-        dtype=dtype,
-        device=device,
-        non_blocking=non_blocking,
-        memory_format=torch.contiguous_format,
-        copy=True,
-    )
-    return out_perm.permute(utils.invert_perm(physical_layout))
-
-
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
         msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
@@ -2098,6 +2075,11 @@ def _to_other(
 # remove to_kwargs that is already present in `a`
 def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
     options_to_check = ["dtype", "device", "layout", "memory_format"]
+    for kw in options_to_check:
+        if kw in to_kwargs and to_kwargs[kw] is None:
+            del to_kwargs[kw]
+
+
     # "device" option could be passed a str instead torch.device
     if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
         to_kwargs["device"] = torch.device(to_kwargs["device"])
@@ -5350,23 +5332,37 @@ def _like_constructor(
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        return construct_fn(
+            physical_shape,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+            memory_format=memory_format,
+        )
+
+    # NOTE: For random functions in eager, the output depends on the location
+    # in memory not the logical index. So, it's equivalent to generating a
+    # contiguous tensor and viewing it as strided.
+    physical_layout = (
+        utils.compute_elementwise_output_logical_to_physical_perm(a)
+    )
+    physical_shape = utils.apply_perm(a.shape, physical_layout)
+
     result = construct_fn(
-        a.shape,
+        physical_shape,
         dtype=dtype,
         layout=layout,
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-
-    if memory_format == torch.preserve_format:
-        logical_to_physical_perm = (
-            utils.compute_elementwise_output_logical_to_physical_perm(a)
-        )
-        result = result.to_permuted(logical_to_physical_perm)
-    else:
-        result = result.to(memory_format=memory_format)
-    return result
+    if physical_layout == range(len(physical_layout)):
+        return result
+    return result.permute(utils.invert_perm(physical_layout))
 
 
 @register_decomposition(aten.full_like)
@@ -5532,11 +5528,11 @@ def randint_like(
     if "high" in kwargs:
         low_high = (*low_high, kwargs.pop("high"))
 
-    torch._check(len(low_high) <= 2, lambda: f"Unexpected arguments {low_high}")
+    torch._check(1 <= len(low_high) <= 2, lambda: f"Unexpected arguments {low_high}")
     torch._check(not kwargs, lambda: f"Unexpected keyword arguments {kwargs}")
 
     return _like_constructor(
-        lambda shape, *a, **kw: torch.randint(shape, *low_high, *a, **kw),
+        lambda shape, *a, **kw: torch.randint(*low_high, shape, *a, **kw),
         input,
         dtype=dtype,
         layout=layout,

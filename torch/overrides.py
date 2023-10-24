@@ -1133,7 +1133,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.tensor_split: lambda input, indices_or_sections, dim=0: -1,
         torch.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.tile: lambda input, dims: -1,
-        torch.to_permuted: lambda input, physical_layout, *, dtype=None, device=None, non_blocking=False: -1,
         torch.topk: lambda input, k, dim=-1, descending=False, out=None: -1,
         torch.trace: lambda input: -1,
         torch.transpose: lambda input, dim0, dim1: -1,

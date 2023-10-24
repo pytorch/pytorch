@@ -1837,21 +1837,6 @@ def error_inputs_empty_permuted(op_info, device, **kwargs):
         error_regex="Duplicate dim not allowed"
     )
 
-def sample_inputs_to_permuted(op, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    for sample in sample_inputs_empty_permuted(
-            op, device, dtype, requires_grad, **kwargs):
-        def make_sample(shape, physical_layout, requires_grad=None, **kwargs):
-            return SampleInput(
-                make_arg(shape),
-                physical_layout,
-                **kwargs,
-            )
-
-        yield make_sample(sample.input, *sample.args, **sample.kwargs)
-
-
 def sample_inputs_scalar_tensor(op, device, dtype, requires_grad, **kwargs):
     # Not including a scalar tensor in vals because meta tests start failing due to
     # lack of meta support for _local_scalar_dense
@@ -13998,14 +13983,6 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    OpInfo("to_permuted",
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_out=False,
-           sample_inputs_func=sample_inputs_to_permuted,
-           skips=[
-           ]),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -19185,12 +19162,6 @@ python_ref_db = [
         torch_opinfo_name="to",
     ),
     PythonRefInfo(
-        "_refs.to_permuted",
-        torch_opinfo_name="to_permuted",
-        # Ref returns the view of a copy
-        validate_view_consistency=False,
-    ),
-    PythonRefInfo(
         "_refs.triu",
         torch_opinfo_name="triu",
     ),
@@ -19628,14 +19599,35 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.rand_like",
         torch_opinfo_name="rand_like",
+        op=lambda *args, **kwargs:
+             wrapper_set_seed(refs.rand_like, *args, **kwargs),
+        validate_view_consistency=False,
+        skips=[
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ],
     ),
     PythonRefInfo(
         "_refs.randn_like",
         torch_opinfo_name="randn_like",
+        validate_view_consistency=False,
+        op=lambda *args, **kwargs:
+             wrapper_set_seed(refs.randn_like, *args, **kwargs),
+        skips=[
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ],
     ),
     PythonRefInfo(
         "_refs.randint_like",
-        torch_opinfo_name="randn_like",
+        torch_opinfo_name="randint_like",
+        op=lambda *args, **kwargs:
+             wrapper_set_seed(refs.randint_like, *args, **kwargs),
+        validate_view_consistency=False,
+        skips=[
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ],
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.real",

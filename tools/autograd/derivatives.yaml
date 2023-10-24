@@ -480,10 +480,6 @@
   self: copysign_tensor_self_backward(grad, self, result)
   result: auto_element_wise
 
-- name: to_permuted(Tensor self, int[] physical_layout, *, ScalarType? dtype=None, Device? device=None, bool non_blocking=False) -> Tensor
-  self: _to_copy_backward(grad, self.options())
-  result: auto_element_wise
-
 - name: cos(Tensor self) -> Tensor
   self: grad * -self.sin().conj()
   result: auto_element_wise
