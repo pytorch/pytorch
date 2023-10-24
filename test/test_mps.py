@@ -79,7 +79,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
-        'aminmax': [torch.float32],
+        'aminmax': [torch.float32, torch.float16],
         'polar': [torch.float32],
 
         # Correctness issues
@@ -237,6 +237,7 @@ def mps_ops_modifier(ops):
         'empty_strided',
         'eye',
         'flatten',
+        'fill',
         'full',
         'imag',
         'isfinite',
@@ -746,7 +747,7 @@ def mps_ops_modifier(ops):
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'multinomial': [torch.float32],  # random results
+        'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -812,8 +813,8 @@ def mps_ops_modifier(ops):
     }
 
     SKIPLIST = {
-        "all": [torch.float16, torch.float32],
-        "any": [torch.float16, torch.float32],
+        'all': None,
+        'any': None,
     }
 
     def addDecorator(op, d) -> None:
@@ -827,9 +828,7 @@ def mps_ops_modifier(ops):
                          unittest.skip("Skipping empty ops."),
                          dtypes=EMPTY_OPS_SKIPLIST[key]))
         if key in SKIPLIST:
-            addDecorator(op, DecorateInfo(
-                         unittest.skip("Skipped!"),
-                         dtypes=SKIPLIST[key]))
+            addDecorator(op, DecorateInfo(unittest.skip("Skipped!"), dtypes=SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
@@ -858,6 +857,7 @@ def mps_ops_modifier(ops):
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS:
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
+
         yield op
 
 def mps_ops_error_inputs_modifier(ops):
@@ -10910,7 +10910,7 @@ class TestConsistency(TestCaseMPS):
     # You most likely do NOT want to modify this manually
 
     FP16_LOW_PRECISION_LIST = {
-        'add', 'sub', 'div',
+        'add', 'sub', 'div', 'addcdiv',
         '__rdiv__', '__rmul__',
         'nn.functional.huber_loss',
         'true_divide', 'kron',
@@ -11183,7 +11183,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES:
+        if dtype not in MPS_DTYPES + [torch.complex64]:
             with self.assertRaises(TypeError):
                 ones(device)
         else:

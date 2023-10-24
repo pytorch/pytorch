@@ -174,11 +174,11 @@ class TestSerialize(TestCase):
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
-        self.assertEqual(len(node.inputs), 6)
-        self.assertEqual(node.inputs[2].arg.as_bool, False)
-        self.assertEqual(node.inputs[3].arg.as_bool, True)
-        self.assertEqual(node.inputs[4].arg.as_string, "right")
-        self.assertEqual(node.inputs[5].arg.as_none, ())
+        self.assertEqual(len(node.inputs), 4)
+        self.assertEqual(node.inputs[2].name, "right")
+        self.assertEqual(node.inputs[2].arg.as_bool, True)
+        self.assertEqual(node.inputs[3].name, "side")
+        self.assertEqual(node.inputs[3].arg.as_string, "right")
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -338,9 +338,10 @@ class TestDeserialize(TestCase):
 
     def test_sym_bool(self):
         def f(x, y):
-            return x.size(0) in y
+            assert x.size(0) in y
+            return x + y
 
-        self.check_graph(f, (torch.ones(2), torch.ones(3)))
+        self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
     def test_shape(self):
         def f(x):

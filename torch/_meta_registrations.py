@@ -170,8 +170,8 @@ def linalg_cross(self, other, *, dim=-1):
 @out_wrapper()
 def linalg_matrix_exp(self):
     squareCheckInputs(self, "linalg.matrix_exp")
-    checkFloatingOrComplex(self, "matrix_exp")
-    return torch.empty_like(self)
+    checkFloatingOrComplex(self, "linalg.matrix_exp")
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(
@@ -352,9 +352,10 @@ def meta_copy_(self, src, non_blocking=False):
             "more than one element of the written-to tensor refers to a single memory location"
         )
 
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        aten.expand_copy.default(intermediate, self.size())
+    if isinstance(src, Tensor):
+        intermediate = src.to(self, non_blocking)
+        if self.size() != intermediate.size():
+            aten.expand_copy.default(intermediate, self.size())
     return self
 
 
@@ -402,18 +403,13 @@ def meta_index_reduce_(
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
+@out_wrapper()
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
     result_size = list(self.size())
     if self.dim() > 0:
         result_size[dim] = index.numel()
     return self.new_empty(result_size)
-
-
-@register_meta(aten.index_select.out)
-def meta_index_select_out(self, dim, index, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(torch.index_select(self, dim, index))
 
 
 @register_meta(aten.segment_reduce.default)
@@ -3017,6 +3013,39 @@ def meta__foreach_binop_list(self, other, alpha=1):
 )
 def meta__foreach_binop__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta(
+    [
+        aten._foreach_add.Tensor,
+    ]
+)
+def meta__foreach_binop_tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.Tensor,
+    ]
+)
+def meta__foreach_binop__tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
 
 
 @register_meta(

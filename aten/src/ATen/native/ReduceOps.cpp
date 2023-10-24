@@ -901,11 +901,11 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
 
     for (const auto i : c10::irange(other.value().dim())) {
       TORCH_CHECK(
-          other.value().size(i) == self.size(i) || i == wrapped_dim,
+          other.value().sym_size(i) == self.sym_size(i) || i == wrapped_dim,
           "diff expects the shape of tensor to prepend or append to match that of"
           " input except along the differencing dimension;"
-          " input.size(", i, ") = ", self.size(i), ", but got"
-          " tensor.size(", i, ") = ", other.value().size(i));
+          " input.size(", i, ") = ", self.sym_size(i), ", but got"
+          " tensor.size(", i, ") = ", other.value().sym_size(i));
     }
   }
 }
@@ -931,19 +931,21 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
     return result;
   }
 
-  auto out_len = self.size(dim) - 1;
+  auto out_len = self.sym_size(dim) - 1;
   auto result = self;
   bool is_kBool = (self.dtype() == at::kBool);
-  n = n >= self.size(dim) ? self.size(dim) : n;
+  n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     if (is_kBool) {
-      result = at::logical_xor(at::narrow(result, dim, 1, out_len), at::narrow(result, dim, 0, out_len));
+      result = at::logical_xor(
+        at::narrow_symint(result, dim, 1, out_len),
+        at::narrow_symint(result, dim, 0, out_len)
+      );
     } else {
-      result = at::narrow(result, dim, 1, out_len) - at::narrow(result, dim, 0, out_len);
+      result = at::narrow_symint(result, dim, 1, out_len) - at::narrow_symint(result, dim, 0, out_len);
     }
-    out_len -= 1;
+    out_len = out_len - 1;
   }
 
   return result;
@@ -961,14 +963,15 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
 
 static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
   if (n == 0) {
-    at::native::resize_output(result, self.sizes());
+    if (resize_output_check_symint(result, self.sym_sizes())) {
+      result.resize__symint(self.sym_sizes());
+    }
     check_scalar_type_device_layout_equal(result, self);
-    result.copy_(self);
-    return result;
+    return result.copy_(self);
   }
 
-  n = n >= self.size(dim) ? self.size(dim) : n;
-  const auto out_len = self.size(dim) - n;
+  n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
+  const auto out_len = self.sym_size(dim) - n;
   auto prev_result = self;
 
   if (n > 1) {
@@ -976,10 +979,17 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
   }
 
   if (self.dtype() == at::kBool) {
-    at::logical_xor_out(result, at::narrow(prev_result, dim, 1, out_len), at::narrow(prev_result, dim, 0, out_len));
-
+    at::logical_xor_out(
+      result,
+      at::narrow_symint(prev_result, dim, 1, out_len),
+      at::narrow_symint(prev_result, dim, 0, out_len)
+    );
   } else {
-    at::sub_out(result, at::narrow(prev_result, dim, 1, out_len), at::narrow(prev_result, dim, 0, out_len));
+    at::sub_out(
+      result,
+      at::narrow_symint(prev_result, dim, 1, out_len),
+      at::narrow_symint(prev_result, dim, 0, out_len)
+    );
   }
 
   return result;
@@ -2167,7 +2177,27 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       && self.layout() == other.layout()
       && self.is_neg() == other.is_neg()
       && self.is_conj() == other.is_conj()) {
-    return true;
+    if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+      return true;
+    }
+    std::atomic<bool> result{true};
+    auto iter = TensorIteratorConfig().add_input(self).build();
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "equal_notnan_cpu", [&] {
+      iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
+        if (!result) {
+            return;
+        }
+        char* self_data = data[0];
+        for (C10_UNUSED const auto i : c10::irange(dim_size)) {
+          if (isnan_(c10::load<scalar_t>(self_data))) {
+            result = false;
+            return;
+          }
+          self_data += strides[0];
+        }
+      });
+    });
+    return result.load();
   }
 
   std::atomic<bool> result{true};
@@ -2185,8 +2215,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
       char* self_data = data[0];
       char* other_data = data[1];
-      for (const auto i : c10::irange(dim_size)) {
-        (void)i; //Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(dim_size)) {
         if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;

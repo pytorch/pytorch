@@ -63,6 +63,10 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif(MSVC)
 
+  if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+  endif()
+
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
   set(GEN_ROCM_FLAG)
