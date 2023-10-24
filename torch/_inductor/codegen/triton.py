@@ -27,7 +27,6 @@ from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
-    DeferredLineBase,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
@@ -824,7 +823,6 @@ class TritonKernel(Kernel):
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
-        self._load_mask = None
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
@@ -832,8 +830,6 @@ class TritonKernel(Kernel):
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
-        # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
@@ -1250,101 +1246,26 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def indirect_indexing(self, var, size, check=True):
-        # TODO(lezcano) This code should be lifted to codegen/common.py.
-        # This should be easy, as now CSE variables carry bounds info
-        class IndirectAssertLine(DeferredLineBase):
-            def __init__(self, line, var, mask, size_map):
-                self.var = var
-                self.mask = mask
-                self.line = line
-                self.size_map = size_map
+    def generate_assert(self, check):
+        return torch.version.hip is None and super().generate_assert(check)
 
-            def __call__(self):
-                size, size_str = self.size_map[(self.var, self.mask)]
+    def load_mask(self, var):
+        mask = ""
+        mask_vars = set(var.mask_vars)
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
 
-                # We assert if we've not been able to prove the bound
-                assert_min = (self.var.bounds.lower >= 0) != sympy.true
-                assert_max = (self.var.bounds.upper < size) != sympy.true
+        if mask_vars:
+            mask = (
+                f"{list(mask_vars)[0]}"
+                if len(mask_vars) == 1
+                else f"({' & '.join(str(v) for v in mask_vars)})"
+            )
+        return mask
 
-                # FooBar interview question
-                if not (assert_min or assert_max):
-                    return None
-                elif assert_min and assert_max:
-                    # The conditions need to be in parens because of Python's operator precedence.
-                    # It'd be less error-prone to use and/or/not, which is supported by triton
-                    cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-                    cond_print = f"0 <= {self.var} < {size_str}"
-                elif assert_min:
-                    cond = f"0 <= {self.var}"
-                    cond_print = cond
-                else:
-                    assert assert_max
-                    cond = f"{self.var} < {size_str}"
-                    cond_print = cond
-
-                if self.mask:
-                    cond = f"({cond}) | ~{self.mask}"
-                return self.line.format(cond=cond, cond_print=cond_print)
-
-            def _new_line(self, line):
-                return IndirectAssertLine(line, self.var, self.mask, self.size_map)
-
-        if var.bounds.lower < 0:
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
-                # Take the negative part of the bound and add size to it
-                # Then take union of that and the positive part
-                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
-                # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:
-                    pos = var.bounds & ValueRanges(0, sympy.oo)
-                    new_bounds = new_bounds | pos
-
-            stm = f"{var} + {self.index_to_str(size)}"
-            # Mixed negative and non-negative
-            if var.bounds.upper >= 0:
-                stm = f"tl.where({var} < 0, {stm}, {var})"
-            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-
-            new_var.update_on_args("index_wrap", (var,), {})
-            var = new_var
-
-        generate_assert = (
-            (check or config.debug_index_asserts)
-            and config.triton.assert_indirect_indexing
-            and torch.version.hip is None
-        )
-        if generate_assert:
-            mask_vars = set(var.mask_vars)
-            if self._load_mask:
-                mask_vars.add(self._load_mask)
-
-            mask = ""
-            if mask_vars:
-                mask = (
-                    f"{list(mask_vars)[0]}"
-                    if len(mask_vars) == 1
-                    else f"({' & '.join(str(v) for v in mask_vars)})"
-                )
-
-            # An assertion line may have been written already, if so just
-            # update the max size.
-            map_key = (var, mask)
-            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
-            if existing_size is not None:
-                size = sympy.Min(size, existing_size)
-            else:
-                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
-                self.compute.writeline(
-                    IndirectAssertLine(line, var, mask, self.indirect_max_sizes)
-                )
-
-            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-
-        return sympy_symbol(str(var))
+    @property
+    def assert_function(self):
+        return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
         """

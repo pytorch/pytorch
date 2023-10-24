@@ -1199,7 +1199,6 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
-        self._load_mask = None
 
     @contextlib.contextmanager
     def masked(self, mask):
@@ -1222,9 +1221,12 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
-        return sympy_symbol(str(index_var))
+    def index_to_str(self, index: sympy.Expr) -> str:
+        """
+        Convert an index expr to a string that can be used in cpp code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
+        """
+        return cexpr(self.rename_indexing(index))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1419,6 +1421,10 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         loop_nest = LoopNestWithSplit.build(self)
         self.codegen_loops_impl(loop_nest, code, worksharing)
+
+    @property
+    def assert_function(self):
+        return "TORCH_CHECK"
 
     def decide_parallel_depth(self, ranges, threads):
         seq = self.size_hint()
