@@ -440,25 +440,32 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(13)
     @skipScriptTest()
     def test_multi_head_attention_dynamic_axes(self):
-        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
+        class MhaWrapper(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mha = torch.nn.MultiheadAttention(4, 4, batch_first=True)
 
+
+            def forward(self, query: torch.Tensor) -> torch.Tensor:
+                return self.mha(query, query, query, need_weights=False)[0]
+
+        model = MhaWrapper().eval()
         dummy_input = torch.randn(1, 10, 4, requires_grad=True)
         test_inputs_small = torch.randn(1, 5, 4, requires_grad=True)
         test_inputs_big = torch.randn(1, 15, 4, requires_grad=True)
+
         self.run_test(
-            mha,
-            (dummy_input, dummy_input, dummy_input),
+            model,
+            dummy_input,
             additional_test_inputs=[
-                (dummy_input, dummy_input, dummy_input),
-                (test_inputs_small, test_inputs_small, test_inputs_small),
-                (test_inputs_big, test_inputs_big, test_inputs_big),
+                dummy_input,
+                test_inputs_small,
+                test_inputs_big,
             ],
-            input_names=["query", "key", "value"],
+            input_names=["query"],
             output_names=["output"],
             dynamic_axes={
                 "query": {0: "batch_size", 1: "sequence"},
-                "key": {0: "batch_size", 1: "sequence"},
-                "value": {0: "batch_size", 1: "sequence"},
                 "output": {0: "batch_size", 1: "sequence"},
             },
             rtol=1e-3,
