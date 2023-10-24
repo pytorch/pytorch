@@ -91,7 +91,6 @@ Following Requirements needs to be met prior to final RC Cut:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
-  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/nightly)
 
 ## Cutting release branches
 
@@ -196,7 +195,6 @@ Validate the release jobs for pytorch and domain libraries should be green. Vali
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
-  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
 
 Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
 
@@ -257,7 +255,6 @@ Patch releases should be considered if a regression meets the following criteria
     * First party domain libraries:
         * [pytorch/vision](https://github.com/pytorch/vision)
         * [pytorch/audio](https://github.com/pytorch/audio)
-        * [pytorch/text](https://github.com/pytorch/text)
 3. Is there not a viable workaround?
     * Can the regression be solved simply or is it not overcomable?
 
