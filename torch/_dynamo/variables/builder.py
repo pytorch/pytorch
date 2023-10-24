@@ -521,7 +521,10 @@ class VariableBuilder:
             and skipfiles.check(value, allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            if callable(value):
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
             return SkipFilesVariable(
                 value,
                 skipfiles.check_verbose(value, allow_torch=True).reason,
