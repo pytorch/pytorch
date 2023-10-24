@@ -3554,6 +3554,32 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
 
+    def test_numpy_not_ndarray_recompiles(self):
+        import torch
+
+        def fn(x=None):
+            if x is None:
+                x = np.ones(3)
+            elif isinstance(x, int):
+                x = np.ones(6)
+            elif isinstance(x, str):
+                x = np.ones(9)
+            return x**2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+
+        x = np.zeros((2, 2))
+
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(opt_fn(), fn())
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(10), fn(10))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(opt_fn("10"), fn("10"))
+        self.assertEqual(cnt.frame_count, 4)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
