@@ -171,7 +171,7 @@ class CachingAutotuner(KernelInterface):
         self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
             self.meta.get("kernel_name", "triton kernel")
             + ", OriginOps: "
-            + str(self.meta.get("origin_ops", []))
+            + str(self.meta.get("origin_ops", {}))
         )
 
     def precompile(self, warm_cache_only_with_cc=None):

@@ -903,10 +903,14 @@ class OriginOpList:
         return str(list(self.oi_list))
 
     def codegen(self, code: IndentedBuffer, line: str):
+        prefix = ""
+        kernel_pattern = "extern_kernel"
         marker_string = str(self)
-        code.writeline(f'torch.cuda.nvtx.range_push("triton_info: {marker_string}")')
-        code.writeline(line)
-        code.writeline("torch.cuda.nvtx.range_pop()")
+        if kernel_pattern in line:
+            prefix = f"{kernel_pattern}, OriginOps: "
+        code.writeline(f'with record_function("{prefix}{marker_string}"):')
+        with code.indent():
+            code.writeline(line)
         return
 
 

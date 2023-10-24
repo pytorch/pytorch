@@ -49,6 +49,38 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_profiling_origin_ops_with_chrome_json(self):
+        # Verify that the OriginOp info encoded in the
+        # kernel name string can be read correctly from the chrome
+        # trace json file.  This test is to ensure there are no string
+        # formatting issues with the origin ops
+        with config.patch({"profiler_mark_wrapper_call": True}):
+
+            @torch.compile
+            def fn(x, y):
+                matrix = torch.matmul(x, y)
+                return matrix.sin().cos()
+
+            x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+
+            with torch.profiler.profile(activities=[ProfilerActivity.CPU]) as prof:
+                fn(x, y)
+
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    trace_json = json.load(f)
+
+            self.assertTrue("traceEvents" in trace_json)
+            events = trace_json["traceEvents"]
+            origins = []
+            for event in events:
+                if "name" in event:
+                    for val in event.values():
+                        if isinstance(val, str) and "Origin" in val:
+                            origins.append(val)
+            self.assertTrue(len(origins) == 2)
+
     def _test_profiling_kernel_names(self, fn, args, kernel_name_str: str):
         """
         We expect a record_function event to be added on the CPU side, surrounding
