@@ -66,11 +66,9 @@ Some notable attributes of the :class:`torch.export.ExportedProgram` class are:
 - ``state_dict`` (``Dict[str, Union[torch.Tensor, torch.nn.Parameter]]``): Data
   structure containing the parameters and buffers.
 - ``range_constraints`` (``Dict[sympy.Symbol, RangeConstraint]``): For programs
-  that are exported with data dependent behavior, the metadata on each node will
+  that are exported with shape/data dependent behavior, the metadata on each node will
   contain symbolic shapes (which look like ``s0``, ``i0``). This attribute maps
   the symbolic shapes to their lower/upper ranges.
-- ``equality_constraints`` (``List[Tuple[InputDim, InputDim]]``): A list of
-  nodes in the graph and dimensions that have the same shape.
 
 Graph
 -----
