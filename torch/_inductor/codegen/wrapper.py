@@ -326,6 +326,7 @@ class WrapperCodeGen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
+        self.user_defined_kernel_count = 0
 
         self.write_header()
         self.write_prefix()
@@ -771,11 +772,15 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
-    def define_user_defined_triton_kernel(self, kernel, kwargs):
-        name = kernel.__name__
+    def get_unique_kernel_name(self, name: str) -> str:
+        new_name = f"{name}_{self.user_defined_kernel_count}"
+        self.user_defined_kernel_count += 1
+        return new_name
 
+    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
+        original_name = kernel.__name__
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
+        compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         compile_wrapper.splice(
             """
@@ -1297,12 +1302,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_->at("{constants_key}").get();"""
+                            f"""auto {constants_key} = constants_.at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_->at("{constants_key}").get());"""
+                            + f"""constants_.at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1406,7 +1411,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
 
-            self.prefix.writeline("constants_ = constants_map;")
+            self.prefix.writeline("update_constants_map(std::move(constants_map));")
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
@@ -1672,7 +1677,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_device_type_{device.type}(),{device.index if device.index else 0}"
+            return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
 
@@ -1684,7 +1689,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_dtype_{str(dtype).split('.')[-1]}()"
+            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
