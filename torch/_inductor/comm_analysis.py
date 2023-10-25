@@ -67,8 +67,11 @@ class NCCL_ALGO(IntEnum):
 
 
 class NCCL_PROTO(IntEnum):
-    LL = 0
-    # LL128 = 1
+    # The ordering and enum values here matches original in
+    # https://github.com/NVIDIA/nccl/blob/0b083e52096c387bad7a5c5c65b26a9dca54de8c/src/include/devcomm.h#L28
+    # For difference between these protocols, see https://github.com/NVIDIA/nccl/issues/281#issuecomment-571816990
+    LL = 0  # Low-latency
+    # LL128 = 1   # Low-latency 128-byte
     # SIMPLE = 2
 
 
