@@ -77,7 +77,7 @@ class TestParsePrevTests(unittest.TestCase):
         return_value={"test2", "test4"},
     )
     @mock.patch(
-        "tools.testing.target_determination.heuristics.correlated_with_historical_failures._get_file_rating_tests",
+        "tools.testing.target_determination.heuristics.correlated_with_historical_failures.get_correlated_tests",
         return_value=["test1"],
     )
     def test_get_reordered_tests(self, *args: Any) -> None:
