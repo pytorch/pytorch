@@ -1323,6 +1323,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/PointwiseOps.cpp",
     "aten/src/ATen/native/Pooling.cpp",
     "aten/src/ATen/native/Pow.cpp",
+    "aten/src/ATen/native/QuantizedLinear.cpp",
     "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/RangeFactories.cpp",
     "aten/src/ATen/native/ReduceAllOps.cpp",
