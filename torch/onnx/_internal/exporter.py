@@ -572,15 +572,16 @@ class LargeProtobufExportOutputSerializer:
         """`destination` is ignored. The model is saved to `self._destination_path` instead."""
         import onnx
 
-        try:
+        if export_output.model_proto.ByteSize() < 1.9 * 1024 * 1024 * 1024:
             onnx.save_model(export_output.model_proto, self._destination_path)  # type: ignore[attr-defined]
-        except ValueError:
+        else:
             # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
             # Fallback to serializing the model with external data.
             onnx.save_model(  # type: ignore[attr-defined]
                 export_output.model_proto,
                 self._destination_path,
                 save_as_external_data=True,
+                all_tensors_to_one_file=True,
             )
 
 
