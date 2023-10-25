@@ -13,15 +13,23 @@ from unittest import skipIf as skipif, SkipTest
 
 import pytest
 
-import torch._numpy as np
 from pytest import raises as assert_raises
-from torch._numpy.testing import assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_equal
+
 
 skip = functools.partial(skipif, True)
 
