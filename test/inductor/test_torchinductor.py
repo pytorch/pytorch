@@ -885,8 +885,6 @@ class CommonTemplate:
 
         test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
 
-
-
     def test_computed_buffer_inlining(self):
         def flip(x):
             idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -3546,6 +3544,7 @@ class CommonTemplate:
             x = x.cos()
             a = x.copy_(y)
             return a.sin()
+
         self.common(fn, (torch.randn(8, 8), torch.randn(8)))
 
     def test_cat_of_loops_and_extern_kernel(self):
