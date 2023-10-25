@@ -51,6 +51,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
     SizeArg,
+    TensorArg,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
 
@@ -2087,6 +2088,19 @@ class TritonKernel(Kernel):
             triton=True,
         )
 
+    def codegen_nan_check(self):
+        if not config.nan_asserts:
+            return
+
+        wrapper = V.graph.wrapper_code
+        _, call_args, arg_types = self.args.python_argdefs()
+        for arg, arg_type in zip(call_args, arg_types):
+            if isinstance(arg_type, TensorArg):
+                line = f"assert not {arg}.isnan().any().item()"
+                wrapper.writeline(line)
+                line = f"assert not {arg}.isinf().any().item()"
+                wrapper.writeline(line)
+
     def warn_mix_layout(self, kernel_name):
         """
         Print message if the kernel have mixed layout inputs.
@@ -2520,6 +2534,7 @@ class TritonScheduling(BaseScheduling):
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        kernel.codegen_nan_check()
         V.graph.removed_buffers |= kernel.removed_buffers
 
         if config.warn_mix_layout:
