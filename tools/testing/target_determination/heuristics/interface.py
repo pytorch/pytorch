@@ -1,20 +1,52 @@
 import sys
 from abc import abstractmethod
 from enum import Enum
+from functools import total_ordering
 from itertools import chain
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+)
 
-StringTuple = Tuple[str, ...]
+from tools.testing.test_run import TestRun, TestRuns
 
 
 # Note: Keep the implementation of Relevance private to this file so
 # that it's easy to change in the future as we discover what's needed
+@total_ordering
 class Relevance(Enum):
-    HIGH = 0
-    PROBABLE = 1
+    HIGH = 4
+    PROBABLE = 3
     UNRANKED = 2
-    UNLIKELY = 3  # Not yet supported. Needs more infra to be usable
-    NONE = 4  # Not yet supported. Needs more infra to be usable
+    UNLIKELY = 1  # Not yet supported. Needs more infra to be usable
+    NONE = 0  # Not yet supported. Needs more infra to be usable
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Relevance):
+            return False
+
+        return self.value == other.value
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Relevance):
+            raise NotImplementedError(f"Can't compare {self} to {other}")
+
+        return self.value < other.value
+
+    @staticmethod
+    def priority_traversal() -> Iterator["Relevance"]:
+        yield Relevance.HIGH
+        yield Relevance.PROBABLE
+        yield Relevance.UNRANKED
+        yield Relevance.UNLIKELY
+        yield Relevance.NONE
 
 
 METRIC_RELEVANCE_GROUP = "relevance_group"
@@ -37,7 +69,7 @@ class TestPrioritizations:
                otherwise it breaks the test sharding logic
     """
 
-    _test_priorities: List[StringTuple]  # This list MUST be ordered by Relevance
+    _test_priorities: List[List[TestRun]]  # This list MUST be ordered by Relevance
     _original_tests: FrozenSet[str]
 
     def __init__(
@@ -51,106 +83,159 @@ class TestPrioritizations:
     ) -> None:
         self._original_tests = frozenset(tests_being_ranked)
 
-        self._test_priorities = [tuple() for _ in range(5)]
+        self._test_priorities = [[] for _ in range(5)]
+        # Setup the initial priorities
+        self._test_priorities[Relevance.UNRANKED.value] = [
+            TestRun(test) for test in tests_being_ranked
+        ]
 
-        self._test_priorities[Relevance.HIGH.value] = self.filter_out_extra_tests(
-            high_relevance
-        )
-        self._test_priorities[Relevance.PROBABLE.value] = self.filter_out_extra_tests(
-            probable_relevance
-        )
-        self._test_priorities[Relevance.UNRANKED.value] = self.filter_out_extra_tests(
-            unranked_relevance
-        )
-        self._test_priorities[Relevance.UNLIKELY.value] = self.filter_out_extra_tests(
-            unlikely_relevance
-        )
-        self._test_priorities[Relevance.NONE.value] = self.filter_out_extra_tests(
-            no_relevance
-        )
-
-        # If any of the original tests were missed from the other lists, add them to the unranked_relevance list
-        missing_tests = sorted(self._original_tests - set(self.get_all_tests()))
-        self._test_priorities[Relevance.UNRANKED.value] = self._test_priorities[
-            Relevance.UNRANKED.value
-        ] + tuple(missing_tests)
+        for test in high_relevance or []:
+            self.set_test_relevance(TestRun(test), Relevance.HIGH)
+        for test in probable_relevance or []:
+            self.set_test_relevance(TestRun(test), Relevance.PROBABLE)
+        for test in unranked_relevance or []:
+            self.set_test_relevance(TestRun(test), Relevance.UNRANKED)
+        for test in unlikely_relevance or []:
+            self.set_test_relevance(TestRun(test), Relevance.UNLIKELY)
+        for test in no_relevance or []:
+            self.set_test_relevance(TestRun(test), Relevance.NONE)
 
         self.validate_test_priorities()
 
-    def filter_out_extra_tests(
-        self, relevance_group: Optional[List[str]]
-    ) -> StringTuple:
-        if not relevance_group:
-            return tuple()
-        return tuple(filter(lambda test: test in self._original_tests, relevance_group))
+    def _traverse_priorities(self) -> Iterator[Tuple[Relevance, List[TestRun]]]:
+        for relevance in Relevance.priority_traversal():
+            yield (relevance, self._test_priorities[relevance.value])
+
+    def get_pointer_to_test(self, test_run: TestRun) -> Iterator[Tuple[Relevance, int]]:
+        # Find a test run that contains the given TestRun and it's relevance.
+        found_match = False
+        for relevance, tests in self._traverse_priorities():
+            for idx, existing_test_run in enumerate(tests):
+                # Do we have an exact match or a direct subset?
+                if existing_test_run.contains(test_run):
+                    test_relevance = Relevance(relevance)
+                    found_match = True
+                    yield (test_relevance, idx)
+
+                # Does test_run contain everything in existing_test_run?
+                # Relevant when you already have a test class prioritized and are trying
+                # to merge it with a request to prioritize it's whole file
+                elif test_run.contains(existing_test_run):
+                    test_relevance = Relevance(relevance)
+                    found_match = True
+                    yield (test_relevance, idx)
+
+        if not found_match:
+            raise ValueError(f"Test {test_run} not found in any relevance group")
+
+    def _update_test_relevance(
+        self,
+        test_run: TestRun,
+        new_relevance: Relevance,
+        acceptable_relevance_fn: Callable[[Relevance, Relevance], bool],
+    ) -> None:
+        if test_run.test_file not in self._original_tests:
+            return  # We don't need this test
+
+        # The tests covered by test_run could potentially have been split up into
+        # multiple test runs, each at a different relevance. Let's make sure to bring
+        # all of them up to the minimum relevance
+        upgraded_tests = TestRun.empty()
+        tests_to_remove = []
+        for curr_relevance, test_run_idx in self.get_pointer_to_test(test_run):
+            if acceptable_relevance_fn(curr_relevance, new_relevance):
+                # This test is already at the desired relevance
+                continue  # no changes needed
+
+            test_run_to_rerank = self._test_priorities[curr_relevance.value][
+                test_run_idx
+            ]
+            # Remove the requested tests from their current relevance group, to be added to the new one
+            remaining_tests = test_run_to_rerank - test_run
+            upgraded_tests |= test_run_to_rerank & test_run
+            if remaining_tests:
+                self._test_priorities[curr_relevance.value][
+                    test_run_idx
+                ] = remaining_tests
+            else:
+                tests_to_remove.append((curr_relevance, test_run_idx))
+
+        for relevance, test_idx in tests_to_remove:
+            del self._test_priorities[relevance.value][test_idx]
+
+        # And add it to the correct relevance group
+        if upgraded_tests:
+            self._test_priorities[new_relevance.value].append(upgraded_tests)
+
+    def set_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
+        return self._update_test_relevance(
+            test_run, new_relevance, lambda curr, new: curr == new
+        )
+
+    def raise_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
+        return self._update_test_relevance(
+            test_run, new_relevance, lambda curr, new: curr >= new
+        )
 
     def validate_test_priorities(self) -> None:
-        # Ensure that the set of tests in the TestPrioritizations is identical to the set of tests passed in
-        assert self._original_tests == set(
-            self.get_all_tests()
-        ), "The set of tests in the TestPrioritizations must be identical to the set of tests passed in"
+        # Union all TestRuns that contain include/exclude pairs
+        all_tests = self.get_all_tests()
+        files = set()
+        includes = set()
+        excludes = set()
+        for test in all_tests:
+            files.add(test.test_file)
+            includes.update(test._included)
+            excludes.update(test._excluded)
 
-    @staticmethod
-    def _merge_tests(
-        current_tests: Iterable[str],
-        new_tests: Iterable[str],
-        higher_pri_tests: Iterable[str],
-    ) -> StringTuple:
-        """
-        We append all new tests to the current tests, while preserving the sorting on the new_tests
-        However, exclude any specified tests which have now moved to a higher priority list or tests
-        that weren't originally in the self's TestPrioritizations
-        """
-        merged_tests = [
-            test
-            for test in chain(current_tests, new_tests)
-            if test not in higher_pri_tests
-        ]  # skip the excluded tests
-        return tuple(dict.fromkeys(merged_tests))  # remove dupes while preseving order
+        if includes != excludes:
+            assert (
+                includes == excludes
+            ), "All includes should have been excluded elsewhere, and vice versa"
+
+        # Ensure that the set of tests in the TestPrioritizations is identical to the set of tests passed in
+        assert (
+            self._original_tests == files
+        ), "The set of tests in the TestPrioritizations must be identical to the set of tests passed in"
 
     def integrate_priorities(self, other: "TestPrioritizations") -> None:
         """
         Integrates priorities from another TestPrioritizations object.
 
         The final result takes all tests from the `self` and rearranges them based on priorities from `other`.
-        If there are tests mentioned in `other` which are not in `self`, those tests are ignored.
-        (For example, that can happen if a heuristic reports tests that are not run in the current job)
+        Currently it will only raise the priority of a test, never lower it.
         """
         assert (
             self._original_tests == other._original_tests
         ), "Both tests should stem from the same original test list"
 
-        higher_pri_tests: List[str] = []
-        for relevance, _ in enumerate(self._test_priorities):
-            self._test_priorities[relevance] = TestPrioritizations._merge_tests(
-                current_tests=self._test_priorities[relevance],
-                new_tests=other._test_priorities[relevance],
-                higher_pri_tests=higher_pri_tests,
-            )
-
-            # Don't let the tests we just added to the current relevance group be added to a lower relevance group
-            higher_pri_tests.extend(self._test_priorities[relevance])
+        for relevance, _ in other._traverse_priorities():
+            if relevance > Relevance.UNRANKED:
+                for test in other._test_priorities[relevance.value]:
+                    self.raise_test_relevance(test, relevance)
+                # TODO: Hande the case where a test is moved to a lower relevance group (once we support that scenario)
 
         self.validate_test_priorities()
+        return
 
-    def get_all_tests(self) -> StringTuple:
+    def get_all_tests(self) -> TestRuns:
         """Returns all tests in the TestPrioritizations"""
-        return tuple(test for test in chain(*self._test_priorities))
+        return tuple(chain(*self._test_priorities))
 
-    def get_prioritized_tests(self) -> StringTuple:
+    def get_prioritized_tests(self) -> TestRuns:
         return self.get_high_relevance_tests() + self.get_probable_relevance_tests()
 
-    def get_high_relevance_tests(self) -> StringTuple:
+    def get_high_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.HIGH.value])
 
-    def get_probable_relevance_tests(self) -> StringTuple:
+    def get_probable_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.PROBABLE.value])
 
-    def get_unranked_relevance_tests(self) -> StringTuple:
+    def get_unranked_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.UNRANKED.value])
 
     def print_info(self) -> None:
-        def _print_tests(label: str, tests: StringTuple) -> None:
+        def _print_tests(label: str, tests: List[TestRun]) -> None:
             if not tests:
                 return
 
@@ -159,13 +244,14 @@ class TestPrioritizations:
                 if test in tests:
                     print(f"  {test}")
 
-        for relevance_group, tests in enumerate(self._test_priorities):
+        for relevance_group, tests in self._traverse_priorities():
             _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
 
     def _get_test_relevance_group(self, test_name: str) -> Relevance:
         """Returns the priority of a test."""
-        for relevance_group, tests in enumerate(self._test_priorities):
-            if test_name in tests:
+        query_test = TestRun(test_name)
+        for relevance_group, tests in self._traverse_priorities():
+            if any(test.contains(query_test) for test in tests):
                 return Relevance(relevance_group)
 
         raise ValueError(f"Test {test_name} not found in any relevance group")
@@ -173,20 +259,22 @@ class TestPrioritizations:
     def _get_test_order(self, test_name: str) -> int:
         """Returns the rank of the test specified by this heuristic."""
         base_rank = 0
+        query_test = TestRun(test_name)
 
-        for relevance_group_tests in self._test_priorities:
-            if test_name in relevance_group_tests:
-                return base_rank + relevance_group_tests.index(test_name)
+        for _, relevance_group_tests in self._traverse_priorities():
+            for idx, test in enumerate(relevance_group_tests):
+                if test.contains(query_test):
+                    return base_rank + idx
             base_rank += len(relevance_group_tests)
 
         raise ValueError(f"Test {test_name} not found in any relevance group")
 
     def _get_test_order_within_relevance_group(self, test_name: str) -> int:
-        for relevance_group_tests in self._test_priorities:
-            if test_name not in relevance_group_tests:
-                continue
-
-            return relevance_group_tests.index(test_name)
+        query_test = TestRun(test_name)
+        for _, relevance_group_tests in self._traverse_priorities():
+            for idx, test in enumerate(relevance_group_tests):
+                if test.contains(query_test):
+                    return idx
 
         raise ValueError(f"Test {test_name} not found in any relevance group")
 
