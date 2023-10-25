@@ -69,6 +69,7 @@ ignored_torch_name_rule_set = {
     "torch.cuda.device",
     "torch.cuda.graphs.graph",
     "torch.device",  # constant folding
+    "torch.distributed.autograd.context",
     "torch.hub._Faketqdm",
     "torch.jit._ir_utils._InsertPoint",
     "torch.jit._script.RecursiveScriptClass",
@@ -91,7 +92,6 @@ ignored_torch_name_rule_set = {
 
 if torch.distributed.is_available():
     ignored_torch_name_rule_set |= {
-        "torch.distributed.autograd.context",
         "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
     }
 
