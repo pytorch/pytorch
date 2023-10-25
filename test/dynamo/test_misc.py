@@ -4647,7 +4647,9 @@ def fn():
 
         for x in [torch.ones(2, 3), torch.ones(3, 4)]:
             gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in compiled_fns]
-            gms_not_compiled = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in not_compiled_fns]
+            gms_not_compiled = [
+                make_fx(fn, tracing_mode=tracing_mode)(x) for fn in not_compiled_fns
+            ]
 
             if compare_shape(x):
                 for gm in gms:
@@ -4701,8 +4703,6 @@ def forward(self, x_1):
                         _get_guard_exprs(gm),
                         """Ne(s0, 3)""",
                     )
-
-
 
     def test_not_dynamic_scope(self):
         def f(y):
