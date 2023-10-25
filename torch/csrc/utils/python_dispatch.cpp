@@ -368,18 +368,20 @@ void initDispatchBindings(PyObject* module) {
           "define",
           [](const py::object& self,
              const char* schema,
-             const char* alias_analysis) {
+             const char* alias_analysis,
+             const std::vector<at::Tag>& tags) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
-                std::move(parsed_schema), {}, register_or_verify());
+                std::move(parsed_schema), tags, register_or_verify());
             // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
           },
           "",
           py::arg("schema"),
-          py::arg("alias_analysis") = "")
+          py::arg("alias_analysis") = "",
+          py::arg("tags") = std::vector<at::Tag>())
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
