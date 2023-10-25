@@ -331,8 +331,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+
             FileCheck() \
-                .check("all_to_all_single") \
+                .check_regex("all_to_all_single\\(buf[[:digit:]]+\\[0\\], buf[[:digit:]]+_inputs\\[0\\], output_split_sizes=\\[i[[:digit:]]+, i[[:digit:]]+\\], input_split_sizes=\\[i[[:digit:]]+, i[[:digit:]]+\\]") \
                 .run(code)
 
             eager_out = example(*inputs, **trs)
