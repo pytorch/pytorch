@@ -69,8 +69,6 @@ ignored_torch_name_rule_set = {
     "torch.cuda.device",
     "torch.cuda.graphs.graph",
     "torch.device",  # constant folding
-    "torch.distributed.autograd.context",
-    "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
     "torch.hub._Faketqdm",
     "torch.jit._ir_utils._InsertPoint",
     "torch.jit._script.RecursiveScriptClass",
@@ -89,6 +87,13 @@ ignored_torch_name_rule_set = {
     "torch.utils.data.datapipes.dataframe.dataframes.CaptureLikeMock",
     "torch.utils.hooks.RemovableHandle",
 }
+
+
+if torch.distributed.is_available():
+    ignored_torch_name_rule_set |= {
+        "torch.distributed.autograd.context",
+        "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
+    }
 
 
 def gen_get_func_inlinelist(dummy_func_inlinelist):
