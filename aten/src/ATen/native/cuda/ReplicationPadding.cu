@@ -242,13 +242,11 @@ void replication_pad2d_backward_out_cuda_template(
   const auto padR = paddingSize[1];
   const auto padT = paddingSize[2];
   const auto padB = paddingSize[3];
-  int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
 
   int numInputDims = input.dim();
   if (numInputDims == 4) {
-    planeDim++;
     dimh++;
     dimw++;
   }
@@ -376,18 +374,8 @@ void replication_pad3d_backward_out_cuda_template(
   shapeAndGradOutputCheck3d(input, gradOutput, pleft, pright, ptop,
       pbottom, pfront, pback);
 
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
 
   int numInputDims = input.dim();
-  if (numInputDims == 5) {
-    planeDim++;
-    dimd++;
-    dimh++;
-    dimw++;
-  }
 
   gradInput.resize_as_(input);
   if (gradInput.numel() == 0) {
@@ -498,12 +486,10 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
       "output gradient tensor must fit into 32-bit index math");
 
   const int padL = paddingSize[0];
-  int planeDim = 0;
   int dimw = 1;
 
   int numInputDims = input.ndimension();
   if (numInputDims == 3) {
-    planeDim++;
     dimw++;
   }
   int iwidth = input.size(dimw);

@@ -3095,7 +3095,6 @@ TEST_F(NVFuserTest, FusionPredRemovalCheck_CUDA) {
     }
 
    private:
-    bool within_ite_ = false;
   } pred_checker;
 
   GpuLower gpulw(&fusion);
