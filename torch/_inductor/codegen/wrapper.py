@@ -2,10 +2,11 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import inspect
 import os
 import re
 from itertools import count
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -19,6 +20,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
+from ..ir import ComputedBuffer, InputBuffer
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -29,6 +31,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
+from .triton_utils import config_of, signature_to_meta
 
 
 pexpr = PythonPrinter().doprint
@@ -213,6 +216,9 @@ class MemoryPlanningLine:
         pass
 
     def __str__(self):
+        """
+        Emits a string representation that fits on one line.
+        """
         args: List[str] = []
         for field in dataclasses.fields(self):
             if field.name == "wrapper":
@@ -320,6 +326,7 @@ class WrapperCodeGen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
+        self.user_defined_kernel_count = 0
 
         self.write_header()
         self.write_prefix()
@@ -368,6 +375,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
+                inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
@@ -493,6 +501,12 @@ class WrapperCodeGen(CodeGen):
         else:
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
+
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, args):
+        stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
+        self.writeline(
+            f"{kernel_name}.run({', '.join(args)}, grid=grid({grid}), stream={stream_name})"
+        )
 
     def generate_scatter_fallback(
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
@@ -794,6 +808,83 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
+    def get_unique_kernel_name(self, name: str) -> str:
+        new_name = f"{name}_{self.user_defined_kernel_count}"
+        self.user_defined_kernel_count += 1
+        return new_name
+
+    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
+        original_name = kernel.__name__
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
+
+        compile_wrapper.splice(
+            """
+            import triton
+            import triton.language as tl
+            from torch._inductor.utils import instance_descriptor
+            from torch._inductor.triton_heuristics import template
+            """,
+            strip=True,
+        )
+        compile_wrapper.newline()
+
+        # TODO(oulgen): num_stages and num_warps are default values of
+        # triton.Config. Can we do better? Or ask the user to provide?
+        num_stages = 2
+        num_warps = 4
+
+        from ..ir import Buffer
+        from .common import SizeArg, TensorArg
+
+        signature: List[Union[TensorArg, SizeArg]] = []
+        constants = {}
+        for key, arg in kwargs.items():
+            # Not a real argument
+            if key == "grid":
+                continue
+            if (
+                key in kernel.__annotations__
+                and "constexpr" in kernel.__annotations__[key]
+            ):
+                constants[key] = arg
+                continue
+            if isinstance(arg, Buffer):
+                signature.append(
+                    TensorArg(key, arg.codegen_reference(), arg.get_dtype())
+                )
+            else:
+                signature.append(SizeArg(key, arg))
+        index_dtype = "tl.int32"
+        triton_meta = {
+            "signature": signature_to_meta(signature, size_dtype=index_dtype),
+            "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
+            "constants": constants,
+            "configs": [config_of(signature)],
+            "kernel_name": name,
+        }
+        compile_wrapper.splice(
+            f"""
+            @template(
+                num_stages={num_stages},
+                num_warps={num_warps},
+                meta={triton_meta!r}
+            )
+            @triton.jit
+            """
+        )
+        compile_wrapper.splice(kernel.src, strip=True)
+        compile_wrapper.writeline("''')")
+        _, lineno = inspect.getsourcelines(kernel.fn)
+        srcfile = inspect.getsourcefile(kernel.fn)
+        metadata = f"# Original path: {srcfile}:{lineno}"
+        self.define_kernel(
+            name,
+            compile_wrapper.getvalue(),
+            metadata,
+        )
+
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if expr not in self.kenel_numel_expr:
@@ -882,6 +973,10 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
+        elif isinstance(s, ComputedBuffer):
+            return s.codegen_reference()
+        elif isinstance(s, InputBuffer):
+            return s.codegen_reference()
         else:
             return repr(s)
 
@@ -919,9 +1014,7 @@ class WrapperCodeGen(CodeGen):
         return f"del {buffer.get_name()}"
 
     def make_free_by_names(self, names_to_del: List[str]):
-        return (
-            f"del {', '.join(name for name in names_to_del)}"
-        )
+        return f"del {', '.join(name for name in names_to_del)}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
@@ -1141,10 +1234,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
         else:
-            from .memory_planning import ALIGN_BYTES
-
             self.header.splice(
-                f"""
+                """
                 #include <ATen/ATen.h>
                 #include <ATen/core/dispatch/Dispatcher.h>
                 #include <ATen/native/BinaryOps.h>
@@ -1152,9 +1243,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
-                #define align(x) torch::inductor::_align(x, {ALIGN_BYTES})
                 """
             )
+
+        from .memory_planning import ALIGN_BYTES
+
+        # Round up to the nearest multiple of ALIGN_BYTES
+        # ALIGN_BYTES must be a power of 2
+        self.header.splice(
+            f"""
+            static int64_t align(int64_t nbytes) {{
+              return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
+            }}
+        """
+        )
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
@@ -1255,12 +1357,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_->at("{constants_key}").get();"""
+                            f"""auto {constants_key} = constants_.at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_->at("{constants_key}").get());"""
+                            + f"""constants_.at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1364,7 +1466,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
 
-            self.prefix.writeline("constants_ = constants_map;")
+            self.prefix.writeline("update_constants_map(std::move(constants_map));")
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
@@ -1533,6 +1635,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
+    def generate_user_defined_triton_kernel(self, kernel_name, args):
+        raise AssertionError(
+            "User defined triton kernels are not supported in CPP mode"
+        )
+
     def generate_scatter_fallback(
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
@@ -1605,6 +1712,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else f"{buffer.get_name()}.reset();"
         )
 
+    def make_free_by_names(self, names_to_del: List[str]):
+        return " ".join(f"{name}.reset();" for name in names_to_del)
+
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         if config.aot_inductor.abi_compatible:
             return f"auto {new_name} = std::move({old_name});  // reuse"
@@ -1625,7 +1735,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_device_type_{device.type}(),{device.index if device.index else 0}"
+            return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
 
@@ -1637,7 +1747,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_dtype_{str(dtype).split('.')[-1]}()"
+            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
@@ -1718,10 +1828,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype})){self.ending}"
         )
-
-    def make_free_by_names(self, names_to_del: List[str]):
-        # TODO will RAIIAtenTensorHandle handle this for us?
-        return ""
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
         if config.aot_inductor.abi_compatible:
@@ -2096,6 +2202,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
+        elif isinstance(val, ComputedBuffer):
+            return val.codegen_reference()
+        elif isinstance(val, InputBuffer):
+            return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):

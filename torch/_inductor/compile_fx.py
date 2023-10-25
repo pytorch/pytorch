@@ -22,7 +22,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import detect_fake_mode
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
@@ -55,6 +55,7 @@ else:
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
 
 
@@ -302,7 +303,7 @@ def compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    if dynamo_utils.count_calls(gm.graph) == 0:
+    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
 
     if config.save_args:
@@ -522,7 +523,12 @@ def fx_codegen_and_compile(
     # .view() call.
     view_to_reshape(gm)
 
-    fake_mode = fake_tensor_prop(gm, example_inputs)
+    # It is safe to run FakeTensorProp under no_grad because by the time
+    # we're in inductor, we assume that AOTAutograd has already "taken care"
+    # of autograd, so there should be no more autograd-related API's in the
+    # graph.
+    with torch.no_grad():
+        fake_mode = fake_tensor_prop(gm, example_inputs)
 
     # pattern matcher passes might not preserve striding information
     # on node.meta["val"]. if in the future we rely on these being
@@ -532,6 +538,7 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
+        post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
