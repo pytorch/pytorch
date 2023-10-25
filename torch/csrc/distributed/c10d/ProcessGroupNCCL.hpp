@@ -44,6 +44,8 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
+constexpr const char* NCCL_PG_WATCHDOG_TIMEOUT = "NCCL_PG_WATCHDOG_TIMEOUT";
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
@@ -768,6 +770,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
   std::atomic<bool> enableTiming_;
+
+  // timer for watch dog thread;
+  timer_t timerId_;
+  // Default watchdog timeout is 10 minutes.
+  int watch_timeout_secs_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
