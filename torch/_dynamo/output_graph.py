@@ -100,6 +100,8 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 
+from .variables.torch_function import TensorWithTFOverrideVariable
+
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -424,12 +426,19 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def new_subtracer(self, source_target):
+    def subtracer(self, source_target, prior_tracer):
         new_scope_ctx = enter_new_scope()
         try:
+            if prior_tracer:
+                # Lineage MUST stay preserved
+                assert prior_tracer.parent is self.current_tracer
             new_scope_ctx.__enter__()
-            tracer = SubgraphTracer(
-                self, parent=self.current_tracer, source_target=source_target
+            tracer = (
+                prior_tracer
+                if prior_tracer
+                else SubgraphTracer(
+                    self, parent=self.current_tracer, source_target=source_target
+                )
             )
             self.tracers.append(tracer)
             yield tracer
@@ -847,7 +856,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                not isinstance(
+                    v,
+                    (
+                        UnspecializedPythonVariable,
+                        NumpyNdarrayVariable,
+                        TensorWithTFOverrideVariable,
+                    ),
+                )
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
@@ -1543,7 +1559,7 @@ class SubgraphTracer(fx.Tracer):
 # (possibly nested) SubgraphTracers, one per body function.
 #
 # Mechanically, we do the introspection by:
-# - Creating a new SubgraphTracer via OutputGraph.new_subtracer
+# - Creating a new SubgraphTracer via OutputGraph.subtracer
 # - Executing the body function.
 # This constructs the graph of the body function in the new SubgraphTracer
 # while modifying the state of the OutputGraph. For example:

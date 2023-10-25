@@ -12,10 +12,12 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
-from . import config, dependencies, ir, metrics
+from . import comms, config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
+from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
@@ -84,6 +86,7 @@ class BaseSchedulerNode:
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
+        self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Optional[Set[str]] = None
         self.min_order: Optional[int] = None
@@ -128,6 +131,9 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.rename(renames))
 
     def add_mutation_dep(self, dep):
+        self.set_read_writes(self.read_writes.with_read(dep))
+
+    def add_fake_dep(self, dep):
         self.set_read_writes(self.read_writes.with_read(dep))
 
     def set_users(self, users: List["NodeUser"]):
@@ -452,8 +458,9 @@ class BaseSchedulerNode:
             return 0
 
         if isinstance(self, SchedulerNode):
-            node_numel = sympy_product(self.get_ranges()[0]) * sympy_product(
-                self.get_ranges()[1]
+            node_numel = V.graph.sizevars.size_hint(
+                sympy_product(self.get_ranges()[0])
+                * sympy_product(self.get_ranges()[1])
             )
         else:
             node_numel = int(1e9)
@@ -503,6 +510,9 @@ class BaseSchedulerNode:
         return node_bytes
 
     def get_estimated_runtime(self) -> float:
+        """
+        Returns estimated op runtime in nanoseconds (ns)
+        """
         layout = None
         dtype = None
         if not self.node:
@@ -558,7 +568,15 @@ class BaseSchedulerNode:
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
-        # TODO(xmfan): add support for CollectiveKernel
+        # Collective kernels
+        if isinstance(self.node, ir.CollectiveKernel):
+            return estimate_nccl_collective_runtime(self)
+        elif isinstance(self.node, ir.Wait):
+            # ir.Wait is only used for collective ops.
+            # The time needed for the collective op is already estimated and considered
+            # when we are processing the collective op IR node, so ir.Wait takes 0 time
+            # since it doesn't take extra time to get the result after the collective is completed.
+            return 0
 
         return 0
 
@@ -737,6 +755,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.node = None  # type: ignore[assignment]
         self.users = None
         self.inverse_users = []
+        self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(*[x.ancestors for x in snodes])
 
@@ -1125,6 +1144,8 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
+        if config.reorder_for_compute_comm_overlap:
+            comms.decide_global_ordering_of_comms(self.nodes)
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
@@ -1134,6 +1155,10 @@ class Scheduler:
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.fuse_nodes()
+        if config.reorder_for_compute_comm_overlap:
+            # Refresh node_users and inverse_users to reflect fused nodes
+            self.compute_node_users()
+            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
@@ -1182,14 +1207,19 @@ class Scheduler:
         kept_node_names = self.name_to_fused_node.keys()
 
         for names in V.graph.lists.values():
-            removed_node_names.update(names)
-
-            names = [name for name in names if name in kept_node_names]
+            names = [
+                name
+                for name in names
+                if name in kept_node_names
+                and not isinstance(self.name_to_node[name], NopKernelSchedulerNode)
+            ]
             if not names:
                 # All nodes eliminated
                 continue
 
+            removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
+
             fe_node = ForeachKernelSchedulerNode(self, snodes)
 
             fe_nodes.append(fe_node)
@@ -1255,6 +1285,8 @@ class Scheduler:
         unbacked_symbol_to_origin_node = {}
 
         for node in self.nodes:
+            log.debug("scheduling %s", node.node)
+
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
@@ -1266,14 +1298,10 @@ class Scheduler:
 
             # if a kernel takes unbacked symints, register dependencies
             for s in node.node.get_unbacked_symbol_uses():
-                # NB: This is not actually a mutation dep, but we do need to
-                # record this ordering dependency
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                node.add_mutation_dep(
-                    StarDep(unbacked_symbol_to_origin_node[s].get_name())
-                )
+                node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
             for alt_name in node.get_mutations():
@@ -1308,7 +1336,18 @@ class Scheduler:
 
         # make sure outputs aren't dead-code-eliminated
         for node_name in V.graph.get_output_names():
+            log.debug("scheduling output %s", node_name)
             add_user(node_name, OutputNode(StarDep(node_name)))
+
+        # make sure unbacked symints aren't dead-code-eliminated
+        for node in V.graph.graph_outputs:
+            if isinstance(node, ir.ShapeAsConstantBuffer):
+                for s in free_unbacked_symbols(node.shape):
+                    node_name = unbacked_symbol_to_origin_node[s].node.name
+                    log.debug(
+                        "scheduling output %s for unbacked symint %s", node_name, s
+                    )
+                    add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -1331,6 +1370,39 @@ class Scheduler:
         for node in self.nodes:
             for user in node.users:
                 user.node.inverse_users.append(node)
+
+    def compute_node_users(self):
+        # set up buffer name to (fused)snode mapping
+        buf_to_snode = {}
+        for node in self.nodes:
+            if isinstance(node, FusedSchedulerNode):
+                for x in node.snodes:
+                    buf_to_snode[x.get_name()] = node
+            buf_to_snode[node.get_name()] = node
+
+        for node in self.nodes:
+            node.node_users = []
+            node.inverse_users = []
+
+        # compute inverse_users
+        for node in self.nodes:
+            inverse_users = []
+            for dep in node.unmet_dependencies:
+                assert dep.name in buf_to_snode
+                dep_node = buf_to_snode[dep.name]
+                inverse_users.append(dep_node)
+            node.inverse_users = inverse_users
+
+        # compute node_users
+        # TODO: ideally, we should deduplicate .users and .node_users,
+        # but currently .users contains extra information that's difficult to
+        # extract into a standalone container.
+        node_to_users = {}
+        for node in self.nodes:
+            for inverse_user in node.inverse_users:
+                node_to_users.setdefault(inverse_user, []).append(node)
+        for node, users in node_to_users.items():
+            node.node_users = users
 
     def dead_node_elimination(self):
         """
@@ -1901,8 +1973,8 @@ class Scheduler:
                     node.get_name(),
                     node.get_estimated_runtime(),
                 )
-            except Exception:
-                log.error(
+            except Exception as e:
+                log.debug(
                     "Generating code for node %s with estimated runtime 0.0",
                     node.get_name(),
                 )

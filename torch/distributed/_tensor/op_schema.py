@@ -58,6 +58,12 @@ class PlacementStrategy:
     output_spec: DTensorSpec
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
+    # redistribute costs for this op placement strategy
+    # we need a nested list to record the cost for each
+    # operand of this operator, and for each operand of
+    # this operator it might have multiple placement strategies
+    redistribute_cost: Optional[List[List[float]]] = None
+
     def pretty_print_placements(self, placements):
         return "".join([str(p) for p in placements])
 
@@ -199,6 +205,24 @@ class OpSchema:
             f"OpSchema(op={self.op},"
             f" args_schema={self.args_schema},"
             f" kwargs_schema={self.kwargs_schema})"
+        )
+
+    def __str__(self) -> str:
+        args_sharding: List[str] = []
+        mesh = None
+        for arg in self.args_schema:
+            if isinstance(arg, DTensorSpec):
+                args_sharding.append(str(arg))
+                mesh = arg.mesh
+            elif isinstance(arg, OpStrategy):
+                assert len(arg.strategies) == 1
+                arg_spec = arg.strategies[0].output_spec
+                args_sharding.append(str(arg_spec))
+                mesh = arg_spec.mesh
+            else:
+                args_sharding.append(str(arg))
+        return (
+            f"Op(op={self.op}, args_sharding={','.join(args_sharding)}, @ mesh:{mesh})"
         )
 
     def __post_init__(self) -> None:
