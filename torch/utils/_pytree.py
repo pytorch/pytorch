@@ -245,7 +245,7 @@ class TreeSpec:
 
     def replace_types(self, mapping: Dict[Any, Any]) -> "TreeSpec":
         if self.is_leaf():
-            return self
+            return LeafSpec()
         new_children_specs = [child.replace_types(mapping) for child in self.children_specs]
         new_type = self.type
         if new_type in mapping:
@@ -457,10 +457,7 @@ def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(
-    pytree: PyTree,
-    spec: TreeSpec,
-) -> Optional[List[Any]]:
+def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[Any]]:
     assert isinstance(spec, TreeSpec)
 
     if _is_leaf(pytree):
