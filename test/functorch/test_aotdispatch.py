@@ -620,23 +620,6 @@ def forward(self, primals_1, primals_2, primals_3):
         inp = [torch.ones(3, 3, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
-    def test_input_mutation_resize_smaller(self):
-        def f(a, b):
-            a.resize_(2, 2)
-            return a + b
-        # tenors that require gradients cannot be resized, so only test requires_grad=False case
-        inp = [
-            torch.ones(3, 3),
-            torch.ones(2, 2, requires_grad=True),
-        ]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
-        inp = [
-            torch.ones(3, 3),
-            torch.ones(2, 2),
-        ]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
     def test_input_mutation_batchnorm(self):
         def f(inpt, weight, bias, running_mean, running_var):
             # This is additionally a good test, because the input tensors that we mutate
@@ -824,6 +807,36 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
     return [view]""")
+
+    def test_output_aliases_input_multi_output_view_should_raise_autograd_error(self):
+        def f1(a):
+            return list(a.unbind(0))
+
+        f1_compiled = aot_function(f1, nop)
+
+        inp1 = torch.ones(3, 3, requires_grad=True).clone()
+        inp2 = torch.ones(3, 3, requires_grad=True).clone()
+        inp3 = torch.ones(3, 3, requires_grad=True).clone()
+
+        with self.assertRaisesRegex(RuntimeError, "Such functions do not allow the output views"):
+            out_test1 = f1_compiled(inp1)
+            # This raises a runtime error from autograd in eager mode
+            out_test1[0].mul_(2)
+
+        with self.assertRaisesRegex(RuntimeError, "Such functions do not allow the output views"):
+            out_test2 = f1_compiled(inp2)
+            inp2.mul_(2)
+            # In eager mode, if we mutate a tensor, any multi-output-view aliases
+            # get their grad_fn replaced with error nodes, so accessing grad_fn should error
+            grad_fn = out_test2[0].grad_fn
+
+        with self.assertRaisesRegex(RuntimeError, "Such functions do not allow the output views"):
+            out_test3 = f1_compiled(inp3)
+            out_test1[0].detach().mul_(2)
+            # The above case also applies to detached aliases (they turn the multi-output-view
+            # alias's grad_fns into error nodes)
+            grad_fn = out_test2[0].grad_fn
+
 
     def test_output_aliases_input_multi_output_view(self):
         # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
@@ -2040,45 +2053,6 @@ def forward(self, tangents_1):
             AssertionError, lambda: fxz(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
-
-    def test_resize_input(self):
-        def f(x, y):
-            y.resize_(4)
-            y.zero_()
-            self.assertEqual(x.shape, (4,))
-            return y
-
-        # NB: don't use verify_aot_autograd as the inputs get
-        # mutated and I don't trust verify to do it right
-
-        compiled_f = aot_function(f, nop)
-        ref_x = torch.randn(0)
-        ref_out = f(ref_x, ref_x)
-
-        test_x = torch.randn(0)
-        test_out = compiled_f(test_x, test_x)
-
-        self.assertEqual(ref_out, test_out)
-
-    def test_resize_input_smaller(self):
-        def f(x, y):
-            y.resize_(4)
-            y.zero_()
-            self.assertEqual(x.shape, (4,))
-            return y
-
-        # NB: don't use verify_aot_autograd as the inputs get
-        # mutated and I don't trust verify to do it right
-
-        compiled_f = aot_function(f, nop)
-        ref_x = torch.randn(5)
-        ref_out = f(ref_x, ref_x)
-
-        test_x = torch.randn(5)
-        test_out = compiled_f(test_x, test_x)
-
-        self.assertEqual(ref_out, test_out)
-
 
     def test_custom_autograd(self):
         class CustomFn(torch.autograd.Function):
@@ -3507,7 +3481,6 @@ aot_autograd_failures = {
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -3521,8 +3494,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
-    xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -3684,8 +3655,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
