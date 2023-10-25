@@ -27,8 +27,12 @@ __global__ void flash_bwd_dq_dk_dv_loop_kernel(Flash_bwd_params params) {
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K>
 __global__ void flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel(Flash_bwd_params params) {
-    static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
-    pytorch_flash::compute_dq_dk_dv_seqk_parallel<Kernel_traits, Is_dropout, Is_causal, Is_local, Is_even_MN, Is_even_K>(params);
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+        static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
+        pytorch_flash::compute_dq_dk_dv_seqk_parallel<Kernel_traits, Is_dropout, Is_causal, Is_local, Is_even_MN, Is_even_K>(params);
+    #else
+        printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 8.0!");
+    #endif
 }
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_N, bool Is_even_K>

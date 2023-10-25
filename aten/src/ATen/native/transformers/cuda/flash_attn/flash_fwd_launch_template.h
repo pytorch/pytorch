@@ -14,13 +14,21 @@ namespace pytorch_flash {
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Return_softmax>
 __global__ void flash_fwd_kernel(Flash_fwd_params params) {
-    static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
-    pytorch_flash::compute_attn<Kernel_traits, Is_dropout, Is_causal, Is_local, Is_even_MN, Is_even_K, Return_softmax>(params);
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+        static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
+        pytorch_flash::compute_attn<Kernel_traits, Is_dropout, Is_causal, Is_local, Is_even_MN, Is_even_K, Return_softmax>(params);
+    #else
+        printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 8.0!");
+    #endif
 }
 
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV>
 __global__ void flash_fwd_splitkv_kernel(Flash_fwd_params params) {
-    pytorch_flash::compute_attn_splitkv<Kernel_traits, Is_causal, Is_local, Is_even_MN, Is_even_K, Split, Append_KV>(params);
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+        pytorch_flash::compute_attn_splitkv<Kernel_traits, Is_causal, Is_local, Is_even_MN, Is_even_K, Split, Append_KV>(params);
+    #else
+        printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 8.0!");
+    #endif
 }
 
 template<typename Kernel_traits, int kBlockM, int Log_max_splits, bool Is_even_K>
