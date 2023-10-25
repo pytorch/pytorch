@@ -71,13 +71,18 @@ class Library:
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
-    def define(self, schema, alias_analysis=""):
+    def define(self, schema, alias_analysis="", *, tags=()):
         r'''Defines a new operator and its semantics in the ns namespace.
 
         Args:
             schema: function schema to define a new operator.
             alias_analysis (optional): Indicates if the aliasing properties of the operator arguments can be
                                        inferred from the schema (default behavior) or not ("CONSERVATIVE").
+            tags (Tag | Sequence[Tag]): one or more torch.Tag to apply to this
+                                       operator. Tagging an operator changes the operator's behavior
+                                       under various PyTorch subsystems; please read the docs for the
+                                       torch.Tag carefully before applying it.
+
         Returns:
             name of the operator as inferred from the schema.
 
@@ -91,7 +96,9 @@ class Library:
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
             raise RuntimeError(f"Invalid alias_analysis type {alias_analysis}")
         assert self.m is not None
-        return self.m.define(schema, alias_analysis)
+        if isinstance(tags, torch.Tag):
+            tags = (tags,)
+        return self.m.define(schema, alias_analysis, tuple(tags))
 
     def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
@@ -171,7 +178,7 @@ _keep_alive = []
 
 
 @functools.singledispatch
-def define(qualname, schema, *, lib=None):
+def define(qualname, schema, *, lib=None, tags=()):
     r"""Defines a new operator.
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
@@ -191,9 +198,13 @@ def define(qualname, schema, *, lib=None):
             avoid name collisions; a given operator may only be created once.
             If you are writing a Python library, we recommend the namespace to
             be the name of your top-level module.
-        schema (str): The schema of the operator
+        schema (str): The schema of the operator.
         lib (Optional[Library]): If provided, the lifetime of this operator
             will be tied to the lifetime of the Library object.
+        tags (Tag | Sequence[Tag]): one or more torch.Tag to apply to this
+            operator. Tagging an operator changes the operator's behavior
+            under various PyTorch subsystems; please read the docs for the
+            torch.Tag carefully before applying it.
 
     Example::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
@@ -222,7 +233,7 @@ def define(qualname, schema, *, lib=None):
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
-    lib.define(name + schema, alias_analysis="")
+    lib.define(name + schema, alias_analysis="", tags=tags)
 
 
 @define.register
