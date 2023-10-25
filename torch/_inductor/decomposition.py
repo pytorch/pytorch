@@ -5,6 +5,7 @@ import typing
 
 import torch
 import torch._decomp as decomp
+import torch._prims_common as utils
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -499,7 +500,7 @@ def masked_scatter(self, mask, source):
 
 
 @register_decomposition(aten.copy)
-def copy(self: Tensor, src: Tensor, non_blocking: bool = False):
+def copy(self, src, non_blocking: bool = False):
     if (
         not non_blocking
         and self.storage_offset == 0

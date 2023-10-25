@@ -1760,7 +1760,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.empty_strided',
         '_refs.equal',
         '_refs.full',
-        '_refs.full_like',
         '_refs.is_complex',
         '_refs.to',
         '_refs.mvlgamma',
@@ -1876,7 +1875,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.unflatten',
         '_refs.sum_to_size',
         # ref implementation missing kwargs
-        '_refs.full_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
