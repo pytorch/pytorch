@@ -19628,35 +19628,29 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.rand_like",
         torch_opinfo_name="rand_like",
-        op=lambda *args, **kwargs:
-             wrapper_set_seed(refs.rand_like, *args, **kwargs),
-        validate_view_consistency=False,
-        skips=[
+        op=lambda *args, **kwargs: wrapper_set_seed(refs.rand_like, *args, **kwargs),
+        skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ],
+        ),
     ),
     PythonRefInfo(
         "_refs.randn_like",
         torch_opinfo_name="randn_like",
-        validate_view_consistency=False,
-        op=lambda *args, **kwargs:
-             wrapper_set_seed(refs.randn_like, *args, **kwargs),
-        skips=[
+        op=lambda *args, **kwargs: wrapper_set_seed(refs.randn_like, *args, **kwargs),
+        skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ],
+        ),
     ),
     PythonRefInfo(
         "_refs.randint_like",
         torch_opinfo_name="randint_like",
-        op=lambda *args, **kwargs:
-             wrapper_set_seed(refs.randint_like, *args, **kwargs),
-        validate_view_consistency=False,
-        skips=[
+        op=lambda *args, **kwargs: wrapper_set_seed(refs.randint_like, *args, **kwargs),
+        skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ],
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.real",

@@ -335,6 +335,9 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),
+    (None, None, "rand_like"),
+    (None, None, "randint_like"),
+    (None, None, "randn_like"),
 
     # AssertionError: False is not true : aten.item was not decomposed, saw calls for: aten._local_scalar_dense.default.
     (None, None, "item"),

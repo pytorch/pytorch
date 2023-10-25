@@ -502,6 +502,29 @@ def invert_perm(perm):
     return new_perm
 
 
+def physical_layout_from_memory_format(memory_format: torch.memory_format, ndim: int):
+    if memory_format == torch.contiguous_format:
+        return list(range(ndim))
+    assert (
+        memory_format == torch.channels_last
+    ), f"Unexpected memory_format {memory_format}"
+
+    if ndim == 3:
+        return [0, 2, 1]
+    elif ndim == 4:
+        return [0, 3, 1, 2]
+    elif ndim == 5:
+        return [0, 4, 1, 2, 3]
+    raise RuntimeError(f"no channels last format exist in {ndim} dimensions")
+
+
+def like_constructor_physical_layout(a: Tensor, memory_format: torch.memory_format):
+    if memory_format == torch.preserve_format:
+        return compute_elementwise_output_logical_to_physical_perm(a)
+    else:
+        return physical_layout_from_memory_format(memory_format, a.ndim)
+
+
 #
 # Common helper functions
 #
