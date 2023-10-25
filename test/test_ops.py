@@ -788,6 +788,7 @@ class TestCommon(TestCase):
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
+        supported_dtypes = op.supported_dtypes(device)
 
         # Ops from python_ref_db point to python decomps that are potentially
         # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
@@ -928,7 +929,11 @@ class TestCommon(TestCase):
 
                 out = _apply_out_transform(_case_three_transform, expected)
 
-                if op.is_factory_function and sample.kwargs.get("device", None) is None:
+                sample_device = sample.kwargs.get("device")
+                if op.is_factory_function and (
+                        sample_device is None
+                        or sample_device == wrong_device
+                ):
                     op_out(out=out)
                 else:
                     msg_fail = (
@@ -949,6 +954,7 @@ class TestCommon(TestCase):
             if (
                 isinstance(expected, torch.Tensor)
                 and expected.dtype in _dtypes
+                and torch.int64 in supported_dtypes
                 or (
                     not isinstance(expected, torch.Tensor)
                     and any(t.dtype in _dtypes for t in expected)

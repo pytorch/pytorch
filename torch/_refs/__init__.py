@@ -5543,7 +5543,6 @@ def randint_like(
         low_high = (*low_high, high)
 
     torch._check(1 <= len(low_high) <= 2, lambda: f"Unexpected arguments {low_high}")
-    torch._check(not kwargs, lambda: f"Unexpected keyword arguments {kwargs}")
 
     return _like_constructor(
         lambda shape, *a, **kw: torch.randint(*low_high, shape, *a, **kw),  # type: ignore[call-overload]
