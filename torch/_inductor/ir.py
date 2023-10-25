@@ -2235,7 +2235,9 @@ class Layout(IRNode):
             return True
 
         # ignore dimensions of size 1, they dont affect layout
-        non_1_indices = [i for i, dim in enumerate(self.size) if V.graph.sizevars.size_hint(dim) != 1]
+        non_1_indices = [
+            i for i, dim in enumerate(self.size) if V.graph.sizevars.size_hint(dim) != 1
+        ]
 
         stride = [self.stride[i] for i in non_1_indices]
         order = [order[i] for i in non_1_indices]
