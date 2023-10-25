@@ -30,7 +30,7 @@ from torch.utils._python_dispatch import (
 )
 
 from .symbolic_shapes import ShapeEnv, SymNode
-from .sym_dispatch_mode import SymDispatchMode
+from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
