@@ -689,6 +689,8 @@ class Tensor(torch._C.TensorBase):
 
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
+
+        See :meth:`torch.UntypedStorage.share_memory_` for more details.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.share_memory_, (self,), self)
