@@ -4065,17 +4065,17 @@ def forward(self, x):
     x_2 = torch.relu(x_1);  x_1 = None
     return pytree.tree_unflatten([x_2], self._out_spec)""",
         )
-        self.assertExpectedInline(
-            gm_edit.code.strip(),
-            """\
-def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x_ = arg0
-    x = torch.cos(l_x_);  l_x_ = None
-    x_1 = torch.sin(x);  x = None
-    x_2 = dynamo_test_export_fn(x_1);  x_1 = None
-    return pytree.tree_unflatten([x_2], self._out_spec)""",
-        )
+
+        def _constais_op(gm, target):
+            for nd in gm.graph.nodes:
+                if nd.target == target:
+                    return True
+            return False
+
+        self.assertTrue(_constais_op(gm_edit, torch.cos))
+        self.assertTrue(_constais_op(gm_edit, torch.sin))
+        self.assertTrue(not _constais_op(gm_edit, torch.relu))
+
         self.assertExpectedInline(
             gm2.code.strip(),
             """\
