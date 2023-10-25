@@ -8,27 +8,13 @@ import warnings
 
 # from numpy.core.getlimits import _discovered_machar, _float_ma
 
-from unittest import skipIf
+from unittest import expectedFailure as xfail, skipIf
 
-import numpy
-
+import torch._numpy as np
 from pytest import raises as assert_raises
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_TORCHDYNAMO,
-    TestCase,
-    xpassIfTorchDynamo,
-)
-
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy import double, finfo, half, iinfo, single
-    from numpy.testing import assert_, assert_equal
-else:
-    import torch._numpy as np
-    from torch._numpy import double, finfo, half, iinfo, single
-    from torch._numpy.testing import assert_, assert_equal
-
+from torch._numpy import double, finfo, half, iinfo, single
+from torch._numpy.testing import assert_, assert_equal
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 skip = functools.partial(skipIf, True)
 
@@ -68,7 +54,6 @@ class TestDouble(TestCase):
 
 
 class TestFinfo(TestCase):
-    @skipIf(numpy.__version__ < "1.23", reason=".smallest_normal is new")
     def test_basic(self):
         dts = list(
             zip(
@@ -90,7 +75,7 @@ class TestFinfo(TestCase):
         with assert_raises((TypeError, ValueError)):
             finfo("i4")
 
-    @skip  # (reason="Some of these attributes are not implemented vs NP versions")
+    @xfail  # (reason="These attributes are not implemented yet.")
     def test_basic_missing(self):
         dt = np.float32
         for attr in [
@@ -140,7 +125,6 @@ class TestRepr(TestCase):
         expected = "iinfo(min=-32768, max=32767, dtype=int16)"
         assert_equal(repr(np.iinfo(np.int16)), expected)
 
-    @skipIf(TEST_WITH_TORCHDYNAMO, reason="repr differs")
     def test_finfo_repr(self):
         repr_f32 = repr(np.finfo(np.float32))
         assert "finfo(resolution=1e-06, min=-3.40282e+38," in repr_f32
@@ -202,7 +186,7 @@ class TestMisc(TestCase):
                 # This test may fail on some platforms
                 assert len(w) == 0
 
-    @xpassIfTorchDynamo  # (reason="None of nmant, minexp, maxexp is implemented.")
+    @xfail  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):
         # Assert that finfo returns reasonable results for all types
         for ftype in np.sctypes["float"] + np.sctypes["complex"]:

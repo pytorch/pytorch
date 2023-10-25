@@ -9,23 +9,16 @@ Extensive tests of this sort of functionality is in numpy_tests/core/*scalar*
 Also test the isscalar function (which is deliberately a bit more lax).
 """
 
+import torch._numpy as np
+from torch._numpy.testing import assert_equal
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
 )
-
-
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy.testing import assert_equal
-else:
-    import torch._numpy as np
-    from torch._numpy.testing import assert_equal
 
 
 parametrize_value = parametrize(
@@ -86,7 +79,6 @@ class TestArrayScalars(TestCase):
         assert arr == 42
 
 
-# @xfailIfTorchDynamo
 @instantiate_parametrized_tests
 class TestIsScalar(TestCase):
     #
@@ -97,12 +89,12 @@ class TestIsScalar(TestCase):
     scalars = [
         subtest(42, "literal"),
         subtest(int(42.0), "int"),
-        subtest(np.float32(42), "float32"),
-        subtest(np.array(42), "array_0D", decorators=[xfailIfTorchDynamo]),
-        subtest([42], "list", decorators=[xfailIfTorchDynamo]),
-        subtest([[42]], "list-list", decorators=[xfailIfTorchDynamo]),
-        subtest(np.array([42]), "array_1D", decorators=[xfailIfTorchDynamo]),
-        subtest(np.array([[42]]), "array_2D", decorators=[xfailIfTorchDynamo]),
+        np.float32(42),
+        np.array(42),
+        [42],
+        [[42]],
+        np.array([42]),
+        np.array([[42]]),
     ]
 
     import math
@@ -110,8 +102,8 @@ class TestIsScalar(TestCase):
     not_scalars = [
         int,
         np.float32,
-        subtest("s", decorators=[xfailIfTorchDynamo]),
-        subtest("string", decorators=[xfailIfTorchDynamo]),
+        "s",
+        "string",
         (),
         [],
         math.sin,
