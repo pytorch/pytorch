@@ -2526,8 +2526,7 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(compiled_outs, real_outs)
         self.assertTrue(isinstance(real_outs[1], torch.Size))
 
-        # TODO(whc) we should learn to return torch.Sizes
-        self.assertFalse(isinstance(compiled_outs[1], torch.Size))
+        self.assertTrue(isinstance(compiled_outs[1], torch.Size))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
