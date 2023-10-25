@@ -565,12 +565,14 @@ def pow_noop(a, b):
 def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
+
 # Note, we also always have a check for identical metadata, which is why these
 # are safe
 @register_noop_decomp([aten.copy], nop_arg=1)
 @register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
+
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
