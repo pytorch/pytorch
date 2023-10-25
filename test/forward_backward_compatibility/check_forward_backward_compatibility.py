@@ -294,8 +294,10 @@ ALLOW_LIST = [
     ("aten::_native_decoder_only_multi_head_attention",
      datetime.date(9999, 1, 1)),
     ("mkldnn::_convolution_pointwise_.binary", datetime.date(2023, 7, 1)),
-    # These ops were moved to python under the c10d_functional namespace
     ("c10d::allreduce_", datetime.date(2023, 7, 30)),
+    ("c10d::_allgather_base_", datetime.date(2023, 12, 30)),
+    ("c10d::_reduce_scatter_base_", datetime.date(2023, 12, 30)),
+    # These ops were moved to python under the c10d_functional namespace
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
@@ -310,6 +312,18 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_linear_int8_weight_fp32_activation", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_linear_int8_weight", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_linear_quantize_weight", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_pack_gemm_matrix_fp16", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_linear_fp16_weight_fp32_activation", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_linear_fp16_weight", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_pack_quantized_matrix", datetime.date(2023, 12, 31)),
+    ("aten::quantized_lstm_cell", datetime.date(2023, 12, 31)),
+    ("aten::quantized_gru_cell", datetime.date(2023, 12, 31)),
+    ("aten::quantized_rnn_relu_cell", datetime.date(2023, 12, 31)),
+    ("aten::quantized_rnn_tanh_cell", datetime.date(2023, 12, 31)),
+    ("quantized::make_quantized_cell_params", datetime.date(2023, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [

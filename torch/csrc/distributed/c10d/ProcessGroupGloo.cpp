@@ -855,10 +855,6 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 }
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
-  emitCollectiveStart(*work.get());
-  work->getFuture()->addCallback(
-      [=](auto& f) { this->emitCollectiveEnd(*work.get()); });
-
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
   lock.unlock();
@@ -1543,6 +1539,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
 
   enqueue(work);
   return work;
+}
+
+c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
+    std::vector<at::Tensor>& inputs,
+    const AllreduceOptions& opts) {
+  // all reduce sparse calls into default allreduce which
+  // implemented with all_gathering indices and values
+  // we do ths we do not have a native cuda implementation
+  return allreduce(inputs, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
