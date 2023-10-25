@@ -349,7 +349,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ):
         super().__init__()
         self.source = source
-        self.mutable_local = mutable_local
+        try:
+            self.mutable_local = mutable_local
+        except Exception:
+            # Annoyingly, LazyVT must implement mutable_local as a property
+            assert mutable_local is None
+
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
