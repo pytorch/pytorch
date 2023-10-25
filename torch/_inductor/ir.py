@@ -2237,15 +2237,11 @@ class Layout(IRNode):
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
 
-        if not self.stride:
-            return True
-
         # ignore dimensions of size 1, they dont affect layout
-        unbacked_dims = free_unbacked_symbols(self.size)
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
-            if (dim in unbacked_dims or V.graph.sizevars.size_hint(dim) != 1)
+            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
         ]
 
         stride = [self.stride[i] for i in non_1_indices]
