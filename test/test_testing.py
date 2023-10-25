@@ -2207,6 +2207,16 @@ class TestImports(TestCase):
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
+    def test_not_import_sympy(self) -> None:
+        try:
+            self._check_python_output("import torch;import sys;assert 'sympy' not in sys.modules")
+        except subprocess.CalledProcessError:
+            self.fail("PyTorch should not depend on SymPy at import time as importing SymPy is *very* slow.\n"
+                      "If you hit this error, you may want to:\n"
+                      "  - Refactor your code to avoid depending on sympy files you may not need to depend\n"
+                      "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
+                      "  - Import things that depend on SymPy locally")
+
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
