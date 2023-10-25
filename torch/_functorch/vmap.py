@@ -89,6 +89,8 @@ def _process_batched_inputs(
     flat_in_dims = _broadcast_to_and_flatten(
         in_dims,
         args_spec,
+        # We have to replace spec types because in_dims must be tuple
+        # (to accomodate `None`) but args may have torch.Size.
         replace_spec_types={torch.Size: tuple}
     )
     if flat_in_dims is None:
