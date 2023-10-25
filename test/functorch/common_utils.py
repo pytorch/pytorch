@@ -26,8 +26,9 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     out_spec = None
     for idx in range(batch_size):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
+        args_spec_with_tuple = args_spec.replace_types({torch.Size: tuple})
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
-        assert(args_spec == dims_spec)
+        assert(args_spec_with_tuple == dims_spec)
         new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
         flat_out, out_spec = pytree.tree_flatten(out)

@@ -243,6 +243,17 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return isinstance(self, LeafSpec)
 
+    def replace_types(self, mapping: Dict[Any, Any]) -> "TreeSpec":
+        if self.is_leaf():
+            return self
+        new_children_specs = [child.replace_types(mapping) for child in self.children_specs]
+        new_type = self.type
+        if new_type in mapping:
+            new_type = mapping[new_type]
+        new = type(self)(new_type, self.context, new_children_specs)
+        return new
+
+
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
@@ -449,7 +460,6 @@ def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
 def _broadcast_to_and_flatten(
     pytree: PyTree,
     spec: TreeSpec,
-    replace_spec_types: Optional[Dict[Any, Any]] = None
 ) -> Optional[List[Any]]:
     assert isinstance(spec, TreeSpec)
 
@@ -458,10 +468,7 @@ def _broadcast_to_and_flatten(
     if isinstance(spec, LeafSpec):
         return None
     node_type = _get_node_type(pytree)
-    if replace_spec_types and spec.type in replace_spec_types:
-        if replace_spec_types[spec.type] != node_type:
-            return None
-    elif node_type != spec.type:
+    if node_type != spec.type:
         return None
 
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
@@ -474,7 +481,7 @@ def _broadcast_to_and_flatten(
     # Recursively flatten the children
     result : List[Any] = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):
-        flat = _broadcast_to_and_flatten(child, child_spec, replace_spec_types)
+        flat = _broadcast_to_and_flatten(child, child_spec)
         if flat is not None:
             result += flat
         else:
