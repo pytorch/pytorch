@@ -352,9 +352,10 @@ def meta_copy_(self, src, non_blocking=False):
             "more than one element of the written-to tensor refers to a single memory location"
         )
 
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        aten.expand_copy.default(intermediate, self.size())
+    if isinstance(src, Tensor):
+        intermediate = src.to(self, non_blocking)
+        if self.size() != intermediate.size():
+            aten.expand_copy.default(intermediate, self.size())
     return self
 
 
@@ -3016,6 +3017,39 @@ def meta__foreach_binop__list(self, other, alpha=1):
 
 @register_meta(
     [
+        aten._foreach_add.Tensor,
+    ]
+)
+def meta__foreach_binop_tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.Tensor,
+    ]
+)
+def meta__foreach_binop__tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+
+
+@register_meta(
+    [
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
@@ -5239,8 +5273,8 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 @register_meta(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
     grad_output: Tensor,
-    output_size: Sequence[Union[int, torch.types.SymInt]],
-    input_size: Sequence[Union[int, torch.types.SymInt]],
+    output_size: Sequence[Union[int, torch.SymInt]],
+    input_size: Sequence[Union[int, torch.SymInt]],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ):

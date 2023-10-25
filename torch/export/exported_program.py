@@ -556,7 +556,7 @@ class ExportedProgram:
                 )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise TypeError(
+                raise TypeError(  # noqa: TRY200
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -593,7 +593,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(
+                raise error.InternalError(  # noqa: TRY200
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
