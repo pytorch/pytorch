@@ -328,9 +328,32 @@ class TestGenericPytree(TestCase):
         ],
     )
     def test_tree_only(self, pytree_impl):
-        self.assertEqual(
-            pytree_impl.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"]
-        )
+        def run_test(typ, pytree):
+            def f(x):
+                return x * 3
+
+            def tree_flatten_only(typ, x):
+                return [x for x in pytree_impl.tree_flatten(x) if isinstance(x, typ)]
+
+            sm1 = sum(map(f, tree_flatten_only(typ, pytree)))
+            sm2 = sum(tuple(tree_flatten_only(typ, pytree_impl.tree_map_only(typ, f, pytree))))
+            self.assertEqual(sm1, sm2)
+
+            def invf(x):
+                return x // 3
+
+            self.assertEqual(
+                pytree_impl.tree_map_only(typ, invf, pytree_impl.tree_map_only(typ, f, pytree)),
+                pytree,
+            )
+
+        cases = [
+            (int, [0, "a"]),
+            (int, {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)}),
+            (int, torch.Size([1, 2, 3]))
+        ]
+        for case in cases:
+            run_test(*case)
 
     @parametrize(
         "pytree_impl",
