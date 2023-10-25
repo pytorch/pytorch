@@ -32,14 +32,13 @@ from typing import (
 from typing_extensions import Self
 
 import torch
-
 import torch._ops
-import torch.export as torch_export
 import torch.utils._pytree as pytree
 from torch._subclasses import fake_tensor
 
 from torch.onnx._internal import _beartype, io_adapter
 from torch.onnx._internal.diagnostics import infra
+
 from torch.onnx._internal.fx import (
     decomposition_table,
     patcher as patcher,
@@ -351,30 +350,16 @@ class ResolvedExportOptions(ExportOptions):
 
     @_beartype.beartype
     def __init__(
-        self,
-        options: Union[ExportOptions, "ResolvedExportOptions"],
-        model: Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]] = None,  # type: ignore[name-defined]
+        self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
     ):
-        from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
-            diagnostics,
-            dynamo_graph_extractor,
-            torch_export_graph_extractor,
-        )
-
+        if options is None:
+            options = ExportOptions()
         if isinstance(options, ResolvedExportOptions):
             self.dynamic_shapes = options.dynamic_shapes
             self.op_level_debug = options.op_level_debug
             self.diagnostic_options = options.diagnostic_options
             self.fake_context = options.fake_context
             # private
-            if isinstance(model, torch_export.ExportedProgram) and not isinstance(
-                options.fx_tracer, torch_export_graph_extractor.TorchExport
-            ):
-                message = "'model' of type 'ExportedProgram' is only supported with 'TorchExport' FX Tracer"
-                e = InvalidExportOptionsError(message)
-                raise InvalidExportOptionsError(
-                    ExportOutput._from_failure(e, options.diagnostic_context), message
-                )
             self.fx_tracer = options.fx_tracer
             self.onnx_registry = options.onnx_registry
             self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
@@ -392,14 +377,16 @@ class ResolvedExportOptions(ExportOptions):
                 return fallback
 
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
+            from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
+                diagnostics,
+                dynamo_graph_extractor,
+            )
 
             self.diagnostic_options = resolve(
                 options.diagnostic_options, DiagnosticOptions()
             )
-            if isinstance(model, torch_export.ExportedProgram):
-                self.fx_tracer = torch_export_graph_extractor.TorchExport()
-            else:
-                self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+
+            self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
             self.fake_context = resolve(options.fake_context, None)
             self.diagnostic_context = diagnostics.DiagnosticContext(
@@ -647,9 +634,7 @@ class ExportOutput:
 
     @_beartype.beartype
     def adapt_torch_inputs_to_onnx(
-        self,
-        *model_args,
-        **model_kwargs,
+        self, *model_args, **model_kwargs
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
@@ -925,35 +910,17 @@ class FXGraphExtractor(abc.ABC):
         """
         ...
 
-    # TODO: Design the passes API
-    @abc.abstractmethod
-    def pre_export_passes(
-        self,
-        options: ResolvedExportOptions,
-        original_model: Union[torch.nn.Module, Callable],
-        fx_module: torch.fx.GraphModule,
-        fx_module_args: Sequence[Any],
-    ):
-        """Applies pre-export passes to the FX graph.
-
-        Pre-export passes are FX-to-FX graph transformations that make the graph
-        more palatable for the FX-to-ONNX conversion.
-        For example, it can be used to flatten model input/output, add explicit
-        casts to the graph, replace/decompose operators, functionalize the graph, etc.
-        """
-        ...
-
 
 class Exporter:
     @_beartype.beartype
     def __init__(
         self,
-        options: ResolvedExportOptions,
+        options: Union[ExportOptions, ResolvedExportOptions],
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
-        self.options = options
+        self.options = ResolvedExportOptions(options)
         assert self.options is not None
 
         self.model = model
@@ -973,6 +940,15 @@ class Exporter:
         with self.options.diagnostic_context:
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
+            )
+
+            updated_model_args = self.options.fx_tracer.input_adapter.apply(
+                *self.model_args, **self.model_kwargs
+            )
+
+            # TODO: Design the passes API
+            graph_module = pre_export_passes(
+                self.options, self.model, graph_module, updated_model_args
             )
 
             # TODO: Defer `import onnxscript` out of `import torch` path
@@ -1086,12 +1062,6 @@ class OnnxExporterError(RuntimeError):
         self.export_output = export_output
 
 
-class InvalidExportOptionsError(RuntimeError):
-    """Raised when user specified an invalid value for the :class:`ExportOptions`."""
-
-    pass
-
-
 @_beartype.beartype
 def _assert_dependencies(export_options: ResolvedExportOptions):
     opset_version = export_options.onnx_registry.opset_version
@@ -1136,7 +1106,7 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
 
 @_beartype.beartype
 def dynamo_export(
-    model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],  # type: ignore[name-defined]
+    model: Union[torch.nn.Module, Callable],
     /,
     *model_args,
     export_options: Optional[ExportOptions] = None,
@@ -1208,14 +1178,11 @@ def dynamo_export(
         }
     """
 
-    if export_options is not None:
-        resolved_export_options = (
-            export_options
-            if isinstance(export_options, ResolvedExportOptions)
-            else ResolvedExportOptions(export_options, model=model)
-        )
-    else:
-        resolved_export_options = ResolvedExportOptions(ExportOptions(), model=model)
+    resolved_export_options = (
+        export_options
+        if isinstance(export_options, ResolvedExportOptions)
+        else ResolvedExportOptions(export_options)
+    )
 
     _assert_dependencies(resolved_export_options)
 
@@ -1242,7 +1209,8 @@ def dynamo_export(
         ) from e
 
 
-def common_pre_export_passes(
+@_beartype.beartype
+def pre_export_passes(
     options: ResolvedExportOptions,
     original_model: Union[torch.nn.Module, Callable],
     fx_module: torch.fx.GraphModule,
@@ -1320,14 +1288,13 @@ def common_pre_export_passes(
 
 
 __all__ = [
-    "DiagnosticOptions",
     "ExportOptions",
     "ExportOutput",
     "ExportOutputSerializer",
-    "InvalidExportOptionsError",
-    "OnnxExporterError",
-    "OnnxRegistry",
     "UnsatisfiedDependencyError",
     "dynamo_export",
+    "OnnxExporterError",
     "enable_fake_mode",
+    "OnnxRegistry",
+    "DiagnosticOptions",
 ]
