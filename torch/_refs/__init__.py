@@ -2079,7 +2079,6 @@ def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
         if kw in to_kwargs and to_kwargs[kw] is None:
             del to_kwargs[kw]
 
-
     # "device" option could be passed a str instead torch.device
     if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
         to_kwargs["device"] = torch.device(to_kwargs["device"])
@@ -5333,23 +5332,10 @@ def _like_constructor(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
-    if memory_format != torch.preserve_format:
-        return construct_fn(
-            physical_shape,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-            memory_format=memory_format,
-        )
-
     # NOTE: For random functions in eager, the output depends on the location
     # in memory not the logical index. So, it's equivalent to generating a
     # contiguous tensor and viewing it as strided.
-    physical_layout = (
-        utils.compute_elementwise_output_logical_to_physical_perm(a)
-    )
+    physical_layout = utils.like_constructor_physical_layout(a, memory_format)
     physical_shape = utils.apply_perm(a.shape, physical_layout)
 
     result = construct_fn(
@@ -5362,7 +5348,7 @@ def _like_constructor(
     )
     if physical_layout == range(len(physical_layout)):
         return result
-    return result.permute(utils.invert_perm(physical_layout))
+    return result.permute(utils.invert_perm(physical_layout)).clone()
 
 
 @register_decomposition(aten.full_like)
@@ -5532,7 +5518,7 @@ def randint_like(
     torch._check(not kwargs, lambda: f"Unexpected keyword arguments {kwargs}")
 
     return _like_constructor(
-        lambda shape, *a, **kw: torch.randint(*low_high, shape, *a, **kw),
+        lambda shape, *a, **kw: torch.randint(*low_high, shape, *a, **kw),  # type: ignore[call-overload]
         input,
         dtype=dtype,
         layout=layout,
