@@ -542,7 +542,6 @@ class VariableBuilder:
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            breakpoint()
             return UserFunctionVariable(value, source=self.source)
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.PYMODULE_MATCH)
@@ -1781,7 +1780,6 @@ class SourcelessBuilder:
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
         elif isinstance(value, types.FunctionType):
-            breakpoint()
             return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
             return EnumVariable(value)
