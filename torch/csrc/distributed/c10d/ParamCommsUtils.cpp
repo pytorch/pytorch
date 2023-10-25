@@ -16,8 +16,10 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int outSize,
     at::ScalarType dType,
     std::vector<int64_t> inSplitSizes,
-    std::vector<int64_t> outSplitSizes)
+    std::vector<int64_t> outSplitSizes,
+    int worldSize)
     : rank_(rank),
+      worldSize_(worldSize),
       columnName_(colName),
       inMessageSize_(inSize),
       outMessageSize_(outSize),

@@ -122,8 +122,11 @@ class AOTInductorModelContainer {
           device_type,
           device_idx,
           &tensor_handle));
-      constants_->emplace(
-          std::move(name), std::move(RAIIAtenTensorHandle(tensor_handle)));
+      constants_->emplace(std::move(name), tensor_handle);
+    }
+
+    for (auto& model : models_) {
+      model->update_constants_map(constants_);
     }
   }
 

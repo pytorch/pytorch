@@ -20,6 +20,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
+    integral_types_and,
 )
 
 from torch.testing._internal.common_utils import (
@@ -1446,6 +1447,18 @@ class TestCommon(TestCase):
 
         self.fail(msg)
 
+    # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops((op for op in op_db if op.promotes_int_to_float), allowed_dtypes=integral_types_and(torch.bool))
+    def test_promotes_int_to_float(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype):
+            output = op(sample.input, *sample.args, **sample.kwargs)
+            if not output.dtype.is_floating_point:
+                self.fail(
+                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
+                )
+
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
@@ -2182,6 +2195,15 @@ class TestFakeTensor(TestCase):
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
+
+    @ops([op for op in op_db if op.is_factory_function])
+    def test_strided_layout(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        for sample in samples:
+            kwargs = sample.kwargs.copy()
+            kwargs['layout'] = torch.strided
+            strided_result = op(sample.input, *sample.args, **kwargs)
+            self.assertEqual(strided_result.layout, torch.strided)
 
 
 instantiate_device_type_tests(TestCommon, globals())
