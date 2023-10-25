@@ -2209,6 +2209,38 @@ class BenchmarkRunner:
         )
         return start, end
 
+    def get_fsdp_auto_wrap_policy(self, model_name: str) -> Optional[ModuleWrapPolicy]:
+        from diffusers.models.transformer_2d import Transformer2DModel
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
+        from torchbenchmark.models.nanogpt.model import Block
+        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
+        from transformers.models.t5.modeling_t5 import T5Block
+        from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+
+        # handcrafted wrap policy
+        MODEL_FSDP_WRAP = {
+            "stable_diffusion_unet": (Transformer2DModel,),
+            "hf_T5": (T5Block,),
+            "hf_T5_base": (T5Block,),
+            "hf_T5_large": (T5Block,),
+            "hf_Whisper": (WhisperEncoderLayer,),
+            "llama_v2_7b_16h": (LlamaDecoderLayer,),
+            "nanogpt": (Block,),
+        }
+
+        if model_name not in MODEL_FSDP_WRAP:
+            # default to using wrap policy based on module size
+            return functools.partial(
+                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
+            )
+
+        return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
+
     def deepcopy_and_maybe_ddp(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
@@ -2227,8 +2259,6 @@ class BenchmarkRunner:
                 MixedPrecision,
             )
 
-            from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-
             if self.args.float16:
                 dtype = torch.float16
             elif self.args.bfloat16:
@@ -2244,10 +2274,6 @@ class BenchmarkRunner:
                 buffer_dtype=dtype,
             )
 
-            my_auto_wrap_policy = functools.partial(
-                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
-            )
-
             model = FSDP(
                 model,
                 use_orig_params=True,
@@ -2256,7 +2282,7 @@ class BenchmarkRunner:
                 else None,
                 mixed_precision=mp_policy,
                 limit_all_gathers=True,
-                auto_wrap_policy=my_auto_wrap_policy,
+                auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
             if torch._inductor.config.triton.cudagraphs:
                 log.warning("Disabling cudagraphs for FSDP compatibility")
