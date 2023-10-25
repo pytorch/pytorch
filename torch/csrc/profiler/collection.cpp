@@ -341,6 +341,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
         torch::profiler::impl::saveExtraArgs(fn));
   }
 
+  // Record NCCL metadata for specific CPU ops
+  fn.isNcclMeta() ? torch_ops_.extra_meta_.emplace_back(
+                        torch::profiler::impl::saveNcclMeta(fn))
+                  : torch_ops_.extra_meta_.emplace_back();
+
   auto out = std::make_unique<KinetoObserverContext>(event);
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
@@ -434,6 +439,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
+  auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
   auto gpu_fallback =
       StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
@@ -447,6 +453,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_stack(),
         jit_module(),
         extra_args(),
+        extra_meta(),
         gpu_fallback(),
         event->allow_tf32_cublas_,
         std::move(event->counters_)};

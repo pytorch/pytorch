@@ -9,6 +9,11 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
 
 namespace torch {
 namespace profiler {
@@ -396,6 +401,51 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
     }
   }
   return types;
+}
+
+// ----------------------------------------------------------------------------
+// -- NCCL Metadata -----------------------------------------------------------
+// ----------------------------------------------------------------------------
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+static constexpr auto kCommuName = "Collective name";
+static constexpr auto kDtype = "dtype";
+static constexpr auto kInMsgSize = "In msg size";
+static constexpr auto kOutMsgSize = "Out msg size";
+static constexpr auto kInSplit = "In split size";
+static constexpr auto kOutSplit = "Out split size";
+static constexpr auto kGroupSize = "Group size";
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
+
+std::unordered_map<std::string, std::string> saveNcclMeta(
+    const at::RecordFunction& fn) {
+  std::unordered_map<std::string, std::string> map;
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
+  if (debugInfo == nullptr) {
+    LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
+                 << fn.name();
+    return map;
+  }
+
+  map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
+  map.emplace(
+      kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
+  map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
+  map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
+  map.emplace(
+      kInSplit,
+      fmt::format("[{}]", fmt::join(debugInfo->getInputSplitSizes(), ", ")));
+  map.emplace(
+      kOutSplit,
+      fmt::format("[{}]", fmt::join(debugInfo->getOutputSplitSizes(), ", ")));
+  map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
+  return map;
 }
 
 // ----------------------------------------------------------------------------

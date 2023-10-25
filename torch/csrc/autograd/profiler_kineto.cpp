@@ -244,6 +244,11 @@ struct AddGenericMetadata : public MetadataBase {
       }
     }
 
+    // Add extra metadata if any
+    for (const auto& [key, val] : op_event.extra_meta_) {
+      addMetadata(key, val);
+    }
+
     if (config_ && !config_->experimental_config.performance_events.empty()) {
       auto& event_names = config_->experimental_config.performance_events;
       for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
@@ -873,6 +878,7 @@ TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
+TYPED_ATTR(TorchOp, extraMeta, e.extra_meta_)
 TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(
