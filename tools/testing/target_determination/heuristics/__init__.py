@@ -16,6 +16,8 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     PreviouslyFailedInPR,
 )
 
+# All currently running heuristics.
+# To add a heurstic in trial mode, specify the keywork argument `trial_mode=True`.
 HEURISTICS: List[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),
