@@ -52,7 +52,7 @@ void abs_kernel(::at::TensorIteratorBase& iter) {
 
 void quantize_tensor_per_tensor_affine_privateuse1(
     const at::Tensor& rtensor,
-    Tensor& at::qtensor,
+    at::Tensor& qtensor,
     double scale,
     int64_t zero_point) {
     // do nothing
