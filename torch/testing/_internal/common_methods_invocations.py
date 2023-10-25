@@ -16678,13 +16678,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
-           supports_autograd=False,
-           skips=(
-               # CUDA histc returns a float tensor but does not correctly warn when passed an integral out tensor
-               # "AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
-               # from a result of dtype torch.float32 into an out= with dtype torch.long"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
-           )),
+           supports_autograd=False),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
@@ -19629,27 +19623,33 @@ python_ref_db = [
         "_refs.rand_like",
         torch_opinfo_name="rand_like",
         op=lambda *args, **kwargs: wrapper_set_seed(refs.rand_like, *args, **kwargs),
+        is_factory_function=True,
+        supports_out=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
         ),
     ),
     PythonRefInfo(
         "_refs.randn_like",
         torch_opinfo_name="randn_like",
         op=lambda *args, **kwargs: wrapper_set_seed(refs.randn_like, *args, **kwargs),
+        is_factory_function=True,
+        supports_out=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
         ),
     ),
     PythonRefInfo(
         "_refs.randint_like",
         torch_opinfo_name="randint_like",
         op=lambda *args, **kwargs: wrapper_set_seed(refs.randint_like, *args, **kwargs),
+        is_factory_function=True,
+        supports_out=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
