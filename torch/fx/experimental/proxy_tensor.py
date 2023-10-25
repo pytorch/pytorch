@@ -48,11 +48,11 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # Hence we transform any torch.Size node into an equivalent tuple
-# if all of its items are `Proxy`s
+# if any of its items are not int/SymInt
 pytree._register_pytree_node(
     torch.Size,
     lambda x: (list(x), None),
-    lambda xs, _: tuple(xs) if all(isinstance(x, Proxy) for x in xs) else torch.Size(xs)
+    lambda xs, _: tuple(xs) if not all(isinstance(x, (int, SymInt)) for x in xs) else torch.Size(xs)
 )
 
 def fake_signature(fn, nargs):
