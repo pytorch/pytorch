@@ -28,7 +28,7 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
-from torch.fx.experimental.sym_dispatch_mode import set_sym_function_mode, sym_function_mode
+from torch.fx.experimental._sym_dispatch_mode import set_sym_function_mode, sym_function_mode
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
