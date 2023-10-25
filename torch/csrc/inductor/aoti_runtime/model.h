@@ -67,10 +67,10 @@ inline uint8_t* constant_ptr(
   // Copy data to GPU memory
   // TODO: Handle shared storage case.
   AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
-                                internal_ptr,
-                                _binary_constants_bin_start + bytes_read,
-                                data_size,
-                                cudaMemcpyHostToDevice));
+      internal_ptr,
+      _binary_constants_bin_start + bytes_read,
+      data_size,
+      cudaMemcpyHostToDevice));
   return internal_ptr;
 #else // !USE_CUDA
   // get pointer to constant which is packed in model during compile time.
@@ -244,7 +244,7 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
         data_size = AOTI_CONST_GPU_ALIGNMENT +
-          (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
+            (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
       }
       constants_internal_offset[i] = max_blob;
       max_blob += data_size;
@@ -270,8 +270,8 @@ class AOTInductorModelBase {
     for (size_t i = 0; i < num_constants; i++) {
       std::string name = constant_name(i);
       size_t data_size = constant_data_size(i);
-      uint8_t* internal_ptr =
-        constant_ptr(constant_blob, constants_internal_offset[i], bytes_read, data_size);
+      uint8_t* internal_ptr = constant_ptr(
+          constant_blob, constants_internal_offset[i], bytes_read, data_size);
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
@@ -301,8 +301,7 @@ class AOTInductorModelBase {
           device_type,
           device_idx,
           &tensor_handle));
-      constants_->emplace(
-          std::move(name), RAIIAtenTensorHandle(tensor_handle));
+      constants_->emplace(std::move(name), RAIIAtenTensorHandle(tensor_handle));
     }
   }
 

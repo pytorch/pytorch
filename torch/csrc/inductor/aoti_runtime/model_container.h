@@ -12,10 +12,6 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model.h>
 
-namespace {
-
-} // anonymous namespace
-
 namespace torch {
 namespace aot_inductor {
 

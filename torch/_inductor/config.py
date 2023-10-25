@@ -201,6 +201,9 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
