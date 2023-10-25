@@ -4500,7 +4500,7 @@ If ``shared`` is True, then memory is shared between processes. All changes are 
 If ``shared`` is False, then changes to the tensor do not affect the file.
 
 ``size`` is the number of elements in the Tensor. If ``shared`` is ``False``, then the file must contain
-at least ``size * sizeof(dtype)`` bytes. If ``shared`` is `True` the file will be created if needed.
+at least ``size * sizeof(dtype)`` bytes. If ``shared`` is ``True`` the file will be created if needed.
 
 .. note::
     Only CPU tensors can be mapped to files.

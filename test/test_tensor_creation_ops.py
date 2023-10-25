@@ -3110,6 +3110,7 @@ class TestTensorCreation(TestCase):
 
     @onlyCPU
     @parametrize('shared', [True, False])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_from_file(self, device, shared):
         dtype = torch.float64
         t = torch.randn(2, 5, dtype=dtype, device=device)
