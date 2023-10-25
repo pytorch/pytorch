@@ -5510,13 +5510,14 @@ def randint_like(
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
-    **kwargs,
+    low=None,
+    high=None,
 ) -> TensorLikeType:
     low_high = args
-    if "low" in kwargs:
-        low_high = (kwargs.pop("low"), *low_high)
-    if "high" in kwargs:
-        low_high = (*low_high, kwargs.pop("high"))
+    if low is not None:
+        low_high = (low, *low_high)
+    if high is not None:
+        low_high = (*low_high, high)
 
     torch._check(1 <= len(low_high) <= 2, lambda: f"Unexpected arguments {low_high}")
     torch._check(not kwargs, lambda: f"Unexpected keyword arguments {kwargs}")
