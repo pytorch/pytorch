@@ -142,15 +142,11 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   fractional_max_pool_check_shape</*ndim*/ 2>(input, randomSamples);
 
   int planeDim = 0;
-  int dimh = 1;
-  int dimw = 2;
 
   int ndims = input.ndimension();
 
   if (ndims == 4) {
     planeDim++;
-    dimh++;
-    dimw++;
   }
 
   /* sizes */

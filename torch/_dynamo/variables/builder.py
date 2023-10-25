@@ -993,6 +993,13 @@ class VariableBuilder:
                 guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
             )
 
+    def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
+        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
+            raise InternalTorchDynamoError(
+                "Cannot wrap a Tensor that has already been",
+                "wrapped by this instance of Dynamo",
+            )
+
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
 
@@ -1000,6 +1007,7 @@ class VariableBuilder:
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
         ) and not source.guard_source().is_fsdp_module():
+            self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
@@ -1009,6 +1017,7 @@ class VariableBuilder:
             )
 
         if is_constant_source(source):
+            self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -1051,23 +1060,6 @@ class VariableBuilder:
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
-
-        # We have accessed the SAME tensor from a different source.  In some
-        # situations, it doesn't matter if you have the same tensor identity
-        # or not, but we are unable to do this fine-grained tracking.  So
-        # instead we just say, if x is y, then to successfully reuse this
-        # compiled tensor again, you must have x is y again.  Negative
-        # aliases, that is, that x is not y, are IMPLICITLY checked as part of
-        # the code cache matching process, you don't need to explicitly
-        # generate a guard for it (nor would you want to, you need O(n^2)
-        # pairwise 'is not' tests to do it.)
-        if value in self.tx.output.real_value_tensor_positive_aliases:
-            stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
-            # TODO(voz): Decently common pattern, refactor at some point.
-            dup_guard = self._make_dupe_guard(stored_value)
-            if dup_guard:
-                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
-            return stored_value
 
         # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
         # When we've discovered an untracked tensor, then we actually need

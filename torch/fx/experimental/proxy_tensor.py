@@ -29,8 +29,7 @@ from torch.utils._python_dispatch import (
     _push_mode,
 )
 
-from .symbolic_shapes import ShapeEnv, SymNode
-from .sym_dispatch_mode import SymDispatchMode
+from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
