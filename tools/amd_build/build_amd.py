@@ -167,10 +167,12 @@ hip_platform_files = [
     "third_party/tensorpipe/cmake/Hip.cmake",
 ]
 
-def remove_hcc(line) -> str:
+
+def remove_hcc(line: str) -> str:
     line = line.replace("HIP_PLATFORM_HCC", "HIP_PLATFORM_AMD")
     line = line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS")
     return line
+
 
 for hip_platform_file in hip_platform_files:
     do_write = False
