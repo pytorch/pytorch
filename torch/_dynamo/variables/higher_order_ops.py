@@ -19,7 +19,6 @@ from torch._guards import Source
 from torch.utils import _pytree as pytree
 
 from ..exc import (
-    InternalTorchDynamoError,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -601,8 +600,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         if len(kwargs) > 0:
-            InternalTorchDynamoError(
-                "builtins.map: kwargs should never be allowed for builtin map."
+            unsupported(
+                "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
