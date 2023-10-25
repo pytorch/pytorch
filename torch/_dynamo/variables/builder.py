@@ -525,8 +525,24 @@ class VariableBuilder:
             return CollectiveFunctionRewriteVariable(
                 new_fn, orig_fn=value, orig_source=old_source, source=new_source
             )
+        elif (
+            istype(value, (type, types.FunctionType))
+            and skipfiles.check(value, allow_torch=True)
+            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
+        ):
+            if callable(value):
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+            return SkipFilesVariable(
+                value,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
+                source=self.source,
+            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            breakpoint()
             return UserFunctionVariable(value, source=self.source)
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.PYMODULE_MATCH)
@@ -716,27 +732,6 @@ class VariableBuilder:
                 self.tx.output.has_user_defined_allowed_in_graph = True
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
-                value,
-                source=self.source,
-            )
-        elif (
-            istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
-            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
-        ):
-            if callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            else:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
-                source=self.source,
-            )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return UserFunctionVariable(
                 value,
                 source=self.source,
             )
@@ -1786,6 +1781,7 @@ class SourcelessBuilder:
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
         elif isinstance(value, types.FunctionType):
+            breakpoint()
             return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
             return EnumVariable(value)
