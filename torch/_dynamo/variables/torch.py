@@ -26,6 +26,7 @@ from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..device_interface import device_interfaces
 from ..exc import unimplemented
+from ..guards import GuardBuilder
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -208,6 +209,14 @@ def torch_reconstruct(codegen, value):
 
 class TorchCtxManagerClassVariable(VariableTracker):
     """Points to a context manager class in torch.* that dynamo has implementations"""
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        return TorchCtxManagerClassVariable(
+            value,
+            source=source,
+            guards={source.make_guard(GuardBuilder.FUNCTION_MATCH)},
+        )
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)

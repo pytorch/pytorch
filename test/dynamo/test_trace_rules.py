@@ -326,12 +326,12 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         msg1 = (
             f"New torch objects: {x} "
             "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Please add them according the instruction at trace_rules.torch_name_rule_map."
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
         )
         msg2 = (
             f"Existing torch objects: {y} were removed. "
             "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction at trace_rules.torch_name_rule_map for more details."
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
         )
         self.assertTrue(len(x) == 0, msg1)
         self.assertTrue(len(y) == 0, msg2)

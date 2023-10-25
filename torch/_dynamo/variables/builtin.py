@@ -1084,7 +1084,6 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchCtxManagerClassVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1176,8 +1175,8 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif trace_rules.check(member) == TorchCtxManagerClassVariable:
-                return TorchCtxManagerClassVariable(member, **options)
+            elif trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):

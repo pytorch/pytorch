@@ -1,6 +1,8 @@
 import functools
 import importlib
 
+from .utils import hashable
+
 from .variables import TorchCtxManagerClassVariable
 
 
@@ -28,9 +30,9 @@ If you are removing an existing torch level API:
   depends on where it is.
 
 TODO: Add torch object names mapping to TorchVariable for in graph and constant fold functions.
-TODO: We would consolidate the skipfiles.check rules into trace_rules.check later.
+TODO: We would consolidate the skipfiles.check rules into trace_rules.lookup later.
 TODO: We would support explictly list objects treated as skip/inline after the skipfiles.check
-and trace_rules.check consolidation is done. Then the explicit listing of skip/inline objects have
+and trace_rules.lookup consolidation is done. Then the explicit listing of skip/inline objects have
 a higher priority, which can be used to override the skipfiles.check rules in some cases.
 """
 torch_name_rule_map = {
@@ -65,6 +67,8 @@ def load_object(name):
     return obj
 
 
-def check(obj):
+def lookup(obj):
+    if not hashable(obj):
+        return None
     rule = get_torch_obj_rule_map().get(obj, None)
     return rule
