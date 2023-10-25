@@ -1360,7 +1360,7 @@ def get_fake_value(node, tx):
 
     op = node.op
 
-    # FX Node should always return the same value
+    # FX Node should always return the same fake value
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
