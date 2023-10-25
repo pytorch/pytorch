@@ -709,10 +709,9 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         example_res = lowered_module.original_module(*real_sub_args)
 
-        # In order to guarantee an equivalent aliasing relationship among
-        # FakeTensors in Dynamo and Tensors in eager execution, executorch
-        # promises not to alias inputs and outputs.
-        # Thus, output FakeTensors shall not alias input FakeTensors.
+        # executorch modules promise not to alias inputs and outputs.
+        # Thus, output FakeTensors correctly will not alias input FakeTensors.
+        # This helps guarantee the 1-1 correspondence property of FakeTensors in Dynamo.
         _assert_tensors_nonaliasing(real_sub_args, example_res)
 
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
