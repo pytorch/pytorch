@@ -6,13 +6,18 @@ import torch
 from test_aot_inductor import AOTInductorModelRunner
 from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
+from torch._inductor import config
 
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 
 
+@config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
+        """
+        Generate a simple test case that has multiple simultaneously-live intermediate tensors.
+        """
         def f(x, y, z):
             t0 = x.matmul(y)
             t1 = x.matmul(z)
@@ -44,7 +49,7 @@ class TestMemoryPlanning(TestCase):
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        with torch._inductor.config.patch("cpp_wrapper", True):
+        with config.patch("cpp_wrapper", True):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
@@ -65,7 +70,7 @@ class TestMemoryPlanning(TestCase):
             torch._export.dynamic_dim(args[0], 0) >= 1,
             torch._export.dynamic_dim(args[0], 0) <= 2048,
         ]
-        with torch._inductor.config.patch("aot_inductor.abi_compatible", True):
+        with config.patch("aot_inductor.abi_compatible", True):
             result, code = run_and_get_cpp_code(
                 lambda: AOTInductorModelRunner.run(
                     "cuda", f, args, constraints=constraints

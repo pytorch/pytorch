@@ -476,7 +476,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         ending = self.ending
-        if "view_as_complex" in extern_kernel.kernel:
+        if config.memory_planning and "view_as_complex" in str(extern_kernel.kernel):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
