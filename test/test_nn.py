@@ -11563,6 +11563,18 @@ class TestNNDeviceType(NNTestCase):
             with torch.no_grad():
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
+    # Ref: https://github.com/pytorch/pytorch/issue/108345
+    @onlyCUDA
+    @largeTensorTest("10GB", "cpu")
+    @largeTensorTest("10GB", "cuda")
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_cross_entropy_64bit(self, device, reduction):
+        labels = torch.zeros(190, 50, dtype=torch.long, device=device)
+        logits = torch.ones(190, 229000, 50, dtype=torch.float, device=device)
+        loss = torch.nn.functional.cross_entropy(logits, labels)
+        loss_cpu = torch.nn.functional.cross_entropy(logits.cpu(), labels.cpu())
+        self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
