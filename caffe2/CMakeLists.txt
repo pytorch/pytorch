@@ -964,6 +964,7 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
   if(USE_CUSPARSELT)
