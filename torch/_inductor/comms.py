@@ -2,36 +2,40 @@
 
 from typing import List
 
+import torch
+
 from . import config, ir, scheduler
 from .dependencies import WeakDep
 from .utils import tuple_sorted
 
+overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
+
 
 def sink_waits(
-    result: List["scheduler.BaseSchedulerNode"],
+    snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
     Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
     communication overlap.
     """
-    new_result = []
+    new_order = []
     cur_waits = set()
-    for snode in result:
+    for snode in snodes:
         if isinstance(snode.node, ir.Wait):
             cur_waits.add(snode)
         else:
             for wait in tuple_sorted(cur_waits):
                 if snode in wait.node_users:
-                    new_result.append(wait)
+                    new_order.append(wait)
                     cur_waits.remove(wait)
-            new_result.append(snode)
+            new_order.append(snode)
     for snode in tuple_sorted(cur_waits):
-        new_result.append(snode)
-    return new_result
+        new_order.append(snode)
+    return new_order
 
 
 def raise_comms(
-    result: List["scheduler.BaseSchedulerNode"],
+    snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
@@ -42,9 +46,9 @@ def raise_comms(
     which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
     or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
-    new_result: List["scheduler.BaseSchedulerNode"] = []
+    new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
     cur_comms: List["scheduler.BaseSchedulerNode"] = []
-    for snode in reversed(result):
+    for snode in reversed(snodes):
         if isinstance(snode.node, ir.CollectiveKernel):
             cur_comms.append(snode)
         else:
@@ -54,13 +58,12 @@ def raise_comms(
                 snode in comm.inverse_users for comm in cur_comms
             ):
                 comm = cur_comms.pop(0)
-                new_result.append(comm)
-            new_result.append(snode)
+                new_order_reversed.append(comm)
+            new_order_reversed.append(snode)
     assert len(cur_comms) <= 1
     for snode in tuple_sorted(cur_comms):
-        new_result.append(snode)
-    result = new_result[::-1]
-    return result
+        new_order_reversed.append(snode)
+    return new_order_reversed[::-1]
 
 
 def get_ancestors(node):
@@ -284,12 +287,65 @@ def reorder_compute_for_overlap(
     return final_order
 
 
+def node_summary(snode):
+    detail = ""
+    if isinstance(snode.node, ir.ExternKernelOut):
+        detail = f" ({snode.node.kernel})"
+    out_tensor_info = (
+        f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
+    )
+    return (
+        f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({snode.node.name})"
+    )
+
+
+def visualize_overlap(order):
+    total_est_runtime: float = 0.0
+    cur_comm_node = None
+    for snode in order:
+        if cur_comm_node is None:
+            if isinstance(snode.node, ir.CollectiveKernel):
+                total_est_runtime += estimate_op_runtime(snode)
+                cur_comm_node = snode.node
+            elif isinstance(snode.node, ir.Wait):
+                raise Exception(
+                    "Wait is not expected when there is no collective running"
+                )
+            else:  # exposed compute op
+                total_est_runtime += estimate_op_runtime(snode)
+            overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+        else:  # cur_comm_node is not None
+            if isinstance(snode.node, ir.CollectiveKernel):
+                raise Exception(
+                    "Found two collectives running at the same time, which is unexpected. "
+                    "`visualize_overlap` needs to be updated to handle this case"
+                )
+            elif isinstance(snode.node, ir.Wait):  # end of this comm op
+                overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+                cur_comm_node = None
+            else:  # overlapped compute op
+                overlap_log.debug(f"| {node_summary(snode)}")  # noqa: G004
+    overlap_log.debug(
+        f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
+    )
+
+
 def reorder_compute_and_comm_for_overlap(
     snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
-    ret = snodes
+    order = snodes
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
-        ret = p(ret)  # type: ignore[operator]
-    return ret
+        if torch.distributed.get_rank() == 0:
+            overlap_log.debug(
+                f"==== Visualize overlap before reordering pass {p} ===="  # noqa: G004
+            )
+            visualize_overlap(order)
+        order = p(order)  # type: ignore[operator]
+        if torch.distributed.get_rank() == 0:
+            overlap_log.debug(
+                f"==== Visualize overlap after reordering pass {p} ===="  # noqa: G004
+            )
+            visualize_overlap(order)
+    return order

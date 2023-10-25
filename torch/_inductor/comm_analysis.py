@@ -40,7 +40,7 @@ for more information and license details.
 """
 
 import math
-from enum import Enum
+from enum import IntEnum
 
 import torch
 from . import ir
@@ -49,30 +49,33 @@ from .utils import get_dtype_size, sympy_product
 from .virtualized import V
 
 
-class NCCL_COLL(Enum):
+class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
 
 
-class NCCL_HW(Enum):
+class NCCL_HW(IntEnum):
     NVLINK = 0
     PCI = 1
     NET = 2
 
 
-class NCCL_ALGO(Enum):
+class NCCL_ALGO(IntEnum):
     TREE = 0
     RING = 1
 
 
-class NCCL_PROTO(Enum):
-    SIMPLE = 0
-    LL = 1
-    LL128 = 2
+class NCCL_PROTO(IntEnum):
+    # The ordering and enum values here matches original in
+    # https://github.com/NVIDIA/nccl/blob/0b083e52096c387bad7a5c5c65b26a9dca54de8c/src/include/devcomm.h#L28
+    # For difference between these protocols, see https://github.com/NVIDIA/nccl/issues/281#issuecomment-571816990
+    LL = 0  # Low-latency
+    # LL128 = 1   # Low-latency 128-byte
+    # SIMPLE = 2
 
 
-class NVIDIA_GPU_TYPE(Enum):
+class NVIDIA_GPU_TYPE(IntEnum):
     VOLTA = 0
     AMPERE = 1
     HOPPER = 2
@@ -200,6 +203,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
 
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
+    nccl_proto = NCCL_PROTO.LL
     coll = get_collective_type(snode)
 
     # =============== bandwidth computation ===============
@@ -212,7 +216,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     index2 = nNodes - 1 if nNodes <= 2 else 2
     # LL: for single node, we look at GPU type; for multi-node, we look at CPU type
     index1 = compCapIndex if nNodes == 1 else 0
-    llMaxBw = llMaxBws[index1][index2]
+    llMaxBw = llMaxBws[index1][index2].item()
 
     # NOTE: each step of ring algorithm is synchronized,
     # and is bottlenecked by the slowest link which is the inter-node interconnect.
@@ -254,11 +258,10 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
         nInterSteps = nNodes - 1
 
     # First compute latency in us; then at the end, convert it to ns
-    latency = baseLat[nccl_algo]
-    intraLat = hwLat[intraHw][nccl_algo]
-    interLat = hwLat[NCCL_HW.NET][nccl_algo]
+    latency = baseLat[nccl_algo][nccl_proto].item()
+    intraLat = hwLat[intraHw][nccl_algo][nccl_proto].item()
+    interLat = hwLat[NCCL_HW.NET][nccl_algo][nccl_proto].item()
 
-    lat = hwLat[hw][nccl_algo]
     # Inter-node rings still have to launch nsteps * net overhead.
     netOverhead = 0.0
     if nNodes > 1:

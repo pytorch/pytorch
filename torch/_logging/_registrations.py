@@ -90,5 +90,10 @@ register_artifact(
     "Detailed Inductor fusion decisions. More detailed than 'schedule'",
     off_by_default=True,
 )
+register_artifact(
+    "overlap",
+    "Detailed Inductor compute/comm overlap decisions",
+    off_by_default=True,
+)
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
