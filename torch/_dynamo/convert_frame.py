@@ -678,7 +678,6 @@ def _compile(
                 fail_reason,
                 fail_user_frame_summary,
             )
-            print("---->>>>>>  ", metrics)
             log_compilation_event(metrics)
 
 
