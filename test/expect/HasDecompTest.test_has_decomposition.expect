@@ -768,8 +768,6 @@ aten::from_file
 aten::from_file.out
 aten::full.names
 aten::full.names_out
-aten::full_like
-aten::full_like.out
 aten::gather
 aten::gather.out
 aten::geqrf
@@ -1046,8 +1044,6 @@ aten::rand.generator_with_names_out
 aten::rand.names
 aten::rand.names_out
 aten::rand.out
-aten::rand_like
-aten::rand_like.out
 aten::randint
 aten::randint.generator
 aten::randint.generator_out
@@ -1056,17 +1052,11 @@ aten::randint.low_generator
 aten::randint.low_generator_out
 aten::randint.low_out
 aten::randint.out
-aten::randint_like
-aten::randint_like.low_dtype
-aten::randint_like.low_dtype_out
-aten::randint_like.out
 aten::randn.generator
 aten::randn.generator_with_names
 aten::randn.generator_with_names_out
 aten::randn.names
 aten::randn.names_out
-aten::randn_like
-aten::randn_like.out
 aten::random
 aten::random.from
 aten::random.from_out
