@@ -1829,9 +1829,6 @@ if(MSVC)
   endforeach()
 endif()
 
-# Create a job pool with a limited number of jobs
-set_property(GLOBAL PROPERTY JOB_POOLS compile_pool=2)
-
 # TODO if this works we want this to be turned on for CI but for developers to turn off
 # And revert changes to -j on CI/CD to enable more parelleism for all files but these
 if(USE_FLASH_ATTENTION)
