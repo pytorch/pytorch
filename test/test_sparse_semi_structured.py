@@ -336,7 +336,7 @@ class TestSparseSemiStructured(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
     def test_cslt_sparse_mm_alpha(self, dtype, device):
-        A = torch.Tensor([0, 0, 1, 1]).tile((128, 128)).to(dtype).cuda()
+        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
 
