@@ -124,7 +124,7 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         assert self.ctx
         if trace_fn is None:
-            trace_fn = inference_graph
+            trace_fn = fwd_only
         replacement = trace_fn(
             replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
         )
@@ -435,7 +435,7 @@ class _TargetArgsExpr(_TargetExpr):
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         """
-        This is used when we are maching a pattern with multiple outputs.
+        This is used when we are matching a pattern with multiple outputs.
         There is a partial match (stored in ctx) and we want to walk
         this pattern to find a connection to an already-matched node.
 
@@ -857,12 +857,14 @@ def register_replacement(
         search_fn: traced to give original pattern
         replace_fn: traced to give replacement graph
         example_inputs: example inputs for initial trace
-        trace_fn: inference_graph or training_graph
+        trace_fn: fwd_only or joint_fwd_bwd
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
     if isinstance(scalar_workaround, dict):
         example_inputs = [*example_inputs, *scalar_workaround.values()]
+
+    argnames = [*inspect.signature(search_fn).parameters.keys()]
 
     def check_fn(match: Match):
         """
@@ -873,7 +875,10 @@ def register_replacement(
         """
         for name in argnames:
             if name not in match.kwargs:
-                raise RuntimeError(f"Not all inputs to pattern found in match.kwargs. Perhaps one of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}")
+                raise RuntimeError(
+                    f"Not all inputs to pattern found in match.kwargs. Perhaps one "
+                    f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
+                )
 
         args = list(
             torch.fx.map_arg(
@@ -895,7 +900,9 @@ def register_replacement(
                     )
             specific_graph = trace_fn(search_fn, args)
             specific_pattern = fx_to_pattern(
-                specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
+                specific_graph,
+                argnames=argnames,
+                exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
                 scalar_workaround=scalar_workaround,
             )
             specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
@@ -910,11 +917,13 @@ def register_replacement(
         for name in argnames:  # type: ignore[has-type]
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
+            if f"tangents_{i}" not in kwargs:
+                break
             args.append(kwargs.pop(f"tangents_{i}"))
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
-    if trace_fn is training_graph:
+    if trace_fn is joint_fwd_bwd:
         # If inference mode is enabled during compilation, assume that we don't
         # want to match on any training graph patterns
         if torch.is_inference_mode_enabled():
@@ -922,7 +931,6 @@ def register_replacement(
 
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
-        argnames = [*inspect.signature(search_fn).parameters.keys()]
         requires_grad: List[bool] = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
@@ -1182,7 +1190,7 @@ def fx_to_pattern(
 
 
 @torch.no_grad()
-def inference_graph(fn, args) -> torch.fx.GraphModule:
+def fwd_only(fn, args) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
@@ -1193,7 +1201,7 @@ def inference_graph(fn, args) -> torch.fx.GraphModule:
 
 
 @torch.enable_grad()
-def training_graph(fn, args) -> torch.fx.GraphModule:
+def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm: Optional[torch.fx.GraphModule] = None
 

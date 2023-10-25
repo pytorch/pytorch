@@ -1,18 +1,16 @@
-import torch
 import functools
 
-from ..pattern_matcher import (
-    inference_graph,
-    Match,
-    register_replacement,
-    training_graph,
-)
+import torch
+
+from ..pattern_matcher import fwd_only, register_replacement
+
 
 @functools.lru_cache(None)
 def _misc_patterns_init():
     from .joint_graph import patterns as joint_graph_patterns
-    from .post_grad import pass_patterns as post_grad_patterns
-    post_grad_patterns = post_grad_patterns[1] # medium priority
+    from .post_grad import pass_patterns as post_grad_patterns_all
+
+    post_grad_patterns = post_grad_patterns_all[1]  # medium priority
 
     if torch.cuda.is_available():
         # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -26,18 +24,23 @@ def _misc_patterns_init():
     # 2. Also, since we are guaranteed that they are completely within bounds,
     # we can use unsafe indexing and skip debug asserts
     def randperm_index_add_pattern(x, y):
-        index = torch.randperm(x.shape[0], device=x.device)[:y.shape[0]]
+        index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
         return torch.index_add(x, dim=0, source=y, index=index), index
 
     def randperm_index_add_replacement(x, y):
-        index = torch.randperm(x.shape[0], device=x.device)[:y.shape[0]]
-        return torch.ops.aten._unsafe_index_put(x, (index,), x[index] + y, accumulate=False), index
+        index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
+        return (
+            torch.ops.aten._unsafe_index_put(
+                x, (index,), x[index] + y, accumulate=False
+            ),
+            index,
+        )
 
     register_replacement(
         randperm_index_add_pattern,
         randperm_index_add_replacement,
         [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
-        inference_graph,
+        fwd_only,
         [post_grad_patterns, joint_graph_patterns],
     )
 
@@ -53,7 +56,7 @@ def _misc_patterns_init():
         randperm_index_pattern,
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],
-        inference_graph,
+        fwd_only,
         [post_grad_patterns, joint_graph_patterns],
-        scalar_workaround={'slice_shape': 42}
+        scalar_workaround={"slice_shape": 42},
     )

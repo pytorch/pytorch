@@ -7,9 +7,9 @@ import torch
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
-    inference_graph,
+    fwd_only,
+    joint_fwd_bwd,
     register_replacement,
-    training_graph,
 )
 
 log = logging.getLogger(__name__)
@@ -522,7 +522,7 @@ def _get_sfdp_patterns():
                 "search_fn": pattern,
                 "replace_fn": replacement,
                 "example_inputs": args,
-                "trace_fn": training_graph,
+                "trace_fn": joint_fwd_bwd,
                 "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
@@ -546,7 +546,7 @@ def _get_sfdp_patterns():
                 "search_fn": pattern,
                 "replace_fn": replacement,
                 "example_inputs": args,
-                "trace_fn": inference_graph,
+                "trace_fn": fwd_only,
                 "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
