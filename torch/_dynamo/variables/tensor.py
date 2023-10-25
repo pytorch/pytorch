@@ -289,6 +289,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
+                if name == "grad_fn":
+                    return variables.autograd.AutogradNodeVariable(
+                        self.as_proxy().node.meta["example_value"].grad_fn,
+                        self.as_proxy().grad_fn,
+                        **options,
+                    )
+
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
@@ -665,95 +672,7 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "register_hook":
-            # see [On tensor.register_hook]
-            assert len(args) == 1
-            fn_var = args[0]
-            if not isinstance(
-                fn_var,
-                (
-                    variables.functions.FunctoolsPartialVariable,
-                    variables.UserFunctionVariable,
-                    variables.TorchVariable,
-                    variables.NNModuleVariable,
-                ),
-            ):
-                unimplemented("Unexpected callable type passed to register_hook")
-
-            # Guards from the fn_var
-            options.update(VariableTracker.propagate(fn_var))
-
-            if isinstance(fn_var, variables.NestedUserFunctionVariable):
-                # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
-                # This should not be onerous to support when needed.
-                unimplemented("NYI - lambda variables as hooks")
-            elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
-                fn = fn_var.as_python_constant()
-                name = fn_var.func.fn.__name__
-            else:
-                fn = fn_var.fn
-                name = fn_var.fn.__name__
-
-            handle_variable = variables.user_defined.RemovableHandleVariable(
-                mutable_local=variables.base.MutableLocal(),
-                **options,
-            )
-
-            if not self.source:
-                # Intermediary
-                src = fn_var.source
-                if (
-                    not src
-                    and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
-                    and fn_var.func.source
-                ):
-                    src = fn_var.func.source
-
-                if not src:
-                    unimplemented("No source for register_hook target fn")
-
-                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
-
-                if not compiled_autograd.compiled_autograd_enabled:
-                    # TODO(voz):
-                    # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
-                    # python state.
-                    # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
-                    # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
-                    #
-                    # Discussion point 1 - Should we bypass this if nopython/fullgraph = True?
-                    #   No. Because this was going to be a graph break anyway - this check does not
-                    # introduce new graph breaks where there were none.
-                    #
-                    # Discussion point 2 - Should we defer this check to backwards?
-                    #   No. Because compiled autograd is not yet ready for prime time. As such, if we defer, a user
-                    # would have no recourse - their forward traces just fine, but will fail at backwards unless
-                    # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
-                    # then they have nothing they can do except disable compile.
-                    unimplemented(
-                        "Compilation of intermediate hooks requires compiled autograd"
-                    )
-
-                # This wraps our user provided fn with a function that intercedes and
-                # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-                fn = functools.partial(trace_wrapped, fn=fn)
-
-                def _register_hook_trampoline(tensor):
-                    tensor.register_hook(fn)
-                    return tensor
-
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function",
-                        _register_hook_trampoline,
-                        (self.as_proxy(),),
-                        {},
-                    ),
-                    **options,
-                )
-
-            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
-            return handle_variable
+            return _register_hook(self, tx, args, kwargs)
         elif name == "requires_grad_" and self.as_proxy().node.meta[
             "example_value"
         ].requires_grad != (args[0].value if len(args) > 0 else True):
@@ -1010,3 +929,97 @@ class TensorSubclassVariable(VariableTracker):
             )
 
         return super().call_function(tx, args, kwargs)
+
+
+def _register_hook(variable, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]):
+    assert isinstance(variable, (TensorVariable, torch._dynamo.variables.autograd.AutogradNodeVariable))
+    options = VariableTracker.propagate(variable)
+    # see [On tensor.register_hook]
+    assert len(args) == 1
+    fn_var = args[0]
+    if not isinstance(
+        fn_var,
+        (
+            variables.functions.FunctoolsPartialVariable,
+            variables.UserFunctionVariable,
+            variables.TorchVariable,
+            variables.NNModuleVariable,
+        ),
+    ):
+        unimplemented("Unexpected callable type passed to register_hook")
+
+    # Guards from the fn_var
+    options.update(VariableTracker.propagate(fn_var))
+
+    if isinstance(fn_var, variables.NestedUserFunctionVariable):
+        # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
+        # This should not be onerous to support when needed.
+        unimplemented("NYI - lambda variables as hooks")
+    elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+        fn = fn_var.as_python_constant()
+        name = fn_var.func.fn.__name__
+    else:
+        fn = fn_var.fn
+        name = fn_var.fn.__name__
+
+    handle_variable = variables.user_defined.RemovableHandleVariable(
+        mutable_local=variables.base.MutableLocal(),
+        **options,
+    )
+
+    if not variable.source:
+        # Intermediary
+        src = fn_var.source
+        if (
+            not src
+            and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
+            and fn_var.func.source
+        ):
+            src = fn_var.func.source
+
+        if not src:
+            unimplemented("No source for register_hook target fn")
+
+        tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+
+        if not compiled_autograd.compiled_autograd_enabled:
+            # TODO(voz):
+            # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
+            # python state.
+            # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
+            # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
+            #
+            # Discussion point 1 - Should we bypass this if nopython/fullgraph = True?
+            #   No. Because this was going to be a graph break anyway - this check does not
+            # introduce new graph breaks where there were none.
+            #
+            # Discussion point 2 - Should we defer this check to backwards?
+            #   No. Because compiled autograd is not yet ready for prime time. As such, if we defer, a user
+            # would have no recourse - their forward traces just fine, but will fail at backwards unless
+            # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
+            # then they have nothing they can do except disable compile.
+            unimplemented(
+                "Compilation of intermediate hooks requires compiled autograd"
+            )
+
+        # This wraps our user provided fn with a function that intercedes and
+        # uses our `invoke` higher order op to record a hook invocation in bwd graph.
+        fn = functools.partial(trace_wrapped, fn=fn)
+
+        def _register_hook_trampoline(tensor):
+            tensor.register_hook(fn)
+            return tensor
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                _register_hook_trampoline,
+                (variable.as_proxy(),),
+                {},
+            ),
+            **options,
+        )
+
+    tx.output.side_effects.register_hook(variable, fn_var, handle_variable)
+    return handle_variable

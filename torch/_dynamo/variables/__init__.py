@@ -22,6 +22,9 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .autograd import (
+    AutogradNodeVariable
+)
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
