@@ -364,6 +364,34 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_data_dependent_evaluate_expr_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # To ensure that the continuation frame is compiled,
+        # have to write the test function in this funny way.
+        # See https://github.com/pytorch/pytorch/issues/111918
+        def test(y):
+            if y > 2:
+                return True
+            else:
+                return False
+
+        @torch._dynamo.optimize(cnts)
+        def fn(x):
+            x = x + 1
+            y = x.item()
+            if test(y):
+                return x * 2
+            else:
+                return x * 3
+
+        x = torch.tensor([3.0])
+        fn(x)
+
+        self.assertExpectedInline(cnts.frame_count, """2""")
+        self.assertExpectedInline(cnts.op_count, """3""")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
