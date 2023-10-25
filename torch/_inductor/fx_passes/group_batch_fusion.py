@@ -468,6 +468,67 @@ class BatchLayernormFusion(BatchFusion):
             graph.erase_node(node)
 
 
+class BatchReLUFusion(BatchFusion):
+    """
+    Batch relu fusion in pre grad pass.
+    We only fuse the relu if the input is after same split/unbind node.
+    """
+    def _getitem_args(self, getitem_node: torch.fx.Node):
+        if getitem_node.target != operator.__getitem__ or (
+            getitem_node.op != "call_function"
+        ):
+            return None
+        return getitem_node.args[0]
+
+    def match(self, node: torch.fx.Node):
+
+        input = get_arg_value(node, 0, "input")
+        if (
+            CallFunctionVarArgs(torch.nn.functional.relu).match(node)
+            and is_node_meta_valid(node)
+            and self._getitem_args(input) is not None
+        ):
+            group_key = (
+                "batch_relu",
+                self._getitem_args(input),
+                str(input.meta["example_value"].shape),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_nodes = []
+        batch_inputs = []
+
+        for node in subset:
+            batch_nodes.append(node)
+            batch_inputs.append(get_arg_value(node, 0, "input"))
+
+        # assume all the nodes to be batched have the same inplace
+        inplace = subset[0].kwargs.get("inplace", False)
+        with graph.inserting_before(subset[0]):
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
+
+            batch_relu = graph.call_function(
+                torch.nn.functional.relu,
+                args=(stack_inputs,),
+                kwargs={"inplace": inplace},
+            )
+            unbind_relu = graph.call_function(
+                torch.unbind, args=(batch_relu,), kwargs={"dim": 0}
+            )
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(unbind_relu):
+                    getitem = graph.call_function(
+                        operator.getitem, args=(unbind_relu, i)
+                    )
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)
+
+
+
 def find_independent_subset_greedy(
     node_list: List[torch.fx.Node],
 ) -> Iterator[List[torch.fx.Node]]:
@@ -599,6 +660,7 @@ def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
             BatchLinearLHSFusion(),
             BatchLayernormFusion(),
             BatchTanhFusion(),
+            BatchReLUFusion(),
         ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
