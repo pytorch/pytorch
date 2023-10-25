@@ -39,26 +39,6 @@ struct attn_fwd {
 };
 
 
-template struct attn_fwd<3 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         16 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<3 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         32 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<3 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         64 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<3 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         128 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
 template struct attn_fwd<1 /* STAGE */,
                          128 /* BLOCK_M */,
                          16 /* BLOCK_DMODEL */,
