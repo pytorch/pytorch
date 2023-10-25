@@ -4,6 +4,7 @@ import traceback
 import torch
 import weakref
 import functools
+import re
 
 __all__ = [
     'Library',
@@ -177,6 +178,9 @@ def _del_library(captured_impls, op_impls, registration_handles):
 _keep_alive = []
 
 
+NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")
+
+
 @functools.singledispatch
 def define(qualname, schema, *, lib=None, tags=()):
     r"""Defines a new operator.
@@ -198,7 +202,9 @@ def define(qualname, schema, *, lib=None, tags=()):
             avoid name collisions; a given operator may only be created once.
             If you are writing a Python library, we recommend the namespace to
             be the name of your top-level module.
-        schema (str): The schema of the operator.
+        schema (str): The schema of the operator. E.g. "(Tensor x) -> Tensor"
+            for an op that accepts one Tensor and returns one Tensor. It does
+            not contain the operator name (that is passed in ``qualname``).
         lib (Optional[Library]): If provided, the lifetime of this operator
             will be tied to the lifetime of the Library object.
         tags (Tag | Sequence[Tag]): one or more torch.Tag to apply to this
@@ -233,6 +239,11 @@ def define(qualname, schema, *, lib=None, tags=()):
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
+    if not NAMELESS_SCHEMA.fullmatch(schema):
+        raise ValueError(
+            f"define(qualname, schema, ...): expected schema "
+            f"to look like e.g. \"(Tensor x) -> Tensor\" but "
+            f"got \"{schema}\"")
     lib.define(name + schema, alias_analysis="", tags=tags)
 
 
