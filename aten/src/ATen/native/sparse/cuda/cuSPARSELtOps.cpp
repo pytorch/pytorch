@@ -240,20 +240,19 @@ at::Tensor _cslt_sparse_mm(
         &handle, &matmul, CUSPARSELT_MATMUL_BIAS_POINTER, &dBias, sizeof(dBias)));
   }
 
-  // set tensor_alpha_mode and alpha pointer for matmut
-  at::Tensor alpha_tensor;
-  if (alpha_opt.has_value()) {
-    alpha_tensor = alpha_opt.value();
-    tensor_alpha_mode = 1;
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-        &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
-  }
-
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
       &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT));
 
   TORCH_CUDASPARSE_CHECK(
       cusparseLtMatmulPlanInit(&handle, &plan, &matmul, &alg_sel));
+
+  // set tensor_alpha_mode and alpha pointer for matmut
+  const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt: Tensor{};
+  if (alpha_opt.has_value()) {
+    tensor_alpha_mode = 1;
+    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+        &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
+  }
 
   size_t workspace_size;
   TORCH_CUDASPARSE_CHECK(
