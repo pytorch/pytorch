@@ -446,7 +446,11 @@ def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[Any]]:
+def _broadcast_to_and_flatten(
+    pytree: PyTree,
+    spec: TreeSpec,
+    replace_spec_types: Optional[Dict[Any, Any]] = None
+) -> Optional[List[Any]]:
     assert isinstance(spec, TreeSpec)
 
     if _is_leaf(pytree):
@@ -454,7 +458,10 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
     if isinstance(spec, LeafSpec):
         return None
     node_type = _get_node_type(pytree)
-    if node_type != spec.type:
+    if replace_spec_types and spec.type in replace_spec_types:
+        if replace_spec_types[spec.type] != node_type:
+            return None
+    elif node_type != spec.type:
         return None
 
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
@@ -467,7 +474,7 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
     # Recursively flatten the children
     result : List[Any] = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):
-        flat = _broadcast_to_and_flatten(child, child_spec)
+        flat = _broadcast_to_and_flatten(child, child_spec, replace_spec_types)
         if flat is not None:
             result += flat
         else:

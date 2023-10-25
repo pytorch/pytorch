@@ -86,7 +86,11 @@ def _process_batched_inputs(
             f'The latter is unsupported.')
 
     flat_args, args_spec = tree_flatten(args)
-    flat_in_dims = _broadcast_to_and_flatten(in_dims, args_spec)
+    flat_in_dims = _broadcast_to_and_flatten(
+        in_dims,
+        args_spec,
+        replace_spec_types={torch.Size: tuple}
+    )
     if flat_in_dims is None:
         raise ValueError(
             f'vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): '
