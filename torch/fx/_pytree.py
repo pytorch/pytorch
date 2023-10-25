@@ -67,7 +67,7 @@ register_pytree_flatten_spec(dict, _dict_flatten_spec, _dict_flatten_spec_exact_
 register_pytree_flatten_spec(list, _list_flatten_spec, _list_flatten_spec_exact_match)
 register_pytree_flatten_spec(tuple, _tuple_flatten_spec, _tuple_flatten_spec_exact_match)
 register_pytree_flatten_spec(namedtuple, _namedtuple_flatten_spec, _tuple_flatten_spec_exact_match)
-def lazy_register():
+def _lazy_register():
     import torch
     register_pytree_flatten_spec(torch.Size, _tuple_flatten_spec, _tuple_flatten_spec_exact_match)
-lazy_register()
+_lazy_register()
