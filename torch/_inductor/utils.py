@@ -137,8 +137,8 @@ def do_bench(*args, **kwargs):
             # NB: Lazily load triton, as importing triton is slow
             # see https://github.com/openai/triton/issues/1599
             from triton.testing import do_bench as triton_do_bench
-        except ImportError:
-            raise NotImplementedError("requires Triton")
+        except ImportError as exc:
+            raise NotImplementedError("requires Triton") from exc
 
         # triton PR https://github.com/openai/triton/pull/1513 change the
         # quantile fields name from 'percentiles' to 'quantiles'
@@ -264,6 +264,21 @@ def is_view(op: torch._ops.OpOverload):
     """
     assert isinstance(op, torch._ops.OpOverload)
     return any(a.alias_info is not None for a in op._schema.arguments)
+
+
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    if use.target is operator.getitem or is_view(use.target):
+        return all(is_pointwise_use(u) for u in use.users)
+
+    return torch.Tag.pointwise in use.target.tags
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -691,6 +706,9 @@ class IndentedBuffer:
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
+
+    def newline(self):
+        self.writeline("\n")
 
     def writeline(self, line):
         if isinstance(line, LineContext):
@@ -1213,6 +1231,31 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
+def has_free_symbols(itr):
+    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if has_free_symbols(t.data.get_size()) or (
+                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+            ):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
+
+
 # Placeholder strings used in triton codegen.
 class Placeholder(enum.Enum):
     # The placeholder for the actual name of a triton kernel.
@@ -1225,73 +1268,26 @@ class Placeholder(enum.Enum):
 
 
 # A utility function for easier AOTInductor testing
-aot_inductor_launcher = """
-#ifdef USE_CUDA
-    #include <c10/cuda/CUDAStream.h>
-#endif // USE_CUDA
-    #include <torch/csrc/inductor/aoti_runtime/interface.h>
-    #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+def aot_inductor_launcher(so_path: str, device: str):
+    if device == "cuda":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 
-    class RAIIModelContainer {
-    public:
-        RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
-                &container_handle,
-                1 /*num_models*/,
-                false /*is_cpu*/,
-                nullptr /*cubin_dir*/));
-        }
+            torch::inductor::AOTIModelRunnerCuda runner("{so_path}");
 
-        ~RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(
-                AOTInductorModelContainerDelete(container_handle));
-        }
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
+        """
+    elif device == "cpu":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner.h>
 
-        AOTInductorModelContainerHandle get() const {
-            return container_handle;
-        }
+            torch::inductor::AOTIModelRunnerCpu runner("{so_path}");
 
-    private:
-        AOTInductorModelContainerHandle container_handle;
-    };
-
-    // Global instance
-    RAIIModelContainer model_container;
-
-    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
-        auto input_handles =
-            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
-
-        // For outputs, we only allocate a vector to hold returned tensor handles,
-        // not allocating the actual output tensor storage here
-        size_t num_outputs;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(
-            AOTInductorModelContainerGetNumOutputs(
-                model_container.get(),
-                &num_outputs));
-        std::vector<AtenTensorHandle> output_handles(num_outputs);
-
-#ifdef USE_CUDA
-        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
-        const auto stream_id = cuda_stream.stream();
-        AOTInductorStreamHandle stream_handle =
-            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-#else // !USE_CUDA
-        AOTInductorStreamHandle stream_handle = nullptr;
-#endif
-
-        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
-
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            model_container.get(),
-            input_handles.data(),
-            input_tensors.size(),
-            output_handles.data(),
-            output_handles.size(),
-            stream_handle,
-            proxy_executor_handle));
-
-        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-            output_handles.data(), output_handles.size());
-    }
-"""
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
+        """
+    else:
+        raise RuntimeError(f"Unsupported device: {device}")

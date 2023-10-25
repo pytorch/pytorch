@@ -625,13 +625,6 @@ class DeallocFromPoolLine(PoolMemoryPlanningLine):
             self.group.allocation.pool.codegen_destroy(self.wrapper, code)
 
 
-class ReuseFromPoolLine(ReuseLine):
-    """Same as ReuseLine, but doesn't delete old variable"""
-
-    def codegen(self, code: IndentedBuffer, delete_old=False):
-        super().codegen(code, delete_old=False)
-
-
 @dataclasses.dataclass
 class MemoryPlanner:
     """
@@ -713,9 +706,7 @@ class MemoryPlanner:
                     )
             elif isinstance(line, ReuseLine):
                 if line.node.get_name() in name_to_group:
-                    lines[i] = ReuseFromPoolLine(
-                        self.wrapper, line.node, line.reused_as
-                    )
+                    line.delete_old = False
 
     def compute_live_ranges(self, lines):
         """Populate every BufferGroup.live_ranges field based on first/last usage"""
