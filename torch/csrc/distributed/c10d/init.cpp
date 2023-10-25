@@ -3,6 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
@@ -799,6 +800,26 @@ This class does not support ``__members__`` property.)");
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
+
+  // TODO(yifu): _{register, resolve}_process_group currently only work for
+  // c10d_functional. Later, we'll unify the name -> group mapping across
+  // Python and C++, and spanning both functional and non-functional
+  // collectives.
+  module.def(
+      "_register_process_group",
+      [](const std::string& group_name,
+         c10::intrusive_ptr<::c10d::ProcessGroup> group) {
+        ::c10d::register_process_group(group_name, group);
+      },
+      py::arg("group_name"),
+      py::arg("group"));
+
+  module.def(
+      "_resolve_process_group",
+      [](const std::string& group_name) {
+        return ::c10d::resolve_process_group(group_name);
+      },
+      py::arg("group_name"));
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
