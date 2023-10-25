@@ -18,7 +18,7 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, exporter
 from torch.onnx._internal.fx import (
     fx_symbolic_graph_extractor,
     patcher,
@@ -684,9 +684,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
-                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
-                    options
-                )
+                export_options = exporter.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
@@ -813,6 +811,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
+        )
+
+    def test_exported_program_as_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        # TODO: Support dynamic shape
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
 
