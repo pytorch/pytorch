@@ -2022,14 +2022,6 @@ def forward(self, tangents_1):
         model_for_eager = MyModel()
         model_for_compile = copy.deepcopy(model_for_eager)
 
-        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
-        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
-
-        print(eager_version_counters, compile_version_counters)
-
-        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
-        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
-
         fw_graph_cell = [None]
         compiled_f = aot_module(
             model_for_compile,
@@ -2042,10 +2034,6 @@ def forward(self, tangents_1):
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
-
-        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
-        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
-        print(eager_version_counters, compile_version_counters)
 
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3, primals_4):
@@ -2083,11 +2071,6 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         model_for_eager = MyModel()
         model_for_compile = copy.deepcopy(model_for_eager)
 
-        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
-        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
-
-        print(eager_version_counters, compile_version_counters)
-
         fw_graph_cell = [None]
         compiled_f = aot_module(
             model_for_compile,
@@ -2100,11 +2083,6 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
-
-        eager_version_counters = [buffer._version for _, buffer in model_for_eager.named_buffers()]
-        compile_version_counters = [buffer._version for _, buffer in model_for_compile.named_buffers()]
-
-        print(eager_version_counters, compile_version_counters)
 
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
@@ -2139,12 +2117,6 @@ def forward(self, primals_1, primals_2, primals_3):
         model_for_eager = MyModel()
         model_for_compile = copy.deepcopy(model_for_eager)
 
-        for name, buffer in model_for_eager.named_buffers():
-            print("EAGER", buffer._version)
-
-        for name, buffer in model_for_compile.named_buffers():
-            print(buffer._version)
-
         fw_graph_cell = [None]
         bw_graph_cell = [None]
         compiled_f = aot_module(
@@ -2158,12 +2130,6 @@ def forward(self, primals_1, primals_2, primals_3):
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
-
-        for name, buffer in model_for_eager.named_buffers():
-            print("EAGER", buffer._version)
-
-        for name, buffer in model_for_compile.named_buffers():
-            print(buffer._version)
 
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
@@ -2197,6 +2163,41 @@ def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem
     return [getitem_6, getitem_7, None, None, None, getitem_5]""")  # noqa: B950
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_new_inp_requires_grad_now(self):
+        def f(x, y):
+            return x.add_(y)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
+            keep_inference_input_mutations=True,
+        )
+
+        inp_ref = (torch.ones(20, 100, requires_grad=False), torch.ones(20, 100, requires_grad=True))
+        inp_test = (torch.ones(20, 100, requires_grad=False), torch.ones(20, 100, requires_grad=True))
+
+        out_ref = f(*inp_ref)
+        out_test = compiled_f(*inp_test)
+
+        # There is no copy_ method
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    add = torch.ops.aten.add.Tensor(clone, primals_2);  clone = primals_2 = None
+    return [add, add]""")  # noqa: B950
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, tangents_1):
+    return [None, tangents_1]""")  # noqa: B950
 
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize

@@ -1083,8 +1083,8 @@ def compile_fx(
             context = torch._guards.TracingContext.get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
-                original_output_start_index = len(
-                    context.fw_metadata.mutated_inp_runtime_indices
+                original_output_start_index = (
+                    context.fw_metadata.num_mutated_inp_runtime_indices
                 )
             else:
                 original_output_start_index = 0
