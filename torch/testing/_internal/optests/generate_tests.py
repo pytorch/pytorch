@@ -4,6 +4,7 @@ import functools
 import inspect
 import json
 import os
+import re
 import tempfile
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -333,6 +334,8 @@ def validate_failures_dict_structure(
                 if not actual_test_name.startswith(test):
                     continue
                 base_test_name = actual_test_name[len(test) + 2 :]
+                # remove potential pytest parametrization suffix
+                base_test_name = re.sub(r"\[.*\]", "", base_test_name)
                 if testcase.__name__ != test_class:
                     continue
                 if hasattr(testcase, base_test_name):
@@ -449,11 +452,14 @@ class OpCheckMode(TorchFunctionMode):
 
     def __enter__(self, *args, **kwargs):
         self.prev_is_opcheck_mode = _is_inside_opcheck_mode.value
+        self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
         _is_inside_opcheck_mode.value = True
+        os.environ["TORCHDYNAMO_DISABLE"] = "1"
         return super().__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
+        os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
