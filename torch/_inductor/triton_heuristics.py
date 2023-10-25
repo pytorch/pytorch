@@ -1081,8 +1081,8 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
 
     configs = [
         triton_config_reduction(size_hints, xblock, rnumel)
-        for xblock in (1, 8, 32, 128, 512)
-        if rnumel * xblock <= 4096 * 4 and xblock <= xnumel
+        for xblock in (1, 8, 32, 128)
+        if rnumel * xblock <= 4096 and xblock <= xnumel
     ]
 
     # TODO(jansel): we should be able to improve these heuristics
@@ -1095,7 +1095,13 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
             triton_config_reduction(
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
-        ]
+        ]    
+    elif reduction_hint == ReductionHint.DEFAULT:
+        configs += [
+            triton_config_reduction(size_hints, xblock, rnumel)
+            for xblock in (256, 512)
+            if rnumel * xblock <= 4096 * 4 and xblock <= xnumel
+        ]        
     for c in configs:
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
