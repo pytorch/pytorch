@@ -29,6 +29,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
+from torch._logging import warning_once
 from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -1085,7 +1086,9 @@ class PatternMatcherPass:
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+                        warning_once(
+                            log, "%s%s %s %s", node, node.args, m, entry.pattern
+                        )
                     if is_match(m) and entry.extra_check(m):
                         count += 1
                         entry.apply(m, graph, node)

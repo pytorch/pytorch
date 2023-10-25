@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -91,13 +92,13 @@ class ErrorHandler:
         Modify the rootcause_error read from the file, to correctly set the exit code.
         """
         if "message" not in rootcause_error:
-            log.warning(
+            warning_once(log,
                 "child error file (%s) does not have field `message`. \n"
                 "cannot override error code: %s",
                 rootcause_error_file, error_code
             )
         elif isinstance(rootcause_error["message"], str):
-            log.warning(
+            warning_once(log,
                 "child error file (%s) has a new message format. \n"
                 "skipping error code override",
                 rootcause_error_file
@@ -147,14 +148,14 @@ class ErrorHandler:
             with open(my_error_file) as fp:
                 try:
                     original = json.dumps(json.load(fp), indent=2)
-                    log.warning(
+                    warning_once(log,
                         "%s already exists"
                         " and will be overwritten."
                         " Original contents:\n%s",
                         my_error_file, original
                     )
                 except json.decoder.JSONDecodeError as err:
-                    log.warning(
+                    warning_once(log,
                         "%s already exists"
                         " and will be overwritten."
                         " Unable to load original contents:\n",

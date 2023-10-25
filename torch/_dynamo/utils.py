@@ -30,6 +30,8 @@ from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
+from torch._logging import warning_once
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -369,8 +371,10 @@ def gen_record_file_name(exc, code):
 def write_record_to_file(filename, exec_record):
     try:
         if os.path.exists(filename):
-            log.warning(
-                "Unable to write execution record %s; file already exists.", filename
+            warning_once(
+                log,
+                "Unable to write execution record %s; file already exists.",
+                filename,
             )
         else:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -954,7 +958,7 @@ def wrap_fake_exception(fn):
         from .exc import unimplemented
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
-        log.warning(msg)
+        warning_once(log, msg)
         raise unimplemented(msg) from e
 
 
@@ -1070,7 +1074,7 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                log.warning("Similarity score=%s", score.cpu().detach().item())
+                warning_once(log, "Similarity score=%s", score.cpu().detach().item())
             return score >= 0.99
         else:
             if not exact_dtype:
@@ -1085,8 +1089,9 @@ def same(
                 ref_error = rmse(fp64_ref, ref).item()
                 # ref unable to produce this with stable numerics in this precision, ignore
                 if math.isnan(ref_error):
-                    log.warning(
-                        "Found nan in reference. Consider running in higher precision."
+                    warning_once(
+                        log,
+                        "Found nan in reference. Consider running in higher precision.",
                     )
 
                 res_error = rmse(fp64_ref, res).item()

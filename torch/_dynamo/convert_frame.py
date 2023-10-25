@@ -9,6 +9,8 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from torch._logging import warning_once
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -348,7 +350,8 @@ def convert_frame_assert(
             if config.report_guard_failures:
                 assert code in guard_failures, "TODO(whc) any other recompile reasons?"
 
-                log.warning(
+                warning_once(
+                    log,
                     "torch._dynamo hit config.cache_size_limit (%s)\n"
                     "   function: %s\n"
                     "   reasons:  %s\n"
@@ -359,7 +362,8 @@ def convert_frame_assert(
                     troubleshooting_url,
                 )
             else:
-                log.warning(
+                warning_once(
+                    log,
                     "torch._dynamo hit config.cache_size_limit (%s)\n"
                     "   function: %s\n"
                     "to diagnose recompilation issues, set env variable TORCHDYNAMO_REPORT_GUARD_FAILURES=1"
@@ -716,7 +720,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             if soft_fail:
                 log.info(error_msg, exc_info=True)
             else:
-                log.warning(error_msg, exc_info=True)
+                warning_once(log, error_msg, exc_info=True)
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]

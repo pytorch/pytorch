@@ -37,6 +37,7 @@ import sympy
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._logging import warning_once
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
@@ -775,7 +776,7 @@ class DeferredLineBase:
 def is_big_gpu(index):
     sms = torch.cuda.get_device_properties(index).multi_processor_count
     if sms < 80:  # V100
-        log.warning("not enough SMs to use max_autotune_gemm mode")
+        warning_once(log, "not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
@@ -824,10 +825,11 @@ def use_cutlass_template(layout):
 
     if res:
         if not try_import_cutlass():
-            log.warning(
+            warning_once(
+                log,
                 "Failed to import CUTLASS lib. Please check whether "
                 "_inductor.config.cuda.cutlass_dir is set correctly. "
-                "Skipping CUTLASS backend for now."
+                "Skipping CUTLASS backend for now.",
             )
             return False
     return res
@@ -925,7 +927,7 @@ def developer_warning(msg):
     keep them on for nightly builds.
     """
     if config.developer_warnings:
-        log.warning(msg)
+        warning_once(log, msg)
     else:
         log.info(msg)
 
@@ -954,7 +956,9 @@ def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
     except ImportError:
-        log.warning("Colorama is not installed. Install it if you want colored output")
+        warning_once(
+            log, "Colorama is not installed. Install it if you want colored output"
+        )
 
     return info_str
 

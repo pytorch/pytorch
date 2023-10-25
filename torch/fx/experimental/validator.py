@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 import functools
 import logging
 import math
@@ -523,7 +524,7 @@ try:
                     # Could not find a solution. It didn't fail, but it also
                     # didn't succeed. Canceling the validation execution (keyboard
                     # interrupt) also gets to this branch.
-                    log.warning("translation validation: could not validate: got z3.unknown")
+                    warning_once(log,"translation validation: could not validate: got z3.unknown")
                 else:
                     # Target expressions are sound.
                     assert r == z3.unsat

@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -77,7 +78,7 @@ def create_c10d_store(
             # TODO properly map the exceptions in pybind (c10d/init.cpp)
             if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
                 if attempt < retries:
-                    log.warning(
+                    warning_once(log,
                         "port: %s already in use, attempt: [%s/%s]", port, attempt, retries
                     )
                     attempt += 1

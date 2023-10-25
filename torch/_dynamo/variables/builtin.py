@@ -9,6 +9,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch._logging import warning_once
 
 from .. import config, polyfill, variables
 from ..allowed_functions import is_allowed
@@ -625,7 +626,8 @@ class BuiltinVariable(VariableTracker):
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
                 if not has_constant_handler:
-                    log.warning(
+                    warning_once(
+                        log,
                         "incorrect arg count %s %s and no constant handler",
                         handler,
                         exc,

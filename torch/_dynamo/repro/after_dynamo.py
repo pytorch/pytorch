@@ -28,6 +28,7 @@ from torch._dynamo.debug_utils import (
     run_fwd_maybe_bwd,
     same_two_models,
 )
+from torch._logging import warning_once
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
 from torch.hub import tqdm
 
@@ -79,8 +80,9 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                 # Check Accuracy
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-                    log.warning(
-                        "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
+                    warning_once(
+                        log,
+                        "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error.",
                     )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
@@ -95,8 +97,9 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                     compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
-                    log.warning(
-                        "Compiled Fx GraphModule failed. Creating script to minify the error."
+                    warning_once(
+                        log,
+                        "Compiled Fx GraphModule failed. Creating script to minify the error.",
                     )
                     if config.repro_level == 1:
                         dump_state_fn = functools.partial(
@@ -195,8 +198,8 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
-    log.warning(
-        "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
+    warning_once(
+        log, "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
 
     with open(file_name, "w") as fd:
@@ -206,7 +209,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
             )
         )
     latest_repro = os.path.join(curdir, "repro.py")
-    log.warning("Copying %s to %s for convenience", file_name, latest_repro)
+    warning_once(log, "Copying %s to %s for convenience", file_name, latest_repro)
 
     if use_buck:
         BuckTargetWriter(latest_repro).write()
@@ -273,8 +276,8 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
         raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
-        log.warning(
-            "Compiled Fx GraphModule failed. Creating script to minify the error."
+        warning_once(
+            log, "Compiled Fx GraphModule failed. Creating script to minify the error."
         )
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name
@@ -307,7 +310,7 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     if backend_accuracy_fails(
         gm, example_inputs, compiler_fn, only_fwd=config.repro_forward_only
     ):
-        log.warning("Accuracy failed for the TorchDynamo produced graph")
+        warning_once(log, "Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
@@ -362,13 +365,15 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
 
 def run_load_args(options, mod, load_args):
     if not hasattr(load_args, "_version"):
-        log.warning(
+        warning_once(
+            log,
             "load_args does not have a _version attribute, please file a bug to PyTorch "
-            "and describe how you generate this repro script"
+            "and describe how you generate this repro script",
         )
     else:
         if load_args._version > 0:
-            log.warning(
+            warning_once(
+                log,
                 "load_args is version %s, but this version of PyTorch only supports "
                 "version 0.  We will try to run it anyway but there may be an incompatibility; "
                 "if so, try upgrading your version of PyTorch.",
@@ -452,7 +457,8 @@ def run_repro(
     **kwargs,
 ):
     for k in kwargs:
-        log.warning(
+        warning_once(
+            log,
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
             k,
         )

@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 ## @package memonger
 # Module caffe2.python.memonger
 
@@ -191,7 +192,7 @@ def estimate_memory_usage(protos, shapes, types, devicescope):
 
     def num_bytes(blob):
         if blob not in shapes or blob not in types:
-            log.warning("Unknown blob encountered: {}".format(blob))
+            warning_once(log,"Unknown blob encountered: {}".format(blob))
             return 0
         sizeof = sizeofs[types[blob]]
         return sizeof * np.prod(shapes[blob])
@@ -467,7 +468,7 @@ def topological_sort_traversal(g):
 
 def compute_ranges(linearized_ops, blob_sizes=None):
     if not blob_sizes:
-        log.warning('Provide blob sizes to get more accurate assignments.')
+        warning_once(log,'Provide blob sizes to get more accurate assignments.')
 
     blobs = collections.defaultdict(
         lambda: LiveRange(defined=None, used=None, size=None))
@@ -973,7 +974,7 @@ def blob_nbytes(blob):
     try:
         sz = workspace.FetchBlob(blob).nbytes
     except Exception:
-        log.warning('Error when fetching blob {}'.format(blob))
+        warning_once(log,'Error when fetching blob {}'.format(blob))
     return sz
 
 

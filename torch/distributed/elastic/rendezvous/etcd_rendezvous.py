@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -183,7 +184,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
             self.set_closed()
             return True
         except BaseException as e:
-            log.warning("Shutdown failed. Error occurred: %s", str(e))
+            warning_once(log,"Shutdown failed. Error occurred: %s", str(e))
             return False
 
 

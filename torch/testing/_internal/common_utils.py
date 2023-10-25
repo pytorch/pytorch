@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 r"""Importing this file must **not** initialize CUDA context. test_distributed
 relies on this assumption to properly run. This means that when this is imported
 no CUDA calls shall be made, including torch.cuda.device_count(), etc.
@@ -93,6 +94,7 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
+from torch._logging import warning_once
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -205,7 +207,7 @@ def maybe_load_json(filename):
     if os.path.isfile(filename):
         with open(filename) as fp:
             return json.load(fp)
-    log.warning("Attempted to load json file '%s' but it does not exist.", filename)
+    warning_once(log,"Attempted to load json file '%s' but it does not exist.", filename)
     return {}
 
 # set them here in case the tests are running in a subprocess that doesn't call run_tests

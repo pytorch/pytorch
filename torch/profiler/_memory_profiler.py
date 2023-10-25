@@ -29,6 +29,7 @@ from torch._C._profiler import (
     _TensorMetadata,
     RecordScope,
 )
+from torch._logging import warning_once
 from torch._utils import _element_size
 from torch.profiler import _utils
 
@@ -376,7 +377,9 @@ class SizeMap:
                     # the core PyTorch codebase.
                     if prior_size != new_size:
                         delta = f"{prior_size} vs. {new_size}"
-                        log.warning("Mismatch between allocation and free: %s", delta)
+                        warning_once(
+                            log, "Mismatch between allocation and free: %s", delta
+                        )
 
         self._values.update(allocations)
 

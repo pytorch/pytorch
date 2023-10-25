@@ -19,6 +19,7 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._logging import warning_once
 from torch._prims_common import type_to_dtype
 
 from . import config, inductor_prims
@@ -84,7 +85,7 @@ remove_decompositions(decompositions, decomps_to_exclude)
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning("duplicate decomp: %s", ops)
+            warning_once(log, "duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
 
 

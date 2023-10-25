@@ -50,6 +50,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
+from torch._logging import warning_once
 from torch._prims_common import suggest_memory_format
 
 if TYPE_CHECKING:
@@ -1920,8 +1921,9 @@ class DLLWrapper:
             f_dlclose.argtypes = [c_void_p]
             f_dlclose(self.DLL._handle)
         else:
-            log.warning(
-                "dll unloading function was not found, library may not be unloaded properly!"
+            warning_once(
+                log,
+                "dll unloading function was not found, library may not be unloaded properly!",
             )
 
     def __getattr__(self, name):

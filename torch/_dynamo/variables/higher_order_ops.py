@@ -16,6 +16,7 @@ from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch._logging import warning_once
 from torch.utils import _pytree as pytree
 
 from ..exc import (
@@ -281,7 +282,7 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.warning(msg)
+        warning_once(log, msg)
         log.exception(ex)
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)

@@ -5,6 +5,7 @@ import os
 import tempfile
 
 import torch
+from torch._logging import warning_once
 from .common import device_from_inputs, fake_tensor_unsupported
 
 from .registry import register_backend
@@ -24,7 +25,7 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
     shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
     example_outputs = gm(*example_inputs)
     if len(example_outputs) == 0:
-        log.warning("Explicitly fall back to eager due to zero output")
+        warning_once(log, "Explicitly fall back to eager due to zero output")
         return gm.forward
     mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
     if device.type == "cuda":
@@ -136,7 +137,8 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
                     arg = arg.detach()
                 inp_name = f"inp_{idx}"
                 if inp_name not in active_inputs:
-                    log.warning(
+                    warning_once(
+                        log,
                         "input %s skipped as not found in tvm's runtime library",
                         inp_name,
                     )

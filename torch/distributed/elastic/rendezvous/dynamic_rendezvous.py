@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -1109,7 +1110,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 f"'{self._settings.run_id}' due to an error of type {type(ex).__name__}."
             )
             self._record(message=msg, node_state=NodeState.FAILED)
-            log.warning(msg)
+            warning_once(log,msg)
 
             return False
         except Exception as e:
@@ -1158,7 +1159,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 f"rendezvous '{self._settings.run_id}' due to an error of type {type(ex).__name__}."
             )
             self._record(message=msg, node_state=NodeState.FAILED)
-            log.warning(msg)
+            warning_once(log,msg)
         finally:
             self._heartbeat_lock.release()
 

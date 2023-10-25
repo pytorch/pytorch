@@ -7,6 +7,7 @@ import torch
 import torch._dynamo as dynamo
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._logging import warning_once
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import profile, ProfilerActivity, record_function
 
@@ -85,7 +86,9 @@ def run_model(args, model, inputs, key):
             dynamo.config.optimize_ddp = False
         if args.dynamo == "inductor" and args.fsdp:
             torch._inductor.config.triton.cudagraphs = False
-            log.warning("disabling inductor cudagraphs for compatibility with FSDP")
+            warning_once(
+                log, "disabling inductor cudagraphs for compatibility with FSDP"
+            )
 
         def print_compile(gm, ex):
             print(

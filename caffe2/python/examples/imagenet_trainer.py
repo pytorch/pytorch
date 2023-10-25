@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 # Module caffe2.python.examples.resnet50_trainer
 import argparse
 import logging
@@ -590,7 +591,7 @@ def Train(args):
             epoch = int(last_str[:-4])
             log.info("Reset epoch to {}".format(epoch))
         else:
-            log.warning("The format of load_model_path doesn't match!")
+            warning_once(log,"The format of load_model_path doesn't match!")
 
     expname = "%s_gpu%d_b%d_L%d_lr%.2f_v2" % (
         model_name,

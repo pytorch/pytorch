@@ -8,6 +8,8 @@ from importlib import __import__
 from typing import Dict, Optional, Set, Union
 from weakref import WeakSet
 
+from torch._logging import warning_once
+
 log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARNING
@@ -319,8 +321,9 @@ def set_logs(
     """
     # ignore if env var is set
     if LOG_ENV_VAR in os.environ:
-        log.warning(
-            "Using TORCH_LOGS environment variable for log settings, ignoring call to set_logs"
+        warning_once(
+            log,
+            "Using TORCH_LOGS environment variable for log settings, ignoring call to set_logs",
         )
         return
 

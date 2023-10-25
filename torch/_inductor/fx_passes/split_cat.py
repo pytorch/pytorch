@@ -7,6 +7,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
+from torch._logging import warning_once
 
 from ..pattern_matcher import (
     Arg,
@@ -76,7 +77,7 @@ def normalize_split_base(
         log.info("couldn't find split args")
         return
     if "example_value" not in split_node.meta:
-        log.warning("example value absent for node: %s", split_node)
+        warning_once(log, "example value absent for node: %s", split_node)
         return
     assert isinstance(split_node.meta["example_value"], (list, tuple))
     split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
@@ -134,7 +135,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     assert isinstance(tensors, (list, tuple))
     for tensor in itertools.chain([cat_node], tensors):
         if "example_value" not in tensor.meta:
-            log.warning("example value absent for node: %s", tensor)
+            warning_once(log, "example value absent for node: %s", tensor)
             return
 
     ndim = cat_node.meta["example_value"].dim()

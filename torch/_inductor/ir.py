@@ -38,6 +38,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
+from torch._logging import warning_once
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -3010,7 +3011,8 @@ class ComputedBuffer(Buffer):
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
-                log.warning(
+                warning_once(
+                    log,
                     "Did not simplify complex index:\n%s\n%s",
                     dict(zip(index_vars, sizes)),
                     memory_addrs,

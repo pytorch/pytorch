@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 import builtins
 import collections
 import functools
@@ -1008,7 +1009,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            log.warning("Failed to convert to int: %s", r)
+            warning_once(log,"Failed to convert to int: %s", r)
             raise
 
     def guard_float(self, file, line):
@@ -1018,7 +1019,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            log.warning("Failed to convert to float: %s", r)
+            warning_once(log,"Failed to convert to float: %s", r)
             raise
 
     def guard_bool(self, file, line):
@@ -1028,7 +1029,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            log.warning("Failed to convert to bool: %s", r)
+            warning_once(log,"Failed to convert to bool: %s", r)
             raise
 
     def expect_true(self, file, line):
@@ -1127,7 +1128,7 @@ def safe_expand(r):
         try:
             return sympy.expand(r)
         except RecursionError:
-            log.warning("RecursionError in sympy.expand(%s)", r)
+            warning_once(log,"RecursionError in sympy.expand(%s)", r)
             return r
     else:
         return r
@@ -1411,7 +1412,7 @@ def _make_node_magic(method, func):
         try:
             out = func(self.expr, other.expr)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
+            warning_once(log,"failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
         pytype: Type
@@ -1448,7 +1449,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            log.warning("failed to eval %s(%s)", method, expr)
+            warning_once(log,"failed to eval %s(%s)", method, expr)
             raise
 
         out_hint = None
@@ -1484,7 +1485,7 @@ def _make_node_magic(method, func):
             try:
                 out = func(pred_node.expr, then_node.expr, else_node.expr)
             except Exception:
-                log.warning("failed to eval %s(%s, %s, %s)", method, pred_node.expr, then_node.expr, else_node.expr)
+                warning_once(log,"failed to eval %s(%s, %s, %s)", method, pred_node.expr, then_node.expr, else_node.expr)
                 raise
 
             out = safe_expand(out)
@@ -1520,7 +1521,7 @@ def _make_node_sizes_strides(method, func):
         try:
             out = func(size_exprs, stride_exprs)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
+            warning_once(log,"failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
             raise
         # bool is never expandable
 
@@ -2054,7 +2055,7 @@ class DimConstraints:
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
             except NotImplementedError as e:
-                log.warning("Failed to reduce inequalities: %s", e)
+                warning_once(log,"Failed to reduce inequalities: %s", e)
                 for expr in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr))
 
@@ -3514,7 +3515,7 @@ class ShapeEnv:
                         else:
                             raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
-                self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
+                self.warning_once(log,"Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
         # First, issue all the non-trivial guards.
@@ -3776,7 +3777,7 @@ class ShapeEnv:
         try:
             new_expr = replace(expr, new_shape_env)
         except RecursionError:
-            log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
+            warning_once(log,"RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
             self.counter["sympy_recursion_error"] += 1
             return None
 
@@ -3900,7 +3901,7 @@ class ShapeEnv:
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
             # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
             if a not in self.replacements or expr != self.replacements[a]:
-                self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
+                self.warning_once(log,"Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
 
@@ -4013,7 +4014,7 @@ class ShapeEnv:
                     "version": 2,
                 },
             )
-            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+            warning_once(log,"Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
     def _get_stack_summary(self):

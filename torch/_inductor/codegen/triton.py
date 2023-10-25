@@ -15,6 +15,7 @@ import sympy
 import torch
 
 import torch._logging
+from torch._logging import warning_once
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -2118,7 +2119,7 @@ class TritonKernel(Kernel):
                         f"Expected stride order {uniform_stride_order}, but found stride order"
                         + f" {stride_order} for kernel {kernel_name}"
                     )
-                    log.warning(msg)
+                    warning_once(log, msg)
 
                     stride_order_list = [
                         ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
@@ -2145,12 +2146,12 @@ class TritonKernel(Kernel):
                         f"  param names {argdefs}\n  buf names {call_args}\n  strides {stride_order_list}"
                         + f"\n  sizes {size_list}\n  sources {source_list}\n"
                     )
-                    log.warning(msg)
+                    warning_once(log, msg)
                     return
         msg = green_text(
             f"All the inputs for the triton kernel {kernel_name} have uniform layout"
         )
-        log.warning(msg)
+        warning_once(log, msg)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)

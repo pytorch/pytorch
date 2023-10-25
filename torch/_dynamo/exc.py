@@ -5,6 +5,7 @@ from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import cast, Optional
 
 import torch._guards
+from torch._logging import warning_once
 
 from . import config
 from .config import is_fbcode
@@ -175,7 +176,7 @@ def unimplemented_with_warning(e, code, msg):
     # this function to log the message and the stack trace.
     graph_break_msg = format_error_msg_verbose(e, code)
     graph_breaks_log.debug("%s", graph_break_msg)
-    log.warning(msg)
+    warning_once(log, msg)
     raise unimplemented(msg) from e
 
 

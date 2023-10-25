@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 import collections
 import dataclasses
 import itertools
@@ -3668,7 +3669,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                             bw_module, placeholder_list
                         )
                     except Exception:
-                        log.warning(
+                        warning_once(log,
                             "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
                             exc_info=True
                         )

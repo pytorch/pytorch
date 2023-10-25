@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 ## @package data_workers
 # Module caffe2.python.data_workers
 
@@ -199,7 +200,7 @@ class BatchFeeder(State):
                 return self._internal_queue.get(block=True, timeout=0.5)
             except Queue.Empty:
                 if time.time() - last_warning > 10.0:
-                    log.warning("** Data input is slow: (still) no data in {} secs.".format(
+                    warning_once(log,"** Data input is slow: (still) no data in {} secs.".format(
                         time.time() - start_time))
                     last_warning = time.time()
                 continue
@@ -207,7 +208,7 @@ class BatchFeeder(State):
 
     def _validate_chunk(self, chunk):
         if chunk is None:
-            log.warning("Fetcher function returned None")
+            warning_once(log,"Fetcher function returned None")
             return False
 
         assert len(chunk) == len(self._input_blob_names), \
@@ -224,7 +225,7 @@ class BatchFeeder(State):
                 j += 1
 
         if len(chunk) == 0:
-            log.warning("Worker provided zero length input")
+            warning_once(log,"Worker provided zero length input")
             return False
 
         return True
@@ -237,7 +238,7 @@ class BatchFeeder(State):
             try:
                 qsize = self._internal_queue.qsize()
                 if qsize < 2 and (time.time() - self._last_warning) > LOG_INT_SECS:
-                    log.warning("Warning, data loading lagging behind: " +
+                    warning_once(log,"Warning, data loading lagging behind: " +
                                 "queue size={}, name={}".format(qsize, self._input_source_name))
                     self._last_warning = time.time()
                 self._counter += 1

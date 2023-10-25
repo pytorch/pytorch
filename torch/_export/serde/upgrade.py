@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 import logging
 from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
@@ -124,7 +125,7 @@ class GraphModuleOpUpgrader:
             else:
                 # we may be able to get away with missing upgraders, if that operator is missing from given graph
                 # module.
-                log.warning("Missing an upgrader to upgrade to version {ver}.", extra={"ver": ver})
+                warning_once(log,"Missing an upgrader to upgrade to version {ver}.", extra={"ver": ver})
 
         return target_upgraders
 

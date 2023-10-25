@@ -1,3 +1,5 @@
+from torch._logging import warning_once
+
 """
 This file includes private common utilities for FSDP.
 """
@@ -362,7 +364,9 @@ def _log_post_backward_hook(
     # cases where hooks don't fire, such as under certain activation checkpoint configs.
     if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
         param_fqns = _get_handle_fqns_from_root(state, handle)
-        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+        warning_once(
+            log, "FSDP firing post-backward hooks for parameters %s", param_fqns
+        )
 
 
 @no_type_check

@@ -34,6 +34,7 @@ from torch._dynamo.debug_utils import (
     same_two_models,
 )
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._logging import warning_once
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import free_symbols, fx_placeholder_targets
 from torch.hub import tqdm
@@ -136,8 +137,8 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                         "Accuracy minification is supported for inductor only"
                     )
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
-                    log.warning(
-                        "Accuracy failed for the AOT Autograd graph %s", graph_name
+                    warning_once(
+                        log, "Accuracy failed for the AOT Autograd graph %s", graph_name
                     )
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
@@ -283,8 +284,8 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
-    log.warning(
-        "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
+    warning_once(
+        log, "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
         save_graph_repro(
@@ -294,11 +295,11 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
     repro_path = os.path.join(curdir, "repro.py")
     try:
         shutil.copyfile(file_name, repro_path)
-        log.warning("Copying repro file for convenience to %s", repro_path)
+        warning_once(log, "Copying repro file for convenience to %s", repro_path)
         if use_buck:
             BuckTargetWriter(file_name).write()
     except OSError:
-        log.warning("No write permissions for %s", repro_path)
+        warning_once(log, "No write permissions for %s", repro_path)
         pass
 
 
@@ -444,7 +445,8 @@ def repro_common(options, mod, load_args):
     assert not any(mod.named_parameters())
     for n, b in mod.named_buffers():
         if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
-            log.warning(
+            warning_once(
+                log,
                 "Constant %s was not serialized, generated random data instead. "
                 "If you think this is affecting you, please comment on "
                 "https://github.com/pytorch/pytorch/issues/100468",
@@ -452,13 +454,15 @@ def repro_common(options, mod, load_args):
             )
 
     if not hasattr(load_args, "_version"):
-        log.warning(
+        warning_once(
+            log,
             "load_args does not have a _version attribute, please file a bug to PyTorch "
-            "and describe how you generate this repro script"
+            "and describe how you generate this repro script",
         )
     else:
         if load_args._version > 0:
-            log.warning(
+            warning_once(
+                log,
                 "load_args is version %s, but this version of PyTorch only supports "
                 "version 0.  We will try to run it anyway but there may be an incompatibility; "
                 "if so, try upgrading your version of PyTorch.",
@@ -718,7 +722,8 @@ def run_repro(
     **kwargs,
 ):
     for k in kwargs:
-        log.warning(
+        warning_once(
+            log,
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
             k,
         )
@@ -729,8 +734,9 @@ def run_repro(
         accuracy = ""
 
     if patch_code is not None:
-        log.warning(
-            "patch_code no longer works on this version of PyTorch, silently ignoring"
+        warning_once(
+            log,
+            "patch_code no longer works on this version of PyTorch, silently ignoring",
         )
 
     parser = argparse.ArgumentParser(

@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 import copy
 import logging
 import os
@@ -9,6 +10,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
+from torch._logging import warning_once
 
 from typing import Set, Dict, Tuple, List
 
@@ -754,7 +756,7 @@ def _try_get_shapes(nets):
         shapes, _ = workspace.InferShapesAndTypes(nets)
         return shapes
     except Exception as e:
-        log.warning("Failed to compute shapes: %s", e)
+        warning_once(log,"Failed to compute shapes: %s", e)
         return {}
 
 

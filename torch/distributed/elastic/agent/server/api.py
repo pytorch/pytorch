@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -739,7 +740,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except SignalException as e:
-            log.warning("Received %s death signal, shutting down workers", e.sigval)
+            warning_once(log,"Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)
             shutdown_called = True
             raise
@@ -944,7 +945,7 @@ class SimpleElasticAgent(ElasticAgent):
                 "Done waiting for other agents. Elapsed: %s seconds", time.time() - start
             )
         except SignalException as e:
-            log.warning("Got termination signal: %s", e.sigval)
+            warning_once(log,"Got termination signal: %s", e.sigval)
             raise
         except Exception:
             log.exception(

@@ -7,6 +7,7 @@ from functools import partial
 from typing import Any, Dict, Generator, Iterable, Tuple
 
 import torch
+from torch._logging import warning_once
 from torch.testing import make_tensor
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map
@@ -269,7 +270,7 @@ class OperatorInputsLoader:
         ), f"Could not find {operator}, must provide overload"
 
         if "embedding" in str(operator):
-            log.warning("Embedding inputs NYI, input data cannot be randomized")
+            warning_once(log, "Embedding inputs NYI, input data cannot be randomized")
             yield
             return
 
@@ -296,7 +297,7 @@ class OperatorInputsLoader:
             try:
                 op = eval(key)
             except AttributeError as ae:
-                log.warning("Evaluating an op name into an OpOverload: %s", ae)
+                warning_once(log, "Evaluating an op name into an OpOverload: %s", ae)
                 continue
             yield op
 

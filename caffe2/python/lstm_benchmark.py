@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 ## @package lstm_benchmark
 # Module caffe2.python.lstm_benchmark
 
@@ -221,11 +222,11 @@ def Caffe2LSTM(args):
         stats = utils.GetGPUMemoryUsageStats()
         log.info("GPU memory:\t{} MB".format(stats['max_total'] / 1024 / 1024))
         if (stats['max_total'] != stats['total']):
-            log.warning(
+            warning_once(log,
                 "Max usage differs from current total usage: {} > {}".
                 format(stats['max_total'], stats['total'])
             )
-            log.warning("This means that costly deallocations occurred.")
+            warning_once(log,"This means that costly deallocations occurred.")
 
     return time.time() - start_time
 

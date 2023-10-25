@@ -16,6 +16,7 @@ import torch._prims_common as utils
 import torch._subclasses.meta_utils
 
 from torch._dynamo.testing import rand_strided
+from torch._logging import warning_once
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
@@ -94,10 +95,11 @@ python_binary(
         target_file = os.path.join(self.subdir, "TARGETS")
         with open(target_file, "w") as fd:
             fd.write(self.build())
-        # log.warning("Wrote isolation TARGETS file at %s", target_file)
+        # warning_once(log,"Wrote isolation TARGETS file at %s", target_file)
         cmd_split = BUCK_CMD_PREFIX + [self.cmd_line_path]
         if print_msg:
-            log.warning(
+            warning_once(
+                log,
                 "Found an example that reproduces the error. Run this cmd to repro - %s",
                 " ".join(cmd_split),
             )
@@ -149,7 +151,9 @@ class NNModuleToString:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            log.warning("We have not tested reprs of some modules - %s", cant_convert)
+            warning_once(
+                log, "We have not tested reprs of some modules - %s", cant_convert
+            )
         # TODO - Assuming that all modules can be safely repr'd. Check if that assumption is correct.
         return True
 
@@ -264,7 +268,7 @@ def get_minifier_repro_path():
 
 def helper_for_dump_minify(contents):
     minified_repro_path = get_minifier_repro_path()
-    log.warning("Writing minified repro to:\n%s", minified_repro_path)
+    warning_once(log, "Writing minified repro to:\n%s", minified_repro_path)
 
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
@@ -377,7 +381,7 @@ def same_two_models(
         except Exception:
             if require_fp64:
                 raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
-            log.warning("Could not generate fp64 outputs")
+            warning_once(log, "Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
@@ -526,7 +530,7 @@ class InputReader:
         # share repros without including the real data, if the problem
         # reproduces even on random data.
         if save_dir is None:
-            log.warning("no save_dir specified, will generate random data")
+            warning_once(log, "no save_dir specified, will generate random data")
         self.store = ContentStoreReader(save_dir) if save_dir is not None else None
         self.args = []
         self.pbar = pbar
@@ -543,12 +547,16 @@ class InputReader:
                 pass
             else:
                 if device != storage.device:
-                    log.warning("device mismatch: %s != %s", device, storage.device)
+                    warning_once(
+                        log, "device mismatch: %s != %s", device, storage.device
+                    )
                     # TODO: transfer it to the right device?  But failing this
                     # way would be very mysterious!  Would have been better
                     # not to store device in the serialized format...
                 return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
+        warning_once(
+            log, "could not load %s, generating random data instead", storage_hash
+        )
         shape = (nbytes // dtype_hint.itemsize,)
         stride = _stride_or_default(None, shape=shape)
         return rand_strided(shape, stride, dtype_hint, device).untyped_storage()

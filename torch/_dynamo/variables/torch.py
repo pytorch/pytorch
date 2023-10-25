@@ -7,6 +7,8 @@ import re
 import types
 from typing import Dict, List
 
+from torch._logging import warning_once
+
 from torch._streambase import _StreamBase
 
 try:
@@ -447,7 +449,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
@@ -597,7 +599,7 @@ Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
 To support this behavior, we need to allow const-propping tensors that store symint data.
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
-                log.warning(msg)
+                warning_once(log, msg)
                 raise unimplemented(msg)
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.

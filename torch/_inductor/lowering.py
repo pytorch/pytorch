@@ -16,6 +16,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
+from torch._logging import warning_once
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -1670,9 +1671,10 @@ def make_fallback(op, layout_constraint=None, warn=True):
         # likely to be triggered preferentially on one CI config over another.
         if torch._dynamo.config.suppress_errors:
             torch._dynamo.config.suppress_errors = False
-            log.warning(
+            warning_once(
+                log,
                 "A make_fallback error occurred in suppress_errors config,"
-                " and suppress_errors is being disabled to surface it."
+                " and suppress_errors is being disabled to surface it.",
             )
         raise AssertionError(
             f"make_fallback({op}): a decomposition exists, we should switch to it."

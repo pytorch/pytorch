@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 import base64
 import dataclasses
 import io
@@ -1482,7 +1483,7 @@ class ExportedProgramDeserializer:
             if symbol := symbol_name_to_symbol.get(k):
                 range_constraints[symbol] = v  # type: ignore[arg-type]
             else:
-                log.warning(f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
+                warning_once(log,f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
         return range_constraints
 
     def deserialize(
@@ -1567,7 +1568,7 @@ class ExportedProgramDeserializer:
         for namespace in model_opset_version:
             if namespace in common_namespaces:
                 continue
-            log.warning("Compiler doesn't have a version table for op namespace: {ns}. ", extra={"ns": namespace})
+            warning_once(log,"Compiler doesn't have a version table for op namespace: {ns}. ", extra={"ns": namespace})
 
 
 class EnumEncoder(json.JSONEncoder):

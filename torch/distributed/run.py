@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -693,7 +694,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     assert args.max_restarts >= 0
 
     if hasattr(args, "master_addr") and args.rdzv_backend != "static":
-        log.warning(
+        warning_once(log,
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
         )
@@ -701,7 +702,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
-        log.warning(
+        warning_once(log,
             "\n*****************************************\n"
             "Setting OMP_NUM_THREADS environment variable for each process to be "
             "%s in default, to avoid your system being overloaded, "

@@ -450,8 +450,8 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if "cuda" in compiled_graph.device_types:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                perf_hint_warning_once(
+                    log, "skipping cudagraphs due to %s", cudagraph_fail_reasons
                 )
 
     # cudagraphs does its own aligning of inputs

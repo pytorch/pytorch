@@ -21,6 +21,7 @@ from torch import fx as fx
 
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
 from torch._dynamo.utils import get_debug_dir
+from torch._logging import warning_once
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -57,7 +58,7 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
     Draw a graph in fname.svg.
     """
     if not has_dot():
-        log.warning("draw_buffers() requires `graphviz` package")
+        warning_once(log, "draw_buffers() requires `graphviz` package")
         return
 
     if fname is None:
@@ -329,8 +330,8 @@ class DebugContext:
             shutil.copytree(self._path, new_path)
             self._path = new_path
         except OSError:
-            log.warning(
-                "Failed to copy debug files from %s to %s", self._path, new_path
+            warning_once(
+                log, "Failed to copy debug files from %s to %s", self._path, new_path
             )
             pass
 
@@ -399,7 +400,9 @@ class DebugContext:
 
         if self._path:
             self.upload_tar()
-            log.warning("%s debug trace: %s", get_graph_being_compiled(), self._path)
+            warning_once(
+                log, "%s debug trace: %s", get_graph_being_compiled(), self._path
+            )
         self._stack.close()
 
     def _save_profile_data(self):
@@ -418,7 +421,7 @@ class DebugContext:
             try:
                 return getattr(DebugFormatter(self), name)
             except Exception:
-                log.warning("Ignoring exception in debug code", exc_info=True)
+                warning_once(log, "Ignoring exception in debug code", exc_info=True)
         else:
 
             def ignored(*args, **kwargs):

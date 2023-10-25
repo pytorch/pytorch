@@ -12,6 +12,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch._logging import warning_once
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
@@ -112,7 +113,7 @@ class BaseSchedulerNode:
                 self.debug_str_extra(),
             ]
         except Exception:
-            log.warning("Ignoring error in debug_str()", exc_info=True)
+            warning_once(log, "Ignoring error in debug_str()", exc_info=True)
 
         return "\n".join(lines).rstrip()
 

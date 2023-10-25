@@ -38,6 +38,8 @@ from typing import (
 )
 from unittest.mock import MagicMock
 
+from torch._logging import warning_once
+
 from typing_extensions import Self
 
 if TYPE_CHECKING:
@@ -1824,7 +1826,7 @@ def read_batch_size_from_file(args, filename, model_name):
             if model_name == cur_name:
                 batch_size = int(b)
     if batch_size is None:
-        log.warning("Could not find batch size for %s", model_name)
+        warning_once(log, "Could not find batch size for %s", model_name)
     elif batch_size == -1:
         raise RuntimeError(
             f"Batch size is unset for {model_name} in {args.batch_size_file}"
@@ -2109,11 +2111,12 @@ class BenchmarkRunner:
     def cast_based_on_args(self, model, example_inputs):
         if self.args.float32 or self.args.only in self.fp32_only_models:
             if not self.args.float32:
-                log.warning("Model %s supports float32 only", self.args.only)
+                warning_once(log, "Model %s supports float32 only", self.args.only)
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             if self.args.only in self.force_amp_for_fp16_bf16_models:
-                log.warning(
+                warning_once(
+                    log,
                     "Model %s does not support float16, running with amp instead",
                     self.args.only,
                 )
@@ -2123,7 +2126,8 @@ class BenchmarkRunner:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
         elif self.args.bfloat16:
             if self.args.only in self.force_amp_for_fp16_bf16_models:
-                log.warning(
+                warning_once(
+                    log,
                     "Model %s does not support bfloat16, running with amp instead",
                     self.args.only,
                 )
@@ -2255,7 +2259,7 @@ class BenchmarkRunner:
                 auto_wrap_policy=my_auto_wrap_policy,
             )
             if torch._inductor.config.triton.cudagraphs:
-                log.warning("Disabling cudagraphs for FSDP compatibility")
+                warning_once(log, "Disabling cudagraphs for FSDP compatibility")
                 torch._inductor.config.triton.cudagraphs = False
         return model
 
@@ -2317,7 +2321,8 @@ class BenchmarkRunner:
                     fp64_outputs,
                 )
             except Exception:
-                log.warning(
+                warning_once(
+                    log,
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
                 )
@@ -3310,8 +3315,9 @@ def main(runner, original_dir=None, args=None):
         # https://github.com/pytorch/pytorch/issues/107300
         device_count = torch.cuda.device_count()
         if device_count <= 1:
-            log.warning(
-                "The use multiprocess flag is set but there are <= 1 devices available."
+            warning_once(
+                log,
+                "The use multiprocess flag is set but there are <= 1 devices available.",
             )
         # multiprocess path
         args.world_size = device_count
@@ -3451,7 +3457,7 @@ def run(runner, args, original_dir=None):
         if torch.cuda.is_available():
             args.devices = ["cuda"]
         else:
-            log.warning("torch.cuda.is_available() == False, using CPU")
+            warning_once(log, "torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
     if args.devices != ["cpu"] and torch.cuda.is_available():

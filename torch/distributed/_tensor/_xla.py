@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 import torch
 
 import torch.nn as nn
+from torch._logging import warning_once
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement, Replicate
 
@@ -26,7 +27,7 @@ try:
 
     TORCH_XLA_INITIALIZED = True
 except ImportError as e:
-    log.warning(e.msg)
+    warning_once(log, e.msg)
 
 
 # wrapper to check xla test requirements

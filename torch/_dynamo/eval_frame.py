@@ -33,6 +33,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
+from torch._logging import warning_once
 from torch._subclasses import fake_tensor
 from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -242,7 +243,7 @@ def remove_from_cache(f):
         from . import reset  # type: ignore[attr-defined]
 
         reset()
-        log.warning("could not determine __code__ for %s", f)
+        warning_once(log, "could not determine __code__ for %s", f)
 
 
 def nothing():

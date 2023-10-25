@@ -22,6 +22,7 @@ from unittest.mock import patch
 import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
+from torch._logging import warning_once
 
 from . import (
     allowed_functions,
@@ -919,7 +920,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         spec = self.f_globals.get("__spec__")
         if package is not None:
             if spec is not None and package != spec.parent:
-                log.warning(
+                warning_once(
+                    log,
                     "__package__ != __spec__.parent (%r != %r)",
                     package,
                     spec.parent,
@@ -929,7 +931,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif spec is not None:
             return spec.parent
         else:
-            log.warning(
+            warning_once(
+                log,
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
                 stacklevel=3,

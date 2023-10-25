@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 
 
 
@@ -131,7 +132,7 @@ def save_model_params(is_checkpoint, model, checkpoint_path, epoch, opts, best_m
             model, checkpoint_path, epoch, opts, best_metric
         )
     except Exception as e:
-        log.warning('Exception from save_model_params {}'.format(str(e)))
+        warning_once(log,'Exception from save_model_params {}'.format(str(e)))
     return checkpoint_path
 
 

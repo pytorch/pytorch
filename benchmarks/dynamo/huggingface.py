@@ -12,6 +12,7 @@ from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_st
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
+from torch._logging import warning_once
 
 log = logging.getLogger(__name__)
 
@@ -650,7 +651,7 @@ def refresh_model_names_and_batch_sizes():
                 + [f"--output={MODELS_FILENAME}"]
             )
         except subprocess.SubprocessError:
-            log.warning(f"Failed to find suitable batch size for {model_name}")
+            warning_once(log, f"Failed to find suitable batch size for {model_name}")
 
 
 def huggingface_main():

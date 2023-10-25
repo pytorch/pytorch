@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -523,7 +524,7 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
+                warning_once(log,"Closing process %s via signal %s", proc.pid, death_sig.name)
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
@@ -538,7 +539,7 @@ class MultiprocessContext(PContext):
             proc.join(time_to_wait)
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning(
+                warning_once(log,
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     proc.pid, death_sig, _get_kill_signal()
                 )
@@ -700,7 +701,7 @@ class SubprocessContext(PContext):
             return
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                warning_once(log,
                     "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
@@ -717,7 +718,7 @@ class SubprocessContext(PContext):
                 pass
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                warning_once(log,
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     handler.proc.pid, death_sig, _get_kill_signal()
                 )

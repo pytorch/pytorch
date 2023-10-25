@@ -16,6 +16,7 @@ import sympy
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch._logging import warning_once
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
@@ -836,15 +837,17 @@ class AlgorithmSelectorCache(PersistentCache):
                 try:
                     timing = benchmark_choice_in_current_process(choice)
                 except CUDACompileError as e:
-                    log.warning(
-                        "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
+                    warning_once(
+                        log,
+                        "CUDA compilation error: \n%s. \nIgnore this choice.",
+                        str(e),
                     )
                     timing = float("inf")
                 except RuntimeError as e:
                     msg = str(e)
                     if "invalid argument" in msg:
                         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                        log.warning(msg)
+                        warning_once(log, msg)
                         timing = float("inf")
                     else:
                         if "illegal memory access" in msg:

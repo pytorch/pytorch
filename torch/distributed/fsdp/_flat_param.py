@@ -27,6 +27,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch._logging import warning_once
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
@@ -2614,4 +2615,4 @@ def _construct_padding_tensor(
 # messasge is passed in)
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
-    log.warning(warning)
+    warning_once(log, warning)

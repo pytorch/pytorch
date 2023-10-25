@@ -7,6 +7,7 @@ import torch
 from torch import fx
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
+from torch._logging import warning_once
 from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
@@ -78,12 +79,13 @@ def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
         )
 
         if len(extended_buckets):
-            log.warning(
+            warning_once(
+                log,
                 "Some buckets were extended beyond their requested parameter capacities"
                 " in order to ensure each subgraph has an output node, required for fx graph partitioning."
                 " This can be the case when a subgraph would have only contained nodes performing inplace mutation,"
                 " and returning no logical outputs. This should not be a problem, unless it results in too few graph"
-                " partitions for optimal DDP performance."
+                " partitions for optimal DDP performance.",
             )
 
         try:
@@ -95,7 +97,8 @@ def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
             )
 
             if len(extended_buckets):
-                log.warning(
+                warning_once(
+                    log,
                     "DDPOptimizer extended these buckets to ensure per-subgraph output nodes:\n%s",
                     tabulate(
                         extended_buckets,

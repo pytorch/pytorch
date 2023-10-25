@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 ## @package data_parallel_model
 # Module caffe2.python.data_parallel_model
 
@@ -152,7 +153,7 @@ def Parallelize(
     if not (cpu_device or ideep):
         for gpu in devices:
             if gpu >= workspace.NumGpuDevices():
-                log.warning("** Only {} GPUs available, GPUs {} requested".format(
+                warning_once(log,"** Only {} GPUs available, GPUs {} requested".format(
                     workspace.NumGpuDevices(), devices))
                 break
         model_helper_obj._device_type = workspace.GpuDeviceType
@@ -215,15 +216,15 @@ def Parallelize(
     # init_params False, otherwise running the param init net will overwrite
     # synchronized values by the training net
     if not has_parameter_updates and model_helper_obj.init_params:
-        log.warning('')
-        log.warning("############# WARNING #############")
-        log.warning("Model {}/{} is used for testing/validation but".format(
+        warning_once(log,'')
+        warning_once(log,"############# WARNING #############")
+        warning_once(log,"Model {}/{} is used for testing/validation but".format(
             model_helper_obj.name, model_helper_obj))
-        log.warning("has init_params=True!")
-        log.warning("This can conflict with model training.")
-        log.warning("Please ensure model = ModelHelper(init_params=False)")
-        log.warning('####################################')
-        log.warning('')
+        warning_once(log,"has init_params=True!")
+        warning_once(log,"This can conflict with model training.")
+        warning_once(log,"Please ensure model = ModelHelper(init_params=False)")
+        warning_once(log,'####################################')
+        warning_once(log,'')
         # TODO: make into assert
 
     for device in devices:
@@ -470,7 +471,7 @@ def Parallelize_BMUF(
     if not cpu_device:
         for gpu in devices:
             if gpu >= workspace.NumGpuDevices():
-                log.warning("** Only {} GPUs available, GPUs {} requested".format(
+                warning_once(log,"** Only {} GPUs available, GPUs {} requested".format(
                     workspace.NumGpuDevices(), devices))
                 break
         model_helper_obj._device_type = workspace.GpuDeviceType
@@ -1732,7 +1733,7 @@ def _ComputeBlobsToSync(model):
 
 
 def _OptimizeGradientMemorySimple(model, losses_by_gpu, devices):
-    log.warning("------- DEPRECATED API, please use " +
+    warning_once(log,"------- DEPRECATED API, please use " +
                    "data_parallel_model.OptimizeGradientMemory() ----- ")
     for device in devices:
         namescope = "{}_{}/".format(model._device_prefix, device)

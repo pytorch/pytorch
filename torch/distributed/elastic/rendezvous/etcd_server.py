@@ -1,3 +1,4 @@
+from torch._logging import warning_once
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -185,7 +186,7 @@ class EtcdServer:
             except Exception as e:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
-                log.warning(
+                warning_once(log,
                     "Failed to start etcd server, got error: %s, retrying", str(e)
                 )
                 if curr_retries >= num_retries:

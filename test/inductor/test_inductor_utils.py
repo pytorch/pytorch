@@ -8,6 +8,7 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 
 from torch._inductor.utils import do_bench, do_bench_using_profiling
+from torch._logging import warning_once
 
 
 log = logging.getLogger(__name__)
@@ -23,12 +24,12 @@ class TestBench(TestCase):
 
     def test_do_bench(self):
         res = do_bench(self._bench_fn)
-        log.warning("do_bench result: %s", res)
+        warning_once(log, "do_bench result: %s", res)
         self.assertGreater(res, 0)
 
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
-        log.warning("do_bench_using_profiling result: %s", res)
+        warning_once(log, "do_bench_using_profiling result: %s", res)
         self.assertGreater(res, 0)
 
 
