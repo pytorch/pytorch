@@ -845,95 +845,6 @@ class SymNodeVariable(VariableTracker):
         )
 
 
-class TensorWithTFOverrideVariable(VariableTracker):
-    """
-    Represents a tensor subclass instance with a __torch_function__ override.
-    """
-
-    @staticmethod
-    def create(
-        tx,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        var = TensorWithTFOverrideVariable(
-            tensor_variable,
-            torch_function_fn,
-            subclass_type,
-            **kwargs,
-        )
-        # stash the subclass type to rewrap an output tensor if needed
-        if var.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global(var.global_mangled_class_name(), subclass_type)
-
-        return var
-
-    def __init__(
-        self,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.tensor_variable = tensor_variable
-        self.torch_function_fn = torch_function_fn
-        self.subclass_type = subclass_type
-
-    def as_proxy(self):
-        return self.tensor_variable.as_proxy()
-
-    def python_type(self):
-        return self.subclass_type
-
-    def subclass_type_var(self):
-        from ..source import GlobalSource
-        from .user_defined import UserDefinedClassVariable
-
-        return UserDefinedClassVariable(
-            self.subclass_type, source=GlobalSource(self.global_mangled_class_name())
-        )
-
-    def global_mangled_class_name(self):
-        return f"__subclass_{self.subclass_type.__name__}_{id(self.subclass_type)}"
-
-    def call_torch_function(self, tx, fn, types, args, kwargs):
-        from .torch_function import call_torch_function
-
-        return call_torch_function(
-            tx,
-            self.subclass_type_var(),
-            self.torch_function_fn,
-            fn,
-            types,
-            args,
-            kwargs,
-        )
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        # This code block implements inlining the __torch_function__ override
-        # of `call_method`.
-        if tx.output.torch_function_enabled:
-            import torch
-            from .builder import SourcelessBuilder
-            from .torch_function import dispatch_torch_function
-
-            # [Note: __torch_function__] Currently we only support methods that are defined on tensor
-            # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
-            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
-            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
-        else:
-            return self.tensor_variable.call_method(tx, name, args, kwargs)
-
-
 class NumpyNdarrayVariable(TensorVariable):
     """
     Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
@@ -1093,6 +1004,7 @@ class TensorSubclassVariable(VariableTracker):
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .builder import VariableBuilder
+            from .torch_function import TensorWithTFOverrideVariable
 
             torch_fn = VariableBuilder(
                 tx, AttrSource(self.source, "__torch_function__")
