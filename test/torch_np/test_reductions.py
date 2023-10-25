@@ -385,6 +385,7 @@ class TestGenericReductions(TestCase):
         expanded = np.expand_dims(func(a, axis=axis), axis=axis)
         assert_array_equal(with_keepdims, expanded)
 
+    @skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on CI w/old numpy")
     @parametrize_func
     def test_keepdims_generic_axis_none(self, func):
         a = np.arange(2 * 3 * 4).reshape((2, 3, 4))
