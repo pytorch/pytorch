@@ -3,6 +3,7 @@ import contextlib
 import copy
 import itertools
 import math
+import platform
 import sys
 import unittest
 from typing import Callable
@@ -1195,7 +1196,8 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
@@ -1427,7 +1429,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_cpu_only_for_all_available_isa(self):
         def fn(x):
-            return torch.sin(torch.cos(torch.erf(x)))
+            return torch.sin(torch.cos(torch.log(torch.erf(x))))
 
         x = torch.randn((2, 9))
         x[0, 0] = torch.nan
@@ -2265,8 +2267,10 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
+        code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        assert metrics.generated_cpp_vec_kernel_count == 2
+        # def and use
+        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):

@@ -1424,7 +1424,7 @@ utils_device.CURRENT_DEVICE == None""",
         args = [torch.randn(10), 4096, np.int64(8)]
         correct = fn(*args)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, dynamic=True)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
@@ -1466,6 +1466,9 @@ utils_device.CURRENT_DEVICE == None""",
         for op, t1_np, t2_np in itertools.product(
             operators, (True, False), (True, False)
         ):
+            if op in [operator.eq, operator.ne]:
+                # returns equivalent of torch.eq/ne
+                continue
             if op is operator.getitem:
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
@@ -1594,6 +1597,34 @@ utils_device.CURRENT_DEVICE == None""",
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_tolist(self):
+        def fn(x):
+            return x.tolist()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = np.arange(5)
+        r = opt_fn(x)
+
+        self.assertEqual(r, [0, 1, 2, 3, 4])
+        self.assertEqual(type(r), list)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_size_attr(self):
+        def fn(x):
+            return x.size + x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = np.arange(5)
+        r = opt_fn(x)
+
+        self.assertEqual(r, fn(x))
+        self.assertEqual(type(r), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_no_raise(self):
@@ -1775,6 +1806,50 @@ utils_device.CURRENT_DEVICE == None""",
         r2 = fn2()
         self.assertEqual(cnts.frame_count, 0)
         assert r2 in ("L", "U")
+
+    def test_trace_ndarray_frame(self):
+        def fn(x):
+            x = x**2
+            print("graph break.")
+            return 2 * x
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+
+        x = np.arange(8)
+        self.assertEqual(fn(x), compiled_fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_numpy_non_torch_dtype(self):
+        # test that we gracefully graph break on dtypes
+        # that do not have pytorch equivalents.
+        def fn(x):
+            return isinstance(x, torch.Tensor)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        # torch does not have the `uint16` dtype
+        for x in [np.array([42], dtype=np.uint16), np.uint16(42), np.dtype("uint16")]:
+            r = opt_fn(x)
+
+            self.assertEqual(r, False)
+            self.assertEqual(cnts.frame_count, 0)  # graph break
+
+    def test_numpy_iter(self):
+        # test that iteration over an ndarray produces ndarrays not bare tensors
+        def fn(x):
+            return [bm for bm in x]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        proba_map = np.arange(3)[:, None]
+        res = opt_fn(proba_map)
+
+        self.assertEqual([type(r) for r in res], [np.ndarray, np.ndarray, np.ndarray])
+        self.assertEqual(res, [np.array([0]), np.array([1]), np.array([2])])
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_dtypes_no_graphbreaks(self):
         # cache size limit needs to be larger than the `dtypes` list size

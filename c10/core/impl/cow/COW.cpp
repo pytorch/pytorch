@@ -30,16 +30,24 @@ at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
   return make_data_ptr(data_ptr, *ctx);
 }
 
+bool is_simple_context(
+    const void* context,
+    const void* data,
+    const at::Allocator* allocator) {
+  if (allocator == c10::GetDefaultMobileCPUAllocator()) {
+    return reinterpret_cast<size_t>(data) ==
+        reinterpret_cast<size_t>(context) + c10::gAlignment;
+  } else {
+    return data == context;
+  }
+}
+
 } // namespace
 
 bool has_simple_data_ptr(const c10::StorageImpl& storage) {
   const c10::DataPtr& data_ptr = storage.data_ptr();
-  if (storage.allocator() == c10::GetDefaultMobileCPUAllocator()) {
-    return reinterpret_cast<size_t>(data_ptr.get()) ==
-        reinterpret_cast<size_t>(data_ptr.get_context()) + c10::gAlignment;
-  } else {
-    return data_ptr.get() == data_ptr.get_context();
-  }
+  return is_simple_context(
+      data_ptr.get_context(), data_ptr.get(), storage.allocator());
 }
 
 bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
@@ -80,7 +88,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage.mutable_data_ptr().move_context();
-    TORCH_INTERNAL_ASSERT(original_ctx.get() == data_ptr.get());
+    TORCH_INTERNAL_ASSERT(is_simple_context(
+        original_ctx.get(), data_ptr.get(), storage.allocator()));
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
