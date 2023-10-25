@@ -210,6 +210,10 @@ def maybe_get_fake_mode(t):
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
     return None
 
 
