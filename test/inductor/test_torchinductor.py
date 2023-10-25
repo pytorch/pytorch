@@ -6648,10 +6648,16 @@ class CommonTemplate:
             (
                 None,
                 rand_strided(
-                    (64, 3, 11, 11), (363, 121, 11, 1), torch.float32, "cuda"
+                    (64, 3, 11, 11),
+                    (363, 121, 11, 1),
+                    torch.float32,
+                    device=self.device,
                 ).to(memory_format=torch.channels_last),
                 rand_strided(
-                    (1, 3, 224, 224), (150528, 50176, 224, 1), torch.float32, "cuda"
+                    (1, 3, 224, 224),
+                    (150528, 50176, 224, 1),
+                    torch.float32,
+                    device=self.device,
                 )
                 .to(memory_format=torch.channels_last)
                 .squeeze(0),
