@@ -47,8 +47,13 @@ CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OperatorBase, Callable] = {}
 CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
-# This could plausibly be handled at the Dynamo level.
-pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+# Hence we transform any torch.Size node into an equivalent tuple
+# if all of its items are `Proxy`s
+pytree._register_pytree_node(
+    torch.Size,
+    lambda x: (list(x), None),
+    lambda xs, _: tuple(xs) if all(isinstance(x, Proxy) for x in xs) else torch.Size(xs)
+)
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -290,7 +295,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
         # TODO: maybe constant SymInts should also be allowed?  Not sure if
         # this can happen
-        and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
+        and pytree.tree_all_only(py_sym_types, lambda _: False, (args, kwargs))
     )
 
     if torch.Tag.data_dependent_output in func.tags:
@@ -312,7 +317,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 "in your make_fx call."
             )
     proxy_args, proxy_kwargs = pytree.tree_map_only(
-        (SymInt, SymFloat, SymBool),
+        py_sym_types,
         fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
@@ -455,7 +460,7 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
-        elif isinstance(a, (SymInt, SymFloat, SymBool)):
+        elif isinstance(a, py_sym_types):
             assert a.node.constant is not None
             return a.node.constant
         return super().create_arg(a)
@@ -463,7 +468,7 @@ class PythonKeyTracer(Tracer):
     def unwrap_proxy(self, e):
         if isinstance(e, torch.Tensor):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
-        elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        elif isinstance(e, py_sym_types):
             return get_proxy_slot(e.node, self, e, lambda e: e())
         else:
             return e
@@ -518,7 +523,7 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
             out
         )
         out = pytree.tree_map_only(
-            (SymInt, SymFloat, SymBool),
+            py_sym_types,
             lambda t: get_proxy_slot(t.node, tracer)(),
             out
         )
