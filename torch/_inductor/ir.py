@@ -2250,7 +2250,7 @@ class Layout(IRNode):
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
             if stride_ordered[i] > stride_ordered[i + 1]:
