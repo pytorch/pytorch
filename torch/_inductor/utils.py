@@ -18,7 +18,6 @@ import tempfile
 import textwrap
 import time
 import unittest
-from collections import OrderedDict
 from dataclasses import dataclass
 from io import StringIO
 from typing import (
@@ -396,25 +395,48 @@ def get_module_name_from_meta(meta_dict):
     mod_name = ""
     torch_op = ""
     if "nn_module_stack" in meta_dict:
-        # nn_module_stack is set in multiple places and is organized
-        # differently.
-        if isinstance(meta_dict["nn_module_stack"], OrderedDict):
-            mod_name, torch_op = list(meta_dict["nn_module_stack"].items())[0]
+        # nn_module_stack is set in multiple places and can be organized
+        # differently.  The key is always the module name.  The value
+        # can either be a tuple or a string.  When it is a tuple, the
+        # last element of the tuple contains the torch_op.  When it is
+        # a string, the string is the torch_op.
+        # Example contents of nn_module_stack
+        # {'L__self___conv1': ("L['self'].conv1",
+        #                 <class 'torch.nn.modules.conv.Conv2d'>)}
+        # {'L__self___bn3': ("L['self'].bn3",
+        #                 <class 'torch.nn.modules.batchnorm.BatchNorm2d'>)}
+        # The key is the unique module name.  The value contains the
+        # torch_op type eg. <class 'torch.nn.modules.batchnorm.BatchNorm2d'>
+        mod_name, extra = list(meta_dict["nn_module_stack"].items())[-1]
+        if isinstance(extra, tuple):
+            torch_op = extra[-1]
         else:
-            mod_name, torch_op = list(meta_dict["nn_module_stack"].values())[0]
-            mod_name = re.sub(r"\[[a-zA-Z\']*\]", "", mod_name)
-            mod_name = re.sub(r"__", "", mod_name)
+            torch_op = extra
 
-        res = re.search(r"<class\s+(\S+)>", str(torch_op))
+        # Clean up the module name so it has similar format to
+        # the output of torch.nn.Module.named_modules()
+        # Examples for mod_name clean up.
+        # Before: 'getattr_L__self___layer4___1___relu'
+        # After: 'L.layer4.1.relu'
+        # Before: 'getattr_L__self___layer4___0___downsample_1'
+        # After: L.layer4.0.downsample_1
+        mod_name = re.sub(r"___", ".", mod_name)
+        mod_name = re.sub(r".*(L)__self", r"\g<1>", mod_name)
+
+        # Clean up the torch_op string by removing the
+        # <class > tag.
+        # Example <class 'torch.nn.modules.conv.Conv2d'> is reduced to
+        # torch.nn.modules.conv.Conv2d
+        res = re.search(r"<class\s+'(\S+)'>", str(torch_op))
         if res:
             torch_op = res.group(1)
-            torch_op = re.sub("'", "", torch_op)
+
     return mod_name, torch_op
 
 
 def get_origin_op_info(node_schedule, descriptive_names):
     all_origins = aggregate_origins(node_schedule)
-    sources = OriginOpList([])
+    sources = OriginOpList([], "")
     # Unique op_names might constrain the origin modules
     # Possible that multiple ops w/ same name can have different modules
     unique_op_names = {}
@@ -898,16 +920,14 @@ class OriginOpInfo:
 @dataclass
 class OriginOpList:
     oi_list: List[OriginOpInfo]
+    kernel_prefix: str
 
     def __repr__(self):
         return str(list(self.oi_list))
 
     def codegen(self, code: IndentedBuffer, line: str):
-        prefix = ""
-        kernel_pattern = "extern_kernel"
         marker_string = str(self)
-        if kernel_pattern in line:
-            prefix = f"{kernel_pattern}, OriginOps: "
+        prefix = f"{self.kernel_prefix}_kernel, OriginOps: "
         code.writeline(f'with record_function("{prefix}{marker_string}"):')
         with code.indent():
             code.writeline(line)

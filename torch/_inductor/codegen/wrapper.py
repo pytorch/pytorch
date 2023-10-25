@@ -553,11 +553,13 @@ class WrapperCodeGen(CodeGen):
                 elif (
                     origin_info_list
                     and isinstance(line, str)
+                    and not re.search(r"^#", line)
                     and config.profiler_mark_wrapper_call
-                    and re.search(r"extern_kernels", line)
                 ):
                     # Inspect the contents of line to see if
-                    # it is an external kernel.  If so add nvtx range
+                    # it is an external kernel. Skip comment lines.
+                    # Emit record_function() into code stream around
+                    # the extern kernel call.
                     origin_info_list.codegen(self.wrapper_call, line)
                     origin_info_list = None
                 else:
