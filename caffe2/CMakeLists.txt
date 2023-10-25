@@ -1829,24 +1829,6 @@ if(MSVC)
   endforeach()
 endif()
 
-# TODO if this works we want this to be turned on for CI but for developers to turn off
-# And revert changes to -j on CI/CD to enable more parelleism for all files but these
-if(USE_FLASH_ATTENTION)
-# To address out-of-memory (OOM) errors that occur when building all files in parallel
-# on our Docker machines, we introduce artificial dependencies between the files.
-# This ensures that files are compiled sequentially, thereby reducing memory usage
-# and preventing OOM errors.
-  set(previous_file "")
-  foreach(tmp ${FLASH_ATTENTION_CUDA_SOURCES})
-    FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
-    SET(tmp_path "../${tmp_path}")
-    if(NOT "${previous_file}" STREQUAL "")
-      set_source_files_properties(${tmp_path} APPEND PROPERTY OBJECT_DEPENDS ${previous_file})
-    endif()
-    set(previous_file ${tmp_path})
-  endforeach()
-endif()
-
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
 # This is because the build rules here written in such a way that they always
 # appear to need to be re-run generating >600 pieces of work during the pytorch
