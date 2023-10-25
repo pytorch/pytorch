@@ -79,8 +79,8 @@ group_fusion = False
 # enable pattern match with batch fusion (using torch op)
 batch_fusion = True
 
-# enable reordering pass
-reordering = True
+# enable reordering pass for improving memory locality
+reorder_for_locality = True
 
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
@@ -102,6 +102,29 @@ force_mixed_mm = False
 
 # TODO: capture whether the graph is from export
 from_export = False
+
+# enable reordering pass for increasing overlap between compute and communication
+reorder_for_compute_comm_overlap = False
+
+# passes (in execution order) for increasing overlap between compute and communication
+# for built-in passes, use string name; for user-defined passes, pass in the function handle
+reorder_for_compute_comm_overlap_passes = [
+    "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
+]
+
+# runtime estimation function for ops
+# for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
+estimate_op_runtime = "default"
+
+# unit: GB/s, uni-directional P2P bandwidth per card
+# default value is NVLink
+intra_node_bw = 300
+
+# unit: GB/s, uni-directional P2P bandwidth per node
+# default value is InfiniBand
+inter_node_bw = 25
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -182,6 +205,9 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
@@ -203,6 +229,9 @@ constant_and_index_propagation = True
 # we always add constants into graph.constants without
 # performing any constant-inlining optimization
 always_keep_tensor_constants = False
+
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
 
 
 def is_fbcode():
@@ -403,9 +432,6 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
-
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
 
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether

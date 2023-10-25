@@ -253,7 +253,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
     def test_fcn(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(fcn_resnet101(pretrained=False, pretrained_backbone=False)),
+            toC(fcn_resnet101(weights=None, weights_backbone=None)),
             toC(x),
             rtol=1e-3,
             atol=1e-5,
@@ -263,7 +263,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
     def test_deeplab(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(deeplabv3_resnet101(pretrained=False, pretrained_backbone=False)),
+            toC(deeplabv3_resnet101(weights=None, weights_backbone=None)),
             toC(x),
             rtol=1e-3,
             atol=1e-5,

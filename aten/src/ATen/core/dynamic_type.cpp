@@ -364,7 +364,7 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
 }
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
-    std::vector<TypePtr> elemTypes) {
+    const std::vector<TypePtr>& elemTypes) {
   return DynamicTypeFactory::create<TupleType>(elemTypes);
 }
 

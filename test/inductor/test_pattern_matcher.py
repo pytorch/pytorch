@@ -21,7 +21,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -77,6 +77,7 @@ class TestPaternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
+    @skipIfRocm
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul(self):
@@ -110,6 +111,7 @@ class TestPaternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
+    @skipIfRocm
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul_gating(self):
