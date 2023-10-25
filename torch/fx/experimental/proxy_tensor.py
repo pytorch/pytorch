@@ -52,7 +52,7 @@ CONSTANT_NUMEL_LIMIT = 1
 pytree._register_pytree_node(
     torch.Size,
     lambda x: (list(x), None),
-    lambda xs, _: tuple(xs) if not all(isinstance(x, (int, SymInt)) for x in xs) else torch.Size(xs)
+    lambda xs, _: tuple(xs) if not all(type(x) in [int, SymInt] for x in xs) else torch.Size(xs)
 )
 
 def fake_signature(fn, nargs):
