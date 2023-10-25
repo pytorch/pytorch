@@ -9,6 +9,7 @@ from torch.ao.pruning.sparsifier.utils import PerChannelNormObserver
 from torch.ao.quantization import default_placeholder_observer, QConfig
 from torch.ao.quantization.quantize import _remove_qconfig
 
+__all__ = ["WandaSparsifier"]
 
 class WandaSparsifier(BaseSparsifier):
     r"""Wanda sparsifier

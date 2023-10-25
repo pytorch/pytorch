@@ -13,6 +13,7 @@ __all__ = [
     "fqn_to_module",
     "get_arg_info_from_tensor_fqn",
     "FakeSparsity",
+    "PerChannelNormObserver",
 ]
 
 
