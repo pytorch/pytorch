@@ -1,7 +1,7 @@
 import logging
 import typing
 from collections import Counter
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 import torch
 import torch._guards
@@ -119,7 +119,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
     """
 
     # A dictionary mapping a tensor to all aliased views.
-    views: Dict[torch.fx.Node, List[torch.fx.Node]] = {}
+    views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
     graph = gm.graph
 
     for node in graph.nodes:
@@ -136,20 +136,20 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
         if existing_views:
             # Replace the view with the an existing view if available.
-            for alias in existing_views:
-                if alias.meta["val"].dtype == to_type:
-                    is_needed = False
-                    node.replace_all_uses_with(alias)
-                    alias.meta.update(node.meta)
-                    graph.erase_node(node)
-                    break
+            alias = existing_views.get(to_type)
+            if alias:
+                is_needed = False
+                node.replace_all_uses_with(alias)
+                alias.meta.update(node.meta)
+                graph.erase_node(node)
         else:
-            existing_views = [src]
+            from_type = src.meta["val"].dtype
+            existing_views = {from_type: src}
             views[src] = existing_views
 
         if is_needed:
-            # Save the new alias.
-            existing_views.append(node)
+            # Save the new alias but do not replace existing one.
+            existing_views.setdefault(to_type, node)
             views[node] = existing_views
 
     # Clean up unused views.
