@@ -350,7 +350,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     )
                 else:
                     res = torch._cslt_sparse_mm(
-                        input_B.compressed_tensor_cusparselt, input_A_padded.t(), bias  # type: ignore[arg-type]
+                        input_B.compressed_tensor_cusparselt, input_A_padded.t(), bias=bias  # type: ignore[arg-type]
                     ).t()
                 return res[:row, :]
 
@@ -369,7 +369,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     ).t()
                 else:
                     res = torch._cslt_sparse_mm(
-                        input_A.compressed_tensor_cusparselt, input_B_padded, None  # type: ignore[arg-type]
+                        input_A.compressed_tensor_cusparselt, input_B_padded, bias=None  # type: ignore[arg-type]
                     )
                 return res[:, :col]
 
@@ -384,7 +384,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         input_A_padded, input_B.sparse_tensor_cutlass, input_B.meta_tensor_cutlass
                     )
                 else:
-                    res = torch._cslt_sparse_mm(input_B.compressed_tensor_cusparselt, input_A_padded.t(), None).t()  # type: ignore[arg-type]
+                    res = torch._cslt_sparse_mm(input_B.compressed_tensor_cusparselt, input_A_padded.t(), bias=None).t()  # type: ignore[arg-type]
 
                 return res[:row, :]
 
@@ -413,7 +413,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     res = torch._cslt_sparse_mm(
                         weight.compressed_tensor_cusparselt,  # type: ignore[arg-type]
                         input_tensor_2d_padded.t(),
-                        bias
+                        bias=bias
                     ).t()
                 return res[:row, :].view(*shape[:-1], -1)
 
