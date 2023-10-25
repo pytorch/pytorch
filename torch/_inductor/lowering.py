@@ -2696,6 +2696,7 @@ def index_output_size_and_inner_fn(
     indices_loaders,
     indexed_size,
     x_loader,
+    add_asserts
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -2746,7 +2747,7 @@ def index_output_size_and_inner_fn(
                     ops.indirect_indexing(
                         loader(idx[start_offset : start_offset + rank]),
                         size,
-                        check=check,
+                        check=add_asserts,
                     )
                 )
         new_index = [
@@ -2785,6 +2786,7 @@ def index_impl(x, indices, check):
         indices_loaders,
         indexed_size,
         x_loader,
+        add_asserts=check,
     )
 
     return Pointwise.create(
@@ -2915,6 +2917,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         indices_loaders,
         indexed_size,
         None,
+        add_asserts=check,
     )
 
     values = expand(values, expected_vals_size)
