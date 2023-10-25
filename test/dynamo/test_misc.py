@@ -4642,10 +4642,12 @@ def fn():
             return " ".join([str(guard_expr) for guard_expr, _ in gm.shape_env.guards])
 
         # We'll check normal function once and compiled function twice.
-        fns = [symbool_fn_not_compiled, symbool_fn_compiled, symbool_fn_compiled]
+        not_compiled_fns = [symbool_fn_not_compiled]
+        compiled_fns = [symbool_fn_compiled, symbool_fn_compiled]
 
         for x in [torch.ones(2, 3), torch.ones(3, 4)]:
-            gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in fns]
+            gms = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in compiled_fns]
+            gms_not_compiled = [make_fx(fn, tracing_mode=tracing_mode)(x) for fn in not_compiled_fns]
 
             if compare_shape(x):
                 for gm in gms:
@@ -4660,6 +4662,19 @@ def forward(self, x_1):
                         _get_guard_exprs(gm),
                         """Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""",
                     )
+
+                for gm in gms_not_compiled:
+                    self.assertExpectedInline(
+                        gm.code.strip(),
+                        """\
+def forward(self, x_1):
+    sin = torch.ops.aten.sin.default(x_1);  x_1 = None
+    return sin""",
+                    )
+                    self.assertExpectedInline(
+                        _get_guard_exprs(gm),
+                        """Eq(s0, 3)""",
+                    )
             else:
                 for gm in gms:
                     self.assertExpectedInline(
@@ -4673,6 +4688,21 @@ def forward(self, x_1):
                         _get_guard_exprs(gm),
                         """Ne(Piecewise((1, Eq(s0, 3)), (0, True)), 1)""",
                     )
+
+                for gm in gms_not_compiled:
+                    self.assertExpectedInline(
+                        gm.code.strip(),
+                        """\
+def forward(self, x_1):
+    cos = torch.ops.aten.cos.default(x_1);  x_1 = None
+    return cos""",
+                    )
+                    self.assertExpectedInline(
+                        _get_guard_exprs(gm),
+                        """Ne(s0, 3)""",
+                    )
+
+
 
     def test_not_dynamic_scope(self):
         def f(y):
