@@ -751,7 +751,8 @@ def device_count() -> int:
     r"""Returns the number of GPUs available."""
     if not _is_compiled():
         return 0
-    nvml_count = _device_count_nvml()
+    # bypass _device_count_nvml() if rocm (not supported)
+    nvml_count = -1 if torch.version.hip else _device_count_nvml()
     return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
 
 

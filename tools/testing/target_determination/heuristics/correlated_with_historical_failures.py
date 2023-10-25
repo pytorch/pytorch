@@ -4,7 +4,10 @@ from collections import defaultdict
 from typing import Any, cast, Dict, List
 from warnings import warn
 
-from tools.stats.export_test_times import TEST_FILE_RATINGS_FILE
+from tools.stats.import_test_stats import (
+    ADDITIONAL_CI_FILES_FOLDER,
+    TEST_FILE_RATINGS_FILE,
+)
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -32,7 +35,7 @@ class CorrelatedWithHistoricalFailures(HeuristicInterface):
 
 
 def _get_file_rating_tests() -> List[str]:
-    path = REPO_ROOT / TEST_FILE_RATINGS_FILE
+    path = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TEST_FILE_RATINGS_FILE
     if not os.path.exists(path):
         print(f"could not find path {path}")
         return []

@@ -999,6 +999,13 @@ class VariableBuilder:
                 guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
             )
 
+    def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
+        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
+            raise InternalTorchDynamoError(
+                "Cannot wrap a Tensor that has already been",
+                "wrapped by this instance of Dynamo",
+            )
+
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
 
@@ -1006,6 +1013,7 @@ class VariableBuilder:
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
         ) and not source.guard_source().is_fsdp_module():
+            self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
@@ -1015,6 +1023,7 @@ class VariableBuilder:
             )
 
         if is_constant_source(source):
+            self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -1074,6 +1083,9 @@ class VariableBuilder:
             if dup_guard:
                 stored_value = stored_value.add_guards(self.make_guards(dup_guard))
             return stored_value
+
+        # By this point, we should have deduplicated all tensors
+        self.assert_not_wrapped_by_this_graph(value)
 
         # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
         # When we've discovered an untracked tensor, then we actually need
