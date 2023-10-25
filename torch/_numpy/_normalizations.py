@@ -69,7 +69,6 @@ def normalize_seq_array_like(x, parm=None):
 
 
 def normalize_dtype(dtype, parm=None):
-    # cf _decorators.dtype_to_torch
     torch_dtype = None
     if dtype is not None:
         dtype = _dtypes.dtype(dtype)
