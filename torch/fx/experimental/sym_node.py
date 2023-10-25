@@ -31,7 +31,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 
-from torch.fx.experimental.sym_dispatch_mode import sym_function_mode
+from torch.fx.experimental._sym_dispatch_mode import sym_function_mode
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
