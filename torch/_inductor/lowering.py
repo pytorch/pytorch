@@ -28,7 +28,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule

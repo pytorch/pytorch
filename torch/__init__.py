@@ -1802,7 +1802,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     csan.enable_cuda_sanitizer()
 
 # Populate magic methods on SymInt and SymFloat
-import torch.fx.experimental.symbolic_shapes
+import torch.fx.experimental.sym_node
 
 from torch import func as func
 from torch.func import vmap

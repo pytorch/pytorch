@@ -16,6 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.sym_node import sym_sqrt, SymNode
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -26,8 +27,6 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     sym_float,
-    sym_sqrt,
-    SymNode,
     to_node,
     is_symbolic,
 )
