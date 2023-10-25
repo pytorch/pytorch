@@ -78,6 +78,10 @@ _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
 """The default path to write the SARIF log to if the export fails."""
 
+_PROTOBUF_SIZE_MAX_LIMIT = 2 * 1024 * 1024 * 1024
+"""The maximum size of a Protobuf file in bytes. This is used to determine whether to
+serialize the model with external data or not."""
+
 log = logging.getLogger(__name__)
 
 
@@ -572,7 +576,7 @@ class LargeProtobufExportOutputSerializer:
         """`destination` is ignored. The model is saved to `self._destination_path` instead."""
         import onnx
 
-        if export_output.model_proto.ByteSize() < 1.9 * 1024 * 1024 * 1024:
+        if export_output.model_proto.ByteSize() < _PROTOBUF_SIZE_MAX_LIMIT:
             onnx.save_model(export_output.model_proto, self._destination_path)  # type: ignore[attr-defined]
         else:
             # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
