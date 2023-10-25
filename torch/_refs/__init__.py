@@ -5346,9 +5346,10 @@ def _like_constructor(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    if physical_layout == range(len(physical_layout)):
+    inverse_perm = utils.invert_perm(physical_layout)
+    if inverse_perm == range(len(inverse_perm)):
         return result
-    return result.permute(utils.invert_perm(physical_layout)).clone()
+    return result.permute(inverse_perm).clone()
 
 
 @register_decomposition(aten.full_like)
