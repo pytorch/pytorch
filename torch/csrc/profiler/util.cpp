@@ -409,7 +409,7 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 static constexpr auto kCommuName = "Collective name";
-static constexpr auto kDtype = "Dtype";
+static constexpr auto kDtype = "dtype";
 static constexpr auto kInMsgSize = "In msg size";
 static constexpr auto kOutMsgSize = "Out msg size";
 static constexpr auto kInSplit = "In split size";
