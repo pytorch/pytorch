@@ -682,14 +682,28 @@
   structured_delegate: all.out
   variants: function, method
 
+- func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: all.dims_out
+  variants: function, method
+  cpp_no_default_args: ['dim']
+  dispatch:
+    CompositeExplicitAutograd: all_dims_default
+
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
-  precomputed:
-  - dim -> int dim
   dispatch:
     CPU, CUDA: all_out
     MPS: all_out_mps
+
+- func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: all_dims_out
+    CompositeExplicitAutograd: all_dims_out_default
+  cpp_no_default_args: ['dim']
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -710,14 +724,29 @@
   variants: function, method
   tags: core
 
+- func: any.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: any.dims_out
+  variants: function, method
+  cpp_no_default_args: ['dim']
+  tags: core
+  dispatch:
+    CompositeExplicitAutograd: any_dims_default
+
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
-  precomputed:
-  - dim -> int dim
   dispatch:
     CPU, CUDA: any_out
     MPS: any_out_mps
+
+- func: any.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: any_dims_out
+    CompositeExplicitAutograd: any_dims_out_default
+  cpp_no_default_args: ['dim']
 
 - func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
