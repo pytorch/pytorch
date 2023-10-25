@@ -20,6 +20,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
+from torch._logging import warning_once
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -257,6 +258,12 @@ class TorchVariable(VariableTracker):
             ).add_options(options)
         elif self.value in config.constant_functions:
             assert not args and not kwargs
+            # See: https://github.com/pytorch/pytorch/issues/110765
+            if self.value in [
+                torch._utils.is_compiling,
+                torch._dynamo.external_utils.is_compiling,
+            ]:
+                tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(
                 config.constant_functions[self.value], **options
             )
@@ -447,7 +454,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
