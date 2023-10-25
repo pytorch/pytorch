@@ -6371,13 +6371,15 @@ class TestQuantizedConv(TestCase):
         use_channelwise=True,
         X2_scale=1.2,
         X2_zero_point=0,
-        fp32_output=False,
+        qconv_output_dtype=None,  # None, torch.float32, torch.bfloat16
         weight_in_channel_last_format=False,
     ):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
             W_zero_point = len(W_zero_point) * [0]
-        if fp32_output:
+        fp32_output = True if qconv_output_dtype is torch.float32 else False
+        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
+        if fp32_output or bfloat16_output:
             Y_scale = 1.0
             Y_zero_point = 0
         batch_size = 3
@@ -6495,7 +6497,7 @@ class TestQuantizedConv(TestCase):
                 groups,
                 1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
                 Y_zero_point,
-                fp32_output,
+                qconv_output_dtype,
                 post_op.binary_attr,
                 post_op.alpha,
                 post_op.unary_attr,
@@ -6517,15 +6519,15 @@ class TestQuantizedConv(TestCase):
                 groups,
                 1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
                 Y_zero_point,
-                fp32_output,
+                qconv_output_dtype,
                 post_op.unary_attr,
                 post_op.scalars,
                 post_op.algorithm,
             )
-            if fp32_output:
-                self.assertTrue(Y_q_cpu_tensor.dtype == torch.float32)
+            if fp32_output or bfloat16_output:
+                self.assertTrue(Y_q_cpu_tensor.dtype == qconv_output_dtype)
                 Y_q_cpu_tensor = torch.quantize_per_tensor(
-                    Y_q_cpu_tensor, scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
+                    Y_q_cpu_tensor if fp32_output else Y_q_cpu_tensor.to(torch.float32), scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
                 ).int_repr()
 
         # Make sure the results match
@@ -6567,10 +6569,10 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [0]
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
-        fp32_output_list = [False, True]
-        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, fp32_output_list)
-        for groups, use_bias, use_channelwise, fp32_output in options:
-            if fp32_output and not (use_bias and use_channelwise):
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+        for groups, use_bias, use_channelwise, output_dtype in options:
+            if output_dtype is not None and not (use_bias and use_channelwise):
                 # Remove some test combination to reduce UT test time
                 continue
             conv1d = torch.nn.Conv1d(
@@ -6602,7 +6604,7 @@ class TestQuantizedConv(TestCase):
                 use_bias=use_bias,
                 post_op=pointwise_post_op,
                 use_channelwise=use_channelwise,
-                fp32_output=fp32_output,
+                qconv_output_dtype=output_dtype,
             )
 
     @skipIfNoONEDNN
@@ -6620,16 +6622,16 @@ class TestQuantizedConv(TestCase):
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
         channel_last_weight_format_list = [False, True]
-        fp32_output_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
         options = itertools.product(
             groups_list,
             use_bias_list,
             use_channelwise_list,
             channel_last_weight_format_list,
-            fp32_output_list,
+            output_dtype_list,
         )
-        for groups, use_bias, use_channelwise, channel_last_weight_format, fp32_output in options:
-            if (fp32_output or channel_last_weight_format) and not (use_bias and use_channelwise):
+        for groups, use_bias, use_channelwise, channel_last_weight_format, output_dtype in options:
+            if (output_dtype is not None or channel_last_weight_format) and not (use_bias and use_channelwise):
                 # Remove some test combination to reduce UT test time
                 continue
             qconv = torch.ops.onednn.qconv2d_pointwise
@@ -6661,7 +6663,7 @@ class TestQuantizedConv(TestCase):
                 use_bias=use_bias,
                 post_op=pointwise_post_op,
                 use_channelwise=use_channelwise,
-                fp32_output=fp32_output,
+                qconv_output_dtype=output_dtype,
                 weight_in_channel_last_format=channel_last_weight_format,
             )
 
@@ -6680,16 +6682,16 @@ class TestQuantizedConv(TestCase):
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
         channel_last_weight_format_list = [False, True]
-        fp32_output_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
         options = itertools.product(
             groups_list,
             use_bias_list,
             use_channelwise_list,
             channel_last_weight_format_list,
-            fp32_output_list,
+            output_dtype_list,
         )
-        for groups, use_bias, use_channelwise, channel_last_weight_format, fp32_output in options:
-            if (fp32_output or channel_last_weight_format) and not (use_bias and use_channelwise):
+        for groups, use_bias, use_channelwise, channel_last_weight_format, output_dtype in options:
+            if (output_dtype is not None or channel_last_weight_format) and not (use_bias and use_channelwise):
                 # Remove some test combination to reduce UT test time
                 continue
             qconv = torch.ops.onednn.qconv3d_pointwise
@@ -6721,7 +6723,7 @@ class TestQuantizedConv(TestCase):
                 use_bias=use_bias,
                 post_op=pointwise_post_op,
                 use_channelwise=use_channelwise,
-                fp32_output=fp32_output,
+                qconv_output_dtype=output_dtype,
                 weight_in_channel_last_format=channel_last_weight_format,
             )
 
