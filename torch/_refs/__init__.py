@@ -5352,6 +5352,7 @@ def _like_constructor(
 
 
 @register_decomposition(aten.full_like)
+@out_wrapper()
 def full_like(
     input: TensorLikeType,
     fill_value: NumberType,
@@ -5451,6 +5452,7 @@ def randn(
 
 
 @register_decomposition(aten.randn_like)
+@out_wrapper()
 def randn_like(
     input: TensorLikeType,
     *,
@@ -5474,6 +5476,7 @@ def randn_like(
 
 
 @register_decomposition(aten.rand_like)
+@out_wrapper()
 def rand_like(
     input: TensorLikeType,
     *,
@@ -5497,6 +5500,7 @@ def rand_like(
 
 
 @register_decomposition(aten.randint_like)
+@out_wrapper()
 def randint_like(
     input: TensorLikeType,
     *args,
