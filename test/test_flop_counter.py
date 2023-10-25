@@ -221,18 +221,18 @@ class TestFlopCounter(TestCase):
 
 
         run_nonuniform_flops = functools.partial(get_flops, batch_size, n_heads, seq_len_q, seq_len_k, head_dim, head_dim_v, dtype)
-
-        flops = [run_nonuniform_flops(backend, with_backward=False) for backend in ["math", "flash", "mem_efficient"]]
-        flops_fw_math, flops_fw_flash, flops_fw_efficient = flops
-        self.assertEqual(flops_fw_math, flops_fw_flash, flops_fw_efficient)
+        # Flash does not support non-uniform attention, i.e. seq_len_q != seq_len_k or dim_q != dim_v"
+        non_uniform_backends = ["math", "mem_efficient"]
+        flops = [run_nonuniform_flops(backend, with_backward=False) for backend in non_uniform_backends]
+        flops_fw_math, flops_fw_efficient = flops
+        self.assertEqual(flops_fw_math, flops_fw_efficient)
 
         self.assertExpectedInline(str(flops_fw_math), """268435456""")
 
-        flops = [run_nonuniform_flops(backend, with_backward=True) for backend in ["math", "flash", "mem_efficient"]]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient = flops
+        flops = [run_nonuniform_flops(backend, with_backward=True) for backend in non_uniform_backends]
+        flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
-        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
-        self.assertExpectedInline(str(flops_fw_bw_flash), """939524096""")
+        self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
     def test_hook_registration(self):
         model = torch.nn.Linear(100, 100)
