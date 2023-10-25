@@ -613,9 +613,11 @@ class ViewAndMutationMeta:
     def __post_init__(self):
         mutated_inp_indices = [
             i for i, m in enumerate(self.input_info)
-            if m.mutates_data or m.mutates_metadata
+            if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
         ]
-
+        # pre-compute the indices of the inputs that are mutated.
+        # When keep_input_mutations is set, we don't need to worry about our epilogue
+        # handling data-only mutations, because we keep them directly in the graph.
         mutated_inp_runtime_indices = [
             i for i, m in enumerate(self.input_info)
             if m.mutation_type == MutationType.MUTATED_OUT_GRAPH and not self.is_subclass
@@ -4839,7 +4841,7 @@ def aot_module_simplified(
         inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
-        num_params_buffers=len(params_and_buffers_flat),
+        num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,
