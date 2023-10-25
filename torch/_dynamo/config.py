@@ -327,6 +327,12 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+# When True, only ops that have the torch.Tag.pt2_compliant tag
+# will be allowed into the graph; all other ops will be disallowed
+# and will fall back to eager-mode PyTorch. Useful to ensure
+# correctness of custom ops.
+only_allow_pt2_compliant_ops = False
+
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
