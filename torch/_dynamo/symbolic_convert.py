@@ -89,7 +89,6 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .variables.lazy import LazyMutableLocal
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -587,11 +586,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return oldvar.mutable_local not in v.recursively_contains and not any(
-                # recursively_contains will miss things for LazyVariableTracker
-                (isinstance(x, LazyMutableLocal) and x.vt is not None)
-                for x in v.recursively_contains
-            )
+            return oldvar.mutable_local not in v.recursively_contains
 
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
