@@ -6,9 +6,10 @@ import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, Optional, cast, TYPE_CHECKING
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import _register_tensor_wrapper
-from torch.fx.experimental.proxy_tensor import (
-    get_innermost_proxy_mode,
-)
+# from torch.fx.experimental.proxy_tensor import (
+#     get_innermost_proxy_mode
+# )
+import torch.fx.experimental.proxy_tensor as proxy_tensor
 from torch._custom_ops import impl_abstract
 
 try:
@@ -501,7 +502,8 @@ def _are_we_tracing() -> bool:
     #  but proxy tracing turned of, so this is how we detect it).
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None:
         return True
-    mode = get_innermost_proxy_mode()
+    import torch.fx.experimental.proxy_tensor as proxy_tensor
+    mode = proxy_tensor.get_innermost_proxy_mode()
     if mode is None:
         return False
     return mode.tracer is not None

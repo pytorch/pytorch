@@ -17,11 +17,13 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.distributed._tensor.device_mesh import DeviceMesh
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
 if dist.is_available():
+    from torch.distributed._tensor.device_mesh import DeviceMesh
     from torch.distributed.distributed_c10d import _get_default_group, ReduceOp
     from torch.distributed.utils import (
         _alloc_storage,
@@ -646,6 +648,7 @@ class DistributedDataParallel(Module, Joinable):
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
+        device_mesh: DeviceMesh = None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -733,10 +736,20 @@ class DistributedDataParallel(Module, Joinable):
 
             self.output_device = _get_device_index(output_device, True)
 
-        if process_group is None:
+        if process_group and device_mesh is not None:
+            raise RuntimeError(
+                "Cannot specify both process_group and device_mesh arguments."
+            )
+        elif process_group is None and device_mesh is None:
             self.process_group = _get_default_group()
-        else:
+        elif device_mesh is None:
             self.process_group = process_group
+        else:
+            if device_mesh.ndim != 1:
+                raise RuntimeError(
+                    f"Only 1D device mesh is supported, but got {device_mesh}."
+                )
+            self.process_group = device_mesh.get_dim_groups(mesh_dim=0)
 
         self.static_graph = False
         self.dim = dim
@@ -1286,8 +1299,8 @@ class DistributedDataParallel(Module, Joinable):
             )
             yield from ps
 
-        for mod in m.modules() if recurse else [m]:
-            yield from model_parameters(mod)
+        for m in m.modules() if recurse else [m]:
+            yield from model_parameters(m)
 
     def _check_default_group(self):
         pickle_not_supported = False

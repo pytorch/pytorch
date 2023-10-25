@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-from torch.distributed._tensor.device_mesh import DeviceMesh
+# from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 try:
@@ -369,7 +369,7 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
 
-    mesh: DeviceMesh
+    mesh: "DeviceMesh"
     schema: OpSchema
     flat_args_schema: List[object]
     local_args: Sequence[object]
