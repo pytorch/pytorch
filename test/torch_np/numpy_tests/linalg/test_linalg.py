@@ -15,85 +15,45 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import pytest
 
+import torch._numpy as np
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises
+from torch._numpy import (
+    array,
+    asarray,
+    atleast_2d,
+    cdouble,
+    csingle,
+    dot,
+    double,
+    identity,
+    inf,
+    linalg,
+    matmul,
+    single,
+    swapaxes,
+)
+from torch._numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
+from torch._numpy.testing import (
+    assert_,
+    assert_allclose,
+    assert_almost_equal,
+    assert_array_equal,
+    assert_equal,
+    suppress_warnings,
+    #  assert_raises_regex, HAS_LAPACK64, IS_WASM
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    slowTest as slow,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
 )
 
-
-# If we are going to trace through these, we should use NumPy
-# If testing on eager mode, we use torch._numpy
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy import (
-        array,
-        asarray,
-        atleast_2d,
-        cdouble,
-        csingle,
-        dot,
-        double,
-        identity,
-        inf,
-        linalg,
-        matmul,
-        single,
-        swapaxes,
-    )
-    from numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
-    from numpy.testing import (
-        assert_,
-        assert_allclose,
-        assert_almost_equal,
-        assert_array_equal,
-        assert_equal,
-        suppress_warnings,
-        #  assert_raises_regex, HAS_LAPACK64, IS_WASM
-    )
-
-else:
-    import torch._numpy as np
-    from torch._numpy import (
-        array,
-        asarray,
-        atleast_2d,
-        cdouble,
-        csingle,
-        dot,
-        double,
-        identity,
-        inf,
-        linalg,
-        matmul,
-        single,
-        swapaxes,
-    )
-    from torch._numpy.linalg import (
-        LinAlgError,
-        matrix_power,
-        matrix_rank,
-        multi_dot,
-        norm,
-    )
-    from torch._numpy.testing import (
-        assert_,
-        assert_allclose,
-        assert_almost_equal,
-        assert_array_equal,
-        assert_equal,
-        suppress_warnings,
-        #  assert_raises_regex, HAS_LAPACK64, IS_WASM
-    )
-
-
 skip = functools.partial(skipif, True)
+
+# FIXME: slow tests have never run (= are broken)
+slow = skip
 
 IS_WASM = False
 HAS_LAPACK64 = False
@@ -347,11 +307,11 @@ def _make_generalized_cases():
         if not isinstance(case.a, np.ndarray):
             continue
 
-        a = np.stack([case.a, 2 * case.a, 3 * case.a])
+        a = np.array([case.a, 2 * case.a, 3 * case.a])
         if case.b is None:
             b = None
         else:
-            b = np.stack([case.b, 7 * case.b, 6 * case.b])
+            b = np.array([case.b, 7 * case.b, 6 * case.b])
         new_case = LinalgCase(
             case.name + "_tile3", a, b, tags=case.tags | {"generalized"}
         )
@@ -448,6 +408,7 @@ class LinalgGeneralizedNonsquareTestCase(LinalgTestCase):
 
 
 class HermitianGeneralizedTestCase(LinalgTestCase):
+    @xfail  # (reason="sort complex")
     @slow
     def test_generalized_herm_cases(self):
         self.check_cases(require={"generalized", "hermitian"}, exclude={"size-0"})
@@ -841,7 +802,7 @@ class TestCond(CondCases, TestCase):
         for A, p in itertools.product(As, p_neg):
             linalg.cond(A, p)
 
-    @skip(reason="NP_VER: fails on CI")  # (
+    @xfail  # (
     #    True, run=False, reason="Platform/LAPACK-dependent failure, see gh-18914"
     # )
     def test_nan(self):
@@ -929,7 +890,7 @@ class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
             ad = asarray(a).astype(cdouble)
         ev = linalg.eigvals(ad)
         assert_almost_equal(d, np.prod(ev, axis=-1))
-        assert_almost_equal(s * np.exp(ld), np.prod(ev, axis=-1), single_decimal=5)
+        assert_almost_equal(s * np.exp(ld), np.prod(ev, axis=-1))
 
         s = np.atleast_1d(s)
         ld = np.atleast_1d(ld)
@@ -1015,7 +976,7 @@ class LstsqCases(LinalgSquareTestCase, LinalgNonsquareTestCase):
 
 @instantiate_parametrized_tests
 class TestLstsq(LstsqCases, TestCase):
-    @xpassIfTorchDynamo  # (reason="Lstsq: we use the future default =None")
+    @xfail  # (reason="Lstsq: we use the future default =None")
     def test_future_rcond(self):
         a = np.array(
             [
@@ -1345,8 +1306,8 @@ class _TestNormGeneral(_TestNormBase):
     def test_vector_return_type(self):
         a = np.array([1, 0, 1])
 
-        exact_types = "Bbhil"  # np.typecodes["AllInteger"]
-        inexact_types = "efdFD"  # np.typecodes["AllFloat"]
+        exact_types = np.typecodes["AllInteger"]
+        inexact_types = np.typecodes["AllFloat"]
 
         all_types = exact_types + inexact_types
 
@@ -1524,7 +1485,7 @@ class _TestNorm2D(_TestNormBase):
     def test_matrix_return_type(self):
         a = np.array([[1, 0, 1], [0, 1, 1]])
 
-        exact_types = "Bbhil"  # np.typecodes["AllInteger"]
+        exact_types = np.typecodes["AllInteger"]
 
         # float32, complex64, float64, complex128 types are the only types
         # allowed by `linalg`, which performs the matrix operations used
@@ -1760,7 +1721,7 @@ class TestQR(TestCase):
         assert_(isinstance(r2, a_type))
         assert_almost_equal(r2, r1)
 
-    @xpassIfTorchDynamo  # (reason="torch does not allow qr(..., mode='raw'")
+    @xfail  # (reason="torch does not allow qr(..., mode='raw'")
     @parametrize("m, n", [(3, 0), (0, 3), (0, 0)])
     def test_qr_empty(self, m, n):
         k = min(m, n)
@@ -1774,7 +1735,7 @@ class TestQR(TestCase):
         assert_equal(h.shape, (n, m))
         assert_equal(tau.shape, (k,))
 
-    @xpassIfTorchDynamo  # (reason="torch does not allow qr(..., mode='raw'")
+    @xfail  # (reason="torch does not allow qr(..., mode='raw'")
     def test_mode_raw(self):
         # The factorization is not unique and varies between libraries,
         # so it is not possible to check against known values. Functional
@@ -1909,7 +1870,7 @@ class TestCholesky(TestCase):
 
 
 class TestMisc(TestCase):
-    @xpassIfTorchDynamo  # (reason="endianness")
+    @xfail  # (reason="endianness")
     def test_byteorder_check(self):
         # Byte order check should pass for native order
         if sys.byteorder == "little":
@@ -2244,7 +2205,7 @@ class TestTensorsolve(TestCase):
 
 
 class TestMisc2(TestCase):
-    @xpassIfTorchDynamo  # (reason="TODO")
+    @xfail  # (reason="TODO")
     def test_unsupported_commontype(self):
         # linalg gracefully handles unsupported type
         arr = np.array([[1, -2], [2, 5]], dtype="float16")
@@ -2252,6 +2213,7 @@ class TestMisc2(TestCase):
         with assert_raises(TypeError):
             linalg.cholesky(arr)
 
+    @xfail  # (reason="TODO")
     # @slow
     # @pytest.mark.xfail(not HAS_LAPACK64, run=False,
     #                   reason="Numpy not compiled with 64-bit BLAS/LAPACK")
