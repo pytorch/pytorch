@@ -363,12 +363,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
-    def check_kwargs(self, kwargs, supported_types):
-        if not all(isinstance(value, supported_types) for value in kwargs.values()):
-            raise unimplemented(
-                f"Only kwargs of the following types are supported: {supported_types}"
-            )
-
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
@@ -1072,12 +1066,15 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable, UserFunctionVariable
+        from . import UserFunctionVariable
         from .builder import wrap_fx_proxy
 
         tracer = self.fwd_bwd_tracer
 
-        self.check_kwargs(kwargs, ConstantVariable)
+        if len(kwargs) > 0:
+            unimplemented(
+                "kwargs have not been implemented for torch.autograd.Function"
+            )
 
         from . import TorchVariable
 
@@ -1134,8 +1131,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r
 
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
-
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -1143,7 +1138,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
