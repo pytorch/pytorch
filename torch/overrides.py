@@ -221,6 +221,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_max,
         torch.sym_min,
         torch.sym_not,
+        torch.sym_ite,
         torch.sym_constrain_range,
         torch.sym_constrain_range_for_size,
         torch.tril_indices,
@@ -585,14 +586,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.fused_moving_avg_obs_fake_quant: (lambda x, observer_on, fake_quant_on, averaging_const, running_min,
                                                 running_max, scale, zero_point, quant_min, quant_max, ch_axis,
                                                 per_row_fake_quant=False, symmetric_quant=False: -1),
-        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias: -1,
-        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias: -1,
-        torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,
-        torch.fbgemm_linear_int8_weight_fp32_activation: (lambda input, weight, packed, col_offsets, weight_scale,
-                                                          weight_zero_point, bias: -1),
-        torch.fbgemm_linear_quantize_weight: lambda input: -1,
-        torch.fbgemm_pack_gemm_matrix_fp16: lambda input: -1,
-        torch.fbgemm_pack_quantized_matrix: lambda input, a, b: -1,
         torch.feature_alpha_dropout: lambda input, p, train: -1,
         torch.feature_dropout: lambda input, p, train: -1,
         torch.fft.ifft: lambda input, n=None, dim=-1, norm=None: -1,
@@ -977,21 +970,12 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantize_per_tensor_dynamic: lambda input, dtype, reduce_range: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
-        torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
-                                   col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
-
-        torch.quantized_lstm_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
-                                    col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
         torch.quantized_max_pool1d: (lambda input, kernel_size, stride=tuple(), padding=(0,),
                                      dilation=(1,), ceil_mode=False: -1),
         torch.quantized_max_pool2d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0),
                                      dilation=(1, 1), ceil_mode=False: -1),
         torch.quantized_max_pool3d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0, 0),
                                      dilation=(1, 1, 1), ceil_mode=False: -1),
-        torch.quantized_rnn_relu_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
-                                        col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
-        torch.quantized_rnn_tanh_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
-                                        col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
         torch.rad2deg: lambda input, out=None: -1,
         torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
@@ -1479,7 +1463,7 @@ def wrap_torch_function(dispatcher: Callable):
 
     return inner
 
-def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
+def _get_overloaded_args(relevant_args: Iterable[Any], get_type_fn: Callable[[Any], Type] = None) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -1501,6 +1485,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
         Iterable of array-like arguments to check for __torch_function__
         methods.
 
+    get_type_fn : callable, optional
+        Function to call on each argument in relevant_args to get its type.
+
     Returns
     -------
     overloaded_args : list
@@ -1510,6 +1497,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
+    if get_type_fn is None:
+        get_type_fn = type
+
     # If torch function is not enabled, there are no overloaded types
     if not torch._C._is_torch_function_enabled():
         return []
@@ -1517,7 +1507,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     overloaded_types: Set[Type] = set()
     overloaded_args: List[Any] = []
     for arg in relevant_args:
-        arg_type = type(arg)
+        arg_type = get_type_fn(arg)
         # We only collect arguments if they have a unique type, which ensures
         # reasonable performance even with a long list of possibly overloaded
         # arguments.
@@ -1535,7 +1525,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
                 # This ensures "subclasses before superclasses".
                 index = len(overloaded_args)
                 for i, old_arg in enumerate(overloaded_args):
-                    if issubclass(arg_type, type(old_arg)):
+                    if issubclass(arg_type, get_type_fn(old_arg)):
                         index = i
                         break
                 overloaded_args.insert(index, arg)

@@ -120,6 +120,8 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
+        torch.resize_as_,
+        torch._tensor._convert,
     ]
 
     # extract all dtypes from torch
@@ -397,4 +399,4 @@ def is_builtin_constant(obj):
 def is_numpy(obj):
     if np is None:
         return False
-    return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
+    return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
