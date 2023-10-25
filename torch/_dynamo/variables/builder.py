@@ -1118,8 +1118,8 @@ class VariableBuilder:
         # ignore_subclass changes
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
-        if not is_fake(fake_tensor_value):
-            raise InternalTorchDynamoError("Wrapped Tensor must have a fake value")
+        if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
+            raise InternalTorchDynamoError("Wrapped Tensor must be this graph's fake")
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
@@ -1417,10 +1417,7 @@ def wrap_fx_proxy_cls(
             example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
         # Handle recursive calls here
-        elif (
-            is_fake(example_value)
-            and maybe_get_fake_mode(example_value) is tx.fake_mode
-        ):
+        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
             pass
 
         elif isinstance(example_value, torch.Tensor):
@@ -1447,8 +1444,7 @@ def wrap_fx_proxy_cls(
                 example_value, tx=tx, **kwargs
             )
         if isinstance(example_value, torch.Tensor) and (
-            not is_fake(example_value)
-            or maybe_get_fake_mode(example_value) is not tx.fake_mode
+            maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
                 "`example_value` needs to be a `FakeTensor`"

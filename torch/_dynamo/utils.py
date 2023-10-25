@@ -1370,7 +1370,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         return node.meta["example_value"]
 
     def ensure_graph_fake(e):
-        assert is_fake(e) and maybe_get_fake_mode(e) is tx.fake_mode
+        assert maybe_get_fake_mode(e) is tx.fake_mode
         return e
 
     def visit(n: torch.fx.Node):
