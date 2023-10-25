@@ -5307,6 +5307,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out2 = model(inp2)
             self.assertTrue(torch.equal(out1, out2))
 
+    def test_batchnorm_load_state_dict(self):
+        bn = torch.nn.BatchNorm2d(3)
+        self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(0))
+
+        bn.num_batches_tracked = torch.tensor(10)
+        self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
+
+        empty_dict = OrderedDict()
+        bn.load_state_dict(empty_dict, strict=False)
+        self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -11768,7 +11779,7 @@ class TestNNDeviceType(NNTestCase):
         reductions = ['none', 'sum', 'mean']
         label_smoothings = [0.05, 0.15]
 
-        weight = torch.tensor([0.3, 0.6], device=device)
+        wgt = torch.tensor([0.3, 0.6], device=device)
         inp1 = torch.tensor([[0.3, 0.4], [1, 2]], device=device)
         inp2 = torch.tensor([[0.3, 0.6], [1, 2]], device=device)
 
@@ -11776,7 +11787,7 @@ class TestNNDeviceType(NNTestCase):
         targ_negative_ignore_index = torch.tensor([-2, 1], device=device)
         targ_positive_ignore_index = torch.tensor([2, 1], device=device)
 
-        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, weight)):
+        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, wgt)):
             def check_equal(loss, inp_targ_1, inp_targ_2):
                 inp1, targ1 = inp_targ_1
                 inp2, targ2 = inp_targ_2
