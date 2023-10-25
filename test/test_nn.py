@@ -11492,7 +11492,7 @@ class TestNNDeviceType(NNTestCase):
 
     # Ref: https://github.com/pytorch/pytorch/issue/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_nll_loss_large_tensor(self, device, reduction):
