@@ -229,14 +229,11 @@ def register_default_collate_for(name: Type, collate_fn: Optional[Callable] = No
         return collate_fn
 
     # @register()
-    def decorator(name):
-        @wraps(register_default_collate_for)
-        def wrapper(collate_fn):
-            default_collate_fn_map[name] = collate_fn
-            return collate_fn
-        return wrapper
-
-    return decorator(name)
+    @wraps(register_default_collate_for)
+    def wrapper(collate_fn):
+        default_collate_fn_map[name] = collate_fn
+        return collate_fn
+    return wrapper
 
 
 def default_collate(batch):
