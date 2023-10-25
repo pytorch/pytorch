@@ -16580,9 +16580,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # Expected RuntimeError when doing an unsafe cast from a result of
-               # dtype torch.float32 into an out= with dtype torch.lon
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # Expected RuntimeError when calling with input.device=cuda:0 and out.device=cpu.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out',
+                            active_if=torch.cuda.is_available()),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
