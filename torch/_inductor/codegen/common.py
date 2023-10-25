@@ -438,10 +438,14 @@ class DeferredLine(DeferredLineBase):
         self.name = name
 
     def __call__(self):
-        if self.name not in (
-            V.graph.removed_buffers | V.kernel.removed_buffers
-        ) and self.name not in (
-            V.graph.inplaced_to_remove | V.kernel.inplaced_to_remove
+        if all(
+            self.name not in x
+            for x in (
+                V.graph.removed_buffers,
+                V.kernel.removed_buffers,
+                V.graph.inplaced_to_remove,
+                V.kernel.inplaced_to_remove,
+            )
         ):
             return self.line
         return None
@@ -643,7 +647,10 @@ class KernelArgs:
             if self._buffer_is_marked_removed(inplaced):
                 continue
             for other in inplaced.other_names:
-                if other in (V.graph.inplaced_to_remove | V.kernel.inplaced_to_remove):
+                if (
+                    other in V.graph.inplaced_to_remove
+                    or other in V.kernel.inplaced_to_remove
+                ):
                     continue
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
