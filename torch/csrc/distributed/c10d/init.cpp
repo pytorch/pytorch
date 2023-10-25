@@ -1772,7 +1772,12 @@ Arguments:
           .def_property_readonly(
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
-              "(Gets this process group name. It's cluster unique)");
+              "(Gets this process group name. It's cluster unique)")
+          .def(
+              "boxed",
+              [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
+                return torch::jit::toPyObject(c10::IValue(self));
+              });
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
@@ -2493,7 +2498,12 @@ Example::
               .. warning ::
                   This API only works for NCCL backend for now and must set
                   NCCL_ENABLE_TIMING environment variable.
-            )");
+            )")
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<::c10d::Work> self) {
+            return torch::jit::toPyObject(c10::IValue(self));
+          });
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
