@@ -1153,7 +1153,7 @@ def run_functionalized_fw_and_collect_metadata(
                 # Is it possible to find a set of conditions where it is **safe** to hide the output aliasing from autograd?
                 #
                 # For a set of outputs of the graph that alias each other, o_1...o_k, consider:
-                # (1) They came from the same multi-outout view op, e.g. o_1, ..., o_k = intermediate.unbind(0)
+                # (1) They came from the same multi-output view op, e.g. o_1, ..., o_k = intermediate.unbind(0)
                 # (2) If there are any other aliases of o_1 through o_k (in the example above, intermediate),
                 #     **at most** 1 can escape from the graph (e.g. there is not some other graph input/output
                 #     o_other, that aliases these outputs)

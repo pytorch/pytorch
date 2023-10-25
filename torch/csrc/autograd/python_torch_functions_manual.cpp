@@ -734,6 +734,8 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_are_all_mutations_hidden_from_autograd",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"_functionalize_is_multi_output_view",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_is_multi_output_view),
