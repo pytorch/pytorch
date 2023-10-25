@@ -1433,7 +1433,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         + f"new at::Tensor({output}));"
                     )
         else:
-            self.wrapper_call.writeline("py::gil_scoped_acquire acquire;")
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
     def generate_end(self, result):
