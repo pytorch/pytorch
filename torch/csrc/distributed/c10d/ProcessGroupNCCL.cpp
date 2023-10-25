@@ -703,7 +703,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
   LOG(ERROR) << exceptionMsg;
   std::exception_ptr exception_ptr =
-      std::make_exception_ptr(std::runtime_error(exceptionMsg));
+      std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
   setException(exception_ptr);
   return true;
 }
@@ -1182,7 +1182,8 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       LOG(ERROR) << exitMsg;
       // TODO(whc) clean up the rethrow - why is it stored in a class var and
       // rethrown?
-      watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+      watchDogException_ =
+          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
       std::rethrow_exception(watchDogException_);
     }
   } catch (...) {
@@ -1191,7 +1192,8 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
         rank_,
         "] NCCL watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
-    watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+    watchDogException_ =
+        std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
     std::rethrow_exception(watchDogException_);
   }
 }
@@ -1388,15 +1390,18 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     // commFailureReason is set.
     auto commFailureReason = ncclComm->getNcclCommFailureReason();
     if (commFailureReason != c10::nullopt) {
-      return std::make_exception_ptr(std::runtime_error(c10::str(
-          "NCCL communicator encountered error set by ProcessGroupNCCL: ",
-          *commFailureReason)));
+      return std::make_exception_ptr(C10_BUILD_ERROR(
+          DistBackendError,
+          c10::str(
+              "NCCL communicator encountered error set by ProcessGroupNCCL: ",
+              *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
-      return std::make_exception_ptr(std::runtime_error(
+      return std::make_exception_ptr(C10_BUILD_ERROR(
+          DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
-          getNcclErrorDetailStr(ncclAsyncErr)));
+              getNcclErrorDetailStr(ncclAsyncErr)));
     }
   }
 
