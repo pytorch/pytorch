@@ -1693,6 +1693,11 @@ def forward(self, x_1):
         self.assertTrue(isinstance(actual, list))
         self.assertEqual(actual, list(tags))
 
+    def test_define_bad_schema(self):
+        lib = self.lib()
+        with self.assertRaisesRegex(ValueError, "expected schema to look like"):
+            torch.library.define(f"{self.test_ns}::foo", "foo(Tensor x) -> Tensor")
+
     def test_define_and_impl(self):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
