@@ -73,11 +73,9 @@ make_tiled_copy_C_warpcontiguousN(Copy_Atom<Args...> const& copy_atom,
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <int THREADS_PER_ROW, typename Engine0, typename Layout0,
-          typename Engine1, typename Layout1, typename Engine2, typename Layout2>
+template <int THREADS_PER_ROW, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
 inline __device__ void dot_do_o(Tensor<Engine0, Layout0> const &do_, Tensor<Engine0, Layout0> const &o,
-                                Tensor<Engine1, Layout1> &dP_sum, Tensor<Engine2, Layout2> &sdPsum,
-                                const int gdP_col_stride, const float scale) {
+                                Tensor<Engine1, Layout1> &dP_sum, const int gdP_col_stride, const float scale) {
     static_assert(Layout0::rank == 3, "Only support 3D Tensor");
     static_assert(Layout1::rank == 1, "Only support 1D Tensor");
     CUTE_STATIC_ASSERT_V(do_.layout() == o.layout());
@@ -100,7 +98,6 @@ inline __device__ void dot_do_o(Tensor<Engine0, Layout0> const &do_, Tensor<Engi
         dP_sum_cur = pytorch_flash::Allreduce<THREADS_PER_ROW>::run(dP_sum_cur, sum_op) * scale;
         if (threadIdx.x % THREADS_PER_ROW == 0) {
             dP_sum(mi * gdP_col_stride + threadIdx.x / THREADS_PER_ROW) = dP_sum_cur;
-            // recast<float>(sdPsum)(mi * gdP_col_stride + threadIdx.x / THREADS_PER_ROW) = dP_sum;
         }
     }
 }
@@ -133,7 +130,8 @@ inline __device__ void compute_dot_do_o(const Params &params) {
         + m_block * kBlockM * params.do_row_stride + bidh * params.do_head_stride;
     const index_t row_offset_o = binfo.q_offset(params.o_batch_stride, params.o_row_stride, bidb)
         + m_block * kBlockM * params.o_row_stride + bidh * params.o_head_stride;
-    const index_t row_offset_dq_accum = ((bidb * params.h + bidh) * params.seqlen_q_rounded + m_block * kBlockM) * params.d_rounded;
+    const index_t row_offset_dq_accum = binfo.q_offset(params.seqlen_q_rounded * params.h * params.d_rounded, params.h * params.d_rounded, bidb)
+        + (m_block * kBlockM + (params.cu_seqlens_q == nullptr ? 0 : 128 * bidb)) * params.h * params.d_rounded + bidh * params.d_rounded;
     const index_t row_offset_dpsum = (bidb * params.h + bidh) * params.seqlen_q_rounded + m_block * kBlockM;
 
     Tensor gdO = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.do_ptr) + row_offset_do),
@@ -143,7 +141,8 @@ inline __device__ void compute_dot_do_o(const Params &params) {
                             Shape<Int<kBlockM>, Int<kHeadDim>>{},
                             make_stride(params.o_row_stride, _1{}));
     Tensor gdQaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.dq_accum_ptr) + row_offset_dq_accum),
-                                  Shape<Int<kBlockM>, Int<kHeadDim>>{}, Stride<Int<kHeadDim>, _1>{});
+                                  Shape<Int<kBlockM>, Int<kHeadDim>>{},
+                                  make_stride(params.h * params.d_rounded, _1{}));
     Tensor dP_sum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.dsoftmax_sum) + row_offset_dpsum),
                                 Shape<Int<kBlockM>>{}, Stride<_1>{});
 
@@ -178,9 +177,11 @@ inline __device__ void compute_dot_do_o(const Params &params) {
     // By right we need to scale dP up by 1/p_dropout, but instead we don't and only scale the final
     // results (dQ and dK) by 1/p_dropout. So we need to keep dP_sum scaled down by p_dropout here,
     // so that (dP - dP_sum) is on the same scale.
-    dot_do_o<Kernel_traits::kGmemThreadsPerRow>(tdOrdO, tdOrO, dP_sum, dP_sum,
+    dot_do_o<Kernel_traits::kGmemThreadsPerRow>(tdOrdO, tdOrO, dP_sum,
                                                 Kernel_traits::kNThreads / (Kernel_traits::kGmemThreadsPerRow), params.p_dropout);
     if (Clear_dQaccum) {
+        // We're actually not zero'ing out all of dQaccum, but only the part that we're going to
+        // do atomicAdds on.
         Tensor zero = make_fragment_like(tdQgdQaccum);
         clear(zero);
         cute::copy(gmem_tiled_copy_dQaccum, zero, tdQgdQaccum);
@@ -254,15 +255,15 @@ inline __device__ void convert_dQ(const Params &params) {
 
     const index_t row_offset_dq = binfo.q_offset(params.dq_batch_stride, params.dq_row_stride, bidb)
         + m_block * kBlockM * params.dq_row_stride + bidh * params.dq_head_stride;
-    const index_t row_offset_dq_accum = ((bidb * params.h + bidh) * params.seqlen_q_rounded
-                                         + m_block * kBlockM) * params.d_rounded;
+    const index_t row_offset_dq_accum = binfo.q_offset(params.seqlen_q_rounded * params.h * params.d_rounded, params.h * params.d_rounded, bidb)
+        + (m_block * kBlockM + (params.cu_seqlens_q == nullptr ? 0 : 128 * bidb)) * params.h * params.d_rounded + bidh * params.d_rounded;
 
     Tensor gdQ = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.dq_ptr) + row_offset_dq),
                              Shape<Int<kBlockM>, Int<kHeadDim>>{},
                              make_stride(params.dq_row_stride, _1{}));
     Tensor gdQaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.dq_accum_ptr) + row_offset_dq_accum),
                                   Shape<Int<kBlockM>, Int<kHeadDim>>{},
-                                  Stride<Int<kHeadDim>, _1>{});
+                                  make_stride(params.h * params.d_rounded, _1{}));
 
     Tensor sdQ = make_tensor(make_smem_ptr(reinterpret_cast<Element *>(smem_)),
                              typename Kernel_traits::SmemLayoutdQ{});
@@ -424,7 +425,7 @@ inline __device__ void convert_dKV(const Params &params) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_MN, bool Is_even_K, bool Is_first, bool Is_last, bool Seq_parallel=false, typename Params>
+template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Is_first, bool Is_last, bool Seq_parallel=false, typename Params>
 inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const int bidb, const int bidh, const int n_block) {
 
     using Element = typename Kernel_traits::Element;
@@ -449,6 +450,9 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     if (n_block * kBlockN >= binfo.actual_seqlen_k || binfo.actual_seqlen_q == 0) return;
 
     int m_block_max = cute::ceil_div(binfo.actual_seqlen_q, kBlockM);
+    if (Is_local) {
+        m_block_max = std::min(m_block_max, cute::ceil_div((n_block + 1) * kBlockN + binfo.actual_seqlen_q - binfo.actual_seqlen_k + params.window_size_left, kBlockM));
+    }
 
     const index_t row_offset_q = binfo.q_offset(params.q_batch_stride, params.q_row_stride, bidb)
         + (m_block_max - 1) * kBlockM * params.q_row_stride + bidh * params.q_head_stride;
@@ -462,8 +466,8 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         + (m_block_max - 1) * kBlockM * params.o_row_stride + bidh * params.o_head_stride;
     const index_t row_offset_dq = binfo.q_offset(params.dq_batch_stride, params.dq_row_stride, bidb)
         + (m_block_max - 1) * kBlockM * params.dq_row_stride + bidh * params.dq_head_stride;
-    const index_t row_offset_dq_accum = ((bidb * params.h + bidh) * params.seqlen_q_rounded
-                                         + (m_block_max - 1) * kBlockM) * params.d_rounded;
+    const index_t row_offset_dq_accum = binfo.q_offset(params.seqlen_q_rounded * params.h * params.d_rounded, params.h * params.d_rounded, bidb)
+        + ((m_block_max - 1) * kBlockM + (params.cu_seqlens_q == nullptr ? 0 : 128 * bidb)) * params.h * params.d_rounded + bidh * params.d_rounded;
     const index_t row_offset_lse = (bidb * params.h + bidh) * params.seqlen_q
         + (m_block_max - 1) * kBlockM;
     const index_t row_offset_dpsum = (bidb * params.h + bidh) * params.seqlen_q_rounded
@@ -489,7 +493,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
                              make_stride(params.dq_row_stride, _1{}));
     Tensor gdQaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.dq_accum_ptr) + row_offset_dq_accum),
                                   Shape<Int<kBlockM>, Int<kHeadDim>>{},
-                                  Stride<Int<kHeadDim>, _1>{});
+                                  make_stride(params.h * params.d_rounded, _1{}));
     Tensor gLSE = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.softmax_lse_ptr) + row_offset_lse),
                               Shape<Int<kBlockM>>{}, Stride<_1>{});
     Tensor gdPsum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.dsoftmax_sum) + row_offset_dpsum),
@@ -517,8 +521,6 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor sPtNoSwizzle = make_tensor(sP.data(), typename Kernel_traits::SmemLayoutPdStransposedNoSwizzle{});
     // sP and sdQ share the same memory so be careful
     Tensor sdQ = make_tensor(sP.data(), typename Kernel_traits::SmemLayoutdQ{});
-    Tensor sdPsum = make_tensor(make_smem_ptr(reinterpret_cast<float2 *>((sP.data() + cute::max(size(sP), size(sdQ))).get())),
-                                Shape<Int<Kernel_traits::kSmemdPsumCount / 2>>{});
 
     typename Kernel_traits::GmemTiledCopyQKV gmem_tiled_copy_QKV;
     auto gmem_thr_copy_QKV = gmem_tiled_copy_QKV.get_thread_slice(tidx);
@@ -656,16 +658,24 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
 
     // We'll advance gdQ and gdQaccum before the 1st read/write.
     tdQgdQ.data() = tdQgdQ.data() + kBlockM * params.dq_row_stride;
-    tdQgdQaccum.data() = tdQgdQaccum.data() + kBlockM * params.d_rounded;
+    tdQgdQaccum.data() = tdQgdQaccum.data() + kBlockM * params.h * params.d_rounded;
 
     int m_block = m_block_max - 1;
-    int m_block_min = !Is_causal ? 0 : (n_block * kBlockN) / kBlockM;
-
-    // We might need to exit early and write 0 to dK and dV.
+    int m_block_min = (!Is_causal && !Is_local)
+        ? 0
+        : std::max(0, (n_block * kBlockN + binfo.actual_seqlen_q - binfo.actual_seqlen_k - params.window_size_right) / kBlockM);
+    // If not local, we're guaranteed that m_block_min <= m_block:
+    // We checked earlier that n_block * kBlockN < actual_seqlen_k, so in the causal case,
+    // n_block * kBlockN + binfo.actual_seqlen_q - binfo.actual_seqlen_k < actual_seqlen_q.
+    // So m_block_min <= (actual_seqlen_q - 1) / kBlockM.
+    // Recall that m_block_max = cute::ceil_div(binfo.actual_seqlen_q, kBlockM) = (actual_seqlen_q + kBlockM - 1) / kBlockM.
+    // So m_block_m - 1 = (actual_seqlen_q - 1) / kBlockM.
+    // We conclude that m_block_min <= m_block, so we will always have at least 1 iteration of the for loop.
+    // However, if local, then this possible to have some blocks of K & V not attending to any query.
+    // We might need to exit early and write 0 to dK and dV for those blocks.
     // Otherwise we get wrong result for the case where we don't enter the for loop.
     // And we might read OOB elements from gQ and gdO.
-    // TODO: what if we're not parallelizing, do we need to compute dot_do_o?
-    if (Is_causal && m_block < m_block_min) {
+    if (Is_local && m_block < m_block_min) {
         const index_t row_offset_dk = binfo.k_offset(params.dk_batch_stride, params.dk_row_stride, bidb)
           + n_block * kBlockN * params.dk_row_stride + bidh * params.dk_head_stride;
         const index_t row_offset_dv = binfo.k_offset(params.dv_batch_stride, params.dv_row_stride, bidb)
@@ -742,14 +752,13 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor lse = make_tensor<ElementAccum>(Shape<Int<decltype(size(taccScS_row))::value>>{});
     #pragma unroll
     for (int mi = 0; mi < size(lse); ++mi) {
-        // Using uint32_t row makes it 10us slower on d=128, not sure why.
         const int row = get<0>(taccScS_row(mi));
         lse(mi) = Is_even_MN || row < binfo.actual_seqlen_q - m_block * kBlockM ? gLSE(row) : 0;
     }
 
     // Tensor tKrK = make_fragment_like(tKsK);
-    // // cute::copy(gmem_thr_copy_QKV, tKgK(_, _, _, 0), tKrK);
-    // cute::copy(gmem_thr_copy_QKV, tKgK, tKrK);
+    // // cute::copy(gmem_tiled_copy_QKV, tKgK(_, _, _, 0), tKrK);
+    // cute::copy(gmem_tiled_copy_QKV, tKgK, tKrK);
     // // if (cute::thread(1, 0)) { print(tKrK); }
 
     pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
@@ -765,7 +774,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     // if (cute::thread0()) { print(tdOgdO.layout()); printf("\n"); print(tdOrdO); print(tdOrO); }
     if (Is_first) {
         cute::copy(tdOrdO, tdOsdO);
-        dot_do_o<Kernel_traits::kGmemThreadsPerRow>(tdOrdO, tdOrO, gdPsum, sdPsum,
+        dot_do_o<Kernel_traits::kGmemThreadsPerRow>(tdOrdO, tdOrO, gdPsum,
                                                     Kernel_traits::kNThreads / (Kernel_traits::kGmemThreadsPerRow), params.p_dropout);
     }
 
@@ -802,11 +811,11 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         // }
         // if (cute::thread0()) { print(tSrK); }
         pytorch_flash::gemm(acc_s, tSrQ, tSrK, tSsQ, tSsK, tiled_mma_sdp,
-                            smem_tiled_copy_QdO, smem_tiled_copy_KV, smem_thr_copy_QdO,
-                            smem_thr_copy_KV);
+                    smem_tiled_copy_QdO, smem_tiled_copy_KV, smem_thr_copy_QdO, smem_thr_copy_KV);
 
         // Reshape acc_s from (MMA=4, MMA_N, MMA_N) to (col=(2, MMA_N), row=(2, MMA_N))
         Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
+        // if (cute::thread(32, 0)) { print(scores); }
         // TD [2023-07-29]: I was thinking that we don't need to mask out the elements beyond
         // actual_seqlen_k, because acc_s would be some finite value for those indices.
         // In the end when we multiply with K to get dQ, the corresponding values of K would be 0,
@@ -814,33 +823,44 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         // However, it's possible that the values in acc_s are so large that they overflow
         // when we multiply with dP and convert to fp16, resulting in Inf in dS and NaNs in dQ.
         // So we need to mask out the elements beyond actual_seqlen_k.
-        if (!Is_causal) {
+        if (!Is_causal && !Is_local) {
             if (!Is_even_MN && (n_block + 1) * kBlockN >= binfo.actual_seqlen_k) {
                 pytorch_flash::apply_mask(scores, binfo.actual_seqlen_k,
                                   n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16);
             }
-        } else {
+        } else if (Is_causal) {
             // Putting this causal masking right after acc_s is *much* slower for some reason.
             // TD [2023-08-16]: We need the 2nd condition because if seqlen_q is long and seqlen_k is short
             // (e.g., 256 and 2), the 2nd block of seqlen_q (from 128 to 255), we're not doing causal masking.
-            // But we still want to mask out elements not beyond actual_seqlen_k.
-            if (m_block * kBlockM < (n_block + 1) * kBlockN
+            // But we still want to mask out elements beyond actual_seqlen_k.
+            if (m_block * kBlockM < (n_block + 1) * kBlockN + binfo.actual_seqlen_q - binfo.actual_seqlen_k
                 || (!Is_even_MN && (n_block + 1) * kBlockN >= binfo.actual_seqlen_k)) {
                 pytorch_flash::apply_mask_causal(scores, n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
                                          binfo.actual_seqlen_k, m_block * kBlockM + get<0>(taccScS_row(0)),
+                                         binfo.actual_seqlen_q,
                                          // binfo.actual_seqlen_k, m_block * kBlockM + (tidx / 32) % AtomLayoutMS * 16 + (tidx % 32) / 4,
                                          AtomLayoutMS * 16);
             }
+        } else if (Is_local) {
+            if (m_block * kBlockM < (n_block + 1) * kBlockN + binfo.actual_seqlen_q - binfo.actual_seqlen_k - params.window_size_right
+                || (m_block + 1) * kBlockM >= n_block * kBlockN + binfo.actual_seqlen_q - binfo.actual_seqlen_k + params.window_size_left
+                || (!Is_even_MN && (n_block + 1) * kBlockN >= binfo.actual_seqlen_k)) {
+                pytorch_flash::apply_mask_local(scores, n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
+                                        binfo.actual_seqlen_k, m_block * kBlockM + get<0>(taccScS_row(0)),
+                                        binfo.actual_seqlen_q, AtomLayoutMS * 16,
+                                        params.window_size_left, params.window_size_right);
+            }
+
         }
         // if (cute::thread(32, 0)) { print(scores); }
         // Compute the exponential value.
         pytorch_flash::scale_apply_exp2</*scale_max=*/false>(scores, lse, params.scale_softmax_log2);
         if (Is_dropout) {
-            uint32_t warp_id = tidx / 32;
-            uint32_t block_row_idx = m_block * (kBlockM / 16) + warp_id % AtomLayoutMS;
+            int warp_id = tidx / 32;
+            int block_row_idx = m_block * (kBlockM / 16) + warp_id % AtomLayoutMS;
             // Need col to be multiples of 32, since we're doing dropout with block of 16 x 32
             static_assert(MMA_N_SdP % 2 == 0);
-            uint32_t block_col_idx = n_block * (kBlockN / 32) + (warp_id / AtomLayoutMS) * (MMA_N_SdP / 2);
+            int block_col_idx = n_block * (kBlockN / 32) + (warp_id / AtomLayoutMS) * (MMA_N_SdP / 2);
             Tensor scores_dropped = make_tensor(scores.data(), pytorch_flash::convert_layout_rowcol_Aregs<Kernel_traits::TiledMmaSdP>(scores.layout()));
             pytorch_flash::apply_dropout</*encode_dropout_in_sign_bit=*/true>(
                 scores_dropped, params.p_dropout_in_uint8_t, seed, offset,
@@ -866,7 +886,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         CUTE_STATIC_ASSERT_V(size<2>(acc_dp) == size<2>(acc_s));                     // MMA
 
         clear(acc_dp);
-        // Tensor acc_dp_reshaped = make_tensor(acc_dp.data(), pytorch_flash::convert_layout_acc_rowcol(acc_dp.layout()));
+        // Tensor acc_dp_reshaped = make_tensor(acc_dp.data(), flash::convert_layout_acc_rowcol(acc_dp.layout()));
         // #pragma unroll
         // for (int mi = 0; mi < size<0>(acc_dp_reshaped); ++mi) {
         //     #pragma unroll
@@ -897,7 +917,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         // if (cute::thread0()) { print(dS); }
 
         Tensor acc_dq = partition_fragment_C(tiled_mma_dq, Shape<Int<kBlockM>, Int<kHeadDim>>{});  // MMA, MMA_N, MMA_K
-        tdQgdQaccum.data() = tdQgdQaccum.data() + (-int(kBlockM * params.d_rounded));
+        tdQgdQaccum.data() = tdQgdQaccum.data() + (-int(kBlockM * params.h * params.d_rounded));
         if (Is_first || Seq_parallel) {
             clear(acc_dq);
         } else {
@@ -930,9 +950,9 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
 
         // Layout p_l = tPrP.layout();
         // Tensor tdVrPt = make_tensor(tPrP.data(), make_layout(get<0>(p_l), get<2>(p_l), get<1>(p_l)));
-        // pytorch_flash::gemm_A_in_regs(acc_dv, tdVrPt, tdVrdO, tdVsdOt, tiled_mma_dkv, smem_thr_copy_QdOt);
+        // flash::gemm_A_in_regs(acc_dv, tdVrPt, tdVrdO, tdVsdOt, tiled_mma_dkv, smem_thr_copy_QdOt);
         // Tensor tdKrdSt = make_tensor(tdSrdS.data(), tdVrPt.layout());
-        // pytorch_flash::gemm_A_in_regs(acc_dk, tdKrdSt, tdKrQt, tdKsQt, tiled_mma_dkv, smem_thr_copy_QdOt);
+        // flash::gemm_A_in_regs(acc_dk, tdKrdSt, tdKrQt, tdKsQt, tiled_mma_dkv, smem_thr_copy_QdOt);
         pytorch_flash::gemm(acc_dv, tdVrPt, tdVrdO, tdVsPt, tdVsdOt, tiled_mma_dkv,
                     smem_tiled_copy_PdSt, smem_tiled_copy_QdOt, smem_thr_copy_PdSt, smem_thr_copy_QdOt);
         // if (cute::thread0() && n_block == 0 && m_block == 0) { print(tdVrPt); }
@@ -962,11 +982,6 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
             #pragma unroll
             for (int mi = 0; mi < size(lse); ++mi) { lse(mi) = gLSE(get<0>(taccScS_row(mi))); }
             gdPsum.data() = gdPsum.data() + (-int(kBlockM));
-            // if (!Is_first && tidx < kBlockM / 2) {
-            //     sdPsum(tidx) = recast<float2>(gdPsum)(tidx);
-            // if (!Is_first && tidx < kBlockM) {
-            //     recast<float>(sdPsum)(tidx) = gdPsum(tidx);
-            // }
         }
 
         if (!Is_last) {
@@ -1008,7 +1023,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
 
         if (Is_first && m_block > m_block_min) {
             cute::copy(tdOrdO, tdOsdO);
-            dot_do_o<Kernel_traits::kGmemThreadsPerRow>(tdOrdO, tdOrO, gdPsum, sdPsum,
+            dot_do_o<Kernel_traits::kGmemThreadsPerRow>(tdOrdO, tdOrO, gdPsum,
                                                         Kernel_traits::kNThreads / (Kernel_traits::kGmemThreadsPerRow), params.p_dropout);
         }
 
@@ -1047,7 +1062,8 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
 
     // Partition sdV and sdK to match the accumulator partitioning
     auto smem_tiled_copy_dKV = make_tiled_copy_C(typename Kernel_traits::SmemCopyAtomdKV{}, tiled_mma_dkv);
-    auto smem_thr_copy_dKV = smem_tiled_copy_dKV.get_thread_slice(tidx);    Tensor taccdKrdK = smem_thr_copy_dKV.retile_S(rdK);       // ((Atom,AtomNum), MMA_N, MMA_N)
+    auto smem_thr_copy_dKV = smem_tiled_copy_dKV.get_thread_slice(tidx);
+    Tensor taccdKrdK = smem_thr_copy_dKV.retile_S(rdK);       // ((Atom,AtomNum), MMA_N, MMA_N)
     Tensor taccdKsdK = smem_thr_copy_dKV.partition_D(sdK);   // ((Atom,AtomNum),PIPE_M,PIPE_N)
     Tensor taccdVrdV = smem_thr_copy_dKV.retile_S(rdV);       // ((Atom,AtomNum), MMA_N, MMA_N)
     Tensor taccdVsdV = smem_thr_copy_dKV.partition_D(sdV);    // ((Atom,AtomNum),PIPE_M,PIPE_N)
@@ -1057,7 +1073,6 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     // is reading it for dQ gemm, leading to a race condition.
     // If Is_last, there's already a __syncthreads() at the end of the loop.
     if (!Is_last) { __syncthreads(); }
-    if (Kernel_traits::Is_V_in_regs && !Is_last) { __syncthreads(); }
 
     cute::copy(smem_tiled_copy_dKV, taccdKrdK, taccdKsdK);
     cute::copy(smem_tiled_copy_dKV, taccdVrdV, taccdVsdV);
@@ -1340,7 +1355,6 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
     Tensor lse = make_tensor<ElementAccum>(Shape<Int<decltype(size(taccScS_row))::value>>{});
     #pragma unroll
     for (int mi = 0; mi < size(lse); ++mi) {
-        // Using uint32_t row makes it 10us slower on d=128, not sure why.
         const int row = get<0>(taccScS_row(mi));
         lse(mi) = row < binfo.actual_seqlen_q - m_block * kBlockM ? gLSE(row) : 0;
     }
@@ -1350,7 +1364,7 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
     Tensor dP_sum = make_fragment_like(lse);
     cute::copy(tdOrdO, tdOsdO);
     dot_do_o<Kernel_traits::kGmemThreadsPerRow>(
-        tdOrdO, tdOrO, sdPsum, sdPsum,
+        tdOrdO, tdOrO, sdPsum,
         Kernel_traits::kNThreads / (Kernel_traits::kGmemThreadsPerRow), params.p_dropout
     );
     __syncthreads();
@@ -1371,6 +1385,7 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
 
         pytorch_flash::gemm(acc_s, tSrQ, tSrK, tSsQ, tSsK, tiled_mma_sdp,
                     smem_tiled_copy_QdO, smem_tiled_copy_KV, smem_thr_copy_QdO, smem_thr_copy_KV);
+
         // Reshape acc_s from (MMA=4, MMA_N, MMA_N) to (col=(2, MMA_N), row=(2, MMA_N))
         Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
         // We don't need to mask out the elements beyond actual_seqlen_k, because acc_s would
@@ -1380,16 +1395,17 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
             pytorch_flash::apply_mask_causal(scores, n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
                                      binfo.actual_seqlen_k, m_block * kBlockM + get<0>(taccScS_row(0)),
                                      // binfo.actual_seqlen_k, m_block * kBlockM + (tidx / 32) % AtomLayoutMS * 16 + (tidx % 32) / 4,
+                                     binfo.actual_seqlen_q,
                                      AtomLayoutMS * 16);
         }
         // Compute the exponential value.
         pytorch_flash::scale_apply_exp2</*scale_max=*/false>(scores, lse, params.scale_softmax_log2);
         if (Is_dropout) {
-            uint32_t warp_id = tidx / 32;
-            uint32_t block_row_idx = m_block * (kBlockM / 16) + warp_id % AtomLayoutMS;
+            int warp_id = tidx / 32;
+            int block_row_idx = m_block * (kBlockM / 16) + warp_id % AtomLayoutMS;
             // Need col to be multiples of 32, since we're doing dropout with block of 16 x 32
             static_assert(MMA_N_SdP % 2 == 0);
-            uint32_t block_col_idx = n_block * (kBlockN / 32) + (warp_id / AtomLayoutMS) * (MMA_N_SdP / 2);
+            int block_col_idx = n_block * (kBlockN / 32) + (warp_id / AtomLayoutMS) * (MMA_N_SdP / 2);
             Tensor scores_dropped = make_tensor(scores.data(), pytorch_flash::convert_layout_rowcol_Aregs<Kernel_traits::TiledMmaSdP>(scores.layout()));
             pytorch_flash::apply_dropout</*encode_dropout_in_sign_bit=*/true>(
                 scores_dropped, params.p_dropout_in_uint8_t, seed, offset,
@@ -1551,7 +1567,7 @@ inline __device__ void compute_dq_dk_dv(const Params &params) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_MN, bool Is_even_K, typename Params>
+template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, typename Params>
 inline __device__ void compute_dq_dk_dv_seqk_parallel(const Params &params) {
 
     const int n_block = blockIdx.x;
@@ -1560,7 +1576,7 @@ inline __device__ void compute_dq_dk_dv_seqk_parallel(const Params &params) {
     // The block index for the head.
     const int bidh = blockIdx.z;
 
-    compute_dq_dk_dv_1colblock<Kernel_traits, Is_dropout, Is_causal, Is_even_MN, Is_even_K, false, false, /*Seq_parallel=*/true>(params, bidb, bidh, n_block);
+    compute_dq_dk_dv_1colblock<Kernel_traits, Is_dropout, Is_causal, Is_local, Is_even_MN, Is_even_K, false, false, /*Seq_parallel=*/true>(params, bidb, bidh, n_block);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
