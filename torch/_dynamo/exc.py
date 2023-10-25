@@ -202,12 +202,14 @@ class KeyErrorMsg:
         return self.__str__()
 
 
-def augment_exc_message(exc, innermost_user_frame_str, msg="\n", export=False):
+def augment_exc_message(exc, msg="\n", export=False):
     import traceback
+
+    exc.innermost_user_frame_summary = None
 
     real_stack = get_real_stack(exc)
     if real_stack is not None:
-        innermost_user_frame_str = str(real_stack[-1])
+        exc.innermost_user_frame_summary = real_stack[-1]
         msg += (
             f"\nfrom user code:\n {''.join(traceback.format_list(get_real_stack(exc)))}"
         )

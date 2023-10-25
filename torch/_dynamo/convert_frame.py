@@ -238,14 +238,14 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def exception_handler(e, code, frame, innermost_user_frame_str, export=False):
+def exception_handler(e, code, frame=None, export=False):
     record_filename = None
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
         e.record_filename = record_filename
 
-    augment_exc_message(e, innermost_user_frame_str, export=export)
+    augment_exc_message(e, export=export)
 
 
 FRAME_COUNTER = 0
@@ -624,12 +624,14 @@ def _compile(
         ) as e:
             fail_type = str(type(e))
             fail_reason = str(e)
-            exception_handler(e, code, frame, fail_user_frame_summary, export=export)
+            exception_handler(e, code, frame, export=export)
+            fail_user_frame_summary = str(e.innermost_user_frame_summary)
             raise
         except Exception as e:
             fail_type = str(type(e))
             fail_reason = str(e)
-            exception_handler(e, code, frame, fail_user_frame_summary, export=export)
+            exception_handler(e, code, frame, export=export)
+            fail_user_frame_summary = str(e.innermost_user_frame_summary)
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
@@ -676,6 +678,7 @@ def _compile(
                 fail_reason,
                 fail_user_frame_summary,
             )
+            print("---->>>>>>  ", metrics)
             log_compilation_event(metrics)
 
 
