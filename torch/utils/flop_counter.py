@@ -248,7 +248,7 @@ def convert_to_percent_str(num, denom):
         return "0%"
     return f"{num / denom:.2%}"
 
-def pytreeify_preserve_structure(f):
+def _pytreeify_preserve_structure(f):
     @wraps(f)
     def nf(args):
         flat_args, spec = tree_flatten(args)
@@ -324,14 +324,14 @@ class FlopCounterMode(TorchDispatchMode):
 
     def _enter_module(self, name):
         def f(module, inputs):
-            out = pytreeify_preserve_structure(self._create_pre_module(name))(inputs)
+            out = _pytreeify_preserve_structure(self._create_pre_module(name))(inputs)
             return out
 
         return f
 
     def _exit_module(self, name):
         def f(module, inputs, outputs):
-            outputs = pytreeify_preserve_structure(self._create_post_module(name))(outputs)
+            outputs = _pytreeify_preserve_structure(self._create_post_module(name))(outputs)
             return outputs
         return f
 
