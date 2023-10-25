@@ -167,13 +167,17 @@ hip_platform_files = [
     "third_party/tensorpipe/cmake/Hip.cmake",
 ]
 
+def remove_hcc(line):
+    line = line.replace("HIP_PLATFORM_HCC", "HIP_PLATFORM_AMD")
+    line = line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS")
+    return line
+
 for hip_platform_file in hip_platform_files:
     do_write = False
     if os.path.exists(hip_platform_file):
         with open(hip_platform_file) as sources:
             lines = sources.readlines()
-        newlines = [line.replace("HIP_PLATFORM_HCC", "HIP_PLATFORM_AMD") for line in lines]
-        newlines = [line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS") for line in lines]
+        newlines = [remove_hcc(line) for line in lines]
         if lines == newlines:
             print(f"{hip_platform_file} skipped")
         else:
