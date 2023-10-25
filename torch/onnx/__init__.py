@@ -44,15 +44,14 @@ from .utils import (
 )
 
 from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
-    DiagnosticOptions,
     ExportOptions,
     ExportOutput,
     ExportOutputSerializer,
-    InvalidExportOptionsError,
-    OnnxExporterError,
-    OnnxRegistry,
     dynamo_export,
+    OnnxExporterError,
     enable_fake_mode,
+    OnnxRegistry,
+    DiagnosticOptions,
 )
 
 from ._internal.onnxruntime import (
@@ -99,15 +98,14 @@ __all__ = [
     # Errors
     "CheckerError",  # Backwards compatibility
     # Dynamo Exporter
-    "DiagnosticOptions",
     "ExportOptions",
     "ExportOutput",
     "ExportOutputSerializer",
-    "InvalidExportOptionsError",
-    "OnnxExporterError",
-    "OnnxRegistry",
     "dynamo_export",
+    "OnnxExporterError",
     "enable_fake_mode",
+    "OnnxRegistry",
+    "DiagnosticOptions",
     # DORT / torch.compile
     "is_onnxrt_backend_supported",
 ]
@@ -119,7 +117,6 @@ ExportOptions.__module__ = "torch.onnx"
 ExportOutput.__module__ = "torch.onnx"
 ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
-InvalidExportOptionsError.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
 OnnxRegistry.__module__ = "torch.onnx"

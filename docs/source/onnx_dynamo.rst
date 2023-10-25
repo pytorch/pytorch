@@ -146,9 +146,6 @@ API Reference
 .. autoclass:: torch.onnx.ExportOutputSerializer
     :members:
 
-.. autoclass:: torch.onnx.InvalidExportOptionsError
-    :members:
-
 .. autoclass:: torch.onnx.OnnxExporterError
     :members:
 
