@@ -585,6 +585,7 @@ def _conv_corr_impl(a, v, mode):
     v = _util.cast_if_needed(v, dt)
 
     padding = v.shape[0] - 1 if mode == "full" else mode
+
     if padding == "same" and v.shape[0] % 2 == 0:
         # UserWarning: Using padding='same' with even kernel lengths and odd
         # dilation may require a zero-padded copy of the input be created
