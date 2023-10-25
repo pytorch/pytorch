@@ -914,8 +914,6 @@ class NumpyNdarrayVariable(TensorVariable):
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
-        elif name in ["__version__"]:
-            unimplemented("delegate np.__version__ to NumPy")
         if result is None:
             raise NotImplementedError()
         return result

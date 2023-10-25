@@ -9,47 +9,31 @@ import warnings
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
-import numpy
-
 # from numpy._utils import _pep440
 import pytest
-from pytest import raises as assert_raises
 
 # from hypothesis import given, settings
 # from hypothesis.strategies import sampled_from
 # from hypothesis.extra import numpy as hynp
 
-
+import torch._numpy as np
+from pytest import raises as assert_raises
+from torch._numpy.testing import (
+    _gen_alignment_data,
+    assert_,
+    assert_almost_equal,
+    assert_equal,
+    #    assert_array_equal, suppress_warnings, _gen_alignment_data,
+    #    assert_warns,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     slowTest as slow,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
 )
-
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy.testing import (
-        _gen_alignment_data,
-        assert_,
-        assert_almost_equal,
-        assert_equal,
-    )
-else:
-    import torch._numpy as np
-    from torch._numpy.testing import (
-        _gen_alignment_data,
-        assert_,
-        assert_almost_equal,
-        assert_equal,
-        #    assert_array_equal, suppress_warnings, _gen_alignment_data,
-        #    assert_warns,
-    )
-
 
 skip = functools.partial(skipif, True)
 
@@ -171,7 +155,7 @@ class TestBaseMath(TestCase):
                 np.add(2, inp2, out=out)
                 assert_almost_equal(out, exp1 + 2, err_msg=msg)
 
-    @xpassIfTorchDynamo  # (reason="pytorch does not have .view")
+    @xfail  # (reason="pytorch does not have .view")
     def test_lower_align(self):
         # check data that is not aligned to element size
         # i.e doubles are aligned to 4 bytes on i386
@@ -202,8 +186,7 @@ class TestPower(TestCase):
             else:
                 assert_almost_equal(b, 6765201, err_msg=msg)
 
-    @skip(reason="NP_VER: fails on CI on older NumPy")
-    @xpassIfTorchDynamo  # (reason="Value-based casting: (2)**(-2) -> 0 in pytorch.")
+    @xfail  # (reason="Value-based casting: (2)**(-2) -> 0 in pytorch.")
     def test_integers_to_negative_integer_power(self):
         # Note that the combination of uint64 with a signed integer
         # has common type np.float64. The other combinations should all
@@ -289,8 +272,7 @@ def _signs(dt):
 @instantiate_parametrized_tests
 class TestModulus(TestCase):
     def test_modulus_basic(self):
-        # dt = np.typecodes["AllInteger"] + np.typecodes["Float"]
-        dt = "Bbhil" + "efd"
+        dt = np.typecodes["AllInteger"] + np.typecodes["Float"]
         for op in [floordiv_and_mod, divmod]:
             for dt1, dt2 in itertools.product(dt, dt):
                 for sg1, sg2 in itertools.product(_signs(dt1), _signs(dt2)):
@@ -335,8 +317,7 @@ class TestModulus(TestCase):
 
     def test_float_modulus_roundoff(self):
         # gh-6127
-        # dt = np.typecodes["Float"]
-        dt = "efd"
+        dt = np.typecodes["Float"]
         for op in [floordiv_and_mod, divmod]:
             for dt1, dt2 in itertools.product(dt, dt):
                 for sg1, sg2 in itertools.product((+1, -1), (+1, -1)):
@@ -352,7 +333,7 @@ class TestModulus(TestCase):
                     else:
                         assert_(b > rem >= 0, msg)
 
-    @parametrize("dt", "efd")
+    @parametrize("dt", np.typecodes["Float"])
     def test_float_modulus_corner_cases(self, dt):
         if dt == "e":
             # FIXME: make xfail
@@ -372,7 +353,7 @@ class TestModulus(TestCase):
         #         sup.filter(RuntimeWarning, "divide by zero encountered in floor_divide")
         #         sup.filter(RuntimeWarning, "divide by zero encountered in divmod")
         #         sup.filter(RuntimeWarning, "invalid value encountered in divmod")
-        for dt in "efd":
+        for dt in np.typecodes["Float"]:
             fone = np.array(1.0, dtype=dt)
             fzer = np.array(0.0, dtype=dt)
             finf = np.array(np.inf, dtype=dt)
@@ -470,8 +451,7 @@ class TestConversion(TestCase):
             a = np.array(l, dtype=T)
             assert_equal([int(_m) for _m in a], li)
 
-    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="pytorch does not emit this warning.")
+    @xfail  # (reason="pytorch does not emit this warning.")
     def test_iinfo_long_values_1(self):
         for code in "bBh":
             with pytest.warns(DeprecationWarning):
@@ -495,7 +475,7 @@ class TestConversion(TestCase):
             dtype(np.iinfo(dtype).max + 1)
 
         for code in [np.int_, np.longlong]:
-            assert_raises((OverflowError, RuntimeError), overflow_error_func, code)
+            assert_raises(RuntimeError, overflow_error_func, code)
 
     def test_numpy_scalar_relational_operators(self):
         # All integer
@@ -574,7 +554,7 @@ class TestConversion(TestCase):
 #            assert_equal( val, val2 )
 
 
-@xpassIfTorchDynamo  # (reason="can delegate repr to pytorch")
+@xfail  # (reason="can delegate repr to pytorch")
 class TestRepr(TestCase):
     def _test_type_repr(self, t):
         finfo = np.finfo(t)
@@ -809,7 +789,7 @@ def recursionlimit(n):
 @instantiate_parametrized_tests
 class TestScalarOpsMisc(TestCase):
     @xfail  # (reason="pytorch does not warn on overflow")
-    @parametrize("dtype", "Bbhil")
+    @parametrize("dtype", np.typecodes["AllInteger"])
     @parametrize(
         "operation",
         [
@@ -827,7 +807,7 @@ class TestScalarOpsMisc(TestCase):
             operation(min, max)
 
     @skip(reason="integer overflow UB: crashes pytorch under ASAN")
-    @parametrize("dtype", "bhil")
+    @parametrize("dtype", np.typecodes["Integer"])
     @parametrize(
         "operation",
         [
@@ -849,9 +829,8 @@ class TestScalarOpsMisc(TestCase):
         with pytest.warns(RuntimeWarning, match="overflow encountered"):
             operation(min, neg_1)
 
-    @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="pytorch does not warn on overflow")
-    @parametrize("dtype", "B")
+    @xfail  # (reason="pytorch does not warn on overflow")
+    @parametrize("dtype", np.typecodes["UnsignedInteger"])
     def test_scalar_unsigned_integer_overflow(self, dtype):
         val = np.dtype(dtype).type(8)
         with pytest.warns(RuntimeWarning, match="overflow encountered"):

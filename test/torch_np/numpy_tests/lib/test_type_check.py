@@ -5,44 +5,22 @@ import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
 
+import torch._numpy as np
 from pytest import raises as assert_raises
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_TORCHDYNAMO,
-    TestCase,
-    xpassIfTorchDynamo,
+
+from torch._numpy import (
+    common_type,
+    iscomplex,
+    iscomplexobj,
+    isneginf,
+    isposinf,
+    isreal,
+    isrealobj,
+    nan_to_num,
+    real_if_close,
 )
-
-
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy import (
-        common_type,
-        iscomplex,
-        iscomplexobj,
-        isneginf,
-        isposinf,
-        isreal,
-        isrealobj,
-        nan_to_num,
-        real_if_close,
-    )
-    from numpy.testing import assert_, assert_array_equal, assert_equal
-else:
-    import torch._numpy as np
-    from torch._numpy import (
-        common_type,
-        iscomplex,
-        iscomplexobj,
-        isneginf,
-        isposinf,
-        isreal,
-        isrealobj,
-        nan_to_num,
-        real_if_close,
-    )
-    from torch._numpy.testing import assert_, assert_array_equal, assert_equal
-
+from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 skip = functools.partial(skipif, True)
 
@@ -51,7 +29,7 @@ def assert_all(x):
     assert_(np.all(x), x)
 
 
-@xpassIfTorchDynamo  # (reason="common_type not implemented")
+@xfail  # (reason="common_type not implemented")
 class TestCommonType(TestCase):
     def test_basic(self):
         ai32 = np.array([[1, 2], [3, 4]], dtype=np.int32)
@@ -118,7 +96,7 @@ class TestMintypecode(TestCase):
         assert_equal(mintypecode("idD"), "D")
 
 
-@xpassIfTorchDynamo  # (reason="TODO: decide on if [1] is a scalar or not")
+@xfail  # (reason="TODO: decide on if [1] is a scalar or not")
 class TestIsscalar(TestCase):
     def test_basic(self):
         assert_(np.isscalar(3))

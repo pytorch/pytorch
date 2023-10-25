@@ -9,30 +9,22 @@ import types
 from itertools import permutations
 from typing import Any
 
-from unittest import skipIf as skipif
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
+
+import torch._numpy as np
 from pytest import raises as assert_raises
+from torch._numpy.testing import assert_, assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
 )
 
 skip = functools.partial(skipif, True)
-
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy.testing import assert_, assert_equal
-else:
-    import torch._numpy as np
-    from torch._numpy.testing import assert_, assert_equal
-
-import numpy
 
 
 def assert_dtype_equal(a, b):
@@ -110,10 +102,6 @@ class TestBuiltin(TestCase):
         with pytest.raises(TypeError):
             operation(np.dtype(np.int32), 7)
 
-    @skipif(
-        numpy.__version__ < "1.24",
-        reason="older numpies emit DeprecatioWarnings instead",
-    )
     @parametrize(
         "dtype",
         [
@@ -207,8 +195,8 @@ class TestPickling(TestCase):
     @parametrize(
         "DType",
         [
-            subtest(type(np.dtype(t)), name=f"{np.dtype(t).name}_{i}")
-            for i, t in enumerate(np.typecodes["All"])
+            subtest(type(np.dtype(t)), name=f"{np.dtype(t).name}")
+            for t in np.typecodes["All"]
         ]
         + [np.dtype],
     )
@@ -220,7 +208,6 @@ class TestPickling(TestCase):
 
 
 @skip(reason="XXX: value-based promotions, we don't have.")
-@instantiate_parametrized_tests
 class TestPromotion(TestCase):
     """Test cases related to more complex DType promotions.  Further promotion
     tests are defined in `test_numeric.py`
@@ -231,12 +218,10 @@ class TestPromotion(TestCase):
         [
             (2**16 - 1, np.complex64, None),
             (2**32 - 1, np.complex128, np.complex64),
-            subtest((np.float16(2), np.complex64, None), name="float16_complex64_None"),
-            subtest((np.float32(2), np.complex64, None), name="float32_complex64_None"),
+            (np.float16(2), np.complex64, None),
+            (np.float32(2), np.complex64, None),
             # repeat for complex scalars:
-            subtest(
-                (np.complex64(2), np.complex64, None), name="complex64_complex64_None"
-            ),
+            (np.complex64(2), np.complex64, None),
         ],
     )
     def test_complex_other_value_based(
@@ -318,7 +303,7 @@ class TestMisc(TestCase):
         assert bool(np.dtype("f8"))
         assert bool(np.dtype("i8"))
 
-    @xpassIfTorchDynamo  # (reason="No keyword arg for dtype ctor.")
+    @xfail  # (reason="No keyword arg for dtype ctor.")
     def test_keyword_argument(self):
         # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
         assert np.dtype(dtype=np.float64) == np.dtype(np.float64)
@@ -358,7 +343,6 @@ class TestFromDTypeAttribute(TestCase):
 
 @skip(reason="Parameteric dtypes, our stuff is simpler.")
 @skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
-@instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:
         alias = np.dtype[Any]

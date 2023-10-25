@@ -1189,14 +1189,6 @@ if TEST_WITH_TORCHDYNAMO:
         torch._inductor.config.fallback_random = True
 
 
-def xpassIfTorchDynamo(func):
-    return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
-
-
-def xfailIfTorchDynamo(func):
-    return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
-
-
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
