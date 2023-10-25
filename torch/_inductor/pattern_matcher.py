@@ -435,7 +435,7 @@ class _TargetArgsExpr(_TargetExpr):
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         """
-        This is used when we are matching a pattern with multiple outputs.
+        This is used when we are maching a pattern with multiple outputs.
         There is a partial match (stored in ctx) and we want to walk
         this pattern to find a connection to an already-matched node.
 
@@ -842,7 +842,7 @@ def register_replacement(
     replace_fn,
     example_inputs: Iterable[Any],
     trace_fn: Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
-    pass_dict,
+    pass_dicts,
     extra_check=_return_true,
     scalar_workaround=(),
     exclusive_arg_names=(),
@@ -861,6 +861,8 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
+    if isinstance(scalar_workaround, dict):
+        example_inputs = [*example_inputs, *scalar_workaround.values()]
 
     def check_fn(match: Match):
         """
@@ -869,17 +871,21 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
+        for name in argnames:
+            if name not in match.kwargs:
+                raise RuntimeError(f"Not all inputs to pattern found in match.kwargs. Perhaps one of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}")
+
         args = list(
             torch.fx.map_arg(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
             )
         )
-        for i, grad in enumerate(requires_grad):
-            if isinstance(args[i], torch.Tensor):
-                if grad and is_integer_dtype(args[i].dtype):
-                    return False
+        with torch._dynamo.utils.detect_fake_mode(args):
+            for i, grad in enumerate(requires_grad):
+                if isinstance(args[i], torch.Tensor):
+                    if grad and is_integer_dtype(args[i].dtype):
+                        return False
 
-                with torch._dynamo.utils.detect_fake_mode(args):
                     args[i] = torch.empty_strided(
                         args[i].size(),
                         args[i].stride(),
@@ -887,16 +893,17 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-        specific_graph = trace_fn(search_fn, args)
-        specific_pattern = fx_to_pattern(
-            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names  # type: ignore[has-type]
-        )
-        specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
-        if specific_pattern_match and extra_check(specific_pattern_match):
-            # trace the pattern using the shapes form the user program
-            match.replacement_graph = trace_fn(replace_fn, args)
-            return True
-        return False
+            specific_graph = trace_fn(search_fn, args)
+            specific_pattern = fx_to_pattern(
+                specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
+                scalar_workaround=scalar_workaround,
+            )
+            specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
+            if specific_pattern_match and extra_check(specific_pattern_match):
+                # trace the pattern using the shapes from the user program
+                match.replacement_graph = trace_fn(replace_fn, args)
+                return True
+            return False
 
     def normalize_args(**kwargs):
         args = []
@@ -938,7 +945,7 @@ def register_replacement(
             extra_check=check_fn,
             normalize_args=normalize_args,
         )
-        pattern.register(pass_dict)
+        pattern.register(pass_dicts)
         return pattern.pattern
 
 

@@ -429,6 +429,43 @@ def _pad_mm_init():
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     rep = {"beta": 0.213377, "alpha": 0.113377}
 
+    from .post_grad import pass_patterns
+    def randperm_index_add_pattern(x, y):
+        index = torch.randperm(x.shape[0], device=x.device)[:y.shape[0]]
+        return torch.index_add(x, dim=0, source=y, index=index), index
+
+    def randperm_index_add_replacement(x, y):
+        index = torch.randperm(x.shape[0], device=x.device)[:y.shape[0]]
+        return torch.ops.aten._unsafe_index_put(x, (index,), x[index] + y, accumulate=False), index
+
+    register_replacement(
+        randperm_index_add_pattern,
+        randperm_index_add_replacement,
+        [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
+        inference_graph,
+        [pass_patterns[0], patterns],
+    )
+
+    def randperm_index_pattern(x, slice_shape):
+        index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
+        return torch.ops.aten.index(x, (index,)), index
+
+    def randperm_index_replacement(x, slice_shape):
+        index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
+        return torch.ops.aten._unsafe_index(x, (index,)), index
+
+    pattern = register_replacement(
+        randperm_index_pattern,
+        randperm_index_replacement,
+        [torch.empty(4, 8, device=device)],
+        inference_graph,
+        [pass_patterns[0], patterns],
+        scalar_workaround={'slice_shape': 42}
+    )
+    print(pattern)
+    from ..pattern_matcher import PatternPrettyPrinter
+    print(PatternPrettyPrinter.run(pattern))
+
     for pattern, replacement, args, workaround, extra_check in [
         (
             mm_pattern,
@@ -453,7 +490,6 @@ def _pad_mm_init():
         ),
     ]:
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
-        args = [*args, *workaround.values()]
         register_replacement(
             pattern,
             replacement,

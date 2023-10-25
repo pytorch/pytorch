@@ -513,7 +513,6 @@ def _get_sfdp_patterns():
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
-            training_args = [*args, *workaround.values()]
             name = pattern.__name__
 
             training_name = (
@@ -522,9 +521,9 @@ def _get_sfdp_patterns():
             yield training_name, {
                 "search_fn": pattern,
                 "replace_fn": replacement,
-                "example_inputs": training_args,
+                "example_inputs": args,
                 "trace_fn": training_graph,
-                "pass_dict": patterns,
+                "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
             }
@@ -548,7 +547,7 @@ def _get_sfdp_patterns():
                 "replace_fn": replacement,
                 "example_inputs": args,
                 "trace_fn": inference_graph,
-                "pass_dict": patterns,
+                "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
             }
