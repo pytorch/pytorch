@@ -212,7 +212,7 @@ class AggregatedHeuristics:
     """
 
     _heuristic_results: Dict[
-        str, TestPrioritizations
+        "HeuristicInterface", TestPrioritizations
     ]  # Key is the Heuristic's name. Dicts will preserve the order of insertion, which is important for sharding
 
     unranked_tests: Tuple[str, ...]
@@ -222,14 +222,16 @@ class AggregatedHeuristics:
         self._heuristic_results = {}
 
     def add_heuristic_results(
-        self, heuristic_name: str, heuristic_results: TestPrioritizations
+        self, heuristic: "HeuristicInterface", heuristic_results: TestPrioritizations
     ) -> None:
-        if heuristic_name in self._heuristic_results:
-            raise ValueError(f"We already have heuristics for {heuristic_name}")
+        if heuristic in self._heuristic_results:
+            raise ValueError(f"We already have heuristics for {heuristic.name}")
 
-        self._heuristic_results[heuristic_name] = heuristic_results
+        self._heuristic_results[heuristic] = heuristic_results
 
-    def get_aggregated_priorities(self) -> TestPrioritizations:
+    def get_aggregated_priorities(
+        self, include_trial: bool = False
+    ) -> TestPrioritizations:
         """
         Returns the aggregated priorities across all heuristics.
         """
@@ -237,7 +239,10 @@ class AggregatedHeuristics:
             tests_being_ranked=self.unranked_tests
         )
 
-        for heuristic_results in self._heuristic_results.values():
+        for heuristic, heuristic_results in self._heuristic_results.items():
+            if heuristic.trial_mode and not include_trial:
+                continue
+
             aggregated_priorities.integrate_priorities(heuristic_results)
 
         return aggregated_priorities
@@ -268,12 +273,15 @@ class AggregatedHeuristics:
         # And figure out how many heuristics suggested prioritizing this test
         num_heuristics_prioritized_by = 0
 
-        for heuristic_name, heuristic_results in self._heuristic_results.items():
+        for heuristic, heuristic_results in self._heuristic_results.items():
             metrics = heuristic_results.get_priority_info_for_test(test)
-            metrics["heuristic_name"] = heuristic_name
+            metrics["heuristic_name"] = heuristic.name
+            metrics["trial_mode"] = heuristic.trial_mode
             heuristics.append(metrics)
 
-            if heuristic_results._get_test_relevance_group(test) in [
+            if not heuristic.trial_mode and heuristic_results._get_test_relevance_group(
+                test
+            ) in [
                 Relevance.HIGH,
                 Relevance.PROBABLE,
             ]:
@@ -284,7 +292,7 @@ class AggregatedHeuristics:
                 # because it was randomly sorted higher initially, while the heuristic that actually prioritized it
                 # used other data to determined it to be slighlty less relevant than other tests.
                 if metrics[METRIC_ORDER_OVERALL] < highest_ranking_heuristic_order:
-                    highest_ranking_heuristic = heuristic_name
+                    highest_ranking_heuristic = heuristic.name
                     highest_ranking_heuristic_order = metrics[METRIC_ORDER_OVERALL]
 
         stats["heuristics"] = heuristics
@@ -295,6 +303,10 @@ class AggregatedHeuristics:
         stats[
             "aggregated"
         ] = self.get_aggregated_priorities().get_priority_info_for_test(test)
+
+        stats["aggregated_trial"] = self.get_aggregated_priorities(
+            include_trial=True
+        ).get_priority_info_for_test(test)
 
         if highest_ranking_heuristic:
             stats["highest_ranking_heuristic"] = highest_ranking_heuristic
@@ -307,12 +319,15 @@ class HeuristicInterface:
     Interface for all heuristics.
     """
 
-    name: str
     description: str
+
+    # When trial mode is set to True, this heuristic's predictions will not be used
+    # to reorder tests. It's results will however be emitted in the metrics.
+    trial_mode: bool
 
     @abstractmethod
     def __init__(self, **kwargs: Dict[str, Any]) -> None:
-        pass
+        self.trial_mode = kwargs.get("trial_mode", False)  # type: ignore[assignment]
 
     @abstractmethod
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
@@ -323,5 +338,9 @@ class HeuristicInterface:
         """
         pass
 
-    def __str__(self) -> str:
+    @property
+    def name(self) -> str:
         return self.__class__.__name__
+
+    def __str__(self) -> str:
+        return self.name
