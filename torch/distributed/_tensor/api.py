@@ -9,7 +9,6 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor._xla import xla_distribute_tensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -394,15 +393,18 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")
 
-        # Early return the original DTensor if the placements are the same.
-        if self._spec.placements == placements:
-            return self
-
         for placement in placements:
             if placement.is_partial():
                 raise RuntimeError(
                     "Can not redistribute to _Partial, _Partial is for internal use only!"
                 )
+            elif isinstance(placement, Shard) and placement.dim < 0:
+                # normalize shard dim to be positive
+                placement.dim += self.ndim
+
+        # Early return the original DTensor if the placements are the same.
+        if self._spec.placements == placements:
+            return self
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(self, device_mesh, placements)
@@ -467,6 +469,8 @@ def distribute_tensor(
     if device_type == "xla":
         # call PyTorch/XLA SPMD for `xla` backend type device mesh.
         # This returns XLAShardedTensor
+        from torch.distributed._tensor._xla import xla_distribute_tensor
+
         return xla_distribute_tensor(
             tensor, device_mesh, placements
         )  # type:ignore[return-value]
@@ -518,6 +522,9 @@ def distribute_tensor(
     for idx, placement in enumerate(placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
+            if placement.dim < 0:
+                # normalize shard placement dim
+                placement.dim += tensor.ndim
             local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
