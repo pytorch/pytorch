@@ -8,7 +8,17 @@ import time
 import warnings
 from itertools import count
 
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -559,7 +569,7 @@ def fx_codegen_and_compile(
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_strides = []
+            output_strides: List[Optional[Tuple[int, ...]]] = []
             if graph.graph_outputs is not None:
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext

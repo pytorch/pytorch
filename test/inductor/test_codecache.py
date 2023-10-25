@@ -160,7 +160,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-
     @skipIfNoTorchVision
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
@@ -169,6 +168,7 @@ class TestFxGraphCache(TestCase):
         Test backward graphs using resnet18. This model exposes failures
         to properly handle output strides.
         """
+
         def fn(mod, x):
             mod.zero_grad()
             mod(x).sum().backward()
