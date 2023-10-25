@@ -345,16 +345,17 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
 
             It is worth noting the difference between :meth:`share_memory_` and :meth:`from_file` with ``shared = True``
 
-            * ``share_memory_`` uses `shm_open(3) <https://man7.org/linux/man-pages/man3/shm_open.3.html>`_ to create a
-                POSIX shared memory object while :meth:`from_file` uses
-                `open(2) <https://man7.org/linux/man-pages/man2/open.2.html>`_ to open the filename passed by the user.
-            * Both use an `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_ with ``MAP_SHARED``
-                to map the file/object into the current virtual address space
-            * ``share_memory_`` will call ``shm_unlink(3)`` on the object after mapping it to make sure the shared memory
-                object is freed when no process has the object open. ``torch.from_file(shared=True)`` does not unlink the
-                file. This file is persistent and will remain until it is deleted by the user.
+            #. ``share_memory_`` uses `shm_open(3) <https://man7.org/linux/man-pages/man3/shm_open.3.html>`_ to create a
+               POSIX shared memory object while :meth:`from_file` uses
+               `open(2) <https://man7.org/linux/man-pages/man2/open.2.html>`_ to open the filename passed by the user.
+            #. Both use an `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_ with ``MAP_SHARED``
+               to map the file/object into the current virtual address space
+            #. ``share_memory_`` will call ``shm_unlink(3)`` on the object after mapping it to make sure the shared memory
+               object is freed when no process has the object open. ``torch.from_file(shared=True)`` does not unlink the
+               file. This file is persistent and will remain until it is deleted by the user.
 
-        Returns: self
+        Returns:
+            ``self``
         """
         return super().share_memory_(*args, **kwargs)
 
@@ -1080,7 +1081,7 @@ class TypedStorage:
         the storage do not affect the file.
 
         ``size`` is the number of elements in the storage. If ``shared`` is ``False``,
-        then the file must contain at least :math:`size * sizeof(Type)` bytes
+        then the file must contain at least ``size * sizeof(Type)`` bytes
         (``Type`` is the type of storage). If ``shared`` is ``True`` the file will be created if needed.
 
         Args:
