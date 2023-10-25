@@ -281,3 +281,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         assert list(baseLat.shape) == [len(NCCL_ALGO), len(NCCL_PROTO)]
         assert list(hwLat.shape) == [len(NCCL_HW), len(NCCL_ALGO), len(NCCL_PROTO)]
         assert llMaxBws.shape[0] == len(NVIDIA_GPU_TYPE)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+    run_tests()
