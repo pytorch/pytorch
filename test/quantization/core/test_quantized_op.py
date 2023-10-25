@@ -6527,7 +6527,9 @@ class TestQuantizedConv(TestCase):
             if fp32_output or bfloat16_output:
                 self.assertTrue(Y_q_cpu_tensor.dtype == qconv_output_dtype)
                 Y_q_cpu_tensor = torch.quantize_per_tensor(
-                    Y_q_cpu_tensor if fp32_output else Y_q_cpu_tensor.to(torch.float32), scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
+                    Y_q_cpu_tensor
+                    if fp32_output
+                    else Y_q_cpu_tensor.to(torch.float32), scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
                 ).int_repr()
 
         # Make sure the results match
