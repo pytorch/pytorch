@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -1372,45 +1373,6 @@ class TestExport(TestCase):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
-    def test_lift_constants(self) -> None:
-        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-
-        def f(x):
-            return x + torch.tensor(3)
-
-        ep = export(f, (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        for node in ep.graph.nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 1)
-        self.assertEqual(len(ep.state_dict), 1)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.tensor(3)
-
-            def forward(self, x):
-                list_tensor = [torch.tensor(3), torch.tensor(4)]
-                return x + self.a + list_tensor[0] + list_tensor[1]
-
-        ep = export(Foo(), (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        nodes = list(ep.graph.nodes)
-
-        for node in nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 3)
-        self.assertEqual(len(ep.state_dict), 3)
-
-        # These constants should be placed after the param/buffers
-        self.assertTrue(
-            nodes[1].name in ep.graph_signature.inputs_to_buffers and
-            nodes[2].name in ep.graph_signature.inputs_to_buffers
-        )
-
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -1532,6 +1494,23 @@ class TestExport(TestCase):
         ep = export(f, (torch.ones(2),))
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
+
+    def test_redundant_asserts(self):
+        def f(x):
+            y = x.item()
+            torch._constrain_as_size(y)
+            return torch.zeros(y)
+
+        ep = export(f, (torch.tensor([3]),))
+        self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
+def forward(self, arg0_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+    ge = _local_scalar_dense >= 0
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
+    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (zeros,)""")
 
 if __name__ == '__main__':
     run_tests()

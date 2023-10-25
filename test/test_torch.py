@@ -2068,7 +2068,7 @@ else:
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
     @dtypes(*floating_types())
-    @dtypesIfCPU(*floating_types_and(torch.bfloat16))
+    @dtypesIfCPU(*floating_types_and(torch.bfloat16, torch.half))
     @dtypesIfCUDA(*floating_types_and(torch.half))
     def test_bernoulli_p(self, device, dtype):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
@@ -2090,7 +2090,7 @@ else:
 
     # RngUniform not implemented for Integral type in XLA test
     @dtypes(*floating_types())
-    @dtypesIfCPU(*all_types_and(torch.bool))
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.half))
     @dtypesIfCUDA(*all_types_and(torch.bool, torch.half))
     def test_bernoulli_self(self, device, dtype):
 
@@ -2118,7 +2118,7 @@ else:
             self.assertTrue(isBinary(t))
 
     @slowTest
-    @dtypes(*floating_types())
+    @dtypes(*floating_types_and(torch.half))
     @dtypesIfCUDA(*floating_types_and(torch.half))
     def test_bernoulli_edge_cases(self, device, dtype):
         # Need to draw a lot of samples to cover every random floating point number.
@@ -2915,7 +2915,7 @@ else:
         large_size = 100000
         t = make_tensor((large_size,), dtype=dtype, device=device)
         t_np = t.cpu().numpy()
-        coordinates_np = list(np.random.randn(large_size))
+        coordinates_np = np.random.randn(large_size)
         coordinates = [torch.tensor(coordinates_np, device=device)]
         actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]
@@ -5000,7 +5000,7 @@ else:
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
@@ -5370,7 +5370,7 @@ else:
         self._test_multinomial_empty(device, False, 2)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypes(torch.float, torch.double)
     def test_multinomial_cpu(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
@@ -6350,6 +6350,11 @@ class TestTorch(TestCase):
             self.assertNotEqual(t_0.stride(), t_1.stride())
             self.assertNotEqual(t_0.size(), t_1.size())
             self.assertFalse(torch.equal(t_0, t_1))
+
+            # Fast path: tensor containing `nan` is not equal to self
+            for dtype in floating_and_complex_types():
+                t = torch.tensor([1., float('nan')], dtype=dtype)
+                self.assertFalse(torch.equal(t, t))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()

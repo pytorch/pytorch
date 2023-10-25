@@ -1675,6 +1675,100 @@ def forward(self, x_1):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
+    def test_define_and_impl(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        @torch.library.impl(f"{self.test_ns}::foo", "CPU", lib=lib)
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_define_validation(self):
+        with self.assertRaisesRegex(ValueError, "namespace"):
+            torch.library.define("foo", "(Tensor x) -> Tensor")
+
+    def test_legacy_define(self):
+        lib = self.lib()
+
+        @torch.library.define(lib, "foo(Tensor x) -> Tensor")
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_impl_function(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        torch.library.impl(f"{self.test_ns}::foo", "CPU", f, lib=lib)
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_legacy_impl(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        @torch.library.impl(lib, "foo", "CPU")
+        def f(x):
+            return torch.from_numpy(np.sin(x.numpy()))
+
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def _test_impl_device(self, name, types, device):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
+
+        @torch.library.impl(f"{self.test_ns}::{name}", types)
+        def f(x):
+            x_np = x.cpu().numpy()
+            y = torch.from_numpy(np.sin(x_np))
+            return y.to(device=x.device)
+
+        x = torch.randn(3, device=device)
+        y = getattr(self.ns(), name)(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_impl_device_cpu(self):
+        self._test_impl_device("foo1", "default", "cpu")
+        self._test_impl_device("foo2", ["cpu"], "cpu")
+        self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_impl_device_cuda(self):
+        self._test_impl_device("foo4", "default", "cuda")
+        self._test_impl_device("foo5", ["cuda"], "cuda")
+        self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
+
+    def test_impl_device_function(self):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+
+        def f(x):
+            x_np = x.cpu().numpy()
+            y = torch.from_numpy(np.sin(x_np))
+            return y.to(device=x.device)
+
+        torch.library.impl(f"{self.test_ns}::foo", "default", f, lib=lib)
+        x = torch.randn(3)
+        y = self.ns().foo(x)
+        assert torch.allclose(y, x.sin())
+
+    def test_impl_device_invalid(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
+            torch.library.impl("blah::blah", "somethingsomething")
+
 
 def op_with_incorrect_schema(testcase, name):
     lib = testcase.lib()
