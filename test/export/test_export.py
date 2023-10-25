@@ -626,7 +626,7 @@ class TestExport(TestCase):
                 return x.sin()
 
         with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
+            torchdynamo.exc.Unsupported,
             r"^(?!.*fall back to eager).*"
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))

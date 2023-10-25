@@ -1248,73 +1248,26 @@ class Placeholder(enum.Enum):
 
 
 # A utility function for easier AOTInductor testing
-aot_inductor_launcher = """
-#ifdef USE_CUDA
-    #include <c10/cuda/CUDAStream.h>
-#endif // USE_CUDA
-    #include <torch/csrc/inductor/aoti_runtime/interface.h>
-    #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+def aot_inductor_launcher(so_path: str, device: str):
+    if device == "cuda":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 
-    class RAIIModelContainer {
-    public:
-        RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
-                &container_handle,
-                1 /*num_models*/,
-                false /*is_cpu*/,
-                nullptr /*cubin_dir*/));
-        }
+            torch::inductor::AOTIModelRunnerCuda runner("{so_path}");
 
-        ~RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(
-                AOTInductorModelContainerDelete(container_handle));
-        }
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
+        """
+    elif device == "cpu":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner.h>
 
-        AOTInductorModelContainerHandle get() const {
-            return container_handle;
-        }
+            torch::inductor::AOTIModelRunnerCpu runner("{so_path}");
 
-    private:
-        AOTInductorModelContainerHandle container_handle;
-    };
-
-    // Global instance
-    RAIIModelContainer model_container;
-
-    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
-        auto input_handles =
-            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
-
-        // For outputs, we only allocate a vector to hold returned tensor handles,
-        // not allocating the actual output tensor storage here
-        size_t num_outputs;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(
-            AOTInductorModelContainerGetNumOutputs(
-                model_container.get(),
-                &num_outputs));
-        std::vector<AtenTensorHandle> output_handles(num_outputs);
-
-#ifdef USE_CUDA
-        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
-        const auto stream_id = cuda_stream.stream();
-        AOTInductorStreamHandle stream_handle =
-            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-#else // !USE_CUDA
-        AOTInductorStreamHandle stream_handle = nullptr;
-#endif
-
-        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
-
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            model_container.get(),
-            input_handles.data(),
-            input_tensors.size(),
-            output_handles.data(),
-            output_handles.size(),
-            stream_handle,
-            proxy_executor_handle));
-
-        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-            output_handles.data(), output_handles.size());
-    }
-"""
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
+        """
+    else:
+        raise RuntimeError(f"Unsupported device: {device}")
