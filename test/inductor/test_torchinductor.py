@@ -880,6 +880,13 @@ class CommonTemplate:
         # Constant is propagated as we can prove that the result is always negative.
         test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
 
+        def unsafe_index(a, b):
+            return aten._unsafe_index(a, (b,))
+
+        test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
+
+
+
     def test_computed_buffer_inlining(self):
         def flip(x):
             idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
