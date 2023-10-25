@@ -238,14 +238,14 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def exception_handler(e, code, frame=None, export=False):
+def exception_handler(e, code, frame, innermost_user_frame_str, export=False):
     record_filename = None
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
         e.record_filename = record_filename
 
-    augment_exc_message(e, export=export)
+    augment_exc_message(e, innermost_user_frame_str, export=export)
 
 
 FRAME_COUNTER = 0
@@ -473,8 +473,9 @@ def _compile(
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
+    fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
-    fail_details: Optional[str] = None
+    fail_user_frame_summary: Optional[str] = None
 
     def transform(instructions, code_options):
         nonlocal output
@@ -621,14 +622,14 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
-            exception_handler(e, code, frame, export=export)
-            fail_details = str(e)  # fail details after exc msg augment
+            exception_handler(e, code, frame, fail_user_frame_summary, export=export)
             raise
         except Exception as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
-            exception_handler(e, code, frame, export=export)
-            fail_details = str(e)  # fail details after exc msg augment
+            exception_handler(e, code, frame, fail_user_frame_summary, export=export)
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
@@ -671,8 +672,9 @@ def _compile(
                 graph_input_count,
                 entire_frame_compile_time,
                 backend_compile_time,
+                fail_type,
                 fail_reason,
-                fail_details,
+                fail_user_frame_summary,
             )
             log_compilation_event(metrics)
 
