@@ -1038,24 +1038,31 @@ run_cudnn_LLM_fprop(int64_t b,
     std::vector<int64_t> k_stride;
     std::vector<int64_t> v_dim;
     std::vector<int64_t> v_stride;
-    // q_dim.assign(q.sizes().data(), q.sizes().data() + q.sizes().size());
+    q_dim.assign(q.sizes().data(), q.sizes().data() + q.sizes().size());
     q_stride.assign(q.strides().data(), q.strides().data() + q.strides().size());
-    // k_dim.assign(k.sizes().data(), k.sizes().data() + k.sizes().size());
+    k_dim.assign(k.sizes().data(), k.sizes().data() + k.sizes().size());
     k_stride.assign(k.strides().data(), k.strides().data() + k.strides().size());
-    // v_dim.assign(v.sizes().data(), v.sizes().data() + v.sizes().size());
+    v_dim.assign(v.sizes().data(), v.sizes().data() + v.sizes().size());
     v_stride.assign(v.strides().data(), v.strides().data() + v.strides().size());
     std::cout << q.sizes() << q.strides() << k.sizes() << k.strides() << v.sizes() << v.strides() << std::endl;
     auto Q = mha_graph.tensor(fe::graph::Tensor_attributes()
                                   .set_name("Q")
-                                  .set_dim({b, h, s_q, d})
+                                  .set_dim(q_dim)
                                   .set_stride(q_stride));
+    std::cout << "q stride: " << q.strides() << std::endl;
+    for (auto it = q_stride.begin(); it != q_stride.end(); it++) std::cout << *it << std::endl;
+    std::cout << "k stride: " << k.strides() << std::endl;
+    for (auto it = k_stride.begin(); it != k_stride.end(); it++) std::cout << *it << std::endl;
+    std::cout << "v stride: " << v.strides() << std::endl;
+    for (auto it = v_stride.begin(); it != v_stride.end(); it++) std::cout << *it << std::endl;
+
     auto K = mha_graph.tensor(fe::graph::Tensor_attributes()
                                   .set_name("K")
-                                  .set_dim({b, h, d, s_kv})
+                                  .set_dim(k_dim)
                                   .set_stride(k_stride));
     auto V = mha_graph.tensor(fe::graph::Tensor_attributes()
                                   .set_name("V")
-                                  .set_dim({b, h, s_kv, d})
+                                  .set_dim(v_dim)
                                   .set_stride(v_stride));
     auto attn_scale = mha_graph.tensor(fe::graph::Tensor_attributes()
                                        .set_name("attn_scale")
@@ -1110,7 +1117,7 @@ run_cudnn_LLM_fprop(int64_t b,
 
     O->set_output(true).set_stride({h * d, d, b * h * d, 1});
     std::vector<int64_t> o_stride;
-    // o_stride.assign(o.strides().data(), o.strides().data() + o.strides().size());
+    o_stride.assign(o.strides().data(), o.strides().data() + o.strides().size());
     O->set_output(true).set_stride(o_stride);
 
     // Check that Stats tensor is real, which is only when its training step
@@ -1122,7 +1129,7 @@ run_cudnn_LLM_fprop(int64_t b,
 
     TORCH_INTERNAL_ASSERT(mha_graph.build_operation_graph(handle).is_good());
 
-    auto plans = mha_graph.get_execution_plan_list(fe::HeurMode_t::HEUR_MODE_A);
+    auto plans = mha_graph.get_execution_plan_list({fe::HeurMode_t::A});
 
 
     TORCH_INTERNAL_ASSERT(plans.check_support(handle).is_good());
