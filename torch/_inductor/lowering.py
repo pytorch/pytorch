@@ -2696,7 +2696,7 @@ def index_output_size_and_inner_fn(
     indices_loaders,
     indexed_size,
     x_loader,
-    add_asserts
+    add_asserts,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
