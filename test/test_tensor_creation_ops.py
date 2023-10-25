@@ -9,6 +9,7 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+import tempfile
 from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
@@ -3106,6 +3107,28 @@ class TestTensorCreation(TestCase):
             a.flags.writeable = False
             t = torch.tensor(a)
             self.assertEqual(len(w), 0)
+
+    @onlyCPU
+    @parametrize('shared', [True, False])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_from_file(self, device, shared):
+        dtype = torch.float64
+        t = torch.randn(2, 5, dtype=dtype, device=device)
+        with tempfile.NamedTemporaryFile() as f:
+            t.numpy().tofile(f)
+            t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
+            self.assertTrue(t_mapped.storage().filename == f.name)
+            self.assertEqual(torch.flatten(t), t_mapped)
+
+            s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
+            self.assertTrue(s.filename == f.name)
+
+    @onlyCPU
+    def test_storage_filename(self, device):
+        t = torch.randn(2, 5, device=device)
+        with self.assertWarnsRegex(UserWarning, "Only storages with data pointers created via at::MapAllocator"):
+            filename = t.storage().filename
+        self.assertIsNone(filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint
