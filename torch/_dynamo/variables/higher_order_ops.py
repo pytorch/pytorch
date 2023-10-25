@@ -81,6 +81,7 @@ def only_consist_of(var, types):
         return all(only_consist_of(item, types) for item in var.items.values())
     return False
 
+
 def _assert_tensors_nonaliasing(inputs, outputs):
     input_tensor_ids = set(
         pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), inputs)
@@ -91,6 +92,7 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     assert input_tensor_ids.isdisjoint(
         output_tensor_ids
     ), "inputs to function body cannot alias outputs"
+
 
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
@@ -707,9 +709,9 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         example_res = lowered_module.original_module(*real_sub_args)
 
-        # In order to guarantee an equivalent aliasing relationship among 
-        # FakeTensors in Dynamo and eager execution, executorch promises not to 
-        # alias inputs and outputs. 
+        # In order to guarantee an equivalent aliasing relationship among
+        # FakeTensors in Dynamo and eager execution, executorch promises not to
+        # alias inputs and outputs.
         # Thus, output fake tensors always correctly do not alias input fake tensors.
         _assert_tensors_nonaliasing(real_sub_args, example_res)
 
