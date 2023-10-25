@@ -6,10 +6,10 @@ import torch
 from test_aot_inductor import AOTInductorModelRunner
 from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
-from torch._inductor import config
 
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
+from torch._inductor import config
 
 
 @config.patch(memory_planning=True)
@@ -18,6 +18,7 @@ class TestMemoryPlanning(TestCase):
         """
         Generate a simple test case that has multiple simultaneously-live intermediate tensors.
         """
+
         def f(x, y, z):
             t0 = x.matmul(y)
             t1 = x.matmul(z)

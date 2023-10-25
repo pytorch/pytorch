@@ -819,7 +819,7 @@ class CommonTemplate:
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
