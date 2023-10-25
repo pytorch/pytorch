@@ -520,11 +520,20 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
     inline_depth: int
+    inconsistent_side_effects: bool
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
+
+    def mark_inconsistent_side_effects(self):
+        """
+        InstructionTranslator has encountered instructions which may cause
+        dynamo to see a different version of history from eager
+        See: https://github.com/pytorch/pytorch/issues/110765
+        """
+        self.inconsistent_side_effects = True
 
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
@@ -1188,6 +1197,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         kwargs = dict(zip(argnames, kwargs_list))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
+
+    def LOAD_METHOD_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        if sys.version_info < (3, 11):
+            self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
+        else:
+            self.LOAD_METHOD(dataclasses.replace(inst, argval=argval))
+
+    def LOAD_ATTR_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
 
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
@@ -1976,6 +2000,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
+        self.inconsistent_side_effects = False
         linecache.lazycache(f_code.co_filename, f_globals)
         self.log_starts_line()
 
@@ -2199,6 +2224,7 @@ class InstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         if (
             self.output.count_calls() == 0
+            and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
@@ -2237,12 +2263,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("Patched init cannot be inlined.")
 
         try:
-            if id(func.get_function()) in allowed_functions._disallowed_function_ids:
-                unimplemented(f"inlining disallowed: {func.get_function()}")
+            func_value = func.get_function()
         except NotImplementedError:
-            pass  # closures
+            func_value = None
 
-        result = skipfiles.check_verbose(func, extra_check=True)
+        if (
+            func.get_name() == "__torch_function__"
+            or func_value is torch._tensor._convert
+        ):
+            return skipfiles.SkipResult(False, "Allow __torch_function__")
+
+        if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
+            unimplemented(f"inlining disallowed: {func_value}")
+
+        result = skipfiles.check_verbose(func, allow_torch=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
@@ -2364,6 +2398,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if tracer.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
+
+        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
 

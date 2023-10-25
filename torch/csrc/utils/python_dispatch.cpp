@@ -733,6 +733,16 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch_key") = static_cast<const char*>(""));
 
   m.def(
+      "_parse_dispatch_key",
+      [](const char* dispatch_key) -> c10::optional<c10::DispatchKey> {
+        try {
+          return c10::parseDispatchKey(dispatch_key);
+        } catch (const c10::Error& err) {
+          return c10::nullopt;
+        }
+      });
+
+  m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
         auto k = std::string(dispatch_key).empty()
@@ -772,6 +782,16 @@ void initDispatchBindings(PyObject* module) {
     return at::functionalization::impl::commit_update(a);
   });
 
+  m.def("_dispatch_key_for_device", [](const std::string& device_type) {
+    auto device = c10::Device(device_type);
+    TORCH_CHECK(
+        !device.has_index(),
+        "Expected device_type string to not have a device index; got ",
+        device_type);
+    return c10::toString(
+        c10::computeDispatchKey(c10::nullopt, c10::nullopt, device));
+  });
+
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
     return (
@@ -787,6 +807,10 @@ void initDispatchBindings(PyObject* module) {
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
+  m.def("_non_sym_sizes", [](const at::Tensor& a) {
+    return a.sizes(); // NB: NOT sym_size
   });
 
   using c10::impl::TorchDispatchModeKey;
