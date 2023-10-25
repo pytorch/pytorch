@@ -1967,6 +1967,10 @@
     "Transformer",
     "Tuple"
   ],
+  "torch.fx.experimental.sym_dispatch_mode": [
+    "sym_function_mode",
+    "set_sym_function_mode"
+  ],
   "torch.fx.experimental.symbolic_shapes": [
     "Constraint",
     "ConstraintViolationError",
