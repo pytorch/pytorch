@@ -330,15 +330,15 @@ class TestSparseSemiStructured(TestCase):
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
 
         dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
-        sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), alpha=None, bias=None, out_dtype=torch.float16)
+        sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @dtypes(torch.float16, torch.bfloat16)
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
     def test_cslt_sparse_mm_alpha(self, dtype, device):
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 128)).to(dtype).cuda()
-        B = torch.ones((512, 128), device=device).to(dtype)
-        alpha = torch.Tensor(range(128)).cuda()
+        B = torch.ones((256, 128), device=device).to(dtype)
+        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
 
         A_compressed = torch._cslt_compress(A)
         sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha)
@@ -352,8 +352,8 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
     def test_cslt_sparse_mm_alpha_int8_in_f16_out(self, device):
         torch.set_printoptions(edgeitems=8)
-        A = torch.Tensor([0, 0, 10, 10]).tile((128, 128)).to(torch.int8).cuda()
-        B = torch.ones((128, 512), device=device).to(torch.int8).t()
+        A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
+        B = torch.ones((128, 256), device=device).to(torch.int8).t()
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
 
         A_compressed = torch._cslt_compress(A)

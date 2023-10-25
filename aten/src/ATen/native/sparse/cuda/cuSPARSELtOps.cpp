@@ -240,7 +240,7 @@ at::Tensor _cslt_sparse_mm(
         &handle, &matmul, CUSPARSELT_MATMUL_BIAS_POINTER, &dBias, sizeof(dBias)));
   }
 
-  // set alpha pointer for matmut, need to assign to get location
+  // set tensor_alpha_mode and alpha pointer for matmut
   at::Tensor alpha_tensor;
   if (alpha_opt.has_value()) {
     alpha_tensor = alpha_opt.value();
