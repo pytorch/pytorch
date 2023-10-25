@@ -2208,10 +2208,8 @@ class TestImports(TestCase):
         self.assertEqual(out, "")
 
     def test_not_import_sympy(self) -> None:
-        try:
-            self._check_python_output("import torch;import sys;assert 'sympy' not in sys.modules")
-        except subprocess.CalledProcessError:
-            self.fail("PyTorch should not depend on SymPy at import time as importing SymPy is *very* slow.\n"
+        out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
+        self.assertEqual(out.strip(), "True", "PyTorch should not depend on SymPy at import time as importing SymPy is *very* slow.\n"
                       "See the beginning of the following blog post for how to profile and find which file is importing sympy:\n"
                       "https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589\n\n"
                       "If you hit this error, you may want to:\n"
