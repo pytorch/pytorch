@@ -326,7 +326,7 @@ class HeuristicInterface:
     trial_mode: bool
 
     @abstractmethod
-    def __init__(self, **kwargs: Dict[str, Any]) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         self.trial_mode = kwargs.get("trial_mode", False)  # type: ignore[assignment]
 
     @abstractmethod
