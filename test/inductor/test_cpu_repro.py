@@ -423,7 +423,7 @@ class CPUReproTests(TestCase):
                         inps.append((h, c))
 
                     fn_opt = torch._dynamo.optimize("inductor")(mod)
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
 
                     # Check that _flat_weights are not functional_tensor, otherwise
                     # deepcopy will fail during recompilation.
@@ -517,7 +517,7 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             inps = [embeds, (hidden_0, hidden_1)]
             fn_opt = torch._dynamo.optimize("inductor")(mod)
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             # This case is unsupported
             self.assertFalse("torch.ops.mkldnn._lstm" in code)
             self.assertEqual(fn_opt(*inps), mod(*inps))
@@ -1382,7 +1382,7 @@ class CPUReproTests(TestCase):
 
         fn_opt = torch.compile()(fn)
         with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             FileCheck().check("atomic_add").run(code)
 
             self.assertEqual(
