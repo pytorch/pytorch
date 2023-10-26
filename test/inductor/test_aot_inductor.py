@@ -85,9 +85,9 @@ class AOTInductorModelRunner:
             def optimized(*args):
                 flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
                 # For scalar inputs, we need to wrap them into tensors
-                flat_example_inputs = [
+                flat_inputs = [
                     inp if isinstance(inp, torch.Tensor) else torch.tensor(inp)
-                    for inp in flat_example_inputs
+                    for inp in flat_inputs
                 ]
                 flat_outputs = module.run(flat_inputs)
                 return pytree.tree_unflatten(flat_outputs, out_spec)
@@ -109,9 +109,9 @@ class AOTInductorModelRunner:
             def optimized(*args):
                 flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
                 # For scalar inputs, we need to wrap them into tensors
-                flat_example_inputs = [
+                flat_inputs = [
                     inp if isinstance(inp, torch.Tensor) else torch.tensor(inp)
-                    for inp in flat_example_inputs
+                    for inp in flat_inputs
                 ]
                 flat_outputs = module.run(flat_inputs)
                 return pytree.tree_unflatten(flat_outputs, out_spec)
