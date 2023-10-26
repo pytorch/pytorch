@@ -402,6 +402,11 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
+      if [[ "$DASHBOARD_TAG" == *memory-planning-true* ]] && [[ "$mode" == "inference" ]]; then
+        TORCHINDUCTOR_MEMORY_PLANNING=1 python "benchmarks/dynamo/$suite.py" --dynamic-shapes \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_memory_planning_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
     done
   done
 }
