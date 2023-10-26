@@ -740,7 +740,6 @@ def error():
 
 # TODO: Deduplicate this with torch/_prims_common/__init__.py
 def eval_is_non_overlapping_and_dense(sizes, strides):
-    from torch.fx.experimental.symbolic_shapes import guard_bool
     return int(guard_bool(_eval_is_non_overlapping_and_dense(sizes, strides)))
 
 def _eval_is_non_overlapping_and_dense(sizes, strides):
