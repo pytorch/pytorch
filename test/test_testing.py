@@ -19,7 +19,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
@@ -2001,13 +2001,19 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_other(self, device, dtype, op, y):
                 pass
 
+            @decorateIf(test_dec, lambda p: p['dtype'] == torch.int16)
+            @ops(op_db)
+            def test_three(self, device, dtype, op):
+                pass
+
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
         device_cls = locals()[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
-                            ('test_other' in name and 'y_5' in name))
+                            ('test_other' in name and 'y_5' in name) or
+                            ('test_three' in name and name.endswith('int16')))
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
@@ -2048,13 +2054,40 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_other(self, device, dtype, module_info, training, y):
                 pass
 
+            @decorateIf(test_dec, lambda p: p['dtype'] == torch.float64)
+            @modules(module_db)
+            def test_three(self, device, dtype, module_info):
+                pass
+
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
         device_cls = locals()[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
-                            ('test_other' in name and 'y_5' in name))
+                            ('test_other' in name and 'y_5' in name) or
+                            ('test_three' in name and name.endswith('float64')))
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
+    def test_param_specific_decoration(self, device):
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @decorateIf(test_dec, lambda params: params["x"] == 1 and params["y"])
+            @parametrize("x", range(5))
+            @parametrize("y", [False, True])
+            def test_param(self, x, y):
+                pass
+
+        device = self.device_type
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+
+        for test_func, name in _get_test_funcs_for_test_class(device_cls):
+            should_apply = ('test_param_x_1_y_True' in name)
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_dtypes_composition_valid(self, device):
