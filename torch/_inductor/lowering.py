@@ -2008,69 +2008,10 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-
-
-def sdpa_constraint(fx_node, *args, **kwargs):
-    # sdpa requires dense last dimension
-    def apply_constraint(arg, fx_arg):
-        if not isinstance(arg, ir.IRNode):
-            return arg
-
-        meta_val = fx_arg.meta["val"]
-        if not meta_val.is_cuda:
-            return arg
-
-        stride_order = ir.get_stride_order(meta_val.stride())
-        if stride_order and stride_order[-1] != 0:
-            # contiguous stride order
-            stride_order = list(reversed(range(len(arg.get_size()))))
-
-        ALIGNMENT = 16
-
-        def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
-
-        assert isinstance(arg, TensorBox)
-        unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
-            arg
-        )
-        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
-
-        # input is padded, requiring_stride_order will unwrap the view and unpad.
-        # Would be nice to be able to require certain padding from inductor ir, nyi
-        if aligned_input_view:
-            return arg
-
-        return ir.ExternKernel.require_stride_order(arg, stride_order)
-
-    args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
-    )
-    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
-    return args, kwargs
-
-
-make_fallback(
-    aten._scaled_dot_product_efficient_attention.default,
-    sdpa_constraint,
-    warn=False,
-)
-make_fallback(
-    aten._scaled_dot_product_efficient_attention_backward.default,
-    sdpa_constraint,
-    warn=False,
-)
-make_fallback(
-    aten._scaled_dot_product_flash_attention.default,
-    sdpa_constraint,
-    warn=False,
-)
-make_fallback(
-    aten._scaled_dot_product_flash_attention_backward.default,
-    sdpa_constraint,
-    warn=False,
-)
-
+make_fallback(aten._scaled_dot_product_efficient_attention)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward)
+make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
+make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)

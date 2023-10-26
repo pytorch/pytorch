@@ -6772,62 +6772,6 @@ class CommonTemplate:
         # expanded dim should not cause copy in require_stride_order
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
-    @requires_cuda()
-    def test_sdpa(self):
-        def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
-            view = torch.ops.aten.view.default(arg3_1, [23760, 128])
-            arg3_1 = None
-            mm = torch.ops.aten.mm.default(view, arg4_1)
-            view = arg4_1 = None
-            view_1 = torch.ops.aten.view.default(mm, [3, 99, 80, 8])
-            mm = None
-            view_2 = torch.ops.aten.view.default(view_1, [3, 99, 80, 8])
-            view_1 = None
-            permute = torch.ops.aten.permute.default(view_2, [0, 3, 1, 2])
-            view_2 = None
-            view_3 = torch.ops.aten.view.default(permute, [3, 8, 99, 80])
-            permute = None
-
-            clone = torch.ops.aten.clone.default(
-                view_3, memory_format=torch.contiguous_format
-            )
-            view_3 = None
-
-            expand = torch.ops.aten.expand.default(clone, [3, 8, 99, 80])
-            clone = None
-            _scaled_dot_product_efficient_attention = (
-                torch.ops.aten._scaled_dot_product_efficient_attention.default(
-                    arg0_1, arg1_1, arg2_1, expand, False
-                )
-            )
-            arg0_1 = arg1_1 = arg2_1 = expand = None
-            getitem = _scaled_dot_product_efficient_attention[0]
-            _scaled_dot_product_efficient_attention = None
-            return (getitem,)
-
-        DEVICE = torch.device("cuda:0")
-        DTYPE = torch.float16
-        B = 3
-        H = 8
-        Q = 99
-        K = 80
-        D = 32
-        C_bias = 128
-
-        # inputs
-        query = torch.randn((B, H, Q, D), device=DEVICE, dtype=DTYPE)
-        key = torch.randn((B, H, K, D), device=DEVICE, dtype=DTYPE)
-        value = torch.randn((B, H, K, D), device=DEVICE, dtype=DTYPE)
-        bias = torch.randn((B, Q, K, C_bias), device=DEVICE, dtype=DTYPE)
-        weights = torch.randn((C_bias, H), device=DEVICE, dtype=DTYPE)
-
-        self.common(
-            foo,
-            (query, key, value, bias, weights),
-            atol=0.02,
-            rtol=1e4,
-        )
-
     def test_where_with_logical_op(self):
         def fn_and(x, y):
             return torch.where(torch.logical_and(x, y), 1.0, 0.0)
