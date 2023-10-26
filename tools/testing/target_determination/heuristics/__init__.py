@@ -4,6 +4,9 @@ from tools.testing.target_determination.heuristics.correlated_with_historical_fa
     CorrelatedWithHistoricalFailures,
 )
 from tools.testing.target_determination.heuristics.edited_by_pr import EditedByPR
+from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
+    HistoricalClassFailurCorrelation,
+)
 
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics as AggregatedHeuristics,
@@ -21,5 +24,6 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
 HEURISTICS: List[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),
+    HistoricalClassFailurCorrelation(),
     CorrelatedWithHistoricalFailures(),
 ]
