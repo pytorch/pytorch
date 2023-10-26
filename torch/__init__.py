@@ -261,7 +261,7 @@ class SymInt:
     def __index__(self):
         return self.node.int_()
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
@@ -313,7 +313,7 @@ class SymFloat:
     def __bool__(self):
         return self.node.bool_()
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
@@ -363,7 +363,7 @@ class SymBool:
     def __int__(self):
         return builtins.int(self.node.bool_())
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
     def __and__(self, other) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
@@ -996,7 +996,8 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
+    from torch.fx.experimental.symbolic_shapes import expect_true
+    if expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
@@ -1045,7 +1046,8 @@ def _check_is_size(i, message=None):
     """
     # This is responsible for the expect_true
     _check(i >= 0, message)
-    torch.fx.experimental.symbolic_shapes._advise_is_size(i)
+    from torch.fx.experimental.symbolic_shapes import _advise_is_size
+    _advise_is_size(i)
 
 def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
@@ -1799,7 +1801,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     csan.enable_cuda_sanitizer()
 
 # Populate magic methods on SymInt and SymFloat
-import torch.fx.experimental.symbolic_shapes
+import torch.fx.experimental.sym_node
 
 from torch import func as func
 from torch.func import vmap

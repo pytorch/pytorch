@@ -29,6 +29,7 @@ from torch.utils._python_dispatch import (
     _push_mode,
 )
 
+from .sym_node import SymNode
 from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
@@ -80,8 +81,6 @@ def set_proxy_slot(obj, tracer, proxy):
         # on a tensor, and it affects the metadata on the proxy.
         tracer.tensor_tracker[obj] = proxy
     else:
-        # Avoid importing sympy at a module level
-        from .symbolic_shapes import SymNode
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
         # we need there not to be spurious dependencies on tangent inputs.
@@ -93,8 +92,6 @@ def set_proxy_slot(obj, tracer, proxy):
             tracer.symnode_tracker[obj] = proxy
 
 def has_proxy_slot(obj, tracer):
-    # Avoid importing sympy at a module level
-    from .symbolic_shapes import SymNode
     assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
     return get_proxy_slot(obj, tracer, False, lambda _: True)
 
@@ -105,8 +102,6 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
     else:
-        # Avoid importing sympy at a module level
-        from .symbolic_shapes import SymNode
         assert isinstance(obj, SymNode), type(obj)
         tracker = tracer.symnode_tracker
 

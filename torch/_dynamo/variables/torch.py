@@ -657,7 +657,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             fn_ = self.value
             if any(isinstance(x, SymNodeVariable) for x in args):
                 if self.value == math.sqrt:
-                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
+                    from torch.fx.experimental.sym_node import sym_sqrt
 
                     fn_ = sym_sqrt
 

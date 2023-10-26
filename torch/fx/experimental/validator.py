@@ -224,7 +224,7 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.symbolic_shapes import sym_sqrt
+        from torch.fx.experimental.sym_node import sym_sqrt
 
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were

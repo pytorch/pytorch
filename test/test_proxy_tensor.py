@@ -11,7 +11,7 @@ from torch.testing._internal.common_methods_invocations import op_db, skip, xfai
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
-    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -1408,7 +1408,7 @@ def forward(self, a_1):
         def f(x, offset, as_sym_float=False):
             x0 = x.size()[0]
             if as_sym_float:
-                x0 = sym_float(x0)
+                x0 = torch.sym_float(x0)
             return torch.add(x0, offset)
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2.0, False)
