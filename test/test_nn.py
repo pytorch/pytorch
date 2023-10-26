@@ -2112,6 +2112,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
                 self.assertEqual(res_bf16, expected)
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_fb_fc_packed(self):
+        X = np.random.rand(16, 16).astype(np.float32) - 0.5
+        W = np.random.rand(16, 16).astype(np.float32) - 0.5
+        b = np.random.rand(16).astype(np.float32) - 0.5
+
+        def fc_op(X, W, b):
+            return np.dot(X, W.T) + b
+
+        x_tensor = torch.tensor(X)
+        w_tensor = torch.tensor(W)
+        b_tensor = torch.tensor(b)
+        packed_w_tensor = torch.fbgemm_pack_gemm_matrix_fp16(w_tensor)
+        actual_output = torch.fbgemm_linear_fp16_weight(x_tensor, packed_w_tensor, b_tensor)
+        expected_output = fc_op(X, W, b)
+        torch.testing.assert_close(torch.from_numpy(expected_output), actual_output.cpu(), atol=1e-3, rtol=1e-3)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
@@ -5287,6 +5306,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out1 = model(inp1)
             out2 = model(inp2)
             self.assertTrue(torch.equal(out1, out2))
+
+    def test_batchnorm_load_state_dict(self):
+        bn = torch.nn.BatchNorm2d(3)
+        self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(0))
+
+        bn.num_batches_tracked = torch.tensor(10)
+        self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
+
+        empty_dict = OrderedDict()
+        bn.load_state_dict(empty_dict, strict=False)
+        self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -11462,7 +11492,7 @@ class TestNNDeviceType(NNTestCase):
 
     # Ref: https://github.com/pytorch/pytorch/issue/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_nll_loss_large_tensor(self, device, reduction):
@@ -11749,7 +11779,7 @@ class TestNNDeviceType(NNTestCase):
         reductions = ['none', 'sum', 'mean']
         label_smoothings = [0.05, 0.15]
 
-        weight = torch.tensor([0.3, 0.6], device=device)
+        wgt = torch.tensor([0.3, 0.6], device=device)
         inp1 = torch.tensor([[0.3, 0.4], [1, 2]], device=device)
         inp2 = torch.tensor([[0.3, 0.6], [1, 2]], device=device)
 
@@ -11757,7 +11787,7 @@ class TestNNDeviceType(NNTestCase):
         targ_negative_ignore_index = torch.tensor([-2, 1], device=device)
         targ_positive_ignore_index = torch.tensor([2, 1], device=device)
 
-        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, weight)):
+        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, wgt)):
             def check_equal(loss, inp_targ_1, inp_targ_2):
                 inp1, targ1 = inp_targ_1
                 inp2, targ2 = inp_targ_2
