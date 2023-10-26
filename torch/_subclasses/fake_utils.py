@@ -10,7 +10,6 @@ from torch._subclasses.fake_tensor import (
     tree_flatten_only,
     UnsupportedFakeTensorException,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
@@ -80,6 +79,9 @@ class CrossRefFakeMode(TorchDispatchMode):
             and torch.Tag.inplace_view not in func.tags
             and torch.Tag.data_dependent_output not in func.tags
         ):
+            # Do not import symbolic_shapes at the top of the module as it imports sympy and that's slow
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
             try:
                 # TODO: enable_python_dispatcher() here
                 with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:

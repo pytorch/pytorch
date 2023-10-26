@@ -22,6 +22,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
 )
 
@@ -30,7 +31,14 @@ from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
-import sympy
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
+
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.

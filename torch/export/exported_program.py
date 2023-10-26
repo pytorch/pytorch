@@ -12,10 +12,18 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
-import sympy
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
+
+    from torch.utils._sympy.value_ranges import ValueRanges
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -24,7 +32,6 @@ from torch.fx._compatibility import compatibility
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-from torch.utils._sympy.value_ranges import ValueRanges
 
 
 __all__ = [
@@ -426,7 +433,7 @@ class ExportedProgram:
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
-        range_constraints: Dict[sympy.Symbol, Any],
+        range_constraints: "Dict[sympy.Symbol, Any]",
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
@@ -445,7 +452,7 @@ class ExportedProgram:
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
+        self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
         self._equality_constraints: List[
             Tuple[InputDim, InputDim]
         ] = equality_constraints
@@ -933,7 +940,7 @@ class ExportedProgram:
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-) -> Dict[sympy.Symbol, Any]:
+) -> "Dict[sympy.Symbol, Any]":
     def get_shape_env(gm):
         vals = [
             node.meta["val"]

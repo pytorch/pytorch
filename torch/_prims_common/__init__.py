@@ -17,10 +17,17 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
-import sympy
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
 
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -1375,6 +1382,11 @@ def elementwise_dtypes(
     args = tuple(x for x in _args if x is not None)
 
     highest_type: type = bool
+
+    # Import sympy locally, as importing it eagerly at a module level is too slow
+    # See https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589
+    import sympy
+
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"

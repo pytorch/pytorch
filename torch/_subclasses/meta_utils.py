@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional
+from typing import ContextManager, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
@@ -13,13 +13,17 @@ from torch._C._functorch import (
 )
 from torch._guards import Source
 
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
 from torch.utils.weak import WeakIdRef
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 
 DimList = List
 
@@ -180,8 +184,8 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
+        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -303,6 +307,7 @@ class MetaConverter:
                     assert t._is_view()
 
                     from torch._dynamo.source import AttrSource
+                    from torch.fx.experimental.symbolic_shapes import DimDynamic
 
                     if shape_env:
                         base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
