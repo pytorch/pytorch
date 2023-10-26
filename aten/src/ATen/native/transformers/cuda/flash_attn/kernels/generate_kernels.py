@@ -20,6 +20,10 @@ void run_mha_fwd_<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params &params, cudaStream_t st
     run_mha_fwd_hdim{HEAD_DIM}<{DTYPE}>(params, stream);
 }}
 """
+KERNEL_IMPL_TEMPLATE_FWD_SPLIT = """
+
+template void run_mha_fwd_splitkv_dispatch<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params &params, cudaStream_t stream);
+"""
 
 KERNEL_IMPL_TEMPLATE_BWD = """
 template<>
@@ -42,8 +46,12 @@ class Kernel:
             return KERNEL_IMPL_TEMPLATE_FWD.format(
                 DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
             )
-        else:
+        elif self.direction == "bwd":
             return KERNEL_IMPL_TEMPLATE_BWD.format(
+                DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
+            )
+        else:
+            return KERNEL_IMPL_TEMPLATE_FWD_SPLIT.format(
                 DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
             )
 
@@ -54,7 +62,7 @@ class Kernel:
 
 def get_all_kernels() -> List[Kernel]:
     for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
-        for direction in ["fwd", "bwd"]:
+        for direction in ["fwd", "bwd", "fwd_split"]:
             yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, direction=direction)
 
 
@@ -65,7 +73,8 @@ def write_kernel(kernel: Kernel, autogen_dir: Path) -> None:
 // Splitting the different head dimensions to different files to speed up compilation.
 // This file is auto-generated. See "generate_kernels.py"\n
 """
-    include = f"#include <ATen/native/transformers/cuda/flash_attn/flash_{kernel.direction}_launch_template.h>\n"
+    launch_template_str = kernel.direction if kernel.direction != "fwd_split" else "fwd"
+    include = f"#include <ATen/native/transformers/cuda/flash_attn/flash_{launch_template_str}_launch_template.h>\n"
     namespace = "namespace pytorch_flash{\n"
     namespace_end = "} // namespace pytorch_flash\n"
     (autogen_dir / kernel.filename).write_text(
@@ -93,8 +102,7 @@ if __name__ == "__main__":
         "-o",
         "--output_dir",
         required=False,
-        help="Where to generate the kernels "
-        " will default to <ATen/native/transformers/cuda/flash_attn/kernels/> ",
+        help="Where to generate the kernels " " will default to the current directory ",
     )
     args = parser.parse_args()
     main(args.output_dir)
