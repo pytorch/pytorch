@@ -939,6 +939,7 @@ def register_replacement(
             normalize_args=normalize_args,
         )
         pattern.register(pass_dict)
+        return pattern.pattern
 
 
 @functorch_config.patch(functionalize_rng_ops=False)

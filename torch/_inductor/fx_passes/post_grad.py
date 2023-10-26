@@ -484,8 +484,8 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same size/strides"""
+def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same metadata"""
     val1 = node1.meta.get("val")
     val2 = node2.meta.get("val")
     return (
@@ -493,6 +493,7 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val2 is not None
         and val1.size() == val2.size()
         and val1.layout == val2.layout
+        and val1.device == val2.device
         and (val1.layout != torch.strided or val1.stride() == val2.stride())
     )
 
@@ -505,6 +506,7 @@ def register_noop_decomp(targets, nop_arg=0):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
             (cond, nop_arg)
         )
+        return cond
 
     return register_fun
 
@@ -564,7 +566,10 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp([aten.clone, aten.alias])
+# Note, we also always have a check for identical metadata, which is why these
+# are safe
+@register_noop_decomp([aten.copy], nop_arg=1)
+@register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
 
@@ -607,7 +612,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_layout(node, src) and cond(*args, **kwargs):
+            if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
