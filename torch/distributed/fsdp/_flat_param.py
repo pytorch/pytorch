@@ -272,9 +272,8 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             parameter with padding. This is used for unsharding outside of
             computation when using mixed precision for parameters. This is
             never defined for ``NO_SHARD``.
-        _post_backward_hook_state (Tuple[AccumulateGrad, RemovableHandle]):
-            Flat parameter's :class:`AccumulateGrad` object and post-backward
-            hook handle.
+        _post_backward_hook_handle (RemovableHandle):
+            Flat parameter's post-backward hook handle.
         _mp_shard (Tensor): Low precision sharded flat parameter with padding.
             This is only defined when parameter mixed precision is enabled. For
             ``NO_SHARD``, this is used for computation.
@@ -324,7 +323,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     _local_shard: Tensor
     _full_param_padded: Tensor
     _full_prec_full_param_padded: Tensor
-    _post_backward_hook_state: Tuple[Any, Any]
+    _post_backward_hook_handle: Any
     _mp_shard: Tensor
     _cpu_grad: Tensor
     _saved_grad_shard: Tensor
