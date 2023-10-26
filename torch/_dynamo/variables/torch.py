@@ -21,6 +21,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
+from torch._logging import warning_once
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -149,6 +150,37 @@ except ImportError:
     pass
 
 
+err_epilogue = (
+    "With the current config, we will graph break "
+    "(and fall back to eager-mode PyTorch) on all ops "
+    "that have do not have the 'pt2_compliant_tag'. "
+    "Please see the following doc for how to mark this op as PT2 compliant "
+    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+)
+
+
+def check_allowed_op(value):
+    if not config.only_allow_pt2_compliant_ops:
+        return
+    if isinstance(value, torch._ops.OpOverload):
+        if torch.Tag.pt2_compliant_tag in value.tags:
+            return
+        unimplemented(
+            f"Encountered the torch.ops.OpOverload {value} "
+            f"that is not PT2 compliant. " + err_epilogue
+        )
+    if isinstance(value, torch._ops.OpOverloadPacket):
+        for overload in value.overloads():
+            op = getattr(value, overload)
+            if torch.Tag.pt2_compliant_tag in op.tags:
+                continue
+            unimplemented(
+                f"Encountered the torch.ops.OpOverloadPacket {value} "
+                f"which has an overload ({overload}) that is not PT2 compliant. "
+                + err_epilogue
+            )
+
+
 class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
@@ -160,6 +192,7 @@ class TorchVariable(VariableTracker):
         ):
             value = tensor_dunder_fns_remap[value]
 
+        check_allowed_op(value)
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -255,9 +288,15 @@ class TorchVariable(VariableTracker):
 
             return SourcelessBuilder()(
                 tx, torch.overrides.get_default_nowrap_functions()
-            ).add_options(options)
+            )
         elif self.value in config.constant_functions:
             assert not args and not kwargs
+            # See: https://github.com/pytorch/pytorch/issues/110765
+            if self.value in [
+                torch._utils.is_compiling,
+                torch._dynamo.external_utils.is_compiling,
+            ]:
+                tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(
                 config.constant_functions[self.value], **options
             )
@@ -447,7 +486,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
