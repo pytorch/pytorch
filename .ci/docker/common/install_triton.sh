@@ -23,8 +23,10 @@ fi
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 
-apt update
-apt-get install -y gpg-agent
+if [ -n "${UBUNTU_VERSION}" ];then
+    apt update
+    apt-get install -y gpg-agent
+fi
 
 if [ -n "${CONDA_CMAKE}" ]; then
   # Keep the current cmake and numpy version here, so we can reinstall them later
