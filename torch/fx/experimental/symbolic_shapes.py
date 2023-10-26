@@ -834,7 +834,8 @@ class SymNode:
         if self._hint is None:
             self._update_hint()
         if self._hint is None:
-            raise self.shape_env._make_data_dependent_error(self._hint_expr, self.expr)
+            # NB: we expect this to raise
+            return self.shape_env.size_hint(self.expr)
         return self._hint
 
     def maybe_as_int(self):
