@@ -21,6 +21,7 @@ from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.ao.quantization.quantize_pt2e import (
     _convert_to_reference_decomposed_fx,
     convert_pt2e,
+    prepare_pt2e,
     prepare_qat_pt2e,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -29,6 +30,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import (
+    NodeSpec as ns,
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
@@ -628,3 +630,105 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.mobilenet_v2()
             self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+
+class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
+    class TwoLinear(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear1 = torch.nn.Linear(16, 8, bias=False)
+            self.linear2 = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            return self.linear2(self.linear1(x))
+
+    class QATPTQTestModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 3)
+            self.linears = TestQuantizeMixQATAndPTQ.TwoLinear()
+            self.my_linear = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            conv_out = self.conv(x)
+            permute_out = torch.permute(conv_out, (0, 2, 3, 1))
+            linear_out = self.linears(permute_out)
+            my_linear_out = self.my_linear(linear_out)
+            # Hardtanh doesnt get quantized via xnnpack quantizer in this test
+            # because it relies on the propagation rules
+            # Need to fix this
+            return torch.nn.functional.hardtanh(my_linear_out)
+
+    def _prepare_qat_linears(self, model):
+        for name, child in model.named_children():
+            if isinstance(child, (torch.nn.Linear, TestQuantizeMixQATAndPTQ.TwoLinear)):
+                if isinstance(child, torch.nn.Linear):
+                    in_channels = child.weight.size(1)
+                else:
+                    in_channels = child.linear1.weight.size(1)
+
+                example_input = (torch.rand((1, in_channels)),)
+                traced_child = capture_pre_autograd_graph(child, example_input)
+                quantizer = XNNPACKQuantizer()
+                quantization_config = get_symmetric_quantization_config(
+                    is_per_channel=True, is_qat=True
+                )
+                quantizer.set_global(quantization_config)
+                traced_child_prepared = prepare_qat_pt2e(traced_child, quantizer)
+                setattr(model, name, traced_child_prepared)
+            else:
+                self._prepare_qat_linears(child)
+
+    def _convert_qat_linears(self, model):
+        for name, child in model.named_children():
+            if isinstance(child, torch.fx.GraphModule):
+                torch.ao.quantization.move_exported_model_to_eval(child)
+                converted_child = convert_pt2e(child, fold_quantize=True)
+                setattr(model, name, converted_child)
+            else:
+                self._convert_qat_linears(child)
+
+    def test_mixing_qat_ptq(self):
+        example_inputs = (torch.randn(2, 3, 4, 4),)
+        model = TestQuantizeMixQATAndPTQ.QATPTQTestModule()
+
+        self._prepare_qat_linears(model)
+
+        after_prepare_result_pt2e = model(*example_inputs)
+        # must be fixed model.eval()
+        self._convert_qat_linears(model)
+        quant_result_pt2e = model(*example_inputs)
+
+        model_pt2e = capture_pre_autograd_graph(
+            model,
+            example_inputs,
+        )
+
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_module_type(torch.nn.Linear, None)
+        quantization_config = get_symmetric_quantization_config()
+        quantizer.set_global(quantization_config)
+        model_pt2e = prepare_pt2e(model_pt2e, quantizer)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+        model_pt2e = convert_pt2e(model_pt2e)
+        quant_result_pt2e = model_pt2e(*example_inputs)
+
+        exported_model = torch.export.export(model_pt2e, example_inputs)
+
+        node_occurrence = {
+            # conv2d: 1 for act, 1 for weight, 1 for output
+            # 3 x linear: 1 for act, 1 for output
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 9,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 9,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_channel.default
+            ): 3,
+            # There needs to be one for hardtanh
+        }
+        self.checkGraphModuleNodes(
+            exported_model.graph_module, expected_node_occurrence=node_occurrence
+        )
