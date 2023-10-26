@@ -263,6 +263,9 @@ report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "
 # Whether to report all guard failures or just the first one that fails
 report_all_guard_failures = False
 
+# If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
+log_compilation_metrics = True
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 

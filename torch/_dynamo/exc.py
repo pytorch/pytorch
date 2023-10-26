@@ -210,9 +210,7 @@ def augment_exc_message(exc, msg="\n", export=False):
     real_stack = get_real_stack(exc)
     if real_stack is not None and len(real_stack) > 0:
         exc.innermost_user_frame_summary = real_stack[-1]
-        msg += (
-            f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
-        )
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\

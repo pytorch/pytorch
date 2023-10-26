@@ -625,60 +625,61 @@ def _compile(
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
-            fail_user_frame_summary = str(e.innermost_user_frame_summary)
+            fail_user_frame_summary = str(e.innermost_user_frame_summary)  # type: ignore[union-attr]
             raise
         except Exception as e:
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
-            fail_user_frame_summary = str(e.innermost_user_frame_summary)
+            fail_user_frame_summary = str(e.innermost_user_frame_summary)  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
         finally:
-            from .utils import curr_frame
+            if config.log_compilation_metrics:
+                from .utils import curr_frame
 
-            frame_key = str(curr_frame)
-            if (
-                fail_reason is None
-                and output is not None
-                and frame_key in frame_phase_timing
-            ):
-                guard_count = len(output.guards)
-                graph_op_count = output.count_calls()
-                graph_node_count = len(output.graph.nodes)
-                graph_input_count = len(output.placeholders)
-                entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                    "entire_frame_compile", None
+                frame_key = str(curr_frame)
+                if (
+                    fail_reason is None
+                    and output is not None
+                    and frame_key in frame_phase_timing
+                ):
+                    guard_count = len(output.guards)
+                    graph_op_count = output.count_calls()
+                    graph_node_count = len(output.graph.nodes)
+                    graph_input_count = len(output.placeholders)
+                    entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                        "entire_frame_compile", None
+                    )
+                    backend_compile_time = frame_phase_timing[frame_key].get(
+                        "backend_compile", None
+                    )
+                else:
+                    guard_count = None
+                    graph_op_count = None
+                    graph_node_count = None
+                    graph_input_count = None
+                    entire_frame_compile_time = None
+                    backend_compile_time = None
+                metrics = CompilationMetrics(
+                    frame_key,
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    cache_size.num_cache_entries_with_same_id_matched_objs,
+                    cache_size.num_cache_entries,
+                    guard_count,
+                    graph_op_count,
+                    graph_node_count,
+                    graph_input_count,
+                    entire_frame_compile_time,
+                    backend_compile_time,
+                    fail_type,
+                    fail_reason,
+                    fail_user_frame_summary,
                 )
-                backend_compile_time = frame_phase_timing[frame_key].get(
-                    "backend_compile", None
-                )
-            else:
-                guard_count = None
-                graph_op_count = None
-                graph_node_count = None
-                graph_input_count = None
-                entire_frame_compile_time = None
-                backend_compile_time = None
-            metrics = CompilationMetrics(
-                frame_key,
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                cache_size.num_cache_entries_with_same_id_matched_objs,
-                cache_size.num_cache_entries,
-                guard_count,
-                graph_op_count,
-                graph_node_count,
-                graph_input_count,
-                entire_frame_compile_time,
-                backend_compile_time,
-                fail_type,
-                fail_reason,
-                fail_user_frame_summary,
-            )
-            log_compilation_event(metrics)
+                log_compilation_event(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
