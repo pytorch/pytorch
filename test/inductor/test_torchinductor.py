@@ -6746,6 +6746,7 @@ class CommonTemplate:
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     @requires_cuda()
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_sdpa(self):
         def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             view = torch.ops.aten.view.default(arg3_1, [23760, 128])
