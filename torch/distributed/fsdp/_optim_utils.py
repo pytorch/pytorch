@@ -344,11 +344,10 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    device = _get_pg_default_device(group)
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
-        tensor = state.to(device)
+        tensor = state.to(fsdp_state.compute_device)
     else:
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
@@ -358,7 +357,9 @@ def _broadcast_state(
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
-        tensor = torch.zeros(state.shape, dtype=state.dtype, device=device)
+        tensor = torch.zeros(
+            state.shape, dtype=state.dtype, device=fsdp_state.compute_device
+        )
     dist.broadcast(tensor, src=0, group=group)
     return tensor
 
@@ -1155,6 +1156,7 @@ def _check_missing_keys_on_rank(
             assert param_key >= 0 and param_key < len(
                 param_key_to_param
             ), "Check the `param_key_to_param` construction"
+    # We cannot use FSDPState.compute_device as this API is a global view.
     device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
     dist.all_reduce(num_missing, group=group)
