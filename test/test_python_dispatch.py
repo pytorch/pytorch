@@ -4,7 +4,7 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch.library import Library, impl, fallthrough_kernel
-from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch import SymInt
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
