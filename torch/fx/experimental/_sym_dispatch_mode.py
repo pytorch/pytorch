@@ -1,4 +1,6 @@
-__all__ = ["SymDispatchMode", "sym_function_mode", "set_sym_function_mode"]
+from typing import List, Type
+
+__all__ = ["SymDispatchMode", "handle_sym_dispatch", "sym_function_mode"]
 
 SYM_FUNCTION_MODE = None
 
@@ -39,10 +41,18 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 
+def handle_sym_dispatch(func, args, kwargs):
+    global SYM_FUNCTION_MODE
+    mode = sym_function_mode()
+    assert mode
+    SYM_FUNCION_MODE = mode.inner
+    try:
+        # TODO: properly compute types
+        types: List[Type] = []
+        return mode.__sym_dispatch__(func, types, args, kwargs)
+    finally:
+        SYM_FUNCION_MODE = mode
+
+
 def sym_function_mode():
     return SYM_FUNCTION_MODE
-
-
-def set_sym_function_mode(mode):
-    global SYM_FUNCTION_MODE
-    SYM_FUNCTION_MODE = mode
