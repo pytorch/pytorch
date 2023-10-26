@@ -4,6 +4,7 @@
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     make_input_replicate_1d,
@@ -260,6 +261,31 @@ class TensorParallelStyleTest(DTensorTestBase):
             prepare_hook._prepare_input,
             error_msgs="No device mesh is currently active",
         )
+
+    @with_comms
+    def test_prepare_module_input_multiple_inputs(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x, y):
+                return self.linear(x) + y
+
+        test_mod = TestModule().to(self.device_type)
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        parallelize_module(test_mod.linear, mesh, ColwiseParallel())
+        parallelize_module(
+            test_mod,
+            mesh,
+            PrepareModuleInput(input_layouts=(Shard(0), None), output_layouts=(Replicate(), None))
+        )
+        output = test_mod(
+            torch.randn(2, 8, device=self.device_type),
+            torch.ones(self.world_size * 2, 8, device=self.device_type)
+        )
+        self.assertEqual(output.shape, (16, 8))
 
     @with_comms
     def test_prepare_module_output(self):
