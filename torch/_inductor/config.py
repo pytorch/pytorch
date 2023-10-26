@@ -100,9 +100,6 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# TODO: capture whether the graph is from export
-from_export = False
-
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
 
@@ -229,6 +226,9 @@ constant_and_index_propagation = True
 # we always add constants into graph.constants without
 # performing any constant-inlining optimization
 always_keep_tensor_constants = False
+
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
 
 
 def is_fbcode():
@@ -430,9 +430,6 @@ class triton:
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
 
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
-
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
@@ -489,6 +486,12 @@ class aot_inductor:
 
     # Wether to codegen abi compatible model.so
     abi_compatible = is_fbcode()
+
+    # Serialized tree spec for flattening inputs
+    serialized_in_spec = ""
+
+    # Serialized tree spec for flattening outputs
+    serialized_out_spec = ""
 
 
 class cuda:
