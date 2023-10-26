@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
 from typing import List
 
 import torch
